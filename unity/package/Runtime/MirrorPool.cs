@@ -19,6 +19,13 @@ namespace LoomGUI
         public bool Stale;
         public ulong LastNodeId;      // 诊断：最近绑定的 node_id（DumpState 打印；不做复用校验——复用换绑是 reuse_key 池化的正常行为）
 
+        // #66：mesh 原始（未补偿）AABB。FULL 帧上传后 RecalculateBounds 时存底；剔除补偿
+        // 永远基于此值重算。不能读 Mesh.bounds 顶替：Header 帧不重建 mesh，Mesh.bounds 里
+        // 是上一帧「已补偿值」，再乘一次线性矩阵得 AABB(L·AABB(L·B)) ≠ AABB(L·B)——滚动中
+        // 的旋转/缩放节点每帧叠加（scale<1 几何级缩小、45° 无界膨胀）。缓存底也让 L 本身
+        // 变化的帧（transform 动画）从原始 bounds 直算，无叠加残留。
+        public Bounds RawMeshBounds;
+
         // buffer 复用（500 节点静态压测 GC 缓解）：每 RenderObj 持可复用 List，
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
         // List<T>.Clear() 保留 Capacity，故 warm-up 后零 per-frame 数组 alloc。
@@ -144,9 +151,14 @@ namespace LoomGUI
                 if (!ro.Go.activeSelf) ro.Go.SetActive(true); // reactivate parked→active
 
                 UpdateHeader(ro, blob, i, root, mm, kind, look, tex);
-                if (level == 2) UploadMeshOrText(ro, blob, i, look);
+                if (level == 2)
+                {
+                    UploadMeshOrText(ro, blob, i, look);
+                    ro.RawMeshBounds = ro.Mesh.bounds; // 原始 AABB 存底（补偿前）
+                }
                 // #66：非纯平移节点的 Mesh.bounds 补偿须在 upload 之后（RecalculateBounds
-                // 会覆盖），header-only 帧也走到这里（bounds 沿用上帧补偿值亦可重算，幂等）。
+                // 会覆盖），且从 RawMeshBounds 缓存底重算——Header 帧不重建 mesh，
+                // 读 Mesh.bounds 会拿到上帧已补偿值再乘一次 L（非幂等，见 RenderObj 字段注释）。
                 if (!blob.IsPureTranslation(i)) CompensateMeshBoundsForLinear(ro, blob, i);
             }
 
@@ -332,7 +344,8 @@ namespace LoomGUI
         /// </summary>
         static void CompensateMeshBoundsForLinear(RenderObj ro, FrameBlob blob, int i)
         {
-            Bounds b = ro.Mesh.bounds;
+            // 从缓存的原始 AABB 算（非 Mesh.bounds——那里可能是上帧已补偿值，再乘会叠加）。
+            Bounds b = ro.RawMeshBounds;
             Vector3 c = b.center;
             Vector3 e = b.extents;
             float ma = blob.Ma(i), mb = blob.Mb(i), mc = blob.Mc(i), md = blob.Md(i);

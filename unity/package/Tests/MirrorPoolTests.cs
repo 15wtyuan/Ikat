@@ -5,30 +5,33 @@ using UnityEngine;
 namespace LoomGUI.Tests
 {
     /// MirrorPool reuse_key 按 reuse_key 复用 GO 的 EditMode 测试。
-    /// 手搓 v10 1 节点 mesh blob（20 列含 reuse_key） → 验 slot 换绑 GO 复用。
+    /// 手搓 v14 1 节点 mesh blob（23 列含 reuse_key） → 验 slot 换绑 GO 复用。
     public class MirrorPoolReuseKeyTests
     {
-        /// 构造一个 v10 1 节点 Mesh blob（20 列 SOA）。
-        /// v10：删 text_arena + text_off/text_len 列（22→20 列），header 116B。
-        static byte[] OneNodeBlobV10(
+        /// 构造一个 v14 1 节点 Mesh blob（23 列 SOA）。
+        /// v14 = v13 + node_id/parent_id 列 4B→8B（#26 u64 拓宽）；header 128B。
+        /// 线性矩阵参数（ma..md）供 bounds 补偿测试复用，默认 identity。
+        internal static byte[] OneNodeBlobV14(
             uint id, float x, float y, float w, float h, uint sortKey,
-            byte payloadKind = 1, byte changeLevel = 2, uint reuseKey = 0)
+            byte payloadKind = 1, byte changeLevel = 2, uint reuseKey = 0,
+            float ma = 1f, float mb = 0f, float mc = 0f, float md = 1f)
         {
             var b = new List<byte>();
 
-            // header: magic, version=10, node_count=1
+            // header: magic, version=14, node_count=1
             b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu));
-            b.AddRange(System.BitConverter.GetBytes(10u));
+            b.AddRange(System.BitConverter.GetBytes(14u));
             b.AddRange(System.BitConverter.GetBytes(1u));
 
-            // header 总长 = 12 + 20*4 + 6*4 = 116。列 offset 从此起按 elemSize 递进。
-            int colOff = 116;
-            int[] offs = new int[20];
-            // v10: 20 cols — node_id(4) parent_id(4) visible(1) alpha(4) sort_key(4) mask_context(4)
+            // header 总长 = 12 + 23*4 + 6*4 = 128。列 offset 从此起按 elemSize 递进。
+            int colOff = 128;
+            int[] offs = new int[23];
+            // v14: 23 cols — node_id(8) parent_id(8) visible(1) alpha(4) sort_key(4) mask_context(4)
             //   m_a..m_ty(6×4) payload_kind(1) mesh_off(4) mesh_len(4) path_idx(4)
             //   program(1) color_matrix(80) change_level(1) reuse_key(4)
-            int[] elemSize = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4 };
-            for (int i = 0; i < 20; i++) { offs[i] = colOff; colOff += elemSize[i]; }
+            //   effect_block(128) shadow_params(24) grad_params(208)
+            int[] elemSize = { 8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24, 208 };
+            for (int i = 0; i < 23; i++) { offs[i] = colOff; colOff += elemSize[i]; }
             int arenaOff = colOff;
 
             // mesh arena：1 mesh，4 verts / 6 idx。
@@ -59,7 +62,7 @@ namespace LoomGUI.Tests
             arena.AddRange(System.BitConverter.GetBytes(3u));
             int arenaLen = arena.Count - arenaStart;
 
-            // 20 列 offset + mesh/clip/path 三 arena off+len（v10：text_arena 已删）
+            // 23 列 offset + mesh/clip/path 三 arena off+len
             foreach (var o in offs) b.AddRange(System.BitConverter.GetBytes(o));
             b.AddRange(System.BitConverter.GetBytes(arenaOff));                      // mesh_arena_off
             b.AddRange(System.BitConverter.GetBytes(arenaLen));                      // mesh_arena_len
@@ -70,17 +73,17 @@ namespace LoomGUI.Tests
             b.AddRange(System.BitConverter.GetBytes(pathOff));                        // path_table_off
             b.AddRange(System.BitConverter.GetBytes(4u));                             // path_table_len（仅 path_count）
 
-            // 列数据 SOA（列优先，镜像 blob.rs v10 / FrameBlob）
-            b.AddRange(System.BitConverter.GetBytes(id));        // col 0: node_id
-            b.AddRange(System.BitConverter.GetBytes(-1));        // col 1: parent_id
+            // 列数据 SOA（列优先，镜像 blob.rs v14 / FrameBlob）
+            b.AddRange(System.BitConverter.GetBytes((ulong)id)); // col 0: node_id（v14 u64）
+            b.AddRange(System.BitConverter.GetBytes(-1L));       // col 1: parent_id（v14 i64）
             b.Add(1);                                            // col 2: visible
             b.AddRange(System.BitConverter.GetBytes(1f));        // col 3: alpha
             b.AddRange(System.BitConverter.GetBytes(sortKey));   // col 4: sort_key
             b.AddRange(System.BitConverter.GetBytes(0u));        // col 5: mask_context
-            b.AddRange(System.BitConverter.GetBytes(1f));        // col 6: m_a
-            b.AddRange(System.BitConverter.GetBytes(0f));        // col 7: m_b
-            b.AddRange(System.BitConverter.GetBytes(0f));        // col 8: m_c
-            b.AddRange(System.BitConverter.GetBytes(1f));        // col 9: m_d
+            b.AddRange(System.BitConverter.GetBytes(ma));        // col 6: m_a
+            b.AddRange(System.BitConverter.GetBytes(mb));        // col 7: m_b
+            b.AddRange(System.BitConverter.GetBytes(mc));        // col 8: m_c
+            b.AddRange(System.BitConverter.GetBytes(md));        // col 9: m_d
             b.AddRange(System.BitConverter.GetBytes(x));         // col 10: m_tx
             b.AddRange(System.BitConverter.GetBytes(y));         // col 11: m_ty
             b.Add(payloadKind);                                  // col 12: payload_kind
@@ -92,6 +95,9 @@ namespace LoomGUI.Tests
             for (int j = 0; j < 20; j++) b.AddRange(System.BitConverter.GetBytes(0f));
             b.Add(changeLevel);                                  // col 18: change_level
             b.AddRange(System.BitConverter.GetBytes(reuseKey));  // col 19: reuse_key
+            for (int j = 0; j < 128; j++) b.Add((byte)0);        // col 20: effect_block 全零
+            for (int j = 0; j < 24; j++) b.Add((byte)0);         // col 21: shadow_params 全零
+            for (int j = 0; j < 208; j++) b.Add((byte)0);        // col 22: grad_params 全零
 
             b.AddRange(arena);
             // clip 表：仅 clip_count=0
@@ -123,7 +129,7 @@ namespace LoomGUI.Tests
             try
             {
                 // 帧 1：node_id=100, reuse_key=5, Full → 建 GO
-                var blob1 = new FrameBlob(OneNodeBlobV10(
+                var blob1 = new FrameBlob(OneNodeBlobV14(
                     id: 100, x: 10f, y: 20f, w: 5f, h: 5f,
                     sortKey: 0, payloadKind: 1, changeLevel: 2, reuseKey: 5));
                 Assert.AreEqual(1, blob1.NodeCount, "blob1 NodeCount=1");
@@ -135,11 +141,11 @@ namespace LoomGUI.Tests
                 var go1 = root.transform.GetChild(0).gameObject;
 
                 // 帧 2：node_id=200, 同 reuse_key=5, Full → 应复用 GO（不销毁重建）
-                var blob2 = new FrameBlob(OneNodeBlobV10(
+                var blob2 = new FrameBlob(OneNodeBlobV14(
                     id: 200, x: 30f, y: 40f, w: 5f, h: 5f,
                     sortKey: 0, payloadKind: 1, changeLevel: 2, reuseKey: 5));
                 Assert.AreEqual(1, blob2.NodeCount, "blob2 NodeCount=1");
-                Assert.AreEqual(200u, blob2.NodeId(0), "blob2 node_id=200");
+                Assert.AreEqual(200ul, blob2.NodeId(0), "blob2 node_id=200");
                 Assert.AreEqual(5u, blob2.ReuseKey(0), "blob2 reuse_key=5");
                 pool.Sync(blob2, root.transform, mm, null, fallback);
 
@@ -154,14 +160,14 @@ namespace LoomGUI.Tests
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 Assert.IsNotNull(poolByReuseField, "应能反射 _poolByReuse");
                 var poolByReuse = (System.Collections.IDictionary)poolByReuseField.GetValue(pool);
-                Assert.IsTrue(poolByReuse.Contains(5u), "_poolByReuse 应含 key=5");
+                Assert.IsTrue(poolByReuse.Contains(5ul), "_poolByReuse 应含 key=5");
 
-                // RenderObj 是 internal sealed class，用反射读 LastNodeId
-                var ro = poolByReuse[5u];
+                // RenderObj 是 internal sealed class，用反射读 LastNodeId（v14 起为 ulong）
+                var ro = poolByReuse[5ul];
                 var lastNodeIdField = ro.GetType().GetField("LastNodeId",
                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
                 Assert.IsNotNull(lastNodeIdField, "应能反射 LastNodeId");
-                Assert.AreEqual(200u, (uint)lastNodeIdField.GetValue(ro),
+                Assert.AreEqual(200ul, (ulong)lastNodeIdField.GetValue(ro),
                     "复用后 LastNodeId 应为 200（更新为新 node_id）");
 
                 Assert.AreEqual(new Vector3(30f, 40f, 0f), go2.transform.localPosition,
@@ -176,23 +182,100 @@ namespace LoomGUI.Tests
         }
     }
 
+    /// #66 剔除 bounds 补偿的幂等性回归：Header 帧（只更 header，不重建 mesh）不得在
+    /// 已补偿的 bounds 上再乘一次线性矩阵——修前读 Mesh.bounds 顶替原始 AABB，
+    /// 滚动中的旋转/缩放节点逐帧叠加（scale<1 几何级缩小 = #66 消失 bug 复发；
+    /// 90° 非正方形交替轴交换；45° 无界膨胀）。修后从 RenderObj.RawMeshBounds 缓存底重算。
+    public class MirrorPoolBoundsCompensationTests
+    {
+        /// 单场景：FULL 帧建立补偿 bounds，随后两个 HEADER 帧（改 m_tx 模拟滚动，
+        /// 线性矩阵不变）。断言三个帧的 Mesh.bounds 全等，且首帧值 == AABB(L·原始) 数学期望。
+        static void RunScenario(float ma, float mb, float mc, float md,
+                                float w, float h,
+                                Vector2 expectCenter, Vector2 expectExtents)
+        {
+            var root = new GameObject("root");
+            var shader = Shader.Find("LoomGUI/Unlit");
+            var mm = new MaterialManager(shader);
+            var pool = new MirrorPool();
+            var fallback = Texture2D.whiteTexture;
+
+            try
+            {
+                // 帧 1：FULL（上传 mesh + RecalculateBounds + 首次补偿）
+                pool.Sync(new FrameBlob(MirrorPoolReuseKeyTests.OneNodeBlobV14(
+                    id: 100, x: 10f, y: 20f, w: w, h: h, sortKey: 0,
+                    payloadKind: 1, changeLevel: 2, reuseKey: 0,
+                    ma: ma, mb: mb, mc: mc, md: md)),
+                    root.transform, mm, null, fallback);
+                var mesh = root.transform.GetChild(0).GetComponent<MeshFilter>().sharedMesh;
+                var b1 = mesh.bounds;
+                Assert.AreEqual(expectCenter.x, b1.center.x, 1e-4f, "帧1 center.x == AABB(L·B)");
+                Assert.AreEqual(expectCenter.y, b1.center.y, 1e-4f, "帧1 center.y == AABB(L·B)");
+                Assert.AreEqual(expectExtents.x, b1.extents.x, 1e-4f, "帧1 extents.x == AABB(L·B)");
+                Assert.AreEqual(expectExtents.y, b1.extents.y, 1e-4f, "帧1 extents.y == AABB(L·B)");
+
+                // 帧 2、3：HEADER（change_level=1，mesh 不重建，仅平移变化模拟滚动）
+                for (int frame = 2; frame <= 3; frame++)
+                {
+                    pool.Sync(new FrameBlob(MirrorPoolReuseKeyTests.OneNodeBlobV14(
+                        id: 100, x: 10f + frame * 7f, y: 20f, w: w, h: h, sortKey: 0,
+                        payloadKind: 1, changeLevel: 1, reuseKey: 0,
+                        ma: ma, mb: mb, mc: mc, md: md)),
+                        root.transform, mm, null, fallback);
+                    var bn = root.transform.GetChild(0).GetComponent<MeshFilter>().sharedMesh.bounds;
+                    Assert.AreEqual(b1.center.x, bn.center.x, 1e-5f,
+                        $"帧{frame} center.x 不得漂移（Header 帧重复补偿 = 叠加）");
+                    Assert.AreEqual(b1.center.y, bn.center.y, 1e-5f,
+                        $"帧{frame} center.y 不得漂移");
+                    Assert.AreEqual(b1.extents.x, bn.extents.x, 1e-5f,
+                        $"帧{frame} extents.x 不得漂移（scale<1 会几何级缩小）");
+                    Assert.AreEqual(b1.extents.y, bn.extents.y, 1e-5f,
+                        $"帧{frame} extents.y 不得漂移");
+                }
+            }
+            finally
+            {
+                pool.Clear();
+                mm.Clear();
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        [Test]
+        public void HeaderFramesDoNotReapplyScaleCompensation()
+        {
+            // quad 8×4（raw center(4,2) extents(4,2)）× scale 0.5 → 视觉 [0,4]×[0,2]：
+            // 补偿后 center(2,1) extents(2,1)。修前每 Header 帧再缩一半（2→1→0.5…）。
+            RunScenario(0.5f, 0f, 0f, 0.5f, 8f, 4f, new Vector2(2f, 1f), new Vector2(2f, 1f));
+        }
+
+        [Test]
+        public void HeaderFramesDoNotAxisSwapRotationCompensation()
+        {
+            // quad 2×8 旋转 90°（L: rx=-y, ry=x）→ 视觉 x∈[-8,0], y∈[0,2]：
+            // 补偿后 center(-4,1) extents(4,1)。修前 Header 帧把 bounds 转回 2×8 形状（轴交换）。
+            RunScenario(0f, 1f, -1f, 0f, 2f, 8f, new Vector2(-4f, 1f), new Vector2(4f, 1f));
+        }
+    }
+
     /// MirrorPool UV 线性映射测试：core 产 [0,1] UV → sprite 在 atlas 页内的子区 uvRect。
     /// 验 RemapMeshUvToSprite 把 [0,1] 全图 UV 正确映射到 sprite 的 atlas 子区。
     public class MirrorPoolUvRemapTests
     {
-        /// 构造含 path 表条目的 v10 1 节点 Mesh blob。
+        /// 构造含 path 表条目的 v14 1 节点 Mesh blob。
         static byte[] OneNodeBlobWithPath(uint id, string path, uint pathIdx,
             float x, float y, float w, float h)
         {
             var b = new List<byte>();
             b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu)); // magic
-            b.AddRange(System.BitConverter.GetBytes(10u));          // version
+            b.AddRange(System.BitConverter.GetBytes(14u));          // version
             b.AddRange(System.BitConverter.GetBytes(1u));           // node_count
 
-            int colOff = 116;
-            int[] offs = new int[20];
-            int[] elemSize = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4 };
-            for (int i = 0; i < 20; i++) { offs[i] = colOff; colOff += elemSize[i]; }
+            int colOff = 128;
+            int[] offs = new int[23];
+            int[] elemSize = { 8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24, 208 };
+            for (int i = 0; i < 23; i++) { offs[i] = colOff; colOff += elemSize[i]; }
             int arenaOff = colOff;
 
             // mesh arena: 4 verts, 6 idx, UV [0,1] 全图
@@ -232,8 +315,8 @@ namespace LoomGUI.Tests
             b.AddRange(System.BitConverter.GetBytes((uint)pathTableLen));
 
             // column data
-            b.AddRange(System.BitConverter.GetBytes(id));          // col 0: node_id
-            b.AddRange(System.BitConverter.GetBytes(-1));          // col 1: parent_id
+            b.AddRange(System.BitConverter.GetBytes((ulong)id)); // col 0: node_id（v14 u64）
+            b.AddRange(System.BitConverter.GetBytes(-1L));       // col 1: parent_id（v14 i64）
             b.Add(1);                                              // col 2: visible
             b.AddRange(System.BitConverter.GetBytes(1f));          // col 3: alpha
             b.AddRange(System.BitConverter.GetBytes(0u));          // col 4: sort_key
@@ -252,6 +335,9 @@ namespace LoomGUI.Tests
             for (int j = 0; j < 20; j++) b.AddRange(System.BitConverter.GetBytes(0f));
             b.Add((byte)2);                                        // col 18: change_level=FULL
             b.AddRange(System.BitConverter.GetBytes(0u));          // col 19: reuse_key=0
+            for (int j = 0; j < 128; j++) b.Add((byte)0);          // col 20: effect_block 全零
+            for (int j = 0; j < 24; j++) b.Add((byte)0);           // col 21: shadow_params 全零
+            for (int j = 0; j < 208; j++) b.Add((byte)0);          // col 22: grad_params 全零
 
             b.AddRange(arena);
             b.AddRange(System.BitConverter.GetBytes(0u));          // clip_count=0
@@ -343,31 +429,31 @@ namespace LoomGUI.Tests
     /// MirrorPool parked keepalive lifecycle 测试。
     /// 验 parked→active 过渡：parked 保留 GO 并 SetActive(false)、reactivate 恢复、
     /// lazy（无历史 GO 不创建）、稳态零 churn。
-    /// 需要 Unity Editor（EditMode tests），构造 v11 blob 驱动 MirrorPool.Sync。
+    /// 需要 Unity Editor（EditMode tests），构造 v14 blob 驱动 MirrorPool.Sync。
     public class MirrorPoolParkedLifecycleTests
     {
-        /// 构造 v11 blob，支持 active + parked 混合条目。
+        /// 构造 v14 blob，支持 active + parked 混合条目。
         /// 每条目 (visByte, nodeId, reuseKey)。
         ///   visByte 0x01 = active → 自动设 changeLevel=2, payloadKind=1, 附加 quad mesh。
         ///   visByte 0x02 = parked → 自动设 changeLevel=0, payloadKind=0, 无 mesh。
         ///   其他列填零/identity。
-        static byte[] BuildV11Blob(params (byte visByte, uint nodeId, uint reuseKey)[] entries)
+        static byte[] BuildV14Blob(params (byte visByte, uint nodeId, uint reuseKey)[] entries)
         {
             int N = entries.Length;
             var b = new List<byte>();
 
-            // header: magic, version=11, node_count
+            // header: magic, version=14, node_count
             b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu));
-            b.AddRange(System.BitConverter.GetBytes(11u));
+            b.AddRange(System.BitConverter.GetBytes(14u));
             b.AddRange(System.BitConverter.GetBytes((uint)N));
 
-            // v11: 21 col strides (bytes per entry)
-            int[] stride = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128 };
+            // v14: 23 col strides (bytes per entry)
+            int[] stride = { 8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24, 208 };
 
-            // col offsets (SOA): header 120B then each col = prev + stride[prev] * N
-            const int headerLen = 120;
+            // col offsets (SOA): header 128B then each col = prev + stride[prev] * N
+            const int headerLen = 128;
             int off = headerLen;
-            for (int i = 0; i < 21; i++)
+            for (int i = 0; i < 23; i++)
             {
                 b.AddRange(System.BitConverter.GetBytes((uint)off));
                 off += stride[i] * N;
@@ -422,12 +508,12 @@ namespace LoomGUI.Tests
             }
 
             // Write SOA columns
-            // col 0: node_id
+            // col 0: node_id（v14 u64）
             for (int i = 0; i < N; i++)
-                b.AddRange(System.BitConverter.GetBytes(entries[i].nodeId));
-            // col 1: parent_id (-1 = none)
+                b.AddRange(System.BitConverter.GetBytes((ulong)entries[i].nodeId));
+            // col 1: parent_id（v14 i64, -1 = none）
             for (int i = 0; i < N; i++)
-                b.AddRange(System.BitConverter.GetBytes(-1));
+                b.AddRange(System.BitConverter.GetBytes(-1L));
             // col 2: visible byte
             for (int i = 0; i < N; i++)
                 b.Add(entries[i].visByte);
@@ -471,6 +557,12 @@ namespace LoomGUI.Tests
             // col 20: effect_block (128B zeros per entry)
             for (int i = 0; i < N; i++)
                 for (int j = 0; j < 128; j++) b.Add((byte)0);
+            // col 21: shadow_params (24B zeros per entry)
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < 24; j++) b.Add((byte)0);
+            // col 22: grad_params (208B zeros per entry)
+            for (int i = 0; i < N; i++)
+                for (int j = 0; j < 208; j++) b.Add((byte)0);
 
             // Now fill arena headers: mesh_arena at colEnd
             int meshArenaStart = colEnd;
@@ -519,9 +611,9 @@ namespace LoomGUI.Tests
             try
             {
                 // Frame 1: active entry creates GO
-                var blob1 = new FrameBlob(BuildV11Blob(
+                var blob1 = new FrameBlob(BuildV14Blob(
                     (0x01, nodeId: 100, reuseKey: 5)));
-                Assert.That(blob1.IsValid, Is.True, "v11 blob valid");
+                Assert.That(blob1.IsValid, Is.True, "v14 blob valid");
                 pool.Sync(blob1, root.transform, mm, null, fallback);
                 Assert.That(pool.Count, Is.EqualTo(1), "frame1: GO created");
 
@@ -529,14 +621,14 @@ namespace LoomGUI.Tests
                 var poolByReuseField = typeof(MirrorPool).GetField("_poolByReuse",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var poolByReuse = (System.Collections.IDictionary)poolByReuseField.GetValue(pool);
-                var ro = poolByReuse[5u];
+                var ro = poolByReuse[5ul];
                 var goField = ro.GetType().GetField("Go",
                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
                 var go = (GameObject)goField.GetValue(ro);
                 Assert.That(go.activeSelf, Is.True, "frame1: GO active");
 
                 // Frame 2: same slot now parked
-                var blob2 = new FrameBlob(BuildV11Blob(
+                var blob2 = new FrameBlob(BuildV14Blob(
                     (0x02, nodeId: 100, reuseKey: 5)));
                 Assert.That(blob2.IsValid, Is.True);
                 Assert.That(blob2.Parked(0), Is.True, "blob2.Parked=true");
@@ -566,7 +658,7 @@ namespace LoomGUI.Tests
             try
             {
                 // Frame 1: active → creates GO
-                pool.Sync(new FrameBlob(BuildV11Blob(
+                pool.Sync(new FrameBlob(BuildV14Blob(
                     (0x01, nodeId: 100, reuseKey: 5))),
                     root.transform, mm, null, fallback);
                 Assert.That(pool.Count, Is.EqualTo(1));
@@ -575,20 +667,20 @@ namespace LoomGUI.Tests
                 var poolByReuseField = typeof(MirrorPool).GetField("_poolByReuse",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 var poolByReuse = (System.Collections.IDictionary)poolByReuseField.GetValue(pool);
-                var ro = poolByReuse[5u];
+                var ro = poolByReuse[5ul];
                 var goField = ro.GetType().GetField("Go",
                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
                 var go = (GameObject)goField.GetValue(ro);
 
                 // Frame 2: parked → GO kept, inactive
-                pool.Sync(new FrameBlob(BuildV11Blob(
+                pool.Sync(new FrameBlob(BuildV14Blob(
                     (0x02, nodeId: 100, reuseKey: 5))),
                     root.transform, mm, null, fallback);
                 Assert.That(pool.Count, Is.EqualTo(1), "parked: GO kept");
                 Assert.That(go.activeSelf, Is.False, "parked: GO inactive");
 
                 // Frame 3: reactivated → GO SetActive(true) again
-                pool.Sync(new FrameBlob(BuildV11Blob(
+                pool.Sync(new FrameBlob(BuildV14Blob(
                     (0x01, nodeId: 200, reuseKey: 5))),
                     root.transform, mm, null, fallback);
                 Assert.That(pool.Count, Is.EqualTo(1), "reactivate: GO still kept");
@@ -614,7 +706,7 @@ namespace LoomGUI.Tests
             try
             {
                 // Parked blob with no prior GO
-                var blob = new FrameBlob(BuildV11Blob(
+                var blob = new FrameBlob(BuildV14Blob(
                     (0x02, nodeId: 100, reuseKey: 5)));
                 Assert.That(blob.IsValid, Is.True);
                 pool.Sync(blob, root.transform, mm, null, fallback);
@@ -642,7 +734,7 @@ namespace LoomGUI.Tests
             try
             {
                 // Frame 1: active → creates GO
-                var blobActive = new FrameBlob(BuildV11Blob(
+                var blobActive = new FrameBlob(BuildV14Blob(
                     (0x01, nodeId: 100, reuseKey: 5)));
                 pool.Sync(blobActive, root.transform, mm, null, fallback);
                 Assert.That(pool.Count, Is.EqualTo(1), "frame1: GO created");
