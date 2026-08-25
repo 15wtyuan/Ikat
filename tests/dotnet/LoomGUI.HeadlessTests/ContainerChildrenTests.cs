@@ -19,7 +19,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class ContainerChildrenTests
     {
         // lib.rs:429 root parent 哨兵（与 create_root/create_node 失败哨兵同值）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── ChildCount ──────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 Assert.Equal(0, ((Container)ctx._registry.GetOrCreate(parent)).ChildCount);   // 空 parent
 
                 AppendChild(stage, parent, CreateNode(stage, "div"));
@@ -55,7 +55,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
 
                 Assert.Equal(0, container.ChildCount);
@@ -83,7 +83,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 AppendChild(stage, parent, CreateNode(stage, "button"));
                 AppendChild(stage, parent, CreateNode(stage, "img"));
 
@@ -106,7 +106,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 AppendChild(stage, parent, CreateNode(stage, "div"));
                 AppendChild(stage, parent, CreateNode(stage, "img"));
 
@@ -132,7 +132,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");   // 无子
+                ulong parent = CreateRoot(stage, "div");   // 无子
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
                 Assert.Throws<ArgumentOutOfRangeException>(() => container.GetChildAt(badIndex));
             }
@@ -155,7 +155,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 AppendChild(stage, parent, CreateNode(stage, "button"));
 
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
@@ -179,8 +179,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
-                uint child = CreateNode(stage, "button");
+                ulong parent = CreateRoot(stage, "div");
+                ulong child = CreateNode(stage, "button");
                 AppendChild(stage, parent, child);
 
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
@@ -208,9 +208,9 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
-                uint first = CreateNode(stage, "div");
-                uint second = CreateNode(stage, "img");
+                ulong parent = CreateRoot(stage, "div");
+                ulong first = CreateNode(stage, "div");
+                ulong second = CreateNode(stage, "img");
                 AppendChild(stage, parent, first);
                 AppendChild(stage, parent, second);
 
@@ -234,10 +234,10 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 AppendChild(stage, parent, CreateNode(stage, "div"));
 
-                uint otherRoot = CreateRoot(stage, "div");   // 另一棵树的根
+                ulong otherRoot = CreateRoot(stage, "div");   // 另一棵树的根
 
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
                 Assert.Equal(-1, container.GetChildIndex(ctx._registry.GetOrCreate(otherRoot)));
@@ -257,7 +257,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
                 Assert.Throws<ArgumentNullException>(() => container.GetChildIndex(null));
             }
@@ -277,8 +277,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
-                uint child = CreateNode(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
+                ulong child = CreateNode(stage, "div");
                 AppendChild(stage, parent, child);
 
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
@@ -305,7 +305,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parent = CreateRoot(stage, "div");
+                ulong parent = CreateRoot(stage, "div");
                 AppendChild(stage, parent, CreateNode(stage, "div"));
 
                 Container container = (Container)ctx._registry.GetOrCreate(parent);
@@ -326,7 +326,7 @@ namespace LoomGUI.HeadlessTests
         // ── helpers ──────────────────────────────────────────────────────
 
         /// <summary>建根节点（无 CSS）。返 NodeId；0xFFFF_FFFF = 失败。</summary>
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -335,7 +335,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>建无父节点（后续 append_child 挂父）。返 NodeId；0xFFFF_FFFF = 失败。</summary>
-        private static uint CreateNode(IntPtr stage, string kind)
+        private static ulong CreateNode(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -344,7 +344,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>挂 child 到 parent 末尾。失败抛（测试 fixture 假定 append 必成功）。</summary>
-        private static void AppendChild(IntPtr stage, uint parent, uint child)
+        private static void AppendChild(IntPtr stage, ulong parent, ulong child)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             int rc = Native.loomgui_stage_append_child(h, parent, child);

@@ -6,8 +6,8 @@ namespace LoomGUI
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v13）：
-    ///   header (128B): magic(u32 LE), version(u32)=13, node_count(u32),
+    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v14）：
+    ///   header (128B): magic(u32 LE), version(u32)=14, node_count(u32),
     ///                 23× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
     ///                 clip_table_off(u32), clip_table_len(u32),
@@ -17,6 +17,7 @@ namespace LoomGUI
     ///   v11：加 effect_block 列（[f32;32]=128B，per-text-node SDF effect 参数），列数 20→21。
     ///   v12：加 shadow_params 列（[f32;6]=24B，box-shadow SDF 参数），列数 21→22。
     ///   v13：加 grad_params 列（[f32;52]=208B，背景渐变像素参数），列数 22→23。
+    ///   v14：node_id/parent_id 列 4B→8B（NodeId u64 拓宽，#26），列数不变。
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
@@ -26,7 +27,8 @@ namespace LoomGUI
         /// v11：加 effect_block 列（SDF effect 参数，照 color_matrix 先例），列数 20→21。
         /// v12：加 shadow_params 列（box-shadow SDF 参数 [f32;6]，照 color_matrix/effect_block 先例），列数 21→22。
         /// v13：加 grad_params 列（渐变像素参数 [f32;52]，照 effect_block 先例），列数 22→23。
-        public const uint ExpectedVersion = 13;
+        /// v14：node_id/parent_id 列 u32→u64/i64（NodeId ABI 拓宽，#26）。
+        public const uint ExpectedVersion = 14;
 
         readonly byte[] _buf;
 
@@ -37,8 +39,8 @@ namespace LoomGUI
         public uint Version => ReadU32(4);
         public int NodeCount => (int)ReadU32(8);
 
-        // 列 offset 在 header[12 .. 12+22*4)。顺序同 Rust columns：
-        //   0=node_id(u32) 1=parent_id(i32,-1=none) 2=visible(u8) 3=alpha(f32)
+        // 列 offset 在 header[12 .. 12+23*4)。顺序同 Rust columns：
+        //   0=node_id(u64) 1=parent_id(i64,-1=none) 2=visible(u8) 3=alpha(f32)
         //   4=sort_key(u32) 5=mask_context(u32)
         //   6=m_a(f32) 7=m_b(f32) 8=m_c(f32) 9=m_d(f32) 10=m_tx(f32) 11=m_ty(f32)
         //   ↑ world matrix Affine2 6 列（m_a..m_ty）。
@@ -56,6 +58,7 @@ namespace LoomGUI
         //   v11：加 effect_block 列（新第 20 列，不动 v10 前移结果）。
         //   v12：加 shadow_params 列（新第 21 列，列数 21→22，arena header 起点同步后移 4 字节）。
         //   v13：加 grad_params 列（新第 22 列，列数 22→23，arena header 起点同步后移 4 字节）。
+        //   v14：node_id/parent_id 列 4B→8B（#26），列数不变，col_off 布局不变（列宽变）。
         int ColOff(int idx) => (int)ReadU32(12 + idx * 4);
 
         // 三 arena header offset。23 列 col_offset 之后：mesh(2), clip(2), path(2) 各 off+len。
@@ -70,8 +73,12 @@ namespace LoomGUI
         int PathTableOff => (int)ReadU32(12 + 23 * 4 + 4 * 4);
         int PathTableLen => (int)ReadU32(12 + 23 * 4 + 4 * 4 + 4);
 
-        public uint NodeId(int i) => ReadU32(ColOff(0) + i * 4);
-        public int ParentId(int i) => (int)ReadU32(ColOff(1) + i * 4);
+        /// v14：node_id 列 u64（NodeId ABI 拓宽，#26）。tag 字节（bits[63:56]）区分
+        /// 真实节点（0）与渲染层合成节点（1..=15 跨页子页 / 16-17 scrollbar thumb /
+        /// 32-35 TextField / 36-47 box-shadow 等）；MirrorPool 按完整 u64 keying。
+        public ulong NodeId(int i) => ReadU64(ColOff(0) + i * 8);
+        /// v14：parent_id 列 i64（-1 = 无父）。合成节点的 parent 仍是其 primary 的 NodeId。
+        public long ParentId(int i) => (long)ReadU64(ColOff(1) + i * 8);
         /// visible 字节双用：bit0=本帧渲染，bit1=parked keepalive（留 GO 不渲染）。
         /// MirrorPool.Sync 用 Parked(i) 识别 keepalive 条目，留镜像对象、跳过渲染上传。
         public bool Visible(int i) => (_buf[ColOff(2) + i] & 0x01) != 0;
@@ -266,6 +273,7 @@ namespace LoomGUI
         }
 
         uint ReadU32(int o) => BitConverter.ToUInt32(_buf, o);
+        ulong ReadU64(int o) => BitConverter.ToUInt64(_buf, o);
         float ReadF32(int o) => BitConverter.ToSingle(_buf, o);
 
         // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityLoomBackend.DumpBlobState 线性扫表）。

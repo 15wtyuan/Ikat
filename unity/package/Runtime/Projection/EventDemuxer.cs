@@ -30,7 +30,7 @@
 //   KEY=percent / HOOK=hook_name 表索引 f32 bits）。字符串经 EventStrTable 索引读回
 //   （loomgui_stage_get_event_string，双调法）。
 //
-// RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致——28 字节）。
+// RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致——32 字节，node_id u64 #26）。
 // 自足 struct，不依赖任何外部 LoomEvent 镜像——headless 测试编译链和 Unity 生产链共用此定义。
 
 using System;
@@ -41,15 +41,15 @@ using LoomGUI.Bindings;
 namespace LoomGUI
 {
     /// <summary>
-    /// Rust <c>loomgui_core::input::EventRecord</c> C# 镜像（28 字节）。
-    /// 字段序：node_id:u32 @0 → event_type:u8 @4 → click_count:u8 @5 → pad [2] → touch_id:i32 @8
-    /// → x:f32 @12 → y:f32 @16 → dx:f32 @20 → dy:f32 @24（#63：DragMove 逐 Move 增量）。
+    /// Rust <c>loomgui_core::input::EventRecord</c> C# 镜像（32 字节，#26 node_id u64 拓宽）。
+    /// 字段序：node_id:u64 @0 → event_type:u8 @8 → click_count:u8 @9 → pad [2] @10 → touch_id:i32 @12
+    /// → x:f32 @16 → y:f32 @20 → dx:f32 @24 → dy:f32 @28（#63：DragMove 逐 Move 增量）。
     /// 自足 struct（headless 测试编译链用 unsafe 读 byte*，不依赖任何外部的 LoomEvent 镜像）。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     struct RawEventRecord
     {
-        public uint nodeId;
+        public ulong nodeId;
         public byte eventType;
         public byte clickCount;
         internal ushort _pad;      // pad[2] @6-7（Down/Up 的 button 在 pad[0]；key events 的 modifiers；动画事件 name 表索引高 16 位——按事件类型复用）
@@ -84,7 +84,7 @@ namespace LoomGUI
             for (int i = 0; i < count; i++)
             {
                 var evt = Marshal.PtrToStructure<RawEventRecord>(ptr + i * recSize);
-                uint nodeId = evt.nodeId;
+                ulong nodeId = evt.nodeId;
                 switch (evt.eventType)
                 {
                     case (byte)EventType.Down:
@@ -283,7 +283,7 @@ namespace LoomGUI
         /// false 走 DispatchTargetOnly（Enter/Leave 专用，见 EventBus.DispatchTargetOnly）。
         /// Target=null（NewCore 遇 not-live nodeId）时丢弃该条——节点已销毁，事件无人接收。
         /// </summary>
-        void DispatchTyped<T>(uint targetNodeId, T evt, bool routeChain = true) where T : IRouteEvent, IRouteEventCore
+        void DispatchTyped<T>(ulong targetNodeId, T evt, bool routeChain = true) where T : IRouteEvent, IRouteEventCore
         {
             if (evt.Target == null) return;   // not-live node（见 NewCore）：丢弃不崩泵
             if (routeChain) _ctx._eventBus.Dispatch(targetNodeId, evt);
@@ -301,7 +301,7 @@ namespace LoomGUI
         /// rc=1（node not live）抛 InvalidOperationException——节点不在，事件本就无人接收，
         /// 留 Target=null 让 DispatchTyped 丢弃，而不是让单条死事件崩整个事件泵。
         /// </summary>
-        RouteEventCore NewCore(uint nodeId)
+        RouteEventCore NewCore(ulong nodeId)
         {
             Node target = null;
             try

@@ -36,7 +36,7 @@ pub const EVT_ANIMATION_KEY: u8 = 27;
 /// @loom-hook stop 跨越（句柄私有）。
 pub const EVT_ANIMATION_HOOK: u8 = 28;
 
-/// 事件字符串表：动画事件 payload 的 name/hook_name 载体（EventRecord 20B 扁平 POD
+/// 事件字符串表：动画事件 payload 的 name/hook_name 载体（EventRecord 32B 扁平 POD
 /// 无字符串槽，事件携带 24-bit 索引，C# demux 按索引读回）。
 ///
 /// 持久 intern：同名跨 tick 索引稳定（表只增不减，量级 = 动画名 + hook 名，内存可忽略）。

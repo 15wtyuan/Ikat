@@ -17,7 +17,7 @@ namespace LoomGUI
         public MeshRenderer Mr;
         public Mesh Mesh;
         public bool Stale;
-        public uint LastNodeId;       // 诊断：最近绑定的 node_id（DumpState 打印；不做复用校验——复用换绑是 reuse_key 池化的正常行为）
+        public ulong LastNodeId;      // 诊断：最近绑定的 node_id（DumpState 打印；不做复用校验——复用换绑是 reuse_key 池化的正常行为）
 
         // buffer 复用（500 节点静态压测 GC 缓解）：每 RenderObj 持可复用 List，
         // UploadMesh 每帧 Clear+fill 后用 Mesh.SetVertices(List) 等 overload 上传——
@@ -36,8 +36,10 @@ namespace LoomGUI
         // 双 dict keying。reuse_key>0 的 slot 节点按 reuse_key 复用 GO
         // （slot 换绑 item 时 NodeId 变但 reuse_key 不变 → GO 不销毁重建）；
         // reuse_key=0 的普通节点按 node_id keying（v1 行为不变）。
-        readonly Dictionary<uint, RenderObj> _poolByNodeId = new();
-        readonly Dictionary<uint, RenderObj> _poolByReuse = new();
+        // v14：node_id u64（#26）。_poolByReuse 的 key 是 reuse_key（u32 ordinal），
+        // 拓宽到 ulong 统一两 dict 类型（同一 pool 变量交替引用）；两 dict 分立，key 无碰撞面。
+        readonly Dictionary<ulong, RenderObj> _poolByNodeId = new();
+        readonly Dictionary<ulong, RenderObj> _poolByReuse = new();
         // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
         // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
         readonly HashSet<uint> _clipsAppliedThisFrame = new();
@@ -87,7 +89,7 @@ namespace LoomGUI
                     }
                     else
                     {
-                        uint nid = blob.NodeId(i);
+                        ulong nid = blob.NodeId(i);
                         if (_poolByNodeId.TryGetValue(nid, out var roC))
                         {
                             roC.Stale = false;
@@ -100,10 +102,10 @@ namespace LoomGUI
                 if (!blob.Visible(i)) continue;
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
-                uint id = blob.NodeId(i);
+                ulong id = blob.NodeId(i);
                 uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
-                uint poolKey = reuseKey != 0 ? reuseKey : id;
-                Dictionary<uint, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
+                ulong poolKey = reuseKey != 0 ? reuseKey : id;
+                Dictionary<ulong, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
 
                 // SKIP：本帧无变化，保留上帧 GO，清 stale。
                 if (level == 0)
@@ -149,10 +151,10 @@ namespace LoomGUI
             }
 
             // ③ 余 stale 销毁（两个 dict）
-            var dead1 = new List<uint>();
+            var dead1 = new List<ulong>();
             foreach (var kv in _poolByNodeId) if (kv.Value.Stale) dead1.Add(kv.Key);
             foreach (var id in dead1) { TearDown(_poolByNodeId[id]); _poolByNodeId.Remove(id); }
-            var dead2 = new List<uint>();
+            var dead2 = new List<ulong>();
             foreach (var kv in _poolByReuse) if (kv.Value.Stale) dead2.Add(kv.Key);
             foreach (var id in dead2) { TearDown(_poolByReuse[id]); _poolByReuse.Remove(id); }
         }
@@ -436,7 +438,7 @@ namespace LoomGUI
             return sb.ToString();
         }
 
-        void DumpDict(System.Text.StringBuilder sb, string tag, Dictionary<uint, RenderObj> pool)
+        void DumpDict(System.Text.StringBuilder sb, string tag, Dictionary<ulong, RenderObj> pool)
         {
             foreach (var kv in pool)
             {

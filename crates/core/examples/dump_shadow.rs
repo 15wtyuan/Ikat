@@ -127,8 +127,8 @@ fn main() {
 
     println!("========== btn-primary shadow synth 节点 ==========");
     for rn in &frame.nodes {
-        let hi = rn.node_id >> 24;
-        let lo = rn.node_id & 0x00FF_FFFF;
+        let hi = rn.node_id >> 56;
+        let lo = rn.node_id & 0x00FF_FFFF_FFFF_FFFF;
         if !(36..=47).contains(&hi) || lo != btn_id {
             continue;
         }

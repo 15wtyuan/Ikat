@@ -44,7 +44,7 @@ fn load_package_ffi_takes_name() {
     loomgui_stage_free(h);
 }
 
-/// instantiate FFI 返有效 NodeId（非 INVALID 0xFFFF_FFFF）。
+/// instantiate FFI 返有效 NodeId（非 INVALID u64::MAX）。
 /// 流程：create_root 建 scene → load_package("bag") → instantiate("bag","comp1") → NodeId。
 #[test]
 fn instantiate_ffi_returns_nodeid() {
@@ -53,12 +53,12 @@ fn instantiate_ffi_returns_nodeid() {
     // create_root 建 scene（ensure_scene 自动建空骨架）。css 传空串（无 inline style）。
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let pkg = make_test_pkg_bytes("comp1");
     let lr = loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len());
     assert_eq!(lr, 0, "load_package ok");
     let id = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
-    assert_ne!(id, 0xFFFF_FFFF, "instantiate 返有效 NodeId");
+    assert_ne!(id, u64::MAX, "instantiate 返有效 NodeId");
     loomgui_stage_free(h);
 }
 
@@ -74,9 +74,9 @@ fn load_package_builds_blob_from_package() {
     assert_eq!(r, 0, "load_package ok");
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
-    assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
+    assert_ne!(comp, u64::MAX, "instantiate ok");
     assert_eq!(
         loomgui_stage_append_child(h, root, comp),
         0,
@@ -144,7 +144,7 @@ fn get_node_world_matrix_invalid_node_returns_identity() {
         (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
     loomgui_stage_get_node_world_matrix(
         h,
-        0xFFFF_FFFF,
+        u64::MAX,
         &mut a,
         &mut b,
         &mut c,
@@ -165,7 +165,7 @@ fn get_node_world_matrix_valid_node_returns_finite_matrix() {
     let h = stage_new_with_dejavu(200.0, 200.0);
     let empty = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     loomgui_stage_tick(h, 0.0); // compute_world_transforms
     let (mut a, mut b, mut c, mut d, mut tx, mut ty) =
         (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
@@ -182,7 +182,7 @@ fn get_node_world_matrix_valid_node_returns_finite_matrix() {
 fn set_content_size_null_handle_and_invalid_node_are_safe() {
     loomgui_stage_set_content_size(std::ptr::null_mut(), 0, 100.0, 200.0);
     let h = stage_new_with_dejavu(200.0, 200.0);
-    loomgui_stage_set_content_size(h, 0xFFFF_FFFF, 100.0, 200.0);
+    loomgui_stage_set_content_size(h, u64::MAX, 100.0, 200.0);
     loomgui_stage_set_content_size(h, 999, 100.0, 200.0);
     loomgui_stage_free(h);
 }
@@ -191,7 +191,7 @@ fn set_content_size_null_handle_and_invalid_node_are_safe() {
 fn set_reuse_key_null_handle_and_invalid_node_are_safe() {
     loomgui_stage_set_reuse_key(std::ptr::null_mut(), 0, 5);
     let h = stage_new_with_dejavu(200.0, 200.0);
-    loomgui_stage_set_reuse_key(h, 0xFFFF_FFFF, 5);
+    loomgui_stage_set_reuse_key(h, u64::MAX, 5);
     loomgui_stage_set_reuse_key(h, 999, 5);
     loomgui_stage_free(h);
 }
@@ -215,7 +215,7 @@ fn is_pointer_on_ui_true_on_hit_false_on_miss() {
     assert!(!h.is_null());
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     // warmup tick：hit_test 读上帧 world_transforms（1 帧延迟）
     loomgui_stage_tick(h, 0.0);
     // 空根 Container 无子 → hit_test 命中根 → 根不算 UI → false
@@ -228,7 +228,8 @@ fn is_pointer_on_ui_true_on_hit_false_on_miss() {
 
 /// EventRecord/PointerEvent sizeof 契约。
 /// PointerEvent 16B：PointerKind repr(u8) 1B + button 1B + pad 2B + touch_id@4 + x@8 + y@12。
-/// EventRecord 20B：node_id@0(4) + event_type@4(1) + pad@5(3) + touch_id@8(4) + x@12(4) + y@16(4)。
+/// EventRecord 32B：node_id@0(8,u64) + event_type@8(1) + click_count@9(1) + pad@10(2) +
+/// touch_id@12(4) + x@16 + y@20 + dx@24 + dy@28（#26 NodeId 拓宽 20→32B，对齐 8）。
 #[test]
 fn pointer_event_event_record_sizeof() {
     use loomgui_core::input::{EventRecord, PointerEvent};
@@ -239,8 +240,8 @@ fn pointer_event_event_record_sizeof() {
     );
     assert_eq!(
         std::mem::size_of::<EventRecord>(),
-        28,
-        "EventRecord 28B（dx/dy @20/#63）"
+        32,
+        "EventRecord 32B（node_id u64 #26）"
     );
 }
 
@@ -262,7 +263,7 @@ fn no_default_features_builds() {
     assert!(ptr.is_null() && len == 0);
     assert_eq!(
         loomgui_node_parent(h, 0),
-        0xFFFF_FFFF,
+        u64::MAX,
         "无 scene → sentinel，不 panic"
     );
     loomgui_stage_free(h);
@@ -281,9 +282,9 @@ fn node_parent_returns_chain_and_sentinel() {
     );
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
-    assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
+    assert_ne!(comp, u64::MAX, "instantiate ok");
     assert_eq!(
         loomgui_stage_append_child(h, root, comp),
         0,
@@ -292,14 +293,10 @@ fn node_parent_returns_chain_and_sentinel() {
     assert_eq!(loomgui_node_parent(h, comp), root, "comp.parent == root");
     assert_eq!(
         loomgui_node_parent(h, root),
-        0xFFFF_FFFF,
+        u64::MAX,
         "root 是顶层 → parent=sentinel"
     );
-    assert_eq!(
-        loomgui_node_parent(h, 0xFFFF_FFFF),
-        0xFFFF_FFFF,
-        "OOB → sentinel"
-    );
+    assert_eq!(loomgui_node_parent(h, u64::MAX), u64::MAX, "OOB → sentinel");
     loomgui_stage_free(h);
 }
 
@@ -342,9 +339,9 @@ fn find_node_by_id_round_trip() {
     );
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
-    assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
+    assert_ne!(comp, u64::MAX, "instantiate ok");
     assert_eq!(
         loomgui_stage_append_child(h, root, comp),
         0,
@@ -355,13 +352,14 @@ fn find_node_by_id_round_trip() {
         let id = std::ffi::CString::new("ok").unwrap();
         loomgui_stage_find_node_by_id(h, id.as_ptr() as *const u8, id.as_bytes().len())
     };
-    assert_ne!(ok_id, 0xFFFF_FFFF, "find ok 应命中");
+    assert_ne!(ok_id, u64::MAX, "find ok 应命中");
+    assert_ne!(ok_id, u64::MAX, "find ok 应命中");
     assert_eq!(ok_id, comp, "find ok == comp 根 NodeId");
     let miss = {
         let id = std::ffi::CString::new("nope").unwrap();
         loomgui_stage_find_node_by_id(h, id.as_ptr() as *const u8, id.as_bytes().len())
     };
-    assert_eq!(miss, 0xFFFF_FFFF, "无匹配 → sentinel");
+    assert_eq!(miss, u64::MAX, "无匹配 → sentinel");
     loomgui_stage_free(h);
 }
 
@@ -374,27 +372,31 @@ fn version_is_v1e() {
     assert_eq!(s, "v1e");
 }
 
-/// EventRecord 28B（#63 +dx/dy DragMove 逐 Move 增量）、PointerEvent 16B、Canceled=3。
+/// EventRecord 32B（node_id u64 #26；#63 +dx/dy DragMove 逐 Move 增量）、PointerEvent 16B、Canceled=3。
 #[test]
 fn event_record_and_pointer_event_sizes_unchanged() {
     use loomgui_core::input::{EventRecord, PointerEvent, PointerKind};
     use std::mem::size_of;
     assert_eq!(
         size_of::<EventRecord>(),
-        28,
-        "EventRecord 28B（dx/dy @20/#63）"
+        32,
+        "EventRecord 32B（node_id u64 #26）"
     );
     assert_eq!(size_of::<PointerEvent>(), 16, "PointerEvent 16B 不变");
     assert_eq!(PointerKind::Canceled as u8, 3, "Canceled=3");
 }
 
-/// KeyEvent sizeof 8B + EventRecord 28B / PointerEvent 16B。
+/// KeyEvent sizeof 8B + EventRecord 32B / PointerEvent 16B。
 #[test]
 fn key_event_sizeof_and_unchanged() {
     use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
     use std::mem::size_of;
     assert_eq!(size_of::<KeyEvent>(), 8, "KeyEvent 8B");
-    assert_eq!(size_of::<EventRecord>(), 28, "EventRecord 28B（#63）");
+    assert_eq!(
+        size_of::<EventRecord>(),
+        32,
+        "EventRecord 32B（node_id u64 #26）"
+    );
     assert_eq!(size_of::<PointerEvent>(), 16, "PointerEvent 16B 不变");
 }
 
@@ -556,7 +558,7 @@ fn set_scroll_pos_non_container_no_op() {
 fn set_scroll_pos_oob_no_op() {
     let mut stage = build_scroll_stage();
     // 越界 NodeId（idx=99）→ no-op 不 panic
-    stage.set_scroll_pos(NodeId((99u32 << 12) | 1), 0.0, 50.0, false);
+    stage.set_scroll_pos(NodeId((99u64 << 32) | 1), 0.0, 50.0, false);
 }
 
 /// WheelEvent ABI 尺寸 16B（4×f32 紧凑，C# 端同布局）。
@@ -577,14 +579,14 @@ fn dynamic_tree_api_ffi_round_trip() {
     assert!(!h.is_null());
     let empty = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     // create_node(button/img/span)——孤立节点
     let btn = loomgui_stage_create_node(h, b"button".as_ptr(), 6, empty.as_ptr(), 0);
-    assert_ne!(btn, 0xFFFF_FFFF, "create_node button ok");
+    assert_ne!(btn, u64::MAX, "create_node button ok");
     let img = loomgui_stage_create_node(h, b"img".as_ptr(), 3, empty.as_ptr(), 0);
-    assert_ne!(img, 0xFFFF_FFFF, "create_node img ok");
+    assert_ne!(img, u64::MAX, "create_node img ok");
     let span = loomgui_stage_create_node(h, b"span".as_ptr(), 4, empty.as_ptr(), 0);
-    assert_ne!(span, 0xFFFF_FFFF, "create_node span ok");
+    assert_ne!(span, u64::MAX, "create_node span ok");
     // append_child ×3 挂到 root（序：btn, img, span）
     assert_eq!(loomgui_stage_append_child(h, root, btn), 0, "append btn");
     assert_eq!(loomgui_stage_append_child(h, root, img), 0, "append img");
@@ -768,7 +770,7 @@ fn a6_inline_children_class_smoke() {
     assert!(!h.is_null());
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
 
     let css = b"width:100px";
     assert_eq!(
@@ -785,8 +787,8 @@ fn a6_inline_children_class_smoke() {
     );
 
     // get_children：cap=0 且有 0 子 → 写入数 0（不算不够，len <= cap）
-    let mut out: u32 = 0xDEAD;
-    let r = loomgui_stage_get_children(h, root, &mut out as *mut u32, 0);
+    let mut out: u64 = 0xDEAD;
+    let r = loomgui_stage_get_children(h, root, &mut out as *mut u64, 0);
     assert_eq!(r, 0, "get_children 0 子 → 写入 0");
     assert_eq!(out, 0xDEAD, "cap=0 时不应写 out");
 
@@ -855,12 +857,12 @@ fn a6_inline_children_class_smoke() {
 
     // 错误路径：不 live 节点 → -1 / -1
     assert_eq!(
-        loomgui_stage_get_child_count(h, 0xFFFF_FFFF),
+        loomgui_stage_get_child_count(h, u64::MAX),
         -1,
         "不 live 节点 get_child_count → -1"
     );
     assert_eq!(
-        loomgui_stage_has_class(h, 0xFFFF_FFFF, class_name.as_ptr(), class_name.len()),
+        loomgui_stage_has_class(h, u64::MAX, class_name.as_ptr(), class_name.len()),
         -1,
         "不 live 节点 has_class → -1"
     );
@@ -944,9 +946,9 @@ fn a6_get_children_capacity_contract() {
     );
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
-    assert_ne!(comp, 0xFFFF_FFFF, "instantiate ok");
+    assert_ne!(comp, u64::MAX, "instantiate ok");
     assert_eq!(
         loomgui_stage_append_child(h, root, comp),
         0,
@@ -961,17 +963,17 @@ fn a6_get_children_capacity_contract() {
     assert_eq!(r, -4, "cap 不够 → -(len+2) = -4");
 
     // cap=2 正好 → 写入 2
-    let mut kids = [0u32; 2];
+    let mut kids = [0u64; 2];
     let r = loomgui_stage_get_children(h, comp, kids.as_mut_ptr(), 2);
     assert_eq!(r, 2, "cap=2 → 写入 2");
     // 写入的是 live 子 NodeId（非 0、非 sentinel）
     for k in kids.iter() {
-        assert_ne!(*k, 0xFFFF_FFFF, "子 NodeId 非 sentinel");
+        assert_ne!(*k, u64::MAX, "子 NodeId 非 sentinel");
     }
     assert_ne!(kids[0], kids[1], "两子 NodeId 应不同");
 
     // cap=1 不够（2 子）→ -4
-    let mut small = [0u32; 1];
+    let mut small = [0u64; 1];
     let r = loomgui_stage_get_children(h, comp, small.as_mut_ptr(), 1);
     assert_eq!(r, -4, "cap=1 不够 → -4");
 
@@ -986,9 +988,9 @@ fn clone_subtree_ffi_round_trip() {
     assert!(!h.is_null());
     let empty_css = b"";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let img = loomgui_stage_create_node(h, b"img".as_ptr(), 3, empty_css.as_ptr(), 0);
-    assert_ne!(img, 0xFFFF_FFFF, "create_node ok");
+    assert_ne!(img, u64::MAX, "create_node ok");
     assert_eq!(
         loomgui_stage_append_child(h, root, img),
         0,
@@ -996,12 +998,12 @@ fn clone_subtree_ffi_round_trip() {
     );
 
     let cloned = loomgui_stage_clone_subtree(h, root);
-    assert_ne!(cloned, 0xFFFF_FFFF, "clone_subtree 返有效 NodeId");
+    assert_ne!(cloned, u64::MAX, "clone_subtree 返有效 NodeId");
     assert_ne!(cloned, root, "新 NodeId 不同于源根");
-    // 游离：新根无父（0xFFFF_FFFF = root sentinel）
+    // 游离：新根无父（u64::MAX = root sentinel）
     assert_eq!(
         loomgui_node_parent(h, cloned),
-        0xFFFF_FFFF,
+        u64::MAX,
         "克隆根游离（无父）"
     );
     // 结构完整：1 子
@@ -1012,8 +1014,8 @@ fn clone_subtree_ffi_round_trip() {
     );
     // 错误路径：无效 src → 哨兵
     assert_eq!(
-        loomgui_stage_clone_subtree(h, 0xFFFF_FFFF),
-        0xFFFF_FFFF,
+        loomgui_stage_clone_subtree(h, u64::MAX),
+        u64::MAX,
         "无效 src → 哨兵"
     );
 

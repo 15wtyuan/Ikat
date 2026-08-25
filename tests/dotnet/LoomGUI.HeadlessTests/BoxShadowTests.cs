@@ -32,7 +32,7 @@ namespace LoomGUI.HeadlessTests
         private const int HeaderFixedLen = 12; // magic + version + node_count
         private const int NumColumns = 22;
         // Column indices (must match the column push order in build_blob).
-        private const int ColNodeId = 0;        // u32
+        private const int ColNodeId = 0;        // u64（#26 拓宽，8B stride）
         private const int ColProgram = 16;       // u8
         private const int ColShadowParams = 21;  // [f32;6] = 24 bytes
         private const int ShadowParamsSize = 24;
@@ -70,8 +70,8 @@ namespace LoomGUI.HeadlessTests
                 int nodesWithZeroParams = 0;
                 for (int i = 0; i < blob.NodeCount; i++)
                 {
-                    uint nodeId = blob.GetNodeId(i);
-                    byte hi = (byte)(nodeId >> 24);
+                    ulong nodeId = blob.GetNodeId(i);
+                    byte hi = (byte)(nodeId >> 56);
                     if (hi < FrontSynthLo || hi > BackSynthHi)
                         continue; // not a shadow synth node
 
@@ -128,7 +128,7 @@ namespace LoomGUI.HeadlessTests
 
             public int NodeCount => _nodeCount;
 
-            public uint GetNodeId(int i) => ReadU32(_ptr, (int)_nodeIdOff + i * 4);
+            public ulong GetNodeId(int i) => ReadU64(_ptr, (int)_nodeIdOff + i * 8);
             public byte GetProgram(int i) => _ptr[_programOff + i];
             public float[] GetShadowParams(int i)
             {
@@ -141,6 +141,13 @@ namespace LoomGUI.HeadlessTests
 
             private static uint ReadU32(byte* p, int offset)
                 => p[offset] | ((uint)p[offset + 1] << 8) | ((uint)p[offset + 2] << 16) | ((uint)p[offset + 3] << 24);
+
+            private static ulong ReadU64(byte* p, int offset)
+            {
+                ulong lo = ReadU32(p, offset);
+                ulong hi = ReadU32(p, offset + 4);
+                return lo | (hi << 32);
+            }
 
             private static float ReadF32(byte* p, int offset)
             {
@@ -177,14 +184,14 @@ namespace LoomGUI.HeadlessTests
             }
         }
 
-        private static uint CreateRoot(StageHandle* h)
+        private static ulong CreateRoot(StageHandle* h)
         {
             byte[] k = Encoding.UTF8.GetBytes("div");
             fixed (byte* kp = k)
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        private static void AppendChild(StageHandle* h, uint parent, uint child)
+        private static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)
@@ -199,7 +206,7 @@ namespace LoomGUI.HeadlessTests
         /// </summary>
         private static Container InstantiateBoxShadowFixture(StageHandle* h, UIContext ctx)
         {
-            uint sceneRootId = CreateRoot(h);
+            ulong sceneRootId = CreateRoot(h);
             ctx._rootId = sceneRootId;
             Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 

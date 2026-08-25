@@ -26,7 +26,7 @@ fn hash_color_matrix(m: &[f32; 20]) -> u64 {
 /// 控件 node_id（control_ids）强制返回 None：merge 会把被合并者的 node_id 吞成 anchor，
 /// 控件必须保留独立 node_id 供 Unity 后端建交互实体（hit test / 状态 / 镜像 GameObject）。
 fn mesh_key(
-    control_ids: &std::collections::HashSet<u32>,
+    control_ids: &std::collections::HashSet<u64>,
     rn: &RenderNode,
 ) -> Option<(Option<String>, u32, u32, u32, u64)> {
     if control_ids.contains(&rn.node_id) {
@@ -67,7 +67,7 @@ fn mesh_key(
 /// 按 sort_key 扫描，连续同 DrawState 的 Mesh 节点合并成单个 merged Mesh payload。
 /// merged node_id = batch 内最小原始 node_id（锚）。控件 node_id（control_ids）排除合并。
 pub fn merge_meshes(
-    control_ids: &std::collections::HashSet<u32>,
+    control_ids: &std::collections::HashSet<u64>,
     nodes: Vec<RenderNode>,
 ) -> Vec<RenderNode> {
     let mut order: Vec<usize> = (0..nodes.len()).collect();
@@ -173,7 +173,7 @@ mod tests {
 
     /// mesh_node 带 image_path（None=纯色，Some=图 path）。
     fn mesh_node(
-        id: u32,
+        id: u64,
         path: Option<&str>,
         sort_key: u32,
         alpha: f32,
@@ -413,7 +413,7 @@ mod tests {
             0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
         ];
 
-        let make_node = |id: u32, cm: [f32; 20]| RenderNode {
+        let make_node = |id: u64, cm: [f32; 20]| RenderNode {
             node_id: id,
             parent_id: None,
             visible: true,
@@ -422,7 +422,7 @@ mod tests {
             world_matrix: crate::transform::IDENTITY,
             blend: BlendMode::Normal,
             mask_context: MaskContext(0),
-            sort_key: id,
+            sort_key: id as u32,
             change_level: ChangeLevel::Full,
             reuse_key: 0,
             effect: crate::render::node::EffectBlock::default(),
@@ -455,7 +455,7 @@ mod tests {
             0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
         ];
 
-        let make_node = |id: u32, sk: u32| RenderNode {
+        let make_node = |id: u64, sk: u32| RenderNode {
             node_id: id,
             parent_id: None,
             visible: true,
@@ -518,7 +518,7 @@ mod tests {
             mesh_node(10, None, 0, 1.0, 0.0),   // 控件
             mesh_node(11, None, 1, 1.0, 100.0), // 同 DrawState 邻居
         ];
-        let control_ids: std::collections::HashSet<u32> = [10u32].iter().copied().collect();
+        let control_ids: std::collections::HashSet<u64> = [10u64].iter().copied().collect();
         let out = merge_meshes(&control_ids, nodes);
         assert_eq!(out.len(), 2, "控件排除合并 → 控件与邻居各自独立");
         assert!(

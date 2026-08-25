@@ -82,7 +82,7 @@ fn main() {
     println!("\n── 渲染节点 world_matrix vs layout_rect（遍历 frame.nodes，查 blob 不匹配）──");
     // build node_id(index) → layout_rect 索引（scene 侧）
     use std::collections::HashMap;
-    let mut lr: HashMap<u32, (f32, f32, f32, f32)> = HashMap::new();
+    let mut lr: HashMap<u64, (f32, f32, f32, f32)> = HashMap::new();
     for n in scene.nodes.values() {
         lr.insert(
             n.id.0,
@@ -98,7 +98,7 @@ fn main() {
     let mut checked = 0;
     let mut samples = Vec::new();
     let mut orphan = 0;
-    let mut matches: HashMap<u32, (f32, f32)> = HashMap::new();
+    let mut matches: HashMap<u64, (f32, f32)> = HashMap::new();
     let wt_len = scene.world_transforms.len();
     println!(
         "  [diag] world_transforms.len()={} nodes.capacity()={}",
@@ -106,7 +106,7 @@ fn main() {
         scene.nodes.capacity()
     );
     // 重复 node_id 检测：同一 node_id 出现多次 → 后者覆盖前者 world_matrix？
-    let mut id_count: HashMap<u32, usize> = HashMap::new();
+    let mut id_count: HashMap<u64, usize> = HashMap::new();
     let mut dup_ids = 0;
     for rn in &frame.nodes {
         let c = id_count.entry(rn.node_id).or_insert(0);

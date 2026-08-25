@@ -23,7 +23,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class NodeClassListTests
     {
         // lib.rs create_root 失败哨兵（与 parent 哨兵同值）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── Add / Contains round-trip ───────────────────────────────────
 
@@ -280,7 +280,7 @@ namespace LoomGUI.HeadlessTests
 
         // ── helpers ──────────────────────────────────────────────────────
 
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind);

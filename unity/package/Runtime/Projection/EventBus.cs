@@ -33,7 +33,7 @@ namespace LoomGUI
         readonly UIContext _ctx;
 
         // 订阅表：同 (node, type, capture) 三元可多 entry（list 保序）。空 list 移 key 防 dict 膨胀。
-        readonly Dictionary<(uint nodeId, byte eventType, bool capture), List<IHandlerEntry>> _subs
+        readonly Dictionary<(ulong nodeId, byte eventType, bool capture), List<IHandlerEntry>> _subs
             = new();
 
         internal EventBus(UIContext ctx) => _ctx = ctx;
@@ -43,7 +43,7 @@ namespace LoomGUI
         /// false 进 bubble 阶段。<paramref name="once"/> = true 触发后自动退订（防"等一个结束事件"泄漏）。
         /// 返 <see cref="EventRegistration"/>——Dispose 退订。
         /// </summary>
-        internal EventRegistration Subscribe<T>(uint nodeId, Action<T> handler, bool capture, bool once)
+        internal EventRegistration Subscribe<T>(ulong nodeId, Action<T> handler, bool capture, bool once)
             where T : IRouteEvent
         {
             // T.EventType 来自 per-struct static 关联（ClickEvent.EventType 等）。泛型无法直接
@@ -76,7 +76,7 @@ namespace LoomGUI
         /// <typeparam name="T">typed event struct。</typeparam>
         /// <param name="targetNodeId">命中节点 NodeId（dispatch 全程 Target 不变）。</param>
         /// <param name="evt">typed event——_core.Target 必须已由调用方（demux / 测试）填。</param>
-        internal void Dispatch<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
+        internal void Dispatch<T>(ulong targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
         {
             // 契约：每个 typed event struct 持 RouteEventCore _core。RouteEventCore 是
             // sealed class（struct 版下 Action<T> 按值传 handler，StopPropagation 突变副本
@@ -96,11 +96,11 @@ namespace LoomGUI
             // 同 IsInSubtree 风格的 10k 防御上限（围栏闭合下树深有界，10k 兜底）。
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             // 链容量预估 8（典型 UI 深度）；深度大时 List 自动扩容。
-            var chain = new List<uint>(8) { targetNodeId };
-            uint current = targetNodeId;
+            var chain = new List<ulong>(8) { targetNodeId };
+            ulong current = targetNodeId;
             for (int i = 0; i < 10_000; i++)
             {
-                uint parent = Native.loomgui_node_parent(h, current);
+                ulong parent = Native.loomgui_node_parent(h, current);
                 if (parent == Node.RootSentinel) break;   // 走出根 / target 不 live
                 if (parent == current) break;             // 防御：自循环（理论不达）
                 chain.Add(parent);
@@ -111,12 +111,12 @@ namespace LoomGUI
             // 无 Dispose），GetOrCreate 必成功且 wrapper 入 registry 缓存。之后 capture/bubble 不再造节点，
             // 改用 IsLive 判活——handler 可能在路由途中 Dispose 路径节点（关面板 / 切页 / 删 item 等 DOM
             // 合法操作），Dispose 经 registry.Remove 移缓存 + 标 _disposed，IsLive 即此判据。
-            foreach (uint nid in chain) _ctx._registry.GetOrCreate(nid);
+            foreach (ulong nid in chain) _ctx._registry.GetOrCreate(nid);
 
             // ── capture 阶段：root → target（chain 反向遍历，不检 stop——对齐 EventRouter.cs）。
             for (int i = chain.Count - 1; i >= 0; i--)
             {
-                uint nodeId = chain[i];
+                ulong nodeId = chain[i];
                 if (!IsLive(nodeId, out var node)) continue;   // 路由中被 Dispose → 跳过（DOM：移除节点不再触发）
                 core.CurrentTarget = node;
                 InvokeHandlers(nodeId, eventType, capture: true, ref evt);
@@ -128,7 +128,7 @@ namespace LoomGUI
 
             for (int i = 0; i < chain.Count; i++)
             {
-                uint nodeId = chain[i];
+                ulong nodeId = chain[i];
                 if (!IsLive(nodeId, out var node)) continue;
                 core.CurrentTarget = node;
                 InvokeHandlers(nodeId, eventType, capture: false, ref evt);
@@ -149,7 +149,7 @@ namespace LoomGUI
         /// <typeparam name="T">typed event struct。</typeparam>
         /// <param name="targetNodeId">事件目标节点 NodeId。</param>
         /// <param name="evt">typed event——_core.Target 必须已由调用方（demux / 测试）填。</param>
-        internal void DispatchTargetOnly<T>(uint targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
+        internal void DispatchTargetOnly<T>(ulong targetNodeId, T evt) where T : IRouteEvent, IRouteEventCore
         {
             RouteEventCore core = evt.Core;
             byte eventType = EventTypeCache<T>.Value;
@@ -165,7 +165,7 @@ namespace LoomGUI
         /// 「事件派发中移除的节点不再触发 listener」。out 节点供 CurrentTarget 赋值；not-live 时 null
         /// （调用方 continue 不使用）。
         /// </summary>
-        bool IsLive(uint nodeId, out Node node)
+        bool IsLive(ulong nodeId, out Node node)
         {
             if (_ctx._registry.TryGet(nodeId, out node) && !node._disposed) return true;
             node = null;
@@ -176,7 +176,7 @@ namespace LoomGUI
         /// 触发指定 (nodeId, eventType, capture) 上的全部订阅。snapshot list 防 handler 内 Dispose
         /// 或 once auto-remove 改 list 边遍历边改。once entry 触发后收集 → 循环后统一移除。
         /// </summary>
-        void InvokeHandlers<T>(uint nodeId, byte eventType, bool capture, ref T evt) where T : IRouteEvent, IRouteEventCore
+        void InvokeHandlers<T>(ulong nodeId, byte eventType, bool capture, ref T evt) where T : IRouteEvent, IRouteEventCore
         {
             var key = (nodeId, eventType, capture);
             if (!_subs.TryGetValue(key, out var list) || list.Count == 0) return;
@@ -219,7 +219,7 @@ namespace LoomGUI
         /// 同步 Dispose 的 entry（如 handler A 内 Dispose handler B 的 reg），IsDisposed flag
         /// 让 InvokeHandlers 在循环到该 entry 时跳过（"Dispose 后不再触发"契约）。
         /// </summary>
-        void Remove((uint nodeId, byte eventType, bool capture) key, IHandlerEntry entry)
+        void Remove((ulong nodeId, byte eventType, bool capture) key, IHandlerEntry entry)
         {
             // 先置 flag 再移 list——flag 是 Dispatch snapshot 跳过判据，list.Remove 仅做表清理。
             entry.MarkDisposed();

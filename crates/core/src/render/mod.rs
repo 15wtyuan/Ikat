@@ -27,63 +27,65 @@ use node::*;
 
 use taffy::style::LengthPercentage;
 
-/// box-shadow 合成 RenderNode 的 high-byte 标签区。
+/// 合成 RenderNode 的 tag 字节（NodeId bits[63:56]，真实节点恒 0）标签区分配总表。
 ///
-/// 每层 box-shadow 产一个合成 RenderNode（独立 draw call），其 node_id =
-/// `(primary & 0x00FF_FFFF) | (synth_byte << 24)`，high byte 编码层类型 + 层内 idx：
-/// - 外阴影（outer）：画在 primary 之下（sort_key < primary）。high byte = 44 + idx
-///   （最多 4 层/primary，44..=47）。
-/// - 内阴影（inset）：画在 primary 之上、子节点之下。high byte = 36 + idx
-///   （最多 8 层/primary，36..=43）。
+/// 每个合成层产一个独立 RenderNode（独立 draw call），其 node_id =
+/// `(primary & LOW_56_BITS) | (tag_byte << 56)`，tag 字节编码层类型 + 层内 idx：
+/// - 0：真实节点（tag 恒 0——合成 id 与真 id 靠 tag 位型天然区分，无碰撞可能）。
+/// - 1..=15：文本跨页子页（sub_page 号）。
+/// - 16：V scrollbar thumb、17：H scrollbar thumb（`scroll.rs` 的 V/H_THUMB_FLAG）。
+/// - 32..=34：TextField 编辑反馈（光标/选区/composition，`TF_*_SYNTH_BYTE`）。
+/// - 35：文本控件文字主体 mesh（`TF_TEXT_SYNTH_BYTE`）。
+/// - 36..=43：inset box-shadow（36+idx，最多 8 层/primary，画在 primary 之上、子节点之下）。
+/// - 44..=47：outer box-shadow（44+idx，最多 4 层/primary，画在 primary 之下）。
+/// - 232..=255：行内图（retired RichText，`INLINE_IMG_SYNTH_ID_BASE`，留 compound-bundle）。
 ///
-/// 选 high-byte 编码（非 bit flag）的理由：bit 空间已挤（V/H_THUMB_FLAG 占 bit 30/29），
-/// 且 outer 多层需在 id 内编码层内 idx 以保证唯一——bit flag 无法编 idx。high byte
-/// 36..=47 全落在安全区：bit 28（旧 BACK_LAYER_FLAG 位）清零、不在跨页子页 1..=15、
-/// 不在 retired INLINE_IMG 232..=255、不在 TF synth 32..=35。故彻底弃用旧
-/// BACK_LAYER_FLAG bit（box-shadow 是其唯一使用者，现已迁出）。
-const FRONT_SHADOW_SYNTH_BYTE: u32 = 36;
-const BACK_SHADOW_SYNTH_BYTE: u32 = 44;
+/// 选 tag 字节编码（非 bit flag）的理由：outer/inset 多层需在 id 内编码层内 idx
+/// 以保证唯一——bit flag 无法编 idx。历史：u32 时代 tag 挤在 bits[31:24]、真实节点
+/// index 被迫 < 4096（有 panic 兜底）；u64 拓宽后 idx 全宽 32 bit，该上限不复存在。
+const LOW_56_BITS: u64 = 0x00FF_FFFF_FFFF_FFFF;
+const FRONT_SHADOW_SYNTH_BYTE: u64 = 36;
+const BACK_SHADOW_SYNTH_BYTE: u64 = 44;
 
-/// 生成 inset box-shadow 合成 node_id（high byte = 36 + idx）。idx = 该 primary 内
+/// 生成 inset box-shadow 合成 node_id（tag byte = 36 + idx）。idx = 该 primary 内
 /// inset 层的 CSS 序号（保 id 唯一；sort_key 由 propagate 按 push 序另算）。
-fn front_shadow_id(primary: u32, idx: u32) -> u32 {
-    (primary & 0x00FF_FFFF) | ((FRONT_SHADOW_SYNTH_BYTE + idx) << 24)
+fn front_shadow_id(primary: u64, idx: u32) -> u64 {
+    (primary & LOW_56_BITS) | ((FRONT_SHADOW_SYNTH_BYTE + idx as u64) << 56)
 }
 
-/// 生成 outer box-shadow 合成 node_id（high byte = 44 + idx）。idx = 该 primary 内
+/// 生成 outer box-shadow 合成 node_id（tag byte = 44 + idx）。idx = 该 primary 内
 /// outer 层的 CSS 序号。
-fn back_shadow_id(primary: u32, idx: u32) -> u32 {
-    (primary & 0x00FF_FFFF) | ((BACK_SHADOW_SYNTH_BYTE + idx) << 24)
+fn back_shadow_id(primary: u64, idx: u32) -> u64 {
+    (primary & LOW_56_BITS) | ((BACK_SHADOW_SYNTH_BYTE + idx as u64) << 56)
 }
 
-/// 判断 node_id 是否为 inset box-shadow 合成节点（high byte 36..=43）。
+/// 判断 node_id 是否为 inset box-shadow 合成节点（tag byte 36..=43）。
 /// propagate_text_sub_page_sort_keys 据此把它们排到 primary 之上（紧随 primary）。
-pub(crate) fn is_front_shadow_synth(node_id: u32) -> bool {
-    let hi = (node_id >> 24) as u8;
+pub(crate) fn is_front_shadow_synth(node_id: u64) -> bool {
+    let hi = (node_id >> 56) as u8;
     (FRONT_SHADOW_SYNTH_BYTE as u8..=43).contains(&hi)
 }
 
-/// 判断 node_id 是否为 outer box-shadow 合成节点（high byte 44..=47）。
-pub(crate) fn is_back_shadow_synth(node_id: u32) -> bool {
-    let hi = (node_id >> 24) as u8;
+/// 判断 node_id 是否为 outer box-shadow 合成节点（tag byte 44..=47）。
+pub(crate) fn is_back_shadow_synth(node_id: u64) -> bool {
+    let hi = (node_id >> 56) as u8;
     (BACK_SHADOW_SYNTH_BYTE as u8..=47).contains(&hi)
 }
 
 /// 判断 node_id 是否为任一 box-shadow 合成节点（inset 36..=43 ∪ outer 44..=47）。
 /// merge::mesh_key / batch::is_mergeable_mesh 据此排除合批——box-shadow 合成 mesh
 /// 须保持独立 node_id（C# MirrorPool 按 node_id 建独立 GO，合批会吞 id）。
-pub(crate) fn is_shadow_synth(node_id: u32) -> bool {
+pub(crate) fn is_shadow_synth(node_id: u64) -> bool {
     is_front_shadow_synth(node_id) || is_back_shadow_synth(node_id)
 }
 
 /// 富文本行内图（inline `<img>`）合成 node_id 子页基址。每个行内图一个独立 RenderNode
 /// （image shader + image_path=src），须叠在 primary 文字层之上：sort_key 由
 /// `propagate_inline_image_sort_keys` 设为 primary 文字层 max + img_idx + 1。
-/// synth_text_node_id 编码后 high byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页
-/// （1..=15）或 box-shadow synth（high byte 36..=47）撞——靠 `inline_image_pairs` 显式
-/// 配对传播 sort_key，不凭 high byte 判别。
+/// tag byte = (1000 + idx) & 0xFF = 232..=255，不与跨页子页（1..=15）或 box-shadow
+/// synth（36..=47）撞——靠 `inline_image_pairs` 显式配对传播 sort_key，不凭 tag 判别。
 #[allow(dead_code)] // RichText retired; kept for compound-bundle text model.
-pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u32 = 1000;
+pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u64 = 1000;
 
 /// Font-atlas image_path for a given page index. Consumed verbatim by the
 /// Unity backend's SpriteResolver. This string format is an ABI-level contract
@@ -249,7 +251,7 @@ pub struct FrameData {
 /// 构造合成 scrollbar thumb RenderNode。
 /// node_id=sentinel (container|flag)，world_matrix=IDENTITY (design 绝对坐标)，
 /// mask_context=0 (不裁剪)，半透明灰 quad。
-fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
+fn thumb_render_node(node_id: u64, rect: Rect, sort_key: u32) -> RenderNode {
     let (v, uvc, col, idx) =
         crate::render::mesh::quad(&rect, [0.6, 0.6, 0.6, 0.6], [0.0, 0.0], [1.0, 1.0]);
     RenderNode {
@@ -295,8 +297,8 @@ fn thumb_render_node(node_id: u32, rect: Rect, sort_key: u32) -> RenderNode {
 #[allow(clippy::too_many_arguments)]
 fn build_container_mesh(
     n: &crate::scene::node::Node,
-    node_id: u32,
-    parent_id: Option<u32>,
+    node_id: u64,
+    parent_id: Option<u64>,
     rect: &Rect,
     wm: [f32; 6],
     alpha: f32,
@@ -587,27 +589,20 @@ fn own_opacity(scene: &Scene, n: &crate::scene::node::Node) -> f32 {
 pub fn build_render_nodes(
     scene: &Scene,
     fonts: &FontTable,
-    prev: &std::collections::HashMap<u32, (u64, u64)>,
+    prev: &std::collections::HashMap<u64, (u64, u64)>,
     image_sizes: &ImageSizeTable,
     atlas: &mut GlyphAtlas,
 ) -> (
     FrameData,
-    std::collections::HashMap<u32, (u64, u64)>,
+    std::collections::HashMap<u64, (u64, u64)>,
     Vec<u32>,
 ) {
     // id_to_pos: NodeId → nodes vec 0 基位置。剪 display:none 子树后 nodes 与 scene.nodes
     // 不等长，batch 按此映射索引 nodes；pruned 节点不入表（batch DFS 遇 id_to_pos 没有
     // 的节点即跳过该子树）。
     let mut id_to_pos: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
-    // 合成 node_id 方案依赖真实节点 index < 4096（bits [31:12] 全零时 bits [31:24] = 0，
-    // 不与子页的 page 编码冲突）。真实场景节点超 4096 时合成 id 会与真节点 id 碰撞。
-    // 硬上限：build 时如果任何真节点 index >= 4096，debug 构建 panic，release 继续
-    // （此时 is_text_sub_page 可能误判真节点为子页，sort_key 乱序）。
-    debug_assert!(
-        scene.nodes.values().all(|n| (n.id.0 >> 12) < 4096),
-        "node index >= 4096: synthetic text sub-page id scheme hard limit exceeded. \
-         See synth_text_node_id / is_text_sub_page in render/mod.rs."
-    );
+    // 注：合成 id 与真 id 靠 tag 字节（bits[63:56]）天然区分——真节点恒 0、合成层 ≥ 1，
+    // 无碰撞可能。u32 时代「真实节点 index < 4096」的硬上限已随 NodeId u64 拓宽消灭。
     // 直接逐节点构造真 RenderNode。change_level 先占 Full，末尾统一定级。
     // 先剪 display:none 子树——display:none 节点 + 后代不产 RenderNode（CSS 语义）。
     let mut pruned = collect_display_none_subtree(scene);
@@ -620,10 +615,10 @@ pub fn build_render_nodes(
     // 主循环是平铺遍历（slotmap 序），父未必先于子，故单独 DFS 一遍把每节点累积值算好。
     let alphas = accumulate_alpha(scene);
     // box-shadow outer 阴影合成 RenderNode 追踪：(primary node_id, outer 阴影合成 node_id)。
-    // inset 阴影不经此表——由 propagate_text_sub_page_sort_keys 按 high-byte 自动收集。
-    let mut back_layer_pairs: Vec<(u32, u32)> = Vec::new();
+    // inset 阴影不经此表——由 propagate_text_sub_page_sort_keys 按 tag 字节自动收集。
+    let mut back_layer_pairs: Vec<(u64, u64)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
-    let inline_image_pairs: Vec<(u32, u32)> = Vec::new();
+    let inline_image_pairs: Vec<(u64, u64)> = Vec::new();
     for n in scene.nodes.values() {
         if pruned.contains(&n.id) {
             continue;
@@ -674,7 +669,7 @@ pub fn build_render_nodes(
     // 控件节点必须保留独立 node_id（Unity 按 node_id 建交互实体/镜像 GameObject）。
     // merge 会把相邻同 DrawState 节点合并成单个（node_id 取 anchor），吞掉被合并者的
     // node_id —— 控件被吞 = Unity 丢失控件实体（不渲染、不可交互）。故控件排除出合并。
-    let control_ids: std::collections::HashSet<u32> = scene
+    let control_ids: std::collections::HashSet<u64> = scene
         .nodes
         .iter()
         .filter_map(|(_, n)| {
@@ -796,10 +791,11 @@ pub fn build_render_nodes(
 }
 
 /// 合成 node_id：为跨页 text 子页生成区别于主节点的 id。
-/// 编码：bits [31:24] = 子页号（1..255），bits [23:0] = primary_id 的低 24 位。
-/// 真实场景 node index < 2^12 时 bits [23:12] 均为零，不会与其它 scene 节点碰撞。
-fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
-    (primary_id & 0x00FF_FFFF) | ((sub_page & 0xFF) << 24)
+/// 编码：bits[63:56] = 子页号（1..=255），bits[55:0] = primary_id 全低位。
+/// 真实节点 tag 恒 0，合成子页 tag ≥ 1——位型天然区分，无碰撞可能（u32 时代
+/// index < 4096 的硬上限随 u64 拓宽消灭）。
+fn synth_text_node_id(primary_id: u64, sub_page: u64) -> u64 {
+    (primary_id & LOW_56_BITS) | ((sub_page & 0xFF) << 56)
 }
 
 // TextField 编辑反馈 mesh（光标 / 选区背景 / composition 下划线）的合成 node_id 标签。
@@ -810,16 +806,16 @@ fn synth_text_node_id(primary_id: u32, sub_page: u32) -> u32 {
 // 这些 mesh 是逐帧重算的动态反馈（光标闪烁、选区随拖拽变），绝不能与静态背景/文字
 // 合批——否则（1）光标闪烁会连累背景每帧重传；（2）cursor 与 composition 变化节奏
 // 不同，合批会让 composition 的 node_id 随光标可见性跳变，dirty-tracking 抖动。故
-// [`is_tf_edit_synth`] 在 batch/merge 里显式排除它们（靠显式谓词，不靠 high-byte 滥位）。
+// [`is_tf_edit_synth`] 在 batch/merge 里显式排除它们（靠显式谓词，不靠 tag 滥位）。
 //
-// high-byte 取值约束（须同时满足）：
+// tag byte 取值约束（须同时满足）：
 //   1. 不在 text 跨页子页范围（1..=15），否则 is_text_sub_page 误判；
 //   2. 不在 box-shadow synth 区间（36..=47），否则 is_shadow_synth 误排除合批；
-//   3. 不与 retired INLINE_IMG_SYNTH_ID_BASE（high byte 232..=255）撞。
+//   3. 不与 retired INLINE_IMG_SYNTH_ID_BASE（tag 232..=255）撞。
 // 选 32/33/34，满足全部约束；is_text_sub_page / is_shadow_synth 对此区间均返 false。
-const TF_CURSOR_SYNTH_BYTE: u32 = 32;
-const TF_SELECTION_SYNTH_BYTE: u32 = 33;
-const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
+const TF_CURSOR_SYNTH_BYTE: u64 = 32;
+const TF_SELECTION_SYNTH_BYTE: u64 = 33;
+const TF_COMPOSITION_SYNTH_BYTE: u64 = 34;
 /// 文字 mesh 合成 id 标签：背景已占真 node_id 时，文字主体 mesh 用此合成 id 区分。
 /// 两类节点复用：
 /// - 文本控件（TextField/TextArea/NumberField）：先 push 背景框 mesh（真 node_id），
@@ -831,40 +827,40 @@ const TF_COMPOSITION_SYNTH_BYTE: u32 = 34;
 /// 文字 mesh 改用此合成 id 与背景区分，C# 各自独立 GO；primary 关联仍 = 真节点 id
 ///（text_sub_primary_id 可还原），供 sort_key 传播与调试反查。选 35：与子页 1..=15、
 /// box-shadow synth 区间（36..=47）、retired 232..=255 均不撞（同 32..=34 安全区间）。
-const TF_TEXT_SYNTH_BYTE: u32 = 35;
+const TF_TEXT_SYNTH_BYTE: u64 = 35;
 
-/// 生成 TextField 编辑反馈 mesh 的合成 node_id（high byte = tag，低 24 位 = primary）。
-/// 编码同 `synth_text_node_id`，仅 high-byte 标签语义不同（编辑反馈 vs 跨页子页）。
-fn tf_synth_id(primary_id: u32, tag_byte: u32) -> u32 {
-    (primary_id & 0x00FF_FFFF) | (tag_byte << 24)
+/// 生成 TextField 编辑反馈 mesh 的合成 node_id（tag byte = tag，低 56 位 = primary）。
+/// 编码同 `synth_text_node_id`，仅 tag 字节语义不同（编辑反馈 vs 跨页子页）。
+fn tf_synth_id(primary_id: u64, tag_byte: u64) -> u64 {
+    (primary_id & LOW_56_BITS) | (tag_byte << 56)
 }
 
-/// 判断 node_id 是否为 TextField 编辑反馈 mesh（high byte 在 32..=34）。
+/// 判断 node_id 是否为 TextField 编辑反馈 mesh（tag byte 在 32..=34）。
 /// 这些 mesh 须保留为独立 RenderNode（不与背景/文字合批，理由见上方常量注释），
 /// batch::is_mergeable_mesh 与 merge::mesh_key 据此排除它们。
-pub(crate) fn is_tf_edit_synth(node_id: u32) -> bool {
-    let hi = (node_id >> 24) as u8;
+pub(crate) fn is_tf_edit_synth(node_id: u64) -> bool {
+    let hi = (node_id >> 56) as u8;
     (TF_CURSOR_SYNTH_BYTE as u8..=TF_COMPOSITION_SYNTH_BYTE as u8).contains(&hi)
 }
 
 /// 判断 node_id 是否为文本控件（TextField/TextArea/NumberField）的文字主体 mesh 合成 id
-///（high byte = 35）。这些 mesh 须独立保留：sort_key 由 propagate_text_sub_page_sort_keys
+///（tag byte = 35）。这些 mesh 须独立保留：sort_key 由 propagate_text_sub_page_sort_keys
 /// 按 primary 传播（紧跟背景之后），merge::mesh_key 据此排除合批（保持独立 GO）。
-pub(crate) fn is_tf_text_synth(node_id: u32) -> bool {
-    (node_id >> 24) as u8 == TF_TEXT_SYNTH_BYTE as u8
+pub(crate) fn is_tf_text_synth(node_id: u64) -> bool {
+    (node_id >> 56) as u8 == TF_TEXT_SYNTH_BYTE as u8
 }
 
-/// 判断 node_id 是否为跨页 text 子页（high byte 在 1..=15，即 bits [31:24] 值 1-15）。
-/// box-shadow synth（high byte 36..=47）和 INLINE_IMG_SYNTH_ID_BASE（high byte
-/// = 232..=255）均不在此范围——各自的 propagate 函数单独传播 sort_key，不走子页传播。
-fn is_text_sub_page(node_id: u32) -> bool {
-    let page = (node_id >> 24) as u8;
+/// 判断 node_id 是否为跨页 text 子页（tag byte 在 1..=15）。
+/// box-shadow synth（tag 36..=47）和 INLINE_IMG_SYNTH_ID_BASE（tag 232..=255）
+/// 均不在此范围——各自的 propagate 函数单独传播 sort_key，不走子页传播。
+fn is_text_sub_page(node_id: u64) -> bool {
+    let page = (node_id >> 56) as u8;
     (1..=15).contains(&page)
 }
 
 /// 提取跨页 text 子页对应的主节点 id。
-fn text_sub_primary_id(node_id: u32) -> u32 {
-    node_id & 0x00FF_FFFF
+fn text_sub_primary_id(node_id: u64) -> u64 {
+    node_id & LOW_56_BITS
 }
 
 /// box-shadow 的 CSS blur radius → 高斯 σ（RmlUi 映射 σ = blur/2）。
@@ -877,8 +873,8 @@ fn shadow_sigma(blur: f32) -> f32 {
 
 /// box-shadow synth 节点继承 primary 的 mask_context（overflow 裁剪传播）。
 ///
-/// assign_sort_keys 按 scene 树 DFS 赋 mask_context，synth 节点（high-byte 假 id）不在
-/// scene 树 → 默认 0（不裁）。本 post-pass 按 synth node_id 的 low-24 位找 primary，拷其
+/// assign_sort_keys 按 scene 树 DFS 赋 mask_context，synth 节点（tag 字节合成 id）不在
+/// scene 树 → 默认 0（不裁）。本 post-pass 按 synth node_id 的低 56 位找 primary，拷其
 /// mask_context，使 shadow 在 overflow 容器内被正确裁剪（shadow 继承主节点
 /// mask_context，outer/inset 同传播）。
 fn propagate_shadow_mask_context(nodes: &mut [RenderNode]) {
@@ -887,14 +883,14 @@ fn propagate_shadow_mask_context(nodes: &mut [RenderNode]) {
         return;
     }
     // primary node_id → mask_context（一遍扫描，避 O(N²)：多层 shadow 共享同 primary 查表）。
-    let ctx_by_id: std::collections::HashMap<u32, MaskContext> = nodes
+    let ctx_by_id: std::collections::HashMap<u64, MaskContext> = nodes
         .iter()
         .filter(|n| !is_shadow_synth(n.node_id))
         .map(|n| (n.node_id, n.mask_context))
         .collect();
     for rn in nodes.iter_mut() {
         if is_shadow_synth(rn.node_id) {
-            let primary = rn.node_id & 0x00FF_FFFF;
+            let primary = rn.node_id & LOW_56_BITS;
             if let Some(mc) = ctx_by_id.get(&primary) {
                 rn.mask_context = *mc;
             }
@@ -912,18 +908,18 @@ fn propagate_shadow_mask_context(nodes: &mut [RenderNode]) {
 /// 多 primary 按 main_sk DESC 处理，避免累积偏移后的 stale 值污染小 key 比较。
 fn propagate_back_shadow_sort_keys(
     nodes: &mut [RenderNode],
-    shadow_pairs: &[(u32, u32)], // (primary_node_id, shadow_node_id)，CSS push 序
+    shadow_pairs: &[(u64, u64)], // (primary_node_id, shadow_node_id)，CSS push 序
 ) {
     if shadow_pairs.is_empty() {
         return;
     }
     // 按 primary 分组 outer 阴影（保 push 序 = CSS 序——outer 按 CSS 序 push）。
-    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
     for &(primary, shadow_id) in shadow_pairs {
         groups.entry(primary).or_default().push(shadow_id);
     }
     // 每组采集 main_sk（primary 当前 sort_key），按 DESC 排序处理。
-    let mut entries: Vec<(u32, u32, Vec<u32>)> = groups
+    let mut entries: Vec<(u32, u64, Vec<u64>)> = groups
         .into_iter()
         .map(|(primary, shadow_ids)| {
             let main_sk = nodes
@@ -940,7 +936,7 @@ fn propagate_back_shadow_sort_keys(
                                                               // 自然排除；显式 set 检查兼底 main_sk=0 的首节点情形（避免阴影被误移位）。
     for &(main_sk, _primary, ref shadow_ids) in &entries {
         let b = shadow_ids.len() as u32;
-        let id_set: std::collections::HashSet<u32> = shadow_ids.iter().copied().collect();
+        let id_set: std::collections::HashSet<u64> = shadow_ids.iter().copied().collect();
         for rn in nodes.iter_mut() {
             if !id_set.contains(&rn.node_id) && rn.sort_key >= main_sk {
                 rn.sort_key += b;
@@ -983,23 +979,23 @@ fn propagate_back_shadow_sort_keys(
 ///
 /// 须在 propagate_text_sub_page / box_shadow 之后调用——读取它们产出的最终 sort_key 作为 base。
 /// 处理多 primary 时按 base DESC，避免累积偏移污染。
-fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u32)]) {
+fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u64, u64)]) {
     if images.is_empty() {
         return;
     }
     // 按 primary 分组行内图（保持声明顺序 = 文本流顺序）。
-    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
     for &(_main, img_id) in images {
-        let primary = img_id & 0x00FF_FFFF;
+        let primary = img_id & LOW_56_BITS;
         groups.entry(primary).or_default().push(img_id);
     }
     // base = 该 primary 及其所有合成子节点（子页/shadow/stroke；行内图自身此刻 sk=0）的 max sort_key。
-    let mut entries: Vec<(u32, Vec<u32>)> = groups
+    let mut entries: Vec<(u32, Vec<u64>)> = groups
         .into_iter()
         .map(|(primary, imgs)| {
             let base = nodes
                 .iter()
-                .filter(|n| (n.node_id & 0x00FF_FFFF) == primary)
+                .filter(|n| (n.node_id & LOW_56_BITS) == primary)
                 .map(|n| n.sort_key)
                 .max()
                 .unwrap_or(0);
@@ -1010,7 +1006,7 @@ fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u3
     entries.sort_by_key(|(base, _)| std::cmp::Reverse(*base));
     for (base, imgs) in &entries {
         let count = imgs.len() as u32;
-        let img_set: std::collections::HashSet<u32> = imgs.iter().copied().collect();
+        let img_set: std::collections::HashSet<u64> = imgs.iter().copied().collect();
         // 后移：sort_key > base 的非本组节点 += count（给行内图腾出 base+1..base+count）。
         for rn in nodes.iter_mut() {
             if !img_set.contains(&rn.node_id) && rn.sort_key > *base {
@@ -1029,12 +1025,12 @@ fn propagate_inline_image_sort_keys(nodes: &mut [RenderNode], images: &[(u32, u3
 /// Text 附属 mesh sort_key 传播 + 后续真节点 sort_key 后移。
 ///
 /// assign_sort_keys 只给 `id_to_pos` 中的真 scene 节点赋 sort_key；合成附属 mesh 保持 0。
-/// 附属 mesh 有四类（都按 primary = low 24 bit 关联真节点）：
-/// - 跨页子页（high byte 1..=15）：多页文字的后续页。
-/// - 文本控件文字首页（high byte 35）：TextField/TextArea/NumberField 的文字主体
+/// 附属 mesh 有四类（都按 primary = 低 56 位关联真节点）：
+/// - 跨页子页（tag 字节 1..=15）：多页文字的后续页。
+/// - 文本控件文字首页（tag 字节 35）：TextField/TextArea/NumberField 的文字主体
 ///   （背景框 mesh 占真 node_id，文字用合成 id 区分，见 TF_TEXT_SYNTH_BYTE）。
-/// - 编辑反馈 mesh（high byte 32..=34）：光标 / 选区背景 / composition 下划线。
-/// - inset box-shadow（high byte 36..=43）：内阴影层，画在 primary 之上、子节点之下。
+/// - 编辑反馈 mesh（tag 字节 32..=34）：光标 / 选区背景 / composition 下划线。
+/// - inset box-shadow（tag 字节 36..=43）：内阴影层，画在 primary 之上、子节点之下。
 ///   render_one_node 按 CSS 逆序 push，使首层 CSS 得最大 offset（画在最上）。
 ///
 /// 此函数：
@@ -1053,8 +1049,8 @@ fn propagate_text_sub_page_sort_keys(
     // 遍历 nodes 按 push 序收集 → synth_ids 保 push 序（= 绘制层序）。
     // 同一遍历建 synth_id→位置 映射，供下方赋 sort_key O(1) 查找（合成 id 有意
     // 不进 id_to_pos，见 push_text_sub_pages 注释）。
-    let mut groups: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
-    let mut synth_pos: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut groups: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+    let mut synth_pos: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     for (i, rn) in nodes.iter().enumerate() {
         if is_text_sub_page(rn.node_id)
             || is_tf_text_synth(rn.node_id)
@@ -1550,15 +1546,15 @@ fn emit_deco_segments(
 /// base 字形走跨页子页机制：首页（page 0）用真 node_id，后续页用 `synth_text_node_id` 合成 id。
 /// SDF 改造后文字效果（shadow/stroke/glow/blur）改由 shader uniform 实现——`meshes.effect`
 /// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原
-/// 双层合成机制全废；box-shadow 现走专属 high-byte synth，不走此路径）。
+/// 双层合成机制全废；box-shadow 现走专属 tag 字节 synth，不走此路径）。
 fn push_text_meshes(
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
     meshes: TextMeshes,
     n: &crate::scene::node::Node,
-    node_id: u32,
-    text_primary_id: u32,
-    parent_id: Option<u32>,
+    node_id: u64,
+    text_primary_id: u64,
+    parent_id: Option<u64>,
     alpha: f32,
     color_tint: [f32; 4],
     wm: [f32; 6],
@@ -1648,7 +1644,7 @@ fn push_text_meshes(
     }
     // 后续页 → 合成 node_id 的子 RenderNode。
     for (pi, (page, verts, uvs, colors, indices)) in base[1..].iter().enumerate() {
-        let sub_id = synth_text_node_id(node_id, (pi + 1) as u32);
+        let sub_id = synth_text_node_id(node_id, (pi + 1) as u64);
         let sub_path = font_atlas_path(*page as usize);
         nodes.push(RenderNode {
             node_id: sub_id,
@@ -1698,8 +1694,8 @@ fn push_text_meshes(
 #[allow(clippy::too_many_arguments)]
 fn push_solid_quad(
     nodes: &mut Vec<RenderNode>,
-    node_id: u32,
-    parent_id: Option<u32>,
+    node_id: u64,
+    parent_id: Option<u64>,
     wm: [f32; 6],
     alpha: f32,
     reuse_key: u32,
@@ -1722,8 +1718,8 @@ fn push_solid_quad(
 #[allow(clippy::too_many_arguments)]
 fn push_solid_mesh(
     nodes: &mut Vec<RenderNode>,
-    node_id: u32,
-    parent_id: Option<u32>,
+    node_id: u64,
+    parent_id: Option<u64>,
     wm: [f32; 6],
     alpha: f32,
     reuse_key: u32,
@@ -1803,7 +1799,7 @@ fn render_one_node(
     atlas: &mut GlyphAtlas,
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
-    back_layer_pairs: &mut Vec<(u32, u32)>,
+    back_layer_pairs: &mut Vec<(u64, u64)>,
     register_id_map: bool,
     alpha: f32,
 ) {
@@ -2283,7 +2279,7 @@ fn render_one_node(
             );
             // 文字 mesh 用合成 id（TF_TEXT_SYNTH_BYTE）：背景框 mesh 已占真 node_id，若
             // 文字也用真 node_id 则 C# MirrorPool 同 node_id 唯一 GO 把文字覆盖背景（控件
-            // 渲染残缺）。合成 id 让文字独立 GO；primary（low 24 bit）仍 = node_id，供
+            // 渲染残缺）。合成 id 让文字独立 GO；primary（低 56 位）仍 = node_id，供
             // sort_key 传播还原。register_id_map=false：背景已注册 n.id → id_to_pos。
             push_text_meshes(
                 nodes,
@@ -2460,9 +2456,9 @@ fn render_one_node(
 /// 不进（由 front-shadow 传播按 is_front_shadow_synth 自动收集）。
 fn push_container_shadows(
     nodes: &mut Vec<RenderNode>,
-    back_layer_pairs: &mut Vec<(u32, u32)>,
-    node_id: u32,
-    parent_id: Option<u32>,
+    back_layer_pairs: &mut Vec<(u64, u64)>,
+    node_id: u64,
+    parent_id: Option<u64>,
     rect: &Rect,
     wm: crate::transform::Affine2,
     alpha: f32,

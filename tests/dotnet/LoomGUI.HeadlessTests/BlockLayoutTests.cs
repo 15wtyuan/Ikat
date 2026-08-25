@@ -71,7 +71,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>Create a div scene root and return its id.</summary>
-        private static uint CreateRoot(StageHandle* h)
+        private static ulong CreateRoot(StageHandle* h)
         {
             byte[] k = Encoding.UTF8.GetBytes("div");
             fixed (byte* kp = k)
@@ -79,7 +79,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>Append child to parent via FFI. Throws on failure.</summary>
-        private static void AppendChild(StageHandle* h, uint parent, uint child)
+        private static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)
@@ -94,7 +94,7 @@ namespace LoomGUI.HeadlessTests
         /// </summary>
         private static Container InstantiateBlockFixture(StageHandle* h, UIContext ctx)
         {
-            uint sceneRootId = CreateRoot(h);
+            ulong sceneRootId = CreateRoot(h);
             ctx._rootId = sceneRootId;
             Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 

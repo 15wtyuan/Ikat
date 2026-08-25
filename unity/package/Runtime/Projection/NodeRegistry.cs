@@ -22,7 +22,7 @@ namespace LoomGUI
     internal sealed class NodeRegistry
     {
         readonly UIContext _ctx;
-        readonly Dictionary<uint, Node> _nodes = new();
+        readonly Dictionary<ulong, Node> _nodes = new();
 
         // 攒批 dirty 集合：存 Node（不是 StyleMirror/NodeTransform）——Remove(id) 统一清理。
         // HashSet 去重：同一节点多次 Set/Store 只占一条目，帧末只 flush 一次。
@@ -40,7 +40,7 @@ namespace LoomGUI
         /// 命中缓存则返同一实例；未命中则经 NodeFactory 造 typed 子类 + 入缓存。
         /// 调用方拿到的对象保证：同一 id 多次返 ReferenceEqual 同一实例。
         /// </summary>
-        internal Node GetOrCreate(uint id)
+        internal Node GetOrCreate(ulong id)
         {
             if (_nodes.TryGetValue(id, out var n))
                 return n;
@@ -53,7 +53,7 @@ namespace LoomGUI
         /// 命中返 true + out 实例；未命中返 false + null。不造新实例。
         /// Dispose / 测试用：判断缓存状态而不触发构造。
         /// </summary>
-        internal bool TryGet(uint id, out Node node) => _nodes.TryGetValue(id, out node);
+        internal bool TryGet(ulong id, out Node node) => _nodes.TryGetValue(id, out node);
 
         /// <summary>StyleMirror.Set/Unset 标脏时注册——帧末 flush 一次性 FlushInline。</summary>
         internal void MarkStyleDirty(Node n) => _dirtyStyles.Add(n);
@@ -95,7 +95,7 @@ namespace LoomGUI
         /// Node.Dispose 完成时 evict 自己；外部直接调用破坏身份稳定，仅 Dispose 路径用。
         /// dirty 集合同步清，防悬挂引用在帧末 flush 已删节点（FFI 对 dead NodeId 静默返 -1，但清掉更干净）。
         /// </summary>
-        internal void Remove(uint id)
+        internal void Remove(ulong id)
         {
             if (_nodes.TryGetValue(id, out var n))
             {
@@ -110,6 +110,6 @@ namespace LoomGUI
         /// Rust 侧 kind 是 Container，但 C# 需要 AbsolutePanel 子类实例。
         /// 调用方负责确保 id 尚未注册（否则覆盖现有缓存，破坏身份稳定）。
         /// </summary>
-        internal void Register(uint id, Node node) => _nodes[id] = node;
+        internal void Register(ulong id, Node node) => _nodes[id] = node;
     }
 }

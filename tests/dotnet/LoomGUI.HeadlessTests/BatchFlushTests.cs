@@ -21,7 +21,7 @@ namespace LoomGUI.HeadlessTests
     /// </summary>
     public unsafe class BatchFlushTests
     {
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── StyleMirror：标脏不立即过桥 ────────────────────────────────
 
@@ -274,7 +274,7 @@ namespace LoomGUI.HeadlessTests
 
         // ── helpers ──────────────────────────────────────────────────────
 
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind);
@@ -285,10 +285,10 @@ namespace LoomGUI.HeadlessTests
         private static Node AppendChildDiv(IntPtr stage, UIContext ctx)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
-            uint root = CreateRoot(stage, "div");
+            ulong root = CreateRoot(stage, "div");
 
             byte[] k = Encoding.UTF8.GetBytes("div");
-            uint child;
+            ulong child;
             fixed (byte* kp = k)
                 child = Native.loomgui_stage_create_node(h, kp, (nuint)k.Length, null, 0);
             if (child == InvalidNodeId)
@@ -304,7 +304,7 @@ namespace LoomGUI.HeadlessTests
         private static void Tick(IntPtr stage) =>
             Native.loomgui_stage_tick((StageHandle*)stage.ToPointer(), 0.016f);
 
-        private static (float x, float y, float w, float h) GetLayoutRect(IntPtr stage, uint id)
+        private static (float x, float y, float w, float h) GetLayoutRect(IntPtr stage, ulong id)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             float x = 0, y = 0, w = 0, hh = 0;
@@ -312,7 +312,7 @@ namespace LoomGUI.HeadlessTests
             return (x, y, w, hh);
         }
 
-        private static void GetWorldMatrix(IntPtr stage, uint id,
+        private static void GetWorldMatrix(IntPtr stage, ulong id,
             out float a, out float b, out float c, out float d, out float tx, out float ty)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
@@ -321,7 +321,7 @@ namespace LoomGUI.HeadlessTests
             a = la; b = lb; c = lc; d = ld; tx = ltx; ty = lty;
         }
 
-        private static ComputedNodeStyleRepr GetComputedStyle(IntPtr stage, uint id)
+        private static ComputedNodeStyleRepr GetComputedStyle(IntPtr stage, ulong id)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             ComputedNodeStyleRepr repr;

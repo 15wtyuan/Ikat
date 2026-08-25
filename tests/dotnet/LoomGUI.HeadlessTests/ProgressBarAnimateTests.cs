@@ -30,7 +30,7 @@ namespace LoomGUI.HeadlessTests
                         h, fp, (nuint)family.Length, bp, (nuint)fontBytes.Length, is_default: 1);
             }
             byte[] k = Encoding.UTF8.GetBytes("div");
-            uint sceneRootId;
+            ulong sceneRootId;
             fixed (byte* kp = k)
                 sceneRootId = Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
             ctx._rootId = sceneRootId;

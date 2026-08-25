@@ -15,7 +15,7 @@ use crate::{ffi_guard, StageHandle};
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_focusable(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -43,7 +43,7 @@ pub extern "C" fn loomgui_stage_get_node_focusable(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_touchable(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -71,7 +71,7 @@ pub extern "C" fn loomgui_stage_get_node_touchable(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_node_is_lookup_scope(h: *const StageHandle, node_id: u32) -> i32 {
+pub extern "C" fn loomgui_node_is_lookup_scope(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -99,7 +99,7 @@ pub extern "C" fn loomgui_node_is_lookup_scope(h: *const StageHandle, node_id: u
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_custom_tag(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -136,22 +136,22 @@ pub extern "C" fn loomgui_stage_get_custom_tag(
     })
 }
 
-/// 返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → 0xFFFF_FFFF（sentinel）。
+/// 返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → u64::MAX（sentinel）。
 ///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
-pub extern "C" fn loomgui_node_parent(h: *const StageHandle, node_id: u32) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const ROOT_SENTINEL: u32 = 0xFFFF_FFFF;
+pub extern "C" fn loomgui_node_parent(h: *const StageHandle, node_id: u64) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const ROOT_SENTINEL: u64 = u64::MAX;
         if h.is_null() {
             return ROOT_SENTINEL;
         }
         let sh = unsafe { &*h };
         match &sh.stage.scene {
             Some(scene) => {
-                // NodeId(u32) → slotmap lookup（代际安全）。无效/悬空 NodeId → sentinel。
+                // NodeId(u64) → slotmap lookup（代际安全）。无效/悬空 NodeId → sentinel。
                 match scene.get(NodeId(node_id)) {
-                    Some(n) => n.parent.map(|p| p.0 as u32).unwrap_or(ROOT_SENTINEL),
+                    Some(n) => n.parent.map(|p| p.0).unwrap_or(ROOT_SENTINEL),
                     None => ROOT_SENTINEL,
                 }
             }
@@ -169,9 +169,9 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
     h: *const StageHandle,
     id: *const u8,
     id_len: usize,
-) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const NOT_FOUND: u32 = 0xFFFF_FFFF;
+) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const NOT_FOUND: u64 = u64::MAX;
         if h.is_null() || id.is_null() {
             return NOT_FOUND;
         }
@@ -182,26 +182,26 @@ pub extern "C" fn loomgui_stage_find_node_by_id(
             Err(_) => return NOT_FOUND,
         };
         match sh.stage.find_node_by_id(id_str) {
-            Some(nid) => nid.0 as u32,
+            Some(nid) => nid.0,
             None => NOT_FOUND,
         }
     })
 }
 
 /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root 的直接子开始 DFS，root 自身 id_attr 不参与匹配，与 DOM querySelectorAll/Query<T> 一致）。
-/// root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel）。
+/// root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → u64::MAX（sentinel）。
 /// 替代"全局首匹配 + 父链后过滤"——C# TryGet/Get 用此入口避免 list slot 间 id 碰撞。
 ///
 /// **常驻（不 gate）：**runtime 稳定入口。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_find_node_by_id_in_subtree(
     h: *const StageHandle,
-    root: u32,
+    root: u64,
     id: *const u8,
     id_len: usize,
-) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const NOT_FOUND: u32 = 0xFFFF_FFFF;
+) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const NOT_FOUND: u64 = u64::MAX;
         if h.is_null() || id.is_null() {
             return NOT_FOUND;
         }
@@ -212,7 +212,7 @@ pub extern "C" fn loomgui_stage_find_node_by_id_in_subtree(
             Err(_) => return NOT_FOUND,
         };
         match sh.stage.find_node_by_id_in_subtree(NodeId(root), id_str) {
-            Some(nid) => nid.0 as u32,
+            Some(nid) => nid.0,
             None => NOT_FOUND,
         }
     })
@@ -222,7 +222,7 @@ pub extern "C" fn loomgui_stage_find_node_by_id_in_subtree(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_layout_rect(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out_x: *mut f32,
     out_y: *mut f32,
     out_w: *mut f32,
@@ -268,7 +268,7 @@ pub extern "C" fn loomgui_stage_get_node_layout_rect(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_world_matrix(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out_a: *mut f32,
     out_b: *mut f32,
     out_c: *mut f32,
@@ -321,7 +321,7 @@ pub extern "C" fn loomgui_stage_get_node_world_matrix(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_sort_key(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u32,
 ) {
     ffi_guard((), || {
@@ -344,7 +344,7 @@ pub extern "C" fn loomgui_stage_get_node_sort_key(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_visible(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) {
     ffi_guard((), || {
@@ -432,7 +432,7 @@ impl ComputedNodeStyleRepr {
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_kind(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -460,7 +460,7 @@ pub extern "C" fn loomgui_stage_get_node_kind(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_id_attr(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -500,7 +500,7 @@ pub extern "C" fn loomgui_stage_get_node_id_attr(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_opacity(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -527,7 +527,7 @@ pub extern "C" fn loomgui_stage_get_node_opacity(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_classes(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -567,7 +567,7 @@ pub extern "C" fn loomgui_stage_get_node_classes(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_computed_style(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut ComputedNodeStyleRepr,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -592,7 +592,7 @@ pub extern "C" fn loomgui_stage_get_node_computed_style(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_child_count(h: *const StageHandle, node: u32) -> i32 {
+pub extern "C" fn loomgui_stage_get_child_count(h: *const StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -605,7 +605,7 @@ pub extern "C" fn loomgui_stage_get_child_count(h: *const StageHandle, node: u32
     })
 }
 
-/// 读节点子节点 NodeId 列表，写入 `out` buffer（u32 per slot）。
+/// 读节点子节点 NodeId 列表，写入 `out` buffer（u64 per slot）。
 /// 返回 i32：≥0 = 实际写入数；负值 = err（-1 = null 句柄 / 节点不 live；
 /// -(n+2) = buffer 不够，n = 所需 cap）。调用方遇负值重分配 n+ 容量再调。
 ///
@@ -613,8 +613,8 @@ pub extern "C" fn loomgui_stage_get_child_count(h: *const StageHandle, node: u32
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_children(
     h: *const StageHandle,
-    node: u32,
-    out: *mut u32,
+    node: u64,
+    out: *mut u64,
     cap: usize,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -648,7 +648,7 @@ pub extern "C" fn loomgui_stage_get_children(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_node_disabled(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) {
     ffi_guard((), || {

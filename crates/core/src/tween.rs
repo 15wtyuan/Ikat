@@ -604,7 +604,7 @@ mod tests {
         let (mut s, _nid) = one_node_scene(); // 仅 1 节点
         let mut mgr = TweenManager::new();
         // 构造一个 index 越界的 NodeId：idx=99（远超 nodes.len()=1+1=2）
-        let oob = NodeId((99u32 << 12) | 1);
+        let oob = NodeId(99 | (1 << 32)); // 新位型：index=99, gen=1
         mgr.tween(
             oob,
             TweenProp::Opacity,

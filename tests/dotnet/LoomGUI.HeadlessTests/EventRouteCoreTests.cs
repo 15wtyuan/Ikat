@@ -209,7 +209,7 @@ namespace LoomGUI.HeadlessTests
 
         // ── harness 辅助 ────────────────────────────────────────────────
 
-        static uint CreateRoot(IntPtr stage, string kind)
+        static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");

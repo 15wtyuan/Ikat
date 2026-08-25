@@ -225,14 +225,18 @@ fn rich_text_block_inline_children_remain_in_scene_tree_after_solve() {
 
 #[test]
 fn node_id_index_and_gen_decode() {
-    let id = NodeId((5 << 12) | 7);
-    assert_eq!(id.index(), 5, "index = 高 20 bit");
-    assert_eq!(id.gen(), 7, "gen = 低 12 bit");
+    // 位型：index = bits[31:0]（低 32 位），gen = bits[55:32]（u32 时代 idx 高 20/gen 低 12）。
+    let id = NodeId((7u64 << 32) | 5);
+    assert_eq!(id.index(), 5, "index = bits[31:0]");
+    assert_eq!(id.gen(), 7, "gen = bits[55:32]");
 }
 
 #[test]
 fn node_id_invalid_sentinel() {
-    assert!(!NodeId::INVALID.is_valid(), "0xFFFF_FFFF = INVALID");
+    assert!(
+        !NodeId::INVALID.is_valid(),
+        "u64::MAX = INVALID（tag=0xFF/idx=全1/gen=全1）"
+    );
     assert!(NodeId(0).is_valid(), "0 有效");
 }
 
@@ -346,10 +350,11 @@ fn node_id_from_key_to_key_roundtrip() {
 }
 
 #[test]
-fn node_id_index_capacity_20bit() {
-    // 20 bit index 上限 = (1<<20)-1 = 1048575
-    let max_idx = (1u32 << 20) - 1;
-    let id = NodeId(max_idx << 12);
+fn node_id_index_capacity_32bit() {
+    // index 全宽 32 bit（bits[31:0]）。u32 时代 idx 曾挤高 20 bit（上限 1048575），
+    // u64 拓宽后与 slotmap idx 同宽，该上限不复存在。
+    let max_idx = u32::MAX as u64;
+    let id = NodeId(max_idx);
     assert_eq!(id.index(), max_idx as usize);
 }
 

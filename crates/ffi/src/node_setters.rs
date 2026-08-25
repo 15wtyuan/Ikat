@@ -13,7 +13,7 @@ use crate::{ffi_guard, StageHandle};
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_node_disabled(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     disabled: bool,
 ) {
     ffi_guard((), || {
@@ -33,7 +33,7 @@ pub extern "C" fn loomgui_stage_set_node_disabled(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_node_touchable(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     touchable: bool,
 ) {
     ffi_guard((), || {
@@ -53,7 +53,7 @@ pub extern "C" fn loomgui_stage_set_node_touchable(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_node_focusable(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     focusable: bool,
 ) {
     ffi_guard((), || {
@@ -67,7 +67,7 @@ pub extern "C" fn loomgui_stage_set_node_focusable(
 
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32, key: u32) {
+pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u64, key: u32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -77,11 +77,11 @@ pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u32,
     })
 }
 
-/// 克隆场景内子树（游离根，不挂树）。返回新 node_id；0xFFFF_FFFF = err / null 句柄 / 无效 src。
+/// 克隆场景内子树（游离根，不挂树）。返回新 node_id；u64::MAX = err / null 句柄 / 无效 src。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u32) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const ERR: u32 = 0xFFFF_FFFF;
+pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u64) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const ERR: u64 = u64::MAX;
         if h.is_null() {
             return ERR;
         }
@@ -93,10 +93,10 @@ pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u32) -> 
     })
 }
 
-// 错误语义：create_root/create_node 返 u32 NodeId（0xFFFF_FFFF = 失败）；
+// 错误语义：create_root/create_node 返 u64 NodeId（u64::MAX = 失败）；
 // 其余返 i32（0=ok，-1=err）。null 句柄 → 失败/sentinel（不 panic）。
 
-/// 建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
+/// 建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；u64::MAX = 失败。
 ///
 /// null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
 ///
@@ -108,9 +108,9 @@ pub extern "C" fn loomgui_stage_create_root(
     kind_len: usize,
     css: *const u8,
     css_len: usize,
-) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const FAIL: u32 = 0xFFFF_FFFF;
+) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const FAIL: u64 = u64::MAX;
         if h.is_null() {
             return FAIL;
         }
@@ -138,7 +138,7 @@ pub extern "C" fn loomgui_stage_create_root(
     })
 }
 
-/// 建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
+/// 建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；u64::MAX = 失败。
 /// 需配合 append_child/insert_before 挂到树。
 ///
 /// null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
@@ -151,9 +151,9 @@ pub extern "C" fn loomgui_stage_create_node(
     kind_len: usize,
     css: *const u8,
     css_len: usize,
-) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const FAIL: u32 = 0xFFFF_FFFF;
+) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const FAIL: u64 = u64::MAX;
         if h.is_null() {
             return FAIL;
         }
@@ -185,7 +185,7 @@ pub extern "C" fn loomgui_stage_create_node(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_append_child(h: *mut StageHandle, parent: u32, child: u32) -> i32 {
+pub extern "C" fn loomgui_stage_append_child(h: *mut StageHandle, parent: u64, child: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -198,16 +198,16 @@ pub extern "C" fn loomgui_stage_append_child(h: *mut StageHandle, parent: u32, c
     })
 }
 
-/// 在 parent.children 中 ref_id 之前插 child。ref_id=0xFFFF_FFFF（INVALID）→ 末尾追加。
+/// 在 parent.children 中 ref_id 之前插 child。ref_id=u64::MAX（INVALID）→ 末尾追加。
 /// 0=ok，-1=err。null 句柄 → -1。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
 pub extern "C" fn loomgui_stage_insert_before(
     h: *mut StageHandle,
-    parent: u32,
-    child: u32,
-    ref_id: u32,
+    parent: u64,
+    child: u64,
+    ref_id: u64,
 ) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
@@ -226,7 +226,7 @@ pub extern "C" fn loomgui_stage_insert_before(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u32, child: u32) -> i32 {
+pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u64, child: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -245,7 +245,7 @@ pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u32, c
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u32) -> i32 {
+pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return 0;
@@ -265,7 +265,7 @@ pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u32) -> i
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_text(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     text: *const u8,
     len: usize,
 ) -> i32 {
@@ -295,7 +295,7 @@ pub extern "C" fn loomgui_stage_set_text(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id: u32) -> i32 {
+pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -317,7 +317,7 @@ pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id:
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_src(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     src: *const u8,
     len: usize,
 ) -> i32 {
@@ -347,7 +347,7 @@ pub extern "C" fn loomgui_stage_set_src(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_inline_override(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     css: *const u8,
     len: usize,
 ) -> i32 {
@@ -380,7 +380,7 @@ pub extern "C" fn loomgui_stage_set_inline_override(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_unset_inline_override(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     prop: *const u8,
     len: usize,
 ) -> i32 {
@@ -411,7 +411,7 @@ pub extern "C" fn loomgui_stage_unset_inline_override(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_add_class(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     name: *const u8,
     len: usize,
 ) -> i32 {
@@ -437,7 +437,7 @@ pub extern "C" fn loomgui_stage_add_class(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_remove_class(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     name: *const u8,
     len: usize,
 ) -> i32 {
@@ -464,7 +464,7 @@ pub extern "C" fn loomgui_stage_remove_class(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_has_class(
     h: *const StageHandle,
-    node: u32,
+    node: u64,
     name: *const u8,
     len: usize,
 ) -> i32 {
@@ -495,7 +495,7 @@ pub extern "C" fn loomgui_stage_has_class(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_transform(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     tx: f32,
     ty: f32,
     sx: f32,

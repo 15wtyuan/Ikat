@@ -1,6 +1,6 @@
 //! golden blob 产器：固定场景 → 帧 blob + 事件流字节，落盘 `tests/dotnet/golden/`
 //! 供 C# 侧（GoldenBlobTests）跨语言镜像对拍——FrameBlob 23 列布局 / EventRecord
-//! 20B 位布局在 C# 侧此前零断言，magic+version 防整体漂移、防不住列语义错位
+//! 32B 位布局（node_id u64，#26，EventRecord 32B）在 C# 侧此前零断言，magic+version 防整体漂移、防不住列语义错位
 //! （列序对调仍 v13 通过）。
 //!
 //! 更新（改 blob 布局 / 改本场景后）：
@@ -19,18 +19,18 @@ use loomgui_core::scene::node::{ControlState, NodeId};
 /// golden 落盘目录（C# HeadlessTests 按相对路径 `golden/` 消费，csproj 拷到输出目录）。
 const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/dotnet/golden");
 
-fn mk_node(h: *mut StageHandle, kind: &str, css: &str) -> u32 {
+fn mk_node(h: *mut StageHandle, kind: &str, css: &str) -> u64 {
     let id = loomgui_stage_create_node(h, kind.as_ptr(), kind.len(), css.as_ptr(), css.len());
-    assert_ne!(id, 0xFFFF_FFFF, "create_node({kind}) failed");
+    assert_ne!(id, u64::MAX, "create_node({kind}) failed");
     id
 }
 
-fn set_text(h: *mut StageHandle, node: u32, text: &str) {
+fn set_text(h: *mut StageHandle, node: u64, text: &str) {
     let rc = loomgui_stage_set_text(h, node, text.as_ptr(), text.len());
     assert_eq!(rc, 0, "set_text failed");
 }
 
-fn set_src(h: *mut StageHandle, node: u32, src: &str) {
+fn set_src(h: *mut StageHandle, node: u64, src: &str) {
     let rc = loomgui_stage_set_src(h, node, src.as_ptr(), src.len());
     assert_eq!(rc, 0, "set_src failed");
 }
@@ -45,7 +45,7 @@ fn build_golden_bytes() -> (Vec<u8>, Vec<u8>) {
     let root_css =
         "width:800px;height:600px;display:flex;flex-direction:column;background-color:#1a2233";
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, root_css.as_ptr(), root_css.len());
-    assert_ne!(root, 0xFFFF_FFFF, "create_root failed");
+    assert_ne!(root, u64::MAX, "create_root failed");
 
     let title = mk_node(h, "span", "font-size:20px;color:#ffffff");
     set_text(h, title, "Golden 对拍 Hello 金");

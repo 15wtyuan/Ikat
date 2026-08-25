@@ -25,7 +25,7 @@ namespace LoomGUI.HeadlessTests
             (_stage, _ctx) = StageHarness.Create();
             StageHandle* h = (StageHandle*)_stage.ToPointer();
             // Instantiate 前需 scene root（同 AnimationHandleTests.LoadFixture 模式）。
-            uint sceneRootId = CreateRoot(h, "div");
+            ulong sceneRootId = CreateRoot(h, "div");
             _ctx._rootId = sceneRootId;
             string fixturePath = Path.Combine(AppContext.BaseDirectory, "fixtures", "component.pkg.bin");
             Assert.True(File.Exists(fixturePath), $"fixture component.pkg.bin not found at {fixturePath}");
@@ -34,7 +34,7 @@ namespace LoomGUI.HeadlessTests
             _page = pkg.Instantiate("component");
         }
 
-        static uint CreateRoot(StageHandle* h, string kind)
+        static ulong CreateRoot(StageHandle* h, string kind)
         {
             byte[] k = Encoding.UTF8.GetBytes(kind);
             fixed (byte* kp = k)

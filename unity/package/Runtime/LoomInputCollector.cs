@@ -45,8 +45,8 @@ namespace LoomGUI
         public float WheelScrollSpeed => _wheelScrollSpeed;
 
         /// 上帧聚焦节点缓存：IME mode 仅在焦点真正转换时切换，避免每帧重设（移动端/
-        /// WebGL IME 状态切换昂贵）。0xFFFFFFFF = 无聚焦。
-        private uint _lastFocused = 0xFFFF_FFFFu;
+        /// WebGL IME 状态切换昂贵）。ulong.MaxValue = 无聚焦（#26 u64 INVALID）。
+        private ulong _lastFocused = ulong.MaxValue;   // #26 u64 INVALID
 
 #if ENABLE_INPUT_SYSTEM
         /// 本帧字符输入缓冲：Keyboard.onTextInput 逐字符事件触发（两帧之间可多次），
@@ -325,8 +325,8 @@ namespace LoomGUI
 #if ENABLE_INPUT_SYSTEM
             var kb = Keyboard.current;
 #endif
-            uint focused = Native.loomgui_stage_focused_node(h);
-            const uint NONE = 0xFFFF_FFFFu;
+            ulong focused = Native.loomgui_stage_focused_node(h);
+            const ulong NONE = ulong.MaxValue;   // #26 u64 INVALID
             if (focused == NONE)
             {
                 // 无聚焦文本框：仅在从聚焦转出时关 IME（避免每帧重设，移动端/WebGL IME

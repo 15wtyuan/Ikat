@@ -13,7 +13,7 @@ use crate::{ffi_guard, StageHandle};
 /// 自动 enter_data_driven（取备用模板 = 第一个设计期 li、分配全局 list_ordinal）。
 /// 这避免 C# 侧需显式调 enter——ItemCount 是业务进入虚拟化的唯一入口。
 #[no_mangle]
-pub extern "C" fn loomgui_list_set_item_count(h: *mut StageHandle, node: u32, count: i32) -> i32 {
+pub extern "C" fn loomgui_list_set_item_count(h: *mut StageHandle, node: u64, count: i32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -43,8 +43,8 @@ pub extern "C" fn loomgui_list_set_item_count(h: *mut StageHandle, node: u32, co
 #[no_mangle]
 pub extern "C" fn loomgui_list_set_template(
     h: *mut StageHandle,
-    node: u32,
-    template_node: u32,
+    node: u64,
+    template_node: u64,
 ) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
@@ -65,14 +65,14 @@ pub extern "C" fn loomgui_list_set_template(
 }
 
 /// 拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
-/// 拍平成 (node_id[], item_index[]) 两列，cap 限 copy 上限。调用方按 out_nodes[i] 的
+/// 拍平成 (node_id[], item_index[]) 两列（node_id 为 u64），cap 限 copy 上限。调用方按 out_nodes[i] 的
 /// node_id 反查其 ListView 祖先实例调 BindItem。cap 不足时不丢 bind——只取装得下的部分，
 /// 余条留在各 ListView 队列里等下一帧再取（走 `drain_pending_binds_bounded` 而非全取）。
 /// 任一指针 null → -1；out_len 写实际返回条数。各参数 null 句柄 guard 在最前。
 #[no_mangle]
 pub extern "C" fn loomgui_list_take_pending_binds(
     h: *mut StageHandle,
-    out_nodes: *mut u32,
+    out_nodes: *mut u64,
     out_indices: *mut i32,
     cap: u32,
     out_len: *mut u32,
@@ -90,7 +90,7 @@ pub extern "C" fn loomgui_list_take_pending_binds(
             .map(|s| s.lists.0.keys().copied().collect())
             .unwrap_or_default();
         let cap = cap as usize;
-        let mut all: Vec<(u32, i32)> = Vec::with_capacity(cap);
+        let mut all: Vec<(u64, i32)> = Vec::with_capacity(cap);
         let Some(scene) = sh.stage.scene.as_mut() else {
             // 无 scene：out_len 仍写 0（调用方按 0 处理）。
             unsafe {
@@ -123,7 +123,7 @@ pub extern "C" fn loomgui_list_take_pending_binds(
 /// ScrollToItem / 首次 ItemCount 调用走此路径——让本帧滚动后新进入可见区的 item 的 slot
 /// 同帧克隆、binds 入队等 C# 消费，避免首帧模板原样。null 句柄 → -1；成功 → 0。
 #[no_mangle]
-pub extern "C" fn loomgui_list_drain_now(h: *mut StageHandle, node: u32) -> i32 {
+pub extern "C" fn loomgui_list_drain_now(h: *mut StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -145,7 +145,7 @@ const NOTIFY_MOVED: u8 = 2;
 #[no_mangle]
 pub extern "C" fn loomgui_list_refresh(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     start: i32,
     count: i32,
 ) -> i32 {
@@ -174,7 +174,7 @@ pub extern "C" fn loomgui_list_refresh(
 #[no_mangle]
 pub extern "C" fn loomgui_list_notify(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     op: u8,
     a: i32,
     b: i32,
@@ -208,7 +208,7 @@ pub extern "C" fn loomgui_list_notify(
 #[no_mangle]
 pub extern "C" fn loomgui_list_scroll_to(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     index: i32,
     behavior: u8,
 ) -> i32 {

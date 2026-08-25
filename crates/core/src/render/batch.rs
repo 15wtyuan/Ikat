@@ -303,7 +303,7 @@ mod tests {
 
     fn placeholder_rn(i: usize) -> RenderNode {
         RenderNode {
-            node_id: i as u32,
+            node_id: i as u64,
             parent_id: if i == 0 { None } else { Some(0) },
             visible: true,
             alpha: 1.0,
@@ -864,12 +864,12 @@ mod tests {
             },
             0,
         );
-        r.node_id = id as u32;
+        r.node_id = id as u64;
         r
     }
     fn text_rn(id: usize) -> RenderNode {
         let mut r = placeholder_rn(id);
-        r.node_id = id as u32;
+        r.node_id = id as u64;
         // text 现产 Mesh(program=1, image_path=合成 atlas path)。
         r.payload = NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
@@ -951,7 +951,7 @@ mod tests {
 
         reorder_for_batching(&scene, &mut rns);
         // Text 必在 A 与 B 之间（保绘制序）。
-        let sk = |id: u32| rns.iter().find(|r| r.node_id == id).unwrap().sort_key;
+        let sk = |id: u64| rns.iter().find(|r| r.node_id == id).unwrap().sort_key;
         assert!(sk(ids[1].0) < sk(ids[2].0), "A 在 Text 前");
         assert!(
             sk(ids[2].0) < sk(ids[3].0),
@@ -1016,7 +1016,7 @@ mod tests {
 
         reorder_for_batching(&scene, &mut rns);
         // C(ctx0) 不跨 B(ctx1) 前移：B 的 sort_key 仍在 A、C 之间或 A 前，但 C 不越 B。
-        let sk = |id: u32| rns.iter().find(|r| r.node_id == id).unwrap().sort_key;
+        let sk = |id: u64| rns.iter().find(|r| r.node_id == id).unwrap().sort_key;
         // C 不应跑到 B 前面（不同 ctx 不跨边界）。
         assert!(sk(ids[2].0) < sk(ids[3].0), "C(ctx0) 不跨 B(ctx1) 边界前移");
     }

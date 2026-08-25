@@ -6,8 +6,8 @@ namespace LoomGUI.Tests.Core
 {
     public class FrameBlobTests
     {
-        // 构造 v13 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=13 + FrameBlob.cs）。
-        // v13 = v12 + 第 23 列 grad_params([f32;52]=208B)，列数 22→23，列数据起点 124→128。
+        // 构造 v14 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=14 + FrameBlob.cs）。
+        // v14 = v13 + node_id/parent_id 列 4B→8B（#26 u64 拓宽）；列数不变（23）。
         static byte[] BuildBlob(int nodeCount, byte[][] columnData, byte[] meshArena = null, byte[] clipTable = null, byte[] pathTable = null)
         {
             meshArena ??= [];
@@ -15,7 +15,7 @@ namespace LoomGUI.Tests.Core
             pathTable ??= [];
 
             // 23 列元素字节大小（须与 FrameBlob.cs ColOff 注释一一对应）。末列 grad_params=208B。
-            int[] elemSizes = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24, 208 };
+            int[] elemSizes = { 8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24, 208 };
             int numCols = elemSizes.Length;
             // header = magic+version+node_count(12) + numCols×col_offset + 3 arena ×(off,len)=24 → 列数据起点。
             int colOff = 12 + numCols * 4 + 24;
@@ -27,7 +27,7 @@ namespace LoomGUI.Tests.Core
 
             var b = new List<byte>();
             b.AddRange(BitConverter.GetBytes(0x4D4F4F4Cu)); // magic
-            b.AddRange(BitConverter.GetBytes(13u));          // version = 13
+            b.AddRange(BitConverter.GetBytes(14u));          // version = 14
             b.AddRange(BitConverter.GetBytes((uint)nodeCount));
             foreach (var o in offs) b.AddRange(BitConverter.GetBytes(o));
             b.AddRange(BitConverter.GetBytes(meshArenaOff));
@@ -56,6 +56,8 @@ namespace LoomGUI.Tests.Core
         }
 
         static byte[] U32(uint v) => BitConverter.GetBytes(v);
+        static byte[] U64(ulong v) => BitConverter.GetBytes(v);
+        static byte[] I64(long v) => BitConverter.GetBytes(v);
         static byte[] I32(int v) => BitConverter.GetBytes(v);
         static byte[] F32(float v) => BitConverter.GetBytes(v);
         static byte[] U8(byte v) => [v];
@@ -96,8 +98,8 @@ namespace LoomGUI.Tests.Core
         public void ColumnAccessors_ReadCorrectValues()
         {
             var cols = new byte[22][];
-            cols[0] = U32(42);          // node_id
-            cols[1] = I32(-1);          // parent_id
+            cols[0] = U64(42);          // node_id（u64，#26）
+            cols[1] = I64(-1);          // parent_id（i64）
             cols[2] = U8(1);            // visible
             cols[3] = F32(0.5f);        // alpha
             cols[4] = U32(100);         // sort_key
@@ -119,8 +121,8 @@ namespace LoomGUI.Tests.Core
 
             var blob = new FrameBlob(BuildBlob(1, cols));
 
-            Assert.Equal(42u, blob.NodeId(0));
-            Assert.Equal(-1, blob.ParentId(0));
+            Assert.Equal(42ul, blob.NodeId(0));
+            Assert.Equal(-1L, blob.ParentId(0));
             Assert.True(blob.Visible(0));
             Assert.Equal(0.5f, blob.Alpha(0));
             Assert.Equal(100u, blob.SortKey(0));
@@ -288,8 +290,8 @@ namespace LoomGUI.Tests.Core
         public void MultiNode_EachHasDistinctValues()
         {
             var cols = new byte[22][];
-            cols[0] = U32(100); // node 0: id=100
-            var b0 = new List<byte>(); b0.AddRange(cols[0]); b0.AddRange(U32(200)); // node 1: id=200
+            cols[0] = U64(100); // node 0: id=100
+            var b0 = new List<byte>(); b0.AddRange(cols[0]); b0.AddRange(U64(200)); // node 1: id=200
             cols[0] = b0.ToArray();
 
             cols[4] = U32(10);  // node 0: sort=10
@@ -297,8 +299,8 @@ namespace LoomGUI.Tests.Core
             cols[4] = b4.ToArray();
 
             var blob = new FrameBlob(BuildBlob(2, cols));
-            Assert.Equal(100u, blob.NodeId(0));
-            Assert.Equal(200u, blob.NodeId(1));
+            Assert.Equal(100ul, blob.NodeId(0));
+            Assert.Equal(200ul, blob.NodeId(1));
             Assert.Equal(10u, blob.SortKey(0));
             Assert.Equal(20u, blob.SortKey(1));
         }

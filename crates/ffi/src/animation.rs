@@ -13,7 +13,7 @@ use crate::{ffi_guard, StageHandle};
 #[no_mangle]
 pub extern "C" fn loomgui_stage_tween(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     prop: u32,
     start: *const f32,
     end: *const f32,
@@ -49,7 +49,7 @@ pub extern "C" fn loomgui_stage_tween(
 
 /// 停该节点该 prop 的 tween（override 保留末值）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_kill_tween(h: *mut StageHandle, node_id: u32, prop: u32) {
+pub extern "C" fn loomgui_stage_kill_tween(h: *mut StageHandle, node_id: u64, prop: u32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -63,7 +63,7 @@ pub extern "C" fn loomgui_stage_kill_tween(h: *mut StageHandle, node_id: u32, pr
 
 /// 清该节点所有动画 override（回 CSS）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_clear_anim(h: *mut StageHandle, node_id: u32) {
+pub extern "C" fn loomgui_stage_clear_anim(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -75,7 +75,7 @@ pub extern "C" fn loomgui_stage_clear_anim(h: *mut StageHandle, node_id: u32) {
 
 /// 清该节点某 prop 对应通道（回 CSS）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u32, prop: u32) {
+pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u64, prop: u32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -103,7 +103,7 @@ pub extern "C" fn loomgui_stage_clear_anim_prop(h: *mut StageHandle, node_id: u3
 #[no_mangle]
 pub extern "C" fn loomgui_stage_play_animation(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     name: *const u8,
     name_len: usize,
 ) -> u64 {
@@ -138,7 +138,7 @@ pub extern "C" fn loomgui_stage_play_animation(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_play_animation_dur(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     name: *const u8,
     name_len: usize,
     duration_s: f32,

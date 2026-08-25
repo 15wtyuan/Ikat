@@ -21,7 +21,7 @@ namespace LoomGUI.HeadlessTests
     /// </summary>
     public unsafe class AcceptanceGateTests
     {
-        private const uint RootSentinel = 0xFFFF_FFFFu;
+        private const ulong RootSentinel = ulong.MaxValue;
 
         // ═════════════════════════════════════════════════════════════════
         // Criterion 1: Type fidelity — Instantiate returns typed nodes
@@ -390,7 +390,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>Create a div scene root node and return its id.</summary>
-        private static uint CreateRoot(StageHandle* h)
+        private static ulong CreateRoot(StageHandle* h)
         {
             byte[] k = Encoding.UTF8.GetBytes("div");
             fixed (byte* kp = k)
@@ -398,7 +398,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>Append child to parent via FFI. Throws on failure.</summary>
-        private static void AppendChild(StageHandle* h, uint parent, uint child)
+        private static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)
@@ -414,7 +414,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>FFI read computed style for a node. Returns the struct; throws on non-zero rc.</summary>
-        private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, uint id)
+        private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, ulong id)
         {
             ComputedNodeStyleRepr repr;
             int rc = Native.loomgui_stage_get_node_computed_style(h, id, &repr);
@@ -432,7 +432,7 @@ namespace LoomGUI.HeadlessTests
         private static Container InstantiateFixture(StageHandle* h, UIContext ctx)
         {
             // Create scene root and set it as the context's root node.
-            uint sceneRootId = CreateRoot(h);
+            ulong sceneRootId = CreateRoot(h);
             ctx._rootId = sceneRootId;
             Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 

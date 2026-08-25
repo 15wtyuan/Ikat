@@ -350,7 +350,7 @@ namespace LoomGUI
 
             StageHandle* h = (StageHandle*)_host.StagePtr.ToPointer();
             byte[] kind = Encoding.UTF8.GetBytes("div");
-            uint rootId;
+            ulong rootId;
             fixed (byte* kp = kind)
                 rootId = Native.loomgui_stage_create_root(h, kp, (nuint)kind.Length, null, 0);
             if (rootId == Node.RootSentinel)
@@ -541,7 +541,7 @@ namespace LoomGUI
         // F9 pick 命中链探针（编辑器/开发构建；LoomDebugProbe.DescribePickChain 本体
         // 常驻可用——正式构建自定义热键绑它即可）。顶层命中变化才打日志，不逐帧刷屏。
         bool _pickProbeOn;
-        uint _probeLastHit = 0xFFFF_FFFF;
+        ulong _probeLastHit = ulong.MaxValue;
 
         void UpdatePickProbe()
         {
@@ -550,7 +550,7 @@ namespace LoomGUI
             if (kb != null && kb.f9Key.wasPressedThisFrame)
             {
                 _pickProbeOn = !_pickProbeOn;
-                _probeLastHit = 0xFFFF_FFFF;
+                _probeLastHit = ulong.MaxValue;
                 Debug.LogWarning($"[LoomGUI] pick probe {(_pickProbeOn ? "ON" : "OFF")} (F9)");
             }
             if (!_pickProbeOn || _host == null) return;
@@ -560,7 +560,7 @@ namespace LoomGUI
             var design = LoomInputCollector.ScreenToDesign(
                 screen, _adaptScale, _adaptOffX, _adaptOffYTopDown, Screen.height);
             Node hit = _host.Context.Pick(new LoomVector2(design.x, design.y));
-            uint hitId = hit?._id ?? 0xFFFF_FFFF;
+            ulong hitId = hit?._id ?? ulong.MaxValue;
             if (hitId == _probeLastHit) return;
             _probeLastHit = hitId;
             Debug.LogWarning(LoomDebugProbe.DescribePickChain(_host.Context, design.x, design.y));

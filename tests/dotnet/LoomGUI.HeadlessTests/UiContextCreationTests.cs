@@ -16,7 +16,7 @@ namespace LoomGUI.HeadlessTests
     /// </summary>
     public unsafe class UiContextCreationTests
     {
-        const uint RootSentinel = 0xFFFF_FFFFu;
+        const ulong RootSentinel = ulong.MaxValue;
 
         // ── helpers ────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ namespace LoomGUI.HeadlessTests
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind);
             byte[] c = Encoding.UTF8.GetBytes(css);
-            uint id;
+            ulong id;
             fixed (byte* kp = k, cp = c)
                 id = Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, cp, (nuint)c.Length);
             if (id == RootSentinel)
@@ -43,7 +43,7 @@ namespace LoomGUI.HeadlessTests
         /// 调 create_root FFI（low-level：返回 raw NodeId，不设 _rootId）。
         /// FocusedNodeAfterRequestFocus 等需要 tick 的测试用——先建 root 建 scene，再 focus。
         /// </summary>
-        static uint CreateRootFFI(StageHandle* h, string kind, string css)
+        static ulong CreateRootFFI(StageHandle* h, string kind, string css)
         {
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
             byte[] c = Encoding.UTF8.GetBytes(css ?? "");
@@ -249,7 +249,7 @@ namespace LoomGUI.HeadlessTests
                 // request_focus writes pending_focus_request；tick 消费它 → scene.focused_node。
                 // focused_node FFI 读 scene.focused_node，不是 pending——故需先 tick。
                 StageHandle* h = (StageHandle*)stage.ToPointer();
-                uint rootId = CreateRootFFI(h, "div", "");
+                ulong rootId = CreateRootFFI(h, "div", "");
                 ctx._rootId = rootId;
                 var c = ctx.Create<Container>();
 

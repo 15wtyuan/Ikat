@@ -12,7 +12,7 @@ use loomgui_core::transform;
 
 /// magic = "LOOM" little-endian。
 const MAGIC: u32 = 0x4D4F4F4C;
-pub(crate) const VERSION: u32 = 13; // v13：加 grad_params 列（[u8;208]，渐变像素参数），列数 22→23
+pub(crate) const VERSION: u32 = 14; // v14：node_id/parent_id 列 u32→u64（NodeId ABI 拓宽，#26）
 
 /// 入口：FrameData（nodes + clip 表）+ Scene（parked slot 池）→ blob 字节。
 ///
@@ -24,7 +24,8 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let nodes = &frame.nodes;
     let clips = &frame.clips;
     let n = nodes.len();
-    // 列名 + 每元素字节数。v13：加 grad_params 列（[u8;208]，渐变像素参数），23 列。
+    // 列名 + 每元素字节数。23 列。
+    //   node_id/parent_id 占 8B（v14：NodeId u64 拓宽；parent_id 为 i64，-1 = 无父）。
     //   path_idx 占 4B（path 表 1-based 索引，0=纯色无图）。
     //   v6：加 color_matrix 列（[f32;20]，80B，原第 20 列→现第 17 列）——ColorFilter。
     //   v11：加 effect_block 列（[u8;128]，per-text-node SDF effect 参数块，照 color_matrix 先例）。
@@ -32,8 +33,8 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     //   v13：加 grad_params 列（GradientParams::SIZE=208B，program=6/7 渐变 shader 参数，
     //        照 effect_block/shadow_params 先例；非渐变节点恒全零，C# 按 program 门控读取）。
     let columns: &[(&str, usize)] = &[
-        ("node_id", 4),
-        ("parent_id", 4),
+        ("node_id", 8),
+        ("parent_id", 8),
         ("visible", 1),
         ("alpha", 4),
         ("sort_key", 4),
@@ -99,8 +100,12 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
 
     for rn in nodes {
         col_node_id.extend_from_slice(&rn.node_id.to_le_bytes());
-        col_parent_id
-            .extend_from_slice(&rn.parent_id.map(|p| p as i32).unwrap_or(-1).to_le_bytes());
+        col_parent_id.extend_from_slice(
+            &rn.parent_id
+                .map(|p| p as i64)
+                .unwrap_or(-1i64)
+                .to_le_bytes(),
+        );
         col_visible.push(rn.visible as u8);
         col_alpha.extend_from_slice(&rn.alpha.to_le_bytes());
         col_sort_key.extend_from_slice(&rn.sort_key.to_le_bytes());
@@ -201,7 +206,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let mut parked_count = 0usize;
     for (slot_node, reuse_key) in scene.parked_keepalive_nodes() {
         col_node_id.extend_from_slice(&slot_node.0.to_le_bytes());
-        col_parent_id.extend_from_slice(&(-1i32).to_le_bytes()); // 不参与父子渲染关系
+        col_parent_id.extend_from_slice(&(-1i64).to_le_bytes()); // 不参与父子渲染关系
         col_visible.push(0b10); // bit1=parked，bit0=不可见
         col_alpha.extend_from_slice(&0f32.to_le_bytes());
         col_sort_key.extend_from_slice(&0u32.to_le_bytes());

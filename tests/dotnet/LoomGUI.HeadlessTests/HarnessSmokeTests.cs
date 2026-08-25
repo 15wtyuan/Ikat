@@ -19,7 +19,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class HarnessSmokeTests
     {
         // create_root 失败哨兵（lib.rs:1115）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         /// <summary>
         /// 完整生命周期 P/Invoke 链路通：stage new → create_root(div) → tick(16ms) → free。
@@ -34,7 +34,7 @@ namespace LoomGUI.HeadlessTests
             {
                 Assert.Equal(stage, ctx._stage);   // UIContext 持的就是 Harness 建的那个 stage handle
 
-                uint root = CreateRoot(stage, "div", "");
+                ulong root = CreateRoot(stage, "div", "");
                 Assert.NotEqual(InvalidNodeId, root);
 
                 Native.loomgui_stage_tick((StageHandle*)stage.ToPointer(), 0.016f);
@@ -56,7 +56,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, _) = StageHarness.Create();
             try
             {
-                uint root = CreateRoot(stage, "div", "");
+                ulong root = CreateRoot(stage, "div", "");
                 Assert.NotEqual(InvalidNodeId, root);
 
                 // Spec-3 ③ return-code + out-param：返 0=ok 且 *out=u8 判别值；非 0=节点不存在或 out null。
@@ -79,7 +79,7 @@ namespace LoomGUI.HeadlessTests
         /// 调 <c>loomgui_stage_create_root</c>。kind/css 用 UTF-8 字节（fixed 钉住 + ptr+len，
         /// 对齐 <c>LoomStage.cs</c> 风格）。返 NodeId；0xFFFF_FFFF = 失败。
         /// </summary>
-        private static uint CreateRoot(IntPtr stage, string kind, string css)
+        private static ulong CreateRoot(IntPtr stage, string kind, string css)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");

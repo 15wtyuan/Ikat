@@ -20,7 +20,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class ContainerTreeWriteOpsTests
     {
         // lib.rs create_root/create_node 失败哨兵（与 root parent 哨兵同值 0xFFFF_FFFF）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── AddChild ─────────────────────────────────────────────────────
 
@@ -471,7 +471,7 @@ namespace LoomGUI.HeadlessTests
         /// <summary>建无父 div 节点，挂一个 class=tag 的标记（用 class 作 label 便于断言顺序）。</summary>
         private static Container Tag(IntPtr stage, UIContext ctx, string tag)
         {
-            uint id = CreateNode(stage, "div");
+            ulong id = CreateNode(stage, "div");
             Node n = ctx._registry.GetOrCreate(id);
             n.Classes.Add(tag);
             return (Container)n;
@@ -486,7 +486,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>建根节点（无 CSS）。返 NodeId；0xFFFF_FFFF = 失败。</summary>
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -495,7 +495,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>建无父节点（后续 AddChild 挂父）。返 NodeId；0xFFFF_FFFF = 失败。</summary>
-        private static uint CreateNode(IntPtr stage, string kind)
+        private static ulong CreateNode(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");

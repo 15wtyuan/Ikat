@@ -281,7 +281,7 @@ fn capable_and_effective_semantics() {
 fn scrolltable_hashmap_get_mut_ensure_clear() {
     // ScrollTable 用 HashMap<NodeId, ScrollPaneState>。NodeId 已 impl Hash+Eq，
     // 不依赖 slotmap 主表存不存在，故此单元测试可不经 Scene 直接造字面量 NodeId。
-    let mk = |idx: u32| NodeId((idx << 12) | 1);
+    let mk = |idx: u32| NodeId((idx as u64) | (1 << 32)); // 新位型：index 低 32 位、gen=1
     let mut t = ScrollTable::default();
     assert!(t.get(mk(2)).is_none(), "空表 get → None");
     // ensure 插 default
@@ -689,7 +689,7 @@ fn apply_wheel_to_hit_on_thumb_decodes_sentinel() {
     // 点 (96, 20) 在 thumb 内 → hit_test 应返 sentinel
     let hit = crate::hit::hit_test(&s, (96.0, 20.0));
     assert!(
-        hit.is_some_and(|id| id.0 & 0x6000_0000 != 0),
+        hit.is_some_and(|id| id.0 & crate::scroll::V_THUMB_FLAG != 0),
         "thumb 命中应返 sentinel，got {:?}",
         hit
     );

@@ -10,8 +10,8 @@ namespace LoomGUI.HeadlessTests
     /// 跨语言 ABI 镜像锁（golden 对拍 + 尺寸断言）：
     ///
     /// ① 事件流 golden——Rust 产器（crates/ffi golden_tests.rs）落盘的真实 EventRecord[]
-    /// 字节，按 C# RawEventRecord 位布局解析断言。此前位复用编码（node_id@0 / type@4 /
-    /// click_count@5 / touch_id@8 / x@12 / y@16）纯靠双侧注释对齐，magic+version 防不住
+    /// 字节，按 C# RawEventRecord 位布局解析断言。此前位复用编码（#26 u64 后 node_id@0(8) /
+    /// type@8 / click_count@9 / touch_id@12 / x@16 / y@20）纯靠双侧注释对齐，magic+version 防不住
     /// 字段错位。golden 再生成：LOOMGUI_UPDATE_GOLDEN=1 cargo test -p loomgui_ffi_c --lib golden。
     ///
     /// ② 手补 #[repr(C)] struct 镜像的尺寸锁——csbindgen 不为 use-imported 的 struct 生成
@@ -31,9 +31,9 @@ namespace LoomGUI.HeadlessTests
         public void EventsGolden_MatchesRawEventRecordBitLayout()
         {
             byte[] bytes = LoadGolden("events.bin");
-            const int REC = 28; // RawEventRecord 28B（#63 +dx/dy；下方尺寸锁同断言）
+            const int REC = 32; // RawEventRecord 32B（#26 node_id u64；下方尺寸锁同断言）
             Assert.True(bytes.Length >= REC && bytes.Length % REC == 0,
-                $"events golden 须为非空 28B 记录数组，实际 {bytes.Length}B");
+                $"events golden 须为非空 32B 记录数组，实际 {bytes.Length}B");
             var recs = MemoryMarshal.Cast<byte, RawEventRecord>(bytes.AsSpan()).ToArray();
             Assert.True(recs.Length >= 2, "Down+Up 应至少产 Up+Click 两条事件");
 
@@ -42,7 +42,7 @@ namespace LoomGUI.HeadlessTests
             Assert.Equal(1, recs[1].clickCount);   // Down+Up 同点 = 单击
             for (int i = 0; i < recs.Length; i++)
             {
-                Assert.NotEqual(uint.MaxValue, recs[i].nodeId);
+                Assert.NotEqual(ulong.MaxValue, recs[i].nodeId);
                 Assert.Equal(-1, recs[i].touchId); // 鼠标主指
                 Assert.Equal(150f, recs[i].x, 3);  // 发送坐标透传
                 Assert.Equal(120f, recs[i].y, 3);
@@ -67,7 +67,7 @@ namespace LoomGUI.HeadlessTests
             Assert.Equal(16, sizeof(PointerEvent)); // kind+button+pad[2]+touch_id+x+y
             Assert.Equal(8, sizeof(KeyEvent));      // key_code+modifiers+is_down+pad[2]
             Assert.Equal(16, sizeof(WheelEvent));   // x+y+delta_x+delta_y
-            Assert.Equal(28, sizeof(RawEventRecord)); // node_id+type+count+pad[2]+touch_id+x+y+dx+dy（#63）
+            Assert.Equal(32, sizeof(RawEventRecord)); // node_id(u64)+type+count+pad[2]+touch_id+x+y+dx+dy（#26）
         }
     }
 }

@@ -8,10 +8,10 @@ use std::ffi::CStr;
 
 /// 测试辅助：建根 div 后直接往 scene.controls 注入 Progress 状态。
 /// FFI 表面无 control_init setter（打包期产物），故测试侧手工填。
-fn make_progress_stage(value: f32, max: f32) -> (*mut StageHandle, u32) {
+fn make_progress_stage(value: f32, max: f32) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
     scene.controls.ensure(
@@ -26,10 +26,10 @@ fn make_progress_stage(value: f32, max: f32) -> (*mut StageHandle, u32) {
 }
 
 /// 测试辅助：建根 div 后直接往 scene.controls 注入 Slider 状态。
-fn make_slider_stage(value: f32, min: f32, max: f32, step: f32) -> (*mut StageHandle, u32) {
+fn make_slider_stage(value: f32, min: f32, max: f32, step: f32) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
     scene.controls.ensure(
@@ -46,10 +46,10 @@ fn make_slider_stage(value: f32, min: f32, max: f32, step: f32) -> (*mut StageHa
 }
 
 /// 测试辅助：建根 div 后直接往 scene.controls 注入 Toggle 状态。
-fn make_toggle_stage(checked: bool) -> (*mut StageHandle, u32) {
+fn make_toggle_stage(checked: bool) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
     scene
@@ -77,7 +77,7 @@ fn ffi_get_node_kind_div_and_invalid() {
     assert_eq!(rc, 0, "div kind rc");
     assert_eq!(kind, NodeKind::Container as u8, "div == Container(0)");
     // 无效 node → rc 非 0（关键：不撞 Container=0 哨兵）。
-    let rc_bad = loomgui_stage_get_node_kind(h, 0xFFFF_FFFF, &mut kind);
+    let rc_bad = loomgui_stage_get_node_kind(h, u64::MAX, &mut kind);
     assert_ne!(
         rc_bad, 0,
         "invalid node must not return 0 (collides with Container)"
@@ -96,7 +96,7 @@ fn ffi_get_node_computed_style_div() {
     assert_eq!(repr.opacity, 1.0);
     assert_eq!(repr.display_mode, DisplayMode::Block as u8);
     // 无效 node → rc 非 0。
-    let rc_bad = loomgui_stage_get_node_computed_style(h, 0xFFFF_FFFF, &mut repr);
+    let rc_bad = loomgui_stage_get_node_computed_style(h, u64::MAX, &mut repr);
     assert_ne!(rc_bad, 0);
     loomgui_stage_free(h);
 }
@@ -141,7 +141,8 @@ fn create_root_null_css_does_not_ub() {
     let h = stage_new_with_dejavu(100.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, std::ptr::null(), 0);
     assert_ne!(
-        root, 0xFFFF_FFFF,
+        root,
+        u64::MAX,
         "create_root with null css must succeed (treated as empty css)"
     );
     loomgui_stage_free(h);
@@ -153,7 +154,8 @@ fn create_node_null_css_does_not_ub() {
     let h = stage_new_with_dejavu(100.0, 100.0);
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, std::ptr::null(), 0);
     assert_ne!(
-        node, 0xFFFF_FFFF,
+        node,
+        u64::MAX,
         "create_node with null css must succeed (treated as empty css)"
     );
     loomgui_stage_free(h);
@@ -177,7 +179,7 @@ fn set_inline_override_null_css_does_not_ub() {
 fn set_text_null_does_not_ub() {
     let h = stage_new_with_dejavu(100.0, 100.0);
     let text = loomgui_stage_create_node(h, b"span".as_ptr(), 4, std::ptr::null(), 0);
-    assert_ne!(text, 0xFFFF_FFFF, "create span ok");
+    assert_ne!(text, u64::MAX, "create span ok");
     let rc = loomgui_stage_set_text(h, text, std::ptr::null(), 0);
     assert_eq!(
         rc, 0,
@@ -344,7 +346,7 @@ fn ffi_control_min_step_progress_err() {
 fn ffi_set_transform_translates_user_transform() {
     let h = stage_new_with_dejavu(200.0, 200.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let rc = loomgui_stage_set_transform(h, root, 50.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0);
     assert_eq!(rc, 0, "set_transform rc");
     // 读回 node.user_transform（同 crate 可访私有字段，需 unsafe 解原指针）
@@ -362,7 +364,7 @@ fn ffi_set_transform_translates_user_transform() {
 fn ffi_set_transform_stores_origin() {
     let h = stage_new_with_dejavu(200.0, 200.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let rc = loomgui_stage_set_transform(h, root, 10.0, 0.0, 1.0, 1.0, 0.0, 5.0, 5.0);
     assert_eq!(rc, 0, "set_transform rc");
     // 读回 node.user_transform.origin（同 crate 可访私有字段，需 unsafe 解原指针）
@@ -378,7 +380,7 @@ fn ffi_set_transform_stores_origin() {
 #[test]
 fn ffi_set_transform_invalid_node_err() {
     let h = stage_new_with_dejavu(200.0, 200.0);
-    let rc = loomgui_stage_set_transform(h, 0xFFFF_FFFF, 10.0, 10.0, 1.0, 1.0, 0.0, 0.0, 0.0);
+    let rc = loomgui_stage_set_transform(h, u64::MAX, 10.0, 10.0, 1.0, 1.0, 0.0, 0.0, 0.0);
     assert_eq!(rc, -1, "invalid node set_transform → -1");
     loomgui_stage_free(h);
 }
@@ -428,16 +430,16 @@ fn ffi_set_control_value_slider_quantize_respects_max() {
 /// 测试辅助：建根 div + 一个聚焦的 TextField（初始 value），返回 (handle, textfield_node)。
 /// FFI 表面无 control_init setter（打包期产物），故测试侧手工注入 ControlState + 设焦点。
 /// 光标初始在 value 末尾（from_init 默认），便于在末尾追加的断言。
-fn make_stage_with_focused_textfield(value: &str) -> (*mut StageHandle, u32) {
+fn make_stage_with_focused_textfield(value: &str) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     // create_node 走 kind_from_tag 白名单（不含 input），改用 create_node_from_template 的
     // FFI 等价：先建个 div 再手工把 kind 改成 TextField 不现实——这里直接复用 create_node
     // 建 div 占位，再注入 TextField ControlState（kind 字段保留 div 不影响 insert_text：
     // insert_text 收 NodeKind 入参，测试侧显式传 TextField）。
     let tf = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(tf, 0xFFFF_FFFF, "create textfield node ok");
+    assert_ne!(tf, u64::MAX, "create textfield node ok");
     loomgui_stage_append_child(h, root, tf);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -450,7 +452,7 @@ fn make_stage_with_focused_textfield(value: &str) -> (*mut StageHandle, u32) {
 }
 
 /// 读 TextField value（断言为 TextField，否则 panic）。
-fn textfield_value(h: *mut StageHandle, node: u32) -> String {
+fn textfield_value(h: *mut StageHandle, node: u64) -> String {
     let sh = unsafe { &*h };
     let scene = sh.stage.scene.as_ref().expect("scene built");
     match scene.controls.get(NodeId(node)) {
@@ -516,7 +518,7 @@ fn ffi_set_text_input_null_handle_err() {
 
 /// 读 TextField 的 cached TextLayout 的 text_width（measure_text_controls 在 solve 后写入）。
 /// 无缓存 / 非 TextField/TextArea → None。
-fn textfield_text_width(h: *const StageHandle, node: u32) -> Option<f32> {
+fn textfield_text_width(h: *const StageHandle, node: u64) -> Option<f32> {
     let sh = unsafe { &*h };
     let scene = sh.stage.scene.as_ref().expect("scene built");
     if !matches!(
@@ -704,12 +706,12 @@ fn ffi_clip_setup() -> std::sync::MutexGuard<'static, ()> {
 fn make_stage_with_focused_textfield_selection(
     value: &str,
     selection: Option<(usize, usize)>,
-) -> (*mut StageHandle, u32) {
+) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let tf = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(tf, 0xFFFF_FFFF, "create textfield node ok");
+    assert_ne!(tf, u64::MAX, "create textfield node ok");
     loomgui_stage_append_child(h, root, tf);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -861,7 +863,7 @@ fn ffi_clipboard_global_left_registered() {
 // C# Value 属性 setter 契约一致），经 Stage.pending_events 缓冲，下 tick 入 last_events。
 
 /// 读 TextField EditState 的 (cursor, anchor) 选区（断言为 TextField）。
-fn textfield_selection(h: *mut StageHandle, node: u32) -> (usize, usize) {
+fn textfield_selection(h: *mut StageHandle, node: u64) -> (usize, usize) {
     let sh = unsafe { &*h };
     let scene = sh.stage.scene.as_ref().expect("scene built");
     match scene.controls.get(NodeId(node)) {
@@ -1092,12 +1094,12 @@ fn ffi_control_text_null_handle_err() {
 
 /// 测试辅助：建根 div + 一个 TextArea（ControlState::TextArea + NodeKind::TextArea），
 /// 返回 (handle, textarea_node)。不对焦（setter 不依赖焦点）。
-fn make_stage_with_textarea(value: &str) -> (*mut StageHandle, u32) {
+fn make_stage_with_textarea(value: &str) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let ta = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(ta, 0xFFFF_FFFF, "create textarea node ok");
+    assert_ne!(ta, u64::MAX, "create textarea node ok");
     loomgui_stage_append_child(h, root, ta);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -1162,12 +1164,12 @@ fn ffi_set_selection_preserves_textarea_variant() {
 }
 
 /// 测试辅助：建根 div 子节点并注入 Dropdown 状态。
-fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
+fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(node, 0xFFFF_FFFF, "create dropdown node ok");
+    assert_ne!(node, u64::MAX, "create dropdown node ok");
     loomgui_stage_append_child(h, root, node);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -1188,12 +1190,12 @@ fn make_dropdown_stage(selected: usize, open: bool) -> (*mut StageHandle, u32) {
 }
 
 /// 测试辅助：建根 div 子节点并注入 TabList 状态。aria-selected 只读合成，无 value_lock。
-fn make_tablist_stage(selected: usize) -> (*mut StageHandle, u32) {
+fn make_tablist_stage(selected: usize) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(node, 0xFFFF_FFFF, "create tablist node ok");
+    assert_ne!(node, u64::MAX, "create tablist node ok");
     loomgui_stage_append_child(h, root, node);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -1210,12 +1212,12 @@ fn make_tablist_stage(selected: usize) -> (*mut StageHandle, u32) {
 }
 
 /// 测试辅助：建根 div 子节点并注入 NumberField 状态。value 是数字的文本形式。
-fn make_number_stage(value: &str, min: f32, max: f32, step: f32) -> (*mut StageHandle, u32) {
+fn make_number_stage(value: &str, min: f32, max: f32, step: f32) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(node, 0xFFFF_FFFF, "create number node ok");
+    assert_ne!(node, u64::MAX, "create number node ok");
     loomgui_stage_append_child(h, root, node);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -1236,12 +1238,12 @@ fn make_number_stage(value: &str, min: f32, max: f32, step: f32) -> (*mut StageH
 }
 
 /// 测试辅助：建一个 readonly=true 的 TextField 节点。
-fn make_readonly_textfield_stage(readonly: bool) -> (*mut StageHandle, u32) {
+fn make_readonly_textfield_stage(readonly: bool) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(node, 0xFFFF_FFFF, "create textfield node ok");
+    assert_ne!(node, u64::MAX, "create textfield node ok");
     loomgui_stage_append_child(h, root, node);
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
@@ -1276,7 +1278,7 @@ fn ffi_get_node_disabled_reads_flag() {
     assert_eq!(out, 1, "disabled flag read back");
     // 无效节点 → 0（false）
     let mut out: u8 = 9;
-    loomgui_stage_get_node_disabled(h, 0xFFFF_FFFF, &mut out);
+    loomgui_stage_get_node_disabled(h, u64::MAX, &mut out);
     assert_eq!(out, 0, "invalid node → 0");
     loomgui_stage_free(h);
 }
@@ -1518,13 +1520,13 @@ fn ffi_get_control_min_max_step_number_field() {
 
 /// 测试辅助：建根 div + 往 scene.keyframes 注入 opacity 0→1 两 stop 的 "fadeIn" 规则。
 /// keyframes 表是 runtime 全局表（instantiate 合并产物），测试侧手工注入（同 controls 惯例）。
-fn make_anim_stage() -> (*mut StageHandle, u32) {
+fn make_anim_stage() -> (*mut StageHandle, u64) {
     use loomgui_core::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule,
     };
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
     scene.keyframes.insert(
@@ -1591,7 +1593,7 @@ fn ffi_play_animation_creates_programmatic_player() {
     );
     // 无效节点 → 0。
     assert_eq!(
-        loomgui_stage_play_animation(h, 0xFFFF_FFFF, b"fadeIn".as_ptr(), 6),
+        loomgui_stage_play_animation(h, u64::MAX, b"fadeIn".as_ptr(), 6),
         0,
         "invalid node"
     );
@@ -1761,7 +1763,7 @@ fn ffi_get_event_string_reads_animation_name() {
     assert_eq!(&buf[..needed], b"fadeIn", "string round-trip");
     // 索引越界 → -1（防御分支）。
     let mut n = 0usize;
-    let rc = loomgui_stage_get_event_string(h, 0xFFFF_FFFF, std::ptr::null_mut(), 0, &mut n);
+    let rc = loomgui_stage_get_event_string(h, u32::MAX, std::ptr::null_mut(), 0, &mut n);
     assert_eq!(rc, -1, "out-of-range index");
     assert_eq!(n, 0);
     // null 句柄 / null out_len → -1。
@@ -1773,10 +1775,10 @@ fn ffi_get_event_string_reads_animation_name() {
 }
 
 /// 测试辅助：建根 div 后注入 Radio 状态（name = 分组名，打包期 data-name bake）。
-fn make_radio_stage(name: &str) -> (*mut StageHandle, u32) {
+fn make_radio_stage(name: &str) -> (*mut StageHandle, u64) {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(root, 0xFFFF_FFFF, "create_root ok");
+    assert_ne!(root, u64::MAX, "create_root ok");
     let sh = unsafe { &mut *h };
     let scene = sh.stage.scene.as_mut().expect("scene built");
     scene.controls.ensure(
@@ -1927,7 +1929,7 @@ fn ffi_stage_hit_test_basic() {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(node, 0xFFFF_FFFF);
+    assert_ne!(node, u64::MAX);
     loomgui_stage_append_child(h, root, node);
     {
         let sh = unsafe { &mut *h };
@@ -1949,7 +1951,7 @@ fn ffi_stage_hit_test_basic() {
         loomgui_core::scene::transform::compute_world_transforms(scene);
     }
     // 命中子节点。
-    let mut out = 0xFFFF_FFFFu32;
+    let mut out = u64::MAX;
     assert_eq!(loomgui_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
     assert_eq!(out, node, "子节点区域命中子");
     // 子外 root 区域 → root。
@@ -1977,7 +1979,7 @@ fn ffi_node_touchable_roundtrip_and_hit() {
     let h = stage_new_with_dejavu(200.0, 100.0);
     let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
     let node = loomgui_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
-    assert_ne!(node, 0xFFFF_FFFF);
+    assert_ne!(node, u64::MAX);
     loomgui_stage_append_child(h, root, node);
     {
         let sh = unsafe { &mut *h };
@@ -2003,7 +2005,7 @@ fn ffi_node_touchable_roundtrip_and_hit() {
     assert_eq!(loomgui_stage_get_node_touchable(h, node, &mut b), 0);
     assert_eq!(b, 1, "default touchable");
     // 命中子节点。
-    let mut out = 0xFFFF_FFFFu32;
+    let mut out = u64::MAX;
     assert_eq!(loomgui_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
     assert_eq!(out, node);
     // set false → 自身不命中，点落到 root（父 fallback）。
@@ -2018,10 +2020,7 @@ fn ffi_node_touchable_roundtrip_and_hit() {
     assert_eq!(out, node, "touchable restored");
     // 越界节点 / null out → -1。
     let mut n2 = 0u8;
-    assert_eq!(
-        loomgui_stage_get_node_touchable(h, 0xFFFF_FFFF, &mut n2),
-        -1
-    );
+    assert_eq!(loomgui_stage_get_node_touchable(h, u64::MAX, &mut n2), -1);
     assert_eq!(
         loomgui_stage_get_node_touchable(h, node, std::ptr::null_mut()),
         -1
@@ -2065,7 +2064,7 @@ fn ffi_get_custom_tag_two_call() {
     );
     // 越界节点 → -1
     assert_eq!(
-        loomgui_stage_get_custom_tag(h, 0xFFFF_FFFF, std::ptr::null_mut(), 0, &mut n2),
+        loomgui_stage_get_custom_tag(h, u64::MAX, std::ptr::null_mut(), 0, &mut n2),
         -1
     );
     loomgui_stage_free(h);
@@ -2091,7 +2090,7 @@ fn ffi_node_is_lookup_scope() {
         "plain node is not"
     );
     assert_eq!(
-        loomgui_node_is_lookup_scope(h, 0xFFFF_FFFF),
+        loomgui_node_is_lookup_scope(h, u64::MAX),
         -1,
         "oob node -> -1"
     );

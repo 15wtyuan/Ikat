@@ -10,7 +10,7 @@ use crate::{ffi_guard, StageHandle};
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_scroll_pos(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     x: f32,
     y: f32,
     animated: u8,
@@ -31,7 +31,7 @@ pub extern "C" fn loomgui_stage_set_scroll_pos(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_content_size(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     w: f32,
     height: f32,
 ) {
@@ -47,7 +47,7 @@ pub extern "C" fn loomgui_stage_set_content_size(
 /// 清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
 /// null 句柄/无效 node → no-op（不 panic）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_clear_content_size_override(h: *mut StageHandle, node_id: u32) {
+pub extern "C" fn loomgui_stage_clear_content_size_override(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -62,7 +62,7 @@ pub extern "C" fn loomgui_stage_clear_content_size_override(h: *mut StageHandle,
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_scroll_pos(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out_x: *mut f32,
     out_y: *mut f32,
 ) {

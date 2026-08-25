@@ -41,8 +41,8 @@ fn sizes(path: &str, w: u32, h: u32) -> ImageSizeTable {
 /// 构造一个带 layout_rect 的 Container Node。
 fn container_node(id: usize, parent: Option<usize>, rect: Rect, bg: Option<[f32; 4]>) -> Node {
     let mut n = Node::default();
-    n.id = NodeId(id as u32);
-    n.parent = parent.map(|p| NodeId(p as u32));
+    n.id = NodeId(id as u64);
+    n.parent = parent.map(|p| NodeId(p as u64));
     n.kind = NodeKind::Container;
     n.layout_rect = rect;
     n.style.background_color = bg;
@@ -1942,7 +1942,7 @@ fn change_level_reload_all_full() {
         &mut test_glyph_atlas(),
     );
     // prev 有 hash 但 node_id 不在其中（模拟 reload：prev 表残留不同节点的 hash）
-    let mut stale: std::collections::HashMap<u32, (u64, u64)> = std::collections::HashMap::new();
+    let mut stale: std::collections::HashMap<u64, (u64, u64)> = std::collections::HashMap::new();
     stale.insert(999, (0, 0));
     let (f2, _, _) = build_render_nodes(
         &scene,
@@ -2889,9 +2889,9 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
 
     // 构造 nodes vec：A(primary, sk=2), A_sub1(synth, sk=0), A_sub2(synth, sk=0),
     //                  B(primary, sk=3), B_sub1(synth, sk=0), C(real, sk=4)
-    let a_id = 0u32;
-    let b_id = 1u32;
-    let c_id = 2u32;
+    let a_id = 0u64;
+    let b_id = 1u64;
+    let c_id = 2u64;
     let a_sub1 = synth_text_node_id(a_id, 1);
     let a_sub2 = synth_text_node_id(a_id, 2);
     let b_sub1 = synth_text_node_id(b_id, 1);
@@ -2906,7 +2906,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
         color_matrix: [0.0; 20],
     };
 
-    let mk_rn = |node_id: u32, sort_key: u32| RenderNode {
+    let mk_rn = |node_id: u64, sort_key: u32| RenderNode {
         node_id,
         parent_id: None,
         visible: true,
@@ -2948,7 +2948,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
     //   Sub-pages: A_sub1=A.sk+1=3, A_sub2=4, B_sub1=B.sk+1=6
     //   Final: A=2, A_sub1=3, A_sub2=4, B=5, B_sub1=6, C=7
 
-    let find = |nid: u32| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
+    let find = |nid: u64| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
     assert_eq!(find(a_id), 2, "A primary");
     assert_eq!(find(a_sub1), 3, "A sub 1");
     assert_eq!(find(a_sub2), 4, "A sub 2");
@@ -2974,8 +2974,8 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
 fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
     use crate::render::node::{BlendMode, ChangeLevel, MaskContext, NodePayload, RenderNode};
 
-    let a_id = 0u32;
-    let b_id = 1u32;
+    let a_id = 0u64;
+    let b_id = 1u64;
     let a_sub1 = synth_text_node_id(a_id, 1);
     let a_img = synth_text_node_id(a_id, INLINE_IMG_SYNTH_ID_BASE);
 
@@ -2988,7 +2988,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
         program: 0,
         color_matrix: [0.0; 20],
     };
-    let mk_rn = |node_id: u32, sort_key: u32| RenderNode {
+    let mk_rn = |node_id: u64, sort_key: u32| RenderNode {
         node_id,
         parent_id: None,
         visible: true,
@@ -3017,7 +3017,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
 
     propagate_inline_image_sort_keys(&mut nodes, &images);
 
-    let find = |nid: u32| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
+    let find = |nid: u64| nodes.iter().find(|n| n.node_id == nid).unwrap().sort_key;
     assert_eq!(find(a_id), 2, "A primary 不变");
     assert_eq!(find(a_sub1), 3, "A 子页不变");
     let a_img_sk = find(a_img);
@@ -3042,17 +3042,17 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
     assert_eq!(sks.len(), unique.len(), "sort_key 不得有 tie");
 }
 
-/// 哨兵：合成 node_id 硬上限文档。
-/// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id 的编码/解码一致性。
+/// 验证 synth_text_node_id / is_text_sub_page / text_sub_primary_id 的编码/解码一致性
+/// （新位型：tag 字节 bits[63:56] 编子页号，低 56 位 = primary）。
 #[test]
 fn synth_text_node_id_roundtrip() {
-    let primary = 0x0000_0123u32;
+    let primary = 0x0000_0123u64;
     let sub = synth_text_node_id(primary, 5);
     assert!(is_text_sub_page(sub));
     assert!(!is_text_sub_page(primary));
-    assert_eq!(text_sub_primary_id(sub), primary & 0x00FF_FFFF);
+    assert_eq!(text_sub_primary_id(sub), primary);
 
-    // 边界：page=15 是子页上限（high byte 1..=15）。
+    // 边界：page=15 是子页上限（tag 字节 1..=15）。
     // page>=16 不再被 is_text_sub_page 识别（超出 1..=15 范围）——
     // 故 sub_page 编码实际可用范围是 1..15（atlas 跨页远不到此上限）。
     let max_sub = synth_text_node_id(0, 15);
@@ -3062,20 +3062,25 @@ fn synth_text_node_id_roundtrip() {
     let shadow_like = synth_text_node_id(0, 16);
     assert!(!is_text_sub_page(shadow_like), "page=16 超出子页范围");
 
-    // 真实 node index=4095（bits[23:12]=4095）不应被误判为子页
-    let high_index = (4095u32 << 12) | 1; // index=4095, gen=1
-    assert!(!is_text_sub_page(high_index), "index=4095 仍不被误判");
+    // 真实节点（tag 字节恒 0）不论 index/generation 多大都不被误判为子页：
+    // 全宽 index（bits[31:0]）+ generation（bits[55:32]）的 id 高 8 位仍为 0。
+    let high_index = 0xFFFF_FFFFu64 | (1 << 32); // index=u32::MAX, gen=1
+    assert!(!is_text_sub_page(high_index), "全宽 index + gen 仍不被误判");
 }
 
-/// 哨兵：index=4096 会与合成子页 bit 碰撞——验 is_text_sub_page 误判。
+/// 哨兵：u64 位型下真实节点与合成子页天然不碰撞——真实节点 tag 字节恒 0、子页
+/// tag ≥ 1，位型即区分。u32 时代 tag 挤 bits[31:24] 导致真实 index 被迫 < 4096
+/// （index=4096 即碰撞，有 panic 兜底）；该硬上限已随拓宽消灭。
 #[test]
-fn node_index_4096_triggers_sub_page_collision() {
-    // index=4096 → bits[31:12] = 0x00001 (bit 24 set) → bits[31:24]=1 → 子页误判
-    let collision_id = 4096u32 << 12;
-    assert!(
-        is_text_sub_page(collision_id),
-        "index=4096 → bits[31:24]=1 → 误判为子页（证明硬上限哨兵的动机）"
-    );
+fn full_width_node_index_never_triggers_sub_page_collision() {
+    // index 全宽 32 bit（含 4096、u32::MAX）+ generation —— tag 字节仍 0，非子页。
+    for idx in [4096u64, 0xFFFF_FFFF] {
+        let real_id = idx | (1u64 << 32); // index + gen=1
+        assert!(
+            !is_text_sub_page(real_id),
+            "index={idx}（tag 字节 0）不误判为子页（u32 时代 4096 硬上限已消灭）"
+        );
+    }
 }
 
 /// `ensure_solid` 首次调分配 1×1 白像素，二次命中返同 UV（缓存不重复分配）。
@@ -3522,7 +3527,7 @@ fn box_shadow_multi_layer_css_order() {
         .unwrap();
     let primary_sk = primary.sort_key;
     // 两 outer + 两 inset，id 唯一
-    let back_ids: Vec<u32> = frame
+    let back_ids: Vec<u64> = frame
         .nodes
         .iter()
         .filter(|rn| is_back_shadow_synth(rn.node_id))
@@ -3537,7 +3542,7 @@ fn box_shadow_multi_layer_css_order() {
             .len(),
         "back id 唯一"
     );
-    let front_ids: Vec<u32> = frame
+    let front_ids: Vec<u64> = frame
         .nodes
         .iter()
         .filter(|rn| is_front_shadow_synth(rn.node_id))
@@ -3555,7 +3560,7 @@ fn box_shadow_multi_layer_css_order() {
     // outer A (CSS 0) 应 > outer B (CSS 1)：A 更贴 primary（更高 back sk）
     let outer_a = back_shadow_id(primary.node_id, 0);
     let outer_b = back_shadow_id(primary.node_id, 1);
-    let sk_of = |id: u32| {
+    let sk_of = |id: u64| {
         frame
             .nodes
             .iter()
@@ -4876,7 +4881,7 @@ fn textfield_with_composition_renders_underline() {
 /// 合成 id 三标签互不冲突，且不与真 node_id 冲突。
 #[test]
 fn tf_synth_ids_are_distinct() {
-    let primary = 0x0000_0005u32;
+    let primary = 0x0000_0005u64;
     let c = tf_synth_id(primary, TF_CURSOR_SYNTH_BYTE);
     let s = tf_synth_id(primary, TF_SELECTION_SYNTH_BYTE);
     let u = tf_synth_id(primary, TF_COMPOSITION_SYNTH_BYTE);
@@ -4921,7 +4926,7 @@ fn textfield_editing_mesh_sort_key_order() {
         &empty_sizes(),
         &mut test_glyph_atlas(),
     );
-    let sk = |nid: u32| -> u32 {
+    let sk = |nid: u64| -> u32 {
         frame
             .nodes
             .iter()
@@ -5090,7 +5095,7 @@ fn textfield_selection_falls_back_to_default_blue() {
 }
 
 /// 渲染后取光标 quad 的左边缘 x（纯色 quad，verts 为世界坐标 [x,y] 对；取最小 x）。
-fn caret_left_x(frame: &FrameData, cursor_id: u32) -> Option<f32> {
+fn caret_left_x(frame: &FrameData, cursor_id: u64) -> Option<f32> {
     frame.nodes.iter().find_map(|rn| {
         if rn.node_id != cursor_id {
             return None;
@@ -5383,7 +5388,7 @@ fn closed_popup_not_rendered() {
         &mut test_glyph_atlas(),
     );
     let popup_subtree_ids = [popup_id.0, option_id.0, option_text_id.0];
-    let leaked: Vec<u32> = frame
+    let leaked: Vec<u64> = frame
         .nodes
         .iter()
         .filter(|rn| popup_subtree_ids.contains(&rn.node_id))

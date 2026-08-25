@@ -45,7 +45,7 @@ pub extern "C" fn loomgui_stage_set_text_input(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_composition(
     h: *mut StageHandle,
-    node: u32,
+    node: u64,
     text: *const u8,
     text_len: usize,
     pos: usize,
@@ -75,7 +75,7 @@ pub extern "C" fn loomgui_stage_set_composition(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u32) -> i32 {
+pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -95,7 +95,7 @@ pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u3
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_cursor_rect(
     h: *const StageHandle,
-    node: u32,
+    node: u64,
     out: *mut CursorRectRepr,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -143,7 +143,7 @@ pub struct CursorRectRepr {
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_text(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     text: *const u8,
     len: usize,
 ) -> i32 {
@@ -205,7 +205,7 @@ pub extern "C" fn loomgui_stage_set_control_text(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_text(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -250,7 +250,7 @@ pub extern "C" fn loomgui_stage_get_control_text(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_selection(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     anchor: usize,
     cursor: usize,
 ) -> i32 {
@@ -287,7 +287,7 @@ pub extern "C" fn loomgui_stage_set_selection(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_selection(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     start: *mut usize,
     end: *mut usize,
 ) -> i32 {
@@ -319,7 +319,7 @@ pub extern "C" fn loomgui_stage_get_selection(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_placeholder(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     text: *const u8,
     len: usize,
 ) -> i32 {
@@ -361,7 +361,7 @@ pub extern "C" fn loomgui_stage_set_control_placeholder(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_placeholder(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -404,7 +404,7 @@ pub extern "C" fn loomgui_stage_get_control_placeholder(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_readonly(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     readonly: bool,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -440,7 +440,7 @@ pub extern "C" fn loomgui_stage_set_control_readonly(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_maxlength(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     max_length: usize,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -472,7 +472,7 @@ pub extern "C" fn loomgui_stage_set_control_maxlength(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_maxlength(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut usize,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -516,7 +516,7 @@ fn clamp_char_boundary(s: &str, idx: usize) -> usize {
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_readonly(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) -> i32 {
     ffi_guard(-1, || {

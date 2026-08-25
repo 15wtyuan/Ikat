@@ -21,7 +21,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class NodeGeometryTransformTests
     {
         // lib.rs create_root 失败哨兵（与 parent 哨兵同值）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── Geometry.LayoutRect：直读 FFI ──────────────────────────────
 
@@ -314,7 +314,7 @@ namespace LoomGUI.HeadlessTests
 
         // ── helpers ──────────────────────────────────────────────────────
 
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind);
@@ -329,10 +329,10 @@ namespace LoomGUI.HeadlessTests
         private static Node AppendChildDiv(IntPtr stage, UIContext ctx)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
-            uint root = CreateRoot(stage, "div");
+            ulong root = CreateRoot(stage, "div");
 
             byte[] k = Encoding.UTF8.GetBytes("div");
-            uint child;
+            ulong child;
             fixed (byte* kp = k)
                 child = Native.loomgui_stage_create_node(h, kp, (nuint)k.Length, null, 0);
             if (child == InvalidNodeId)

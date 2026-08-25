@@ -55,7 +55,7 @@ fn main() {
         frame.nodes.len()
     );
 
-    let mut mesh_verts: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut mesh_verts: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     for rn in &frame.nodes {
         let NodePayload::Mesh { verts, .. } = &rn.payload;
         *mesh_verts.entry(rn.node_id).or_default() += verts.len();
@@ -119,11 +119,11 @@ fn main() {
 
     // 检测同 node_id 多 mesh：C# MirrorPool 按 node_id 唯一索引 GO，
     // 同 node_id 的第 2+ 个 mesh 会被覆盖/跳过 = 渲染丢失。
-    let mut id_count: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut id_count: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     for rn in &frame.nodes {
         *id_count.entry(rn.node_id).or_default() += 1;
     }
-    let mut dups: Vec<u32> = id_count
+    let mut dups: Vec<u64> = id_count
         .iter()
         .filter(|(_, c)| **c >= 2)
         .map(|(k, _)| *k)

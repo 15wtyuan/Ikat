@@ -33,7 +33,7 @@ namespace LoomGUI.HeadlessTests
     /// </summary>
     public unsafe class FixtureSmokeTests
     {
-        private const uint RootSentinel = 0xFFFF_FFFFu;
+        private const ulong RootSentinel = ulong.MaxValue;
 
         /// <summary>
         /// Central smoke test: LoadPackage(fixture) → Instantiate → verify all 9 E3 criteria.
@@ -48,7 +48,7 @@ namespace LoomGUI.HeadlessTests
                 // ── Setup: create scene root + register font + LoadPackage + Instantiate ──
                 StageHandle* h = (StageHandle*)stage.ToPointer();
                 RegisterDefaultFont(h);
-                uint sceneRootId = CreateRoot(h, "div");
+                ulong sceneRootId = CreateRoot(h, "div");
                 ctx._rootId = sceneRootId;
                 Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 
@@ -165,10 +165,10 @@ namespace LoomGUI.HeadlessTests
                 // ── Criterion 7: Lifecycle ───────────────────────────────
                 // Dispose instRoot → children cascade-disposed.
                 {
-                    uint childIdLc = child._id;
-                    uint textIdLc = text._id;
-                    uint btnIdLc = btn._id;
-                    uint imgIdLc = img._id;
+                    ulong childIdLc = child._id;
+                    ulong textIdLc = text._id;
+                    ulong btnIdLc = btn._id;
+                    ulong imgIdLc = img._id;
 
                     Assert.False(instRoot.IsDisposed);
                     Assert.False(child.IsDisposed);
@@ -265,14 +265,14 @@ namespace LoomGUI.HeadlessTests
             }
         }
 
-        private static uint CreateRoot(StageHandle* h, string kind)
+        private static ulong CreateRoot(StageHandle* h, string kind)
         {
             byte[] k = Encoding.UTF8.GetBytes(kind);
             fixed (byte* kp = k)
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        private static void AppendChild(StageHandle* h, uint parent, uint child)
+        private static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)
@@ -286,7 +286,7 @@ namespace LoomGUI.HeadlessTests
             Native.loomgui_stage_tick(h, 0.016f);
         }
 
-        private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, uint id)
+        private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, ulong id)
         {
             ComputedNodeStyleRepr repr;
             int rc = Native.loomgui_stage_get_node_computed_style(h, id, &repr);

@@ -54,10 +54,12 @@ pub const SCROLLBAR_TRACK_THICKNESS: f32 = 8.0;
 /// scrollbar thumb 最小尺寸（px，防 content 过长时 thumb 缩到不可见）。
 pub const MIN_THUMB_SIZE: f32 = 20.0;
 
-/// 合成 scrollbar thumb 的 sentinel node_id flag。
-/// 合成 RenderNode 的 node_id = container_id.0 as u32 | flag（高位，真实 NodeId 小，复用稳定）。
-pub const V_THUMB_FLAG: u32 = 0x4000_0000;
-pub const H_THUMB_FLAG: u32 = 0x2000_0000;
+/// 合成 scrollbar thumb 的 tag 字节位（NodeId bits[63:56]，真实节点恒 0）。
+/// 合成 RenderNode 的 node_id = container_id.0 | flag（tag 字节置位，idx/gen 保留）。
+/// V=16 / H=17：紧跟跨页子页（1..=15）、避开 TF synth（32..）——tag 区段总表见
+/// `render/mod.rs` 合成 id 常量注释。u32 时代是 bit 30/29 flag，u64 拓宽时迁入 tag 区。
+pub const V_THUMB_FLAG: u64 = 16 << 56;
+pub const H_THUMB_FLAG: u64 = 17 << 56;
 
 /// cubic-out 缓动：(t-1)^3 + 1，t∈[0,1]。advance tween 用。
 fn cubic_out(t: f32) -> f32 {
@@ -716,8 +718,11 @@ pub fn apply_wheel_to_hit(scene: &mut Scene, w: WheelEvent) {
     while let Some(id) = pane {
         // sentinel thumb_id → decode container_id（thumb covers container edge,
         // wheel on thumb = wheel on container）
-        let id = if id.0 & 0x6000_0000 != 0 {
-            NodeId(id.0 & !0x6000_0000)
+        // tag 字节区段判定（V=16/H=17，bits[63:56]）：命中即剥 flag 还原 container id。
+        // 清 V|H 掩码（bit 60|56）恰好覆盖 16/17 两 tag 的全部置位位，idx/gen 低位保留。
+        const THUMB_FLAGS: u64 = V_THUMB_FLAG | H_THUMB_FLAG;
+        let id = if id.0 & THUMB_FLAGS != 0 {
+            NodeId(id.0 & !THUMB_FLAGS)
         } else {
             id
         };

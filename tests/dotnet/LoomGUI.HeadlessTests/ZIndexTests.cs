@@ -14,7 +14,7 @@ namespace LoomGUI.HeadlessTests
     {
         static StageHandle* H(UIContext ctx) => (StageHandle*)ctx._stage.ToPointer();
 
-        static uint CreateRoot(UIContext ctx)
+        static ulong CreateRoot(UIContext ctx)
         {
             byte[] k = Encoding.UTF8.GetBytes("div");
             fixed (byte* kp = k)
@@ -49,7 +49,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 RegisterDefaultFont(ctx);
-                uint rootId = CreateRoot(ctx);
+                ulong rootId = CreateRoot(ctx);
                 ctx._rootId = rootId;
                 Container root = (Container)ctx._registry.GetOrCreate(rootId);
                 UIPackage pkg = ctx.LoadPackage("dropdown", FixtureBytes("dropdown.pkg.bin"));

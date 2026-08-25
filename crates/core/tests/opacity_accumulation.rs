@@ -50,7 +50,7 @@ fn child_id(s: &Scene, parent: NodeId, idx: usize) -> NodeId {
 /// merge 后子 node_id 被锚吞）：节点集里至少一个存在、每个存在者都携带累积值。
 fn assert_all_alphas(
     frame: &loomgui_core::render::FrameData,
-    ids: &[u32],
+    ids: &[u64],
     expected: f32,
     msg: &str,
 ) {

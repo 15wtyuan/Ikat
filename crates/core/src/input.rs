@@ -68,14 +68,14 @@ pub const KEY_V: u32 = 118;
 pub const KEY_X: u32 = 120;
 pub const KEY_Z: u32 = 122;
 
-/// 事件输出（FFI 扁平 POD，28B）。event_type: 0=Down,1=Up,2=Move,3=Click,4=RollOver,5=RollOut。
+/// 事件输出（FFI 扁平 POD，32B）。event_type: 0=Down,1=Up,2=Move,3=Click,4=RollOver,5=RollOut。
 /// pad[0] = PointerDown/Up/Click 的按键（web MouseEvent.button 值域：0=左/1=中/2=右；
 /// 其余事件 0）。dx/dy = DragMove 逐 Move 增量（首条含阈值前行程，锚 Down 位），
 /// 其余事件 0——累计偏移消费方用 DragStartEvent.StartPosition + Position 推导。
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct EventRecord {
-    pub node_id: u32,
+    pub node_id: u64,
     pub event_type: u8,
     pub click_count: u8, // 1 或 2（仅 Click 有意义，其余=0）
     pub pad: [u8; 2],

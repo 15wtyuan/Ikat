@@ -70,7 +70,7 @@ namespace LoomGUI.HeadlessTests
                 StageHandle* h = (StageHandle*)stage.ToPointer();
                 RegisterDefaultFont(h);
 
-                uint sceneRootId = CreateRoot(h, "div");
+                ulong sceneRootId = CreateRoot(h, "div");
                 ctx._rootId = sceneRootId;
                 Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 
@@ -110,7 +110,7 @@ namespace LoomGUI.HeadlessTests
                 for (int i = 0; i < 4; i++)
                     TickAndDrain(h, ctx);
 
-                uint ul = list._id;
+                ulong ul = list._id;
 
                 // ── Sanity: measured heights are genuinely non-uniform ──────────────────
                 // Read each visible slot's border-box height; at least two must differ, proving
@@ -124,7 +124,7 @@ namespace LoomGUI.HeadlessTests
                     $"heights must be non-uniform to exercise anchoring; min={minH} max={maxH}");
 
                 // Capture initial state at top: first slot's world-y + scroll_pos.
-                uint firstSlot0 = FirstSlotChildId(h, ul);
+                ulong firstSlot0 = FirstSlotChildId(h, ul);
                 Assert.NotEqual(0u, firstSlot0);
                 float initialFirstSlotWorldY = GetLayoutRect(h, firstSlot0).y;
                 float initialScrollY = GetScrollY(h, pane._id);
@@ -170,7 +170,7 @@ namespace LoomGUI.HeadlessTests
 
                 // No-drift assertion: the first visible slot (item 0, re-cloned after recycling)
                 // sits at the same world-y as the initial state, and scroll_pos returned to ~0.
-                uint firstSlot1 = FirstSlotChildId(h, ul);
+                ulong firstSlot1 = FirstSlotChildId(h, ul);
                 Assert.NotEqual(0u, firstSlot1);
                 float finalFirstSlotWorldY = GetLayoutRect(h, firstSlot1).y;
                 float finalScrollY = GetScrollY(h, pane._id);
@@ -205,7 +205,7 @@ namespace LoomGUI.HeadlessTests
                 StageHandle* h = (StageHandle*)stage.ToPointer();
                 RegisterDefaultFont(h);
 
-                uint sceneRootId = CreateRoot(h, "div");
+                ulong sceneRootId = CreateRoot(h, "div");
                 ctx._rootId = sceneRootId;
                 Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 
@@ -272,7 +272,7 @@ namespace LoomGUI.HeadlessTests
                 StageHandle* h = (StageHandle*)stage.ToPointer();
                 RegisterDefaultFont(h);
 
-                uint sceneRootId = CreateRoot(h, "div");
+                ulong sceneRootId = CreateRoot(h, "div");
                 ctx._rootId = sceneRootId;
                 Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 
@@ -348,14 +348,14 @@ namespace LoomGUI.HeadlessTests
             }
         }
 
-        static uint CreateRoot(StageHandle* h, string kind)
+        static ulong CreateRoot(StageHandle* h, string kind)
         {
             byte[] k = Encoding.UTF8.GetBytes(kind);
             fixed (byte* kp = k)
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        static void AppendChild(StageHandle* h, uint parent, uint child)
+        static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)
@@ -366,7 +366,7 @@ namespace LoomGUI.HeadlessTests
         /// Read a node's layout rect (x,y,w,h) straight off the FFI. Mirrors NodeGeometry.LayoutRect
         /// but usable without materializing a typed Node (we only have raw ids for slots here).
         /// </summary>
-        static (float x, float y, float w, float h) GetLayoutRect(StageHandle* h, uint node)
+        static (float x, float y, float w, float h) GetLayoutRect(StageHandle* h, ulong node)
         {
             float x = 0, y = 0, w = 0, hh = 0;
             Native.loomgui_stage_get_node_layout_rect(h, node, &x, &y, &w, &hh);
@@ -379,13 +379,13 @@ namespace LoomGUI.HeadlessTests
         /// precede the head spacer, so we scan for the first ListItem by kind rather than
         /// assuming a fixed child index.
         /// </summary>
-        static uint FirstSlotChildId(StageHandle* h, uint ul)
+        static ulong FirstSlotChildId(StageHandle* h, ulong ul)
         {
             int count = Native.loomgui_stage_get_child_count(h, ul);
             if (count == 0) return 0;
-            uint[] buf = new uint[count];
+            ulong[] buf = new ulong[count];
             int written;
-            fixed (uint* bp = buf)
+            fixed (ulong* bp = buf)
                 written = Native.loomgui_stage_get_children(h, ul, bp, (nuint)count);
             for (int i = 0; i < written; i++)
             {
@@ -401,10 +401,10 @@ namespace LoomGUI.HeadlessTests
         /// Set the pane's scroll position (non-animated) via the FFI. ScrollTo is a stub on the
         /// public API, so virtualization scroll tests drive the pane's scroll_pos directly.
         /// </summary>
-        static void SetScrollPos(StageHandle* h, uint pane, float y)
+        static void SetScrollPos(StageHandle* h, ulong pane, float y)
             => Native.loomgui_stage_set_scroll_pos(h, pane, 0.0f, y, animated: 0);
 
-        static float GetScrollY(StageHandle* h, uint pane)
+        static float GetScrollY(StageHandle* h, ulong pane)
         {
             float x, y;
             Native.loomgui_stage_get_scroll_pos(h, pane, &x, &y);
@@ -416,14 +416,14 @@ namespace LoomGUI.HeadlessTests
         /// non-uniform-height sanity check: confirms the dataset is genuinely variable so the
         /// anchoring assertion is not vacuous.
         /// </summary>
-        static List<(float x, float y, float w, float h)> SlotLayoutRects(StageHandle* h, uint ul)
+        static List<(float x, float y, float w, float h)> SlotLayoutRects(StageHandle* h, ulong ul)
         {
             var result = new List<(float, float, float, float)>();
             int count = Native.loomgui_stage_get_child_count(h, ul);
             if (count == 0) return result;
-            uint[] buf = new uint[count];
+            ulong[] buf = new ulong[count];
             int written;
-            fixed (uint* bp = buf)
+            fixed (ulong* bp = buf)
                 written = Native.loomgui_stage_get_children(h, ul, bp, (nuint)count);
             for (int i = 0; i < written; i++)
             {
@@ -439,13 +439,13 @@ namespace LoomGUI.HeadlessTests
         /// Height of the head spacer (the Container child immediately before the first slot).
         /// Non-zero after scrolling proves items were collapsed above the visible window.
         /// </summary>
-        static float HeadSpacerHeight(StageHandle* h, uint ul)
+        static float HeadSpacerHeight(StageHandle* h, ulong ul)
         {
             int count = Native.loomgui_stage_get_child_count(h, ul);
             if (count == 0) return 0f;
-            uint[] buf = new uint[count];
+            ulong[] buf = new ulong[count];
             int written;
-            fixed (uint* bp = buf)
+            fixed (ulong* bp = buf)
                 written = Native.loomgui_stage_get_children(h, ul, bp, (nuint)count);
             int firstSlotIdx = -1;
             for (int i = 0; i < written; i++)

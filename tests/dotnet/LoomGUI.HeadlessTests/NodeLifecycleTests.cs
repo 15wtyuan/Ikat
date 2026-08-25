@@ -16,7 +16,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class NodeLifecycleTests
     {
         // lib.rs:429 root parent 哨兵（与 create_root 失败哨兵 0xFFFF_FFFF 同值）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── NodeFactory：kind byte → typed C# 子类 ───────────────────────
 
@@ -29,7 +29,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "div", "");
+                ulong id = CreateRoot(stage, "div", "");
                 Assert.NotEqual(InvalidNodeId, id);
 
                 Node n = ctx._registry.GetOrCreate(id);
@@ -50,7 +50,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "button", "");
+                ulong id = CreateRoot(stage, "button", "");
                 Assert.NotEqual(InvalidNodeId, id);
 
                 Node n = ctx._registry.GetOrCreate(id);
@@ -71,7 +71,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "img", "");
+                ulong id = CreateRoot(stage, "img", "");
                 Assert.NotEqual(InvalidNodeId, id);
 
                 Node n = ctx._registry.GetOrCreate(id);
@@ -92,7 +92,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "span", "");
+                ulong id = CreateRoot(stage, "span", "");
                 Assert.NotEqual(InvalidNodeId, id);
 
                 Node n = ctx._registry.GetOrCreate(id);
@@ -116,7 +116,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "div", "");
+                ulong id = CreateRoot(stage, "div", "");
                 Node first = ctx._registry.GetOrCreate(id);
                 Node second = ctx._registry.GetOrCreate(id);
                 Assert.Same(first, second);
@@ -136,7 +136,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "div", "");
+                ulong id = CreateRoot(stage, "div", "");
 
                 Assert.False(ctx._registry.TryGet(id, out var pre));
                 Assert.Null(pre);
@@ -163,7 +163,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "div", "");
+                ulong id = CreateRoot(stage, "div", "");
                 Node n = ctx._registry.GetOrCreate(id);
                 Assert.Null(n.Parent);
             }
@@ -182,7 +182,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "div", "");
+                ulong id = CreateRoot(stage, "div", "");
                 Node n = ctx._registry.GetOrCreate(id);
 
                 Assert.False(n.IsDisposed);
@@ -209,7 +209,7 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint id = CreateRoot(stage, "div", "");
+                ulong id = CreateRoot(stage, "div", "");
                 Node n = ctx._registry.GetOrCreate(id);
                 n.Dispose();
 
@@ -249,7 +249,7 @@ namespace LoomGUI.HeadlessTests
         /// 调 loomgui_stage_create_root（与 HarnessSmokeTests.CreateRoot 同风格：
         /// UTF-8 字节 + fixed 钉住 + ptr+len）。返 NodeId；0xFFFF_FFFF = 失败。
         /// </summary>
-        private static uint CreateRoot(IntPtr stage, string kind, string css)
+        private static ulong CreateRoot(IntPtr stage, string kind, string css)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");

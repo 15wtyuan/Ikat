@@ -20,7 +20,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class EventBusTests
     {
         // lib.rs create_root 失败哨兵（与 parent 哨兵同值）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── 订阅 + 触发 ─────────────────────────────────────────────────
 
@@ -178,8 +178,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parentId = CreateRoot(stage, "div");
-                uint childId = CreateNode(stage, "div");
+                ulong parentId = CreateRoot(stage, "div");
+                ulong childId = CreateNode(stage, "div");
                 AppendChild(stage, parentId, childId);
                 Container parent = (Container)ctx._registry.GetOrCreate(parentId);
                 Node child = ctx._registry.GetOrCreate(childId);
@@ -207,9 +207,9 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint midId = CreateNode(stage, "div");
-                uint leafId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong midId = CreateNode(stage, "div");
+                ulong leafId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, midId);
                 AppendChild(stage, midId, leafId);
                 Node root = ctx._registry.GetOrCreate(rootId);
@@ -245,8 +245,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint parentId = CreateRoot(stage, "div");
-                uint childId = CreateNode(stage, "div");
+                ulong parentId = CreateRoot(stage, "div");
+                ulong childId = CreateNode(stage, "div");
                 AppendChild(stage, parentId, childId);
                 Container parent = (Container)ctx._registry.GetOrCreate(parentId);
                 Node child = ctx._registry.GetOrCreate(childId);
@@ -278,8 +278,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint childId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong childId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, childId);
                 Container root = (Container)ctx._registry.GetOrCreate(rootId);
                 Node child = ctx._registry.GetOrCreate(childId);
@@ -307,8 +307,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint childId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong childId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, childId);
                 Container root = (Container)ctx._registry.GetOrCreate(rootId);
                 Node child = ctx._registry.GetOrCreate(childId);
@@ -378,7 +378,7 @@ namespace LoomGUI.HeadlessTests
             ctx._eventBus.Dispatch(target._id, evt);
         }
 
-        static uint CreateRoot(IntPtr stage, string kind)
+        static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -386,7 +386,7 @@ namespace LoomGUI.HeadlessTests
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        static uint CreateNode(IntPtr stage, string kind)
+        static ulong CreateNode(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -394,7 +394,7 @@ namespace LoomGUI.HeadlessTests
                 return Native.loomgui_stage_create_node(h, kp, (nuint)k.Length, null, 0);
         }
 
-        static void AppendChild(IntPtr stage, uint parent, uint child)
+        static void AppendChild(IntPtr stage, ulong parent, ulong child)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             int rc = Native.loomgui_stage_append_child(h, parent, child);

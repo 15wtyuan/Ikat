@@ -21,7 +21,7 @@ use crate::{ffi_guard, StageHandle};
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_value(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     value: f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -91,7 +91,7 @@ pub extern "C" fn loomgui_stage_set_control_value(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_value(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -118,7 +118,7 @@ pub extern "C" fn loomgui_stage_get_control_value(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_checked(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     checked: bool,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -151,7 +151,7 @@ pub extern "C" fn loomgui_stage_set_control_checked(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_checked(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut bool,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -178,7 +178,7 @@ pub extern "C" fn loomgui_stage_get_control_checked(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_max(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     max: f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -262,7 +262,7 @@ pub extern "C" fn loomgui_stage_set_control_max(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_max(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -294,7 +294,7 @@ pub extern "C" fn loomgui_stage_get_control_max(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_min(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     min: f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -354,7 +354,7 @@ pub extern "C" fn loomgui_stage_set_control_min(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_min(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -383,7 +383,7 @@ pub extern "C" fn loomgui_stage_get_control_min(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_step(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     step: f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -465,7 +465,7 @@ fn renumber_edit_value(edit: &mut EditState, min: f32, max: f32, step: f32) {
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_step(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -493,7 +493,7 @@ pub extern "C" fn loomgui_stage_get_control_step(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_control_indeterminate(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -521,7 +521,7 @@ pub extern "C" fn loomgui_stage_get_control_indeterminate(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_control_indeterminate(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     v: u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -551,7 +551,7 @@ pub extern "C" fn loomgui_stage_set_control_indeterminate(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_radio_name(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -594,7 +594,7 @@ pub extern "C" fn loomgui_stage_get_radio_name(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -623,7 +623,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_option_value(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
     buf_cap: usize,
     out_len: *mut usize,
@@ -647,7 +647,7 @@ pub extern "C" fn loomgui_stage_get_option_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_id: u32) -> i32 {
+pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -669,7 +669,7 @@ pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_i
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_option_index(h: *const StageHandle, node_id: u32) -> i32 {
+pub extern "C" fn loomgui_stage_get_option_index(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -690,7 +690,7 @@ pub extern "C" fn loomgui_stage_get_option_index(h: *const StageHandle, node_id:
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: u32) -> i32 {
+pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -711,7 +711,7 @@ pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: 
 /// Ok(Some(v)) = 有值（由调用方写 buf）；Ok(None) = 语义空值；Err(rc) = 直接返回的错码。
 fn read_control_string(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     _out: *mut u8,
     _buf_cap: usize,
     out_len: *mut usize,
@@ -753,7 +753,7 @@ fn write_out_string(v: &str, out: *mut u8, buf_cap: usize, out_len: *mut usize) 
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_dropdown_selected_index(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -782,7 +782,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_index(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     index: u32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -815,7 +815,7 @@ pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_tablist_selected_index(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -844,7 +844,7 @@ pub extern "C" fn loomgui_stage_get_tablist_selected_index(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_tablist_selected_index(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     index: u32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -873,7 +873,7 @@ pub extern "C" fn loomgui_stage_set_tablist_selected_index(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_dropdown_open(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -900,7 +900,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_open(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_dropdown_open(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     open: u8,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -929,7 +929,7 @@ pub extern "C" fn loomgui_stage_set_dropdown_open(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_get_number_value(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     out: *mut f32,
 ) -> i32 {
     ffi_guard(-1, || {
@@ -963,7 +963,7 @@ pub extern "C" fn loomgui_stage_get_number_value(
 #[no_mangle]
 pub extern "C" fn loomgui_stage_set_number_value(
     h: *mut StageHandle,
-    node_id: u32,
+    node_id: u64,
     value: f32,
 ) -> i32 {
     ffi_guard(-1, || {

@@ -29,8 +29,8 @@ namespace LoomGUI
         /// 合并编号的精确穿插方案，勿再加大 Lift。
         internal const int HostSortOrderLift = 1000;
 
-        private readonly Dictionary<uint, GameObject> _bindings = new();   // node_id → 用户 GO
-        private readonly Dictionary<uint, GameObject> _wrappers = new();   // node_id → wrapper GO（跟随 UI）
+        private readonly Dictionary<ulong, GameObject> _bindings = new();  // node_id → 用户 GO（u64，#26）
+        private readonly Dictionary<ulong, GameObject> _wrappers = new();  // node_id → wrapper GO（跟随 UI，u64 #26）
         private Transform _root;
         private GameObject _container;  // 挂 root、localScale (1,-1,1) 翻正 handedness
 
@@ -47,7 +47,7 @@ namespace LoomGUI
             _container.layer = root.gameObject.layer;  // LoomUILayer
         }
 
-        public void Bind(uint nodeId, GameObject go)
+        public void Bind(ulong nodeId, GameObject go)
         {
             if (go == null) return;
             Unbind(nodeId);
@@ -130,7 +130,7 @@ namespace LoomGUI
             }
         }
 
-        public void Unbind(uint nodeId)
+        public void Unbind(ulong nodeId)
         {
             if (_bindings.TryGetValue(nodeId, out var go))
             {
@@ -188,7 +188,7 @@ namespace LoomGUI
 
             foreach (var kv in _bindings)
             {
-                uint id = kv.Key;
+                ulong id = kv.Key;
                 var go = kv.Value;
                 if (go == null) continue;
 

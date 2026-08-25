@@ -243,8 +243,8 @@ pub extern "C" fn loomgui_stage_unload_package(
     })
 }
 
-/// 从包克隆一个组件进当前 scene，返组件根 NodeId（u32）。
-/// pkg/comp = UTF-8 字节（指针+len）。失败返 0xFFFF_FFFF（INVALID，同 create_root 失败语义）。
+/// 从包克隆一个组件进当前 scene，返组件根 NodeId（u64）。
+/// pkg/comp = UTF-8 字节（指针+len）。失败返 u64::MAX（INVALID，同 create_root 失败语义）。
 /// scene 必须已存在（create_root 先建），否则 Err→sentinel。null 句柄 → sentinel。
 ///
 /// **常驻（不 gate）。**包装 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
@@ -255,9 +255,9 @@ pub extern "C" fn loomgui_stage_instantiate(
     pkg_len: usize,
     comp: *const u8,
     comp_len: usize,
-) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const INVALID: u32 = 0xFFFF_FFFF;
+) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const INVALID: u64 = u64::MAX;
         if h.is_null() || pkg.is_null() || comp.is_null() {
             return INVALID;
         }

@@ -79,8 +79,8 @@ mod tests {
 
     fn node(id: usize, parent: Option<usize>, rect: Rect) -> Node {
         let mut n = Node::default();
-        n.id = NodeId(id as u32); // from_nodes 覆写；仅占位
-        n.parent = parent.map(|p| NodeId(p as u32)); // from_nodes 覆写；仅用于 scene_with 推 edges
+        n.id = NodeId(id as u64); // from_nodes 覆写；仅占位
+        n.parent = parent.map(|p| NodeId(p as u64)); // from_nodes 覆写；仅用于 scene_with 推 edges
         n.layout_rect = rect;
         n
     }

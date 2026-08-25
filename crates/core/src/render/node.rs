@@ -127,8 +127,8 @@ impl EffectBlock {
 /// - `mask_context` / `sort_key`：batch::assign_sort_keys 后填。
 #[derive(Debug, Clone, Serialize)]
 pub struct RenderNode {
-    pub node_id: u32,
-    pub parent_id: Option<u32>,
+    pub node_id: u64,
+    pub parent_id: Option<u64>,
     pub visible: bool,
     pub alpha: f32,
     pub color_tint: [f32; 4],

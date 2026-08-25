@@ -20,7 +20,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class TextContentTests
     {
         // lib.rs create_root/create_node 失败哨兵。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── TextNode.Text round-trip ────────────────────────────────────
 
@@ -329,7 +329,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>建根节点（无 CSS）。返 NodeId；0xFFFF_FFFF = 失败。</summary>
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -338,7 +338,7 @@ namespace LoomGUI.HeadlessTests
         }
 
         /// <summary>建无父节点。返 NodeId；0xFFFF_FFFF = 失败。</summary>
-        private static uint CreateNode(IntPtr stage, string kind)
+        private static ulong CreateNode(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");

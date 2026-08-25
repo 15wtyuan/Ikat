@@ -78,14 +78,14 @@ namespace LoomGUI.HeadlessTests
             }
         }
 
-        private static uint CreateRoot(StageHandle* h)
+        private static ulong CreateRoot(StageHandle* h)
         {
             byte[] k = Encoding.UTF8.GetBytes("div");
             fixed (byte* kp = k)
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        private static void AppendChild(StageHandle* h, uint parent, uint child)
+        private static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)
@@ -100,7 +100,7 @@ namespace LoomGUI.HeadlessTests
         /// </summary>
         private static Container InstantiateVisualFixture(StageHandle* h, UIContext ctx)
         {
-            uint sceneRootId = CreateRoot(h);
+            ulong sceneRootId = CreateRoot(h);
             ctx._rootId = sceneRootId;
             Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 
@@ -121,7 +121,7 @@ namespace LoomGUI.HeadlessTests
             return instRoot;
         }
 
-        private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, uint id)
+        private static ComputedNodeStyleRepr GetComputedStyle(StageHandle* h, ulong id)
         {
             ComputedNodeStyleRepr repr;
             int rc = Native.loomgui_stage_get_node_computed_style(h, id, &repr);

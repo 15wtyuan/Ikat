@@ -125,14 +125,30 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_unload_package(StageHandle* h, byte* name, nuint name_len);
 
         /// <summary>
-        ///  从包克隆一个组件进当前 scene，返组件根 NodeId（u32）。
-        ///  pkg/comp = UTF-8 字节（指针+len）。失败返 0xFFFF_FFFF（INVALID，同 create_root 失败语义）。
+        ///  从包克隆一个组件进当前 scene，返组件根 NodeId（u64）。
+        ///  pkg/comp = UTF-8 字节（指针+len）。失败返 u64::MAX（INVALID，同 create_root 失败语义）。
         ///  scene 必须已存在（create_root 先建），否则 Err→sentinel。null 句柄 → sentinel。
         ///
         ///  **常驻（不 gate）。**包装 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_instantiate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_instantiate(StageHandle* h, byte* pkg, nuint pkg_len, byte* comp, nuint comp_len);
+        internal static extern ulong loomgui_stage_instantiate(StageHandle* h, byte* pkg, nuint pkg_len, byte* comp, nuint comp_len);
+
+        /// <summary>
+        ///  全局 shutdown（Domain reload hook）。C# `LoomStage.ResetStatics`（SubsystemRegistration）调用。
+        ///
+        ///  当前核心无全局 native 态——Stage 是 per-handle（`loomgui_stage_free` drop 全部 Stage 拥有的内存），
+        ///  故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
+        ///  此处自动成为清理入口，无需再改 C# 接线。
+        ///
+        ///  **注意：Font 的 `Box::leak`（`text/layout.rs`）是真泄漏**——`bytes.clone()` 后 leak 取
+        ///  `'static` 切片喂 ttf-parser Face，原 Vec 虽被 `_bytes` 持有但与 leaked 切片不是同一份，
+        ///  Stage drop 时 `_bytes` 释放的是 clone 来源而非 leaked 副本。每次 Stage 创建都 leak 一份字体字节，
+        ///  不可由 shutdown 回收（leak 切片无 handle 跟踪）。若未来域重载内存观测触发阈值，
+        ///  再考虑字体缓存化为进程单例。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_shutdown", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_shutdown();
 
         /// <summary>
         ///  跑一帧 tick_and_render → build_blob 写入缓存。dt 累积进 time_s（双击窗口，C# 传 unscaledDeltaTime）。
@@ -163,6 +179,32 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_take_warnings", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern byte* loomgui_stage_take_warnings(StageHandle* h, nuint* out_len);
+
+        /// <summary>
+        ///  构造最小测试包（headless test fixture helper）。
+        ///  组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含两个 Container 节点：根容器 + 子容器 id="badge"（2-node，配合 self-exclusive 子树查找）。
+        ///  返 pkg bytes 指针+长度；失败返 null（空字符串/格式错）。
+        ///  调用方用完后调 loomgui_bytes_free 释放。
+        ///
+        ///  **测试 helper（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_make_test_pkg", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* loomgui_make_test_pkg(byte* comp, nuint comp_len, nuint* out_len);
+
+        /// <summary>
+        ///  取走缺字诊断报告（tofu 取证）：shaping 全链（主字体+回退）缺字记录，每行一条
+        ///  （family + 字符 + 码位 + 修法）。返回堆分配 UTF-8 buffer（含尾部 NUL），调用方用
+        ///  `loomgui_bytes_free` 释放；无新记录 → null（*out_len=0）。会话级去重（同 family+char
+        ///  只报一次），pending 累积不丢。宿主每帧 tick 后调。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_take_missing_glyphs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* loomgui_stage_take_missing_glyphs(StageHandle* h, nuint* out_len);
+
+        /// <summary>
+        ///  释放 loomgui_make_test_pkg 返回的 bytes。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_bytes_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_bytes_free(byte* ptr, nuint len);
 
         /// <summary>
         ///  注入本帧指针事件（扁平 PointerEvent 数组）。tick 前调。
@@ -208,134 +250,13 @@ namespace LoomGUI.Bindings
         internal static extern bool loomgui_stage_is_pointer_on_ui(StageHandle* h);
 
         /// <summary>
-        ///  业务设节点 disabled 状态（伪类源 + active/click 抑制）。NodeId.0 越界静默跳过。
-        ///  null 句柄 → no-op。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_disabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_node_disabled(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool disabled);
-
-        /// <summary>
-        ///  设节点 touchable（公共 Node.Touchable 的后端；CSS `pointer-events` 的运行时面）。
-        ///  false = 本节点不参与命中（子节点照常——透传语义）。写 interaction（hit 判据）+
-        ///  base_style（rematch 重起源）。null 句柄 / 节点缺失 → no-op。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_touchable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_node_touchable(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool touchable);
-
-        /// <summary>
-        ///  设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=0（Tab 链 0 组）；
-        ///  false → tabindex=-1（Tab 链/点击聚焦排除，编程 Focus() 仍可用——DOM 语义）。
-        ///  null 句柄 / 节点缺失 → no-op。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_focusable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_node_focusable(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool focusable);
-
-        /// <summary>
-        ///  读节点可获焦性（interaction.tabindex &gt;= 0，Tab 链判据同源）。null 句柄 / 无 scene /
-        ///  节点缺失 → -1（不与 false 混淆）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_focusable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_focusable(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  读节点 touchable（interaction.touchable，hit_test 同源）。null 句柄 / 无 scene /
-        ///  节点缺失 → -1（不与 false 混淆）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_touchable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_touchable(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  读节点 LOOKUP_SCOPE 查找边界标记（组件展开域 host / ListView slot 根 / 实例根打此位）。
-        ///  C# Query&amp;lt;T&amp;gt;/Query(selector) 的 DFS 剪枝用——遇此标记的子节点 visit 后不下钻
-        /// （Get/TryGet 走 core find_node_by_id_in_subtree 已内置剪枝，本 FFI 补 Query 的 C# 侧路径）。
-        ///  null 句柄 / 无 scene / 节点缺失 → -1（不与 false 混淆）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_node_is_lookup_scope", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_node_is_lookup_scope(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  读 CustomElement 原始 hyphen 标签名（`&lt;game-item-card&gt;` → "game-item-card"；打包期展开
-        ///  保留，tag 选择器 + 诊断用）。双调法：首次 buf_cap 不足返 -2 + out_len 写所需字节数，
-        ///  调用方二次调用取串。非 CustomElement / null 句柄 / 无 scene / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_custom_tag", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_custom_tag(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → 0xFFFF_FFFF（sentinel）。
-        ///
-        ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_node_parent", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_node_parent(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  按 CSS id 属性查节点（业务用 id 定位节点替代硬编码 build 序 id）。
-        ///  id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel，同 node_parent）。
-        ///
-        ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_find_node_by_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_find_node_by_id(StageHandle* h, byte* id, nuint id_len);
-
-        /// <summary>
-        ///  在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root 的直接子开始 DFS，root 自身 id_attr 不参与匹配，与 DOM querySelectorAll/Query&lt;T&gt; 一致）。
-        ///  root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel）。
-        ///  替代"全局首匹配 + 父链后过滤"——C# TryGet/Get 用此入口避免 list slot 间 id 碰撞。
-        ///
-        ///  **常驻（不 gate）：**runtime 稳定入口。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_find_node_by_id_in_subtree", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_find_node_by_id_in_subtree(StageHandle* h, uint root, byte* id, nuint id_len);
-
-        /// <summary>
-        ///  构造最小测试包（headless test fixture helper）。
-        ///  组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含两个 Container 节点：根容器 + 子容器 id="badge"（2-node，配合 self-exclusive 子树查找）。
-        ///  返 pkg bytes 指针+长度；失败返 null（空字符串/格式错）。
-        ///  调用方用完后调 loomgui_bytes_free 释放。
-        ///
-        ///  **测试 helper（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_make_test_pkg", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte* loomgui_make_test_pkg(byte* comp, nuint comp_len, nuint* out_len);
-
-        /// <summary>
-        ///  取走缺字诊断报告（tofu 取证）：shaping 全链（主字体+回退）缺字记录，每行一条
-        ///  （family + 字符 + 码位 + 修法）。返回堆分配 UTF-8 buffer（含尾部 NUL），调用方用
-        ///  `loomgui_bytes_free` 释放；无新记录 → null（*out_len=0）。会话级去重（同 family+char
-        ///  只报一次），pending 累积不丢。宿主每帧 tick 后调。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_take_missing_glyphs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern byte* loomgui_stage_take_missing_glyphs(StageHandle* h, nuint* out_len);
-
-        /// <summary>
-        ///  释放 loomgui_make_test_pkg 返回的 bytes。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_bytes_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_bytes_free(byte* ptr, nuint len);
-
-        /// <summary>
         ///  加 touch monitor（C# CaptureTouch 后调）。核心把 node 加进 touch_id 对应槽的 touch_monitors（去重）。
         ///  touch_id=-1 → 鼠标主指槽；找不到槽 → no-op。null 句柄 → no-op。
         ///
         ///  **常驻（不 gate）：**runtime 稳定入口。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_add_touch_monitor", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_add_touch_monitor(StageHandle* h, int touch_id, uint node_id);
+        internal static extern void loomgui_stage_add_touch_monitor(StageHandle* h, int touch_id, ulong node_id);
 
         /// <summary>
         ///  移除 touch monitor（C# 主动释放调）。从所有槽移除该 node。null 句柄 → no-op。
@@ -343,7 +264,7 @@ namespace LoomGUI.Bindings
         ///  **常驻（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_touch_monitor", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_remove_touch_monitor(StageHandle* h, uint node_id);
+        internal static extern void loomgui_stage_remove_touch_monitor(StageHandle* h, ulong node_id);
 
         /// <summary>
         ///  外部取消待 click（照 fgui Stage.CancelClick(touchId)）。置对应槽 click_cancelled。
@@ -359,6 +280,674 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_key_input", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_set_key_input(StageHandle* h, KeyEvent* keys, nuint len);
+
+        /// <summary>
+        ///  注册宿主剪贴板回调。set_fn/get_fn = 后端实现的剪贴板桥（如 Unity
+        ///  GUIUtility.systemCopyBuffer）：set 收 (ptr,len) UTF-8 字节拷走，get 写 (out_ptr,out_len)
+        ///  返宿主持有的缓冲区（活到下次 get）。传 null 解除注册。
+        ///
+        ///  core 是 cdylib，不能 extern 调宿主符号——故走回调注册。后端应在 Stage 启动后尽早
+        ///  注册一次。未注册时 Ctrl+C/X 仍走（写丢），Ctrl+V 读空串（no-op）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_register_clipboard", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_register_clipboard(loomgui_register_clipboard_set_fn_delegate set_fn, loomgui_register_clipboard_get_fn_delegate get_fn);
+
+        /// <summary>
+        ///  注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
+        ///  null/len=0 = 本帧无滚轮（直接 return，不清空——与 set_key_input 不同；累积语义）。
+        ///
+        ///  **常驻（不 gate）：**输入是 runtime 稳定入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_wheel_input", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_wheel_input(StageHandle* h, WheelEvent* events, nuint len);
+
+        /// <summary>
+        ///  编程聚焦节点（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
+        ///  （含 tabindex=None/-1）；disabled 拒；越界跳过。null 句柄 → no-op。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_request_focus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_request_focus(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  读当前焦点节点。无焦点/无 scene → u64::MAX（sentinel，同 node_parent）。null 句柄 → sentinel。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_focused_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_focused_node(StageHandle* h);
+
+        /// <summary>
+        ///  清除当前 focus（`Stage::blur` 的 FFI 包装）：记 pending_focus_request = Some(None)，
+        ///  下 tick 消费清焦点（与 `request_focus` 对称）。null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_blur", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_blur(StageHandle* h);
+
+        /// <summary>
+        ///  命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
+        ///  NodeId u64）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
+        ///  （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
+        ///  新节点本帧未命中，1 帧延迟语义）。scrollbar thumb 合成 id（tag 字节 16/17，
+        ///  NodeId bits[63:56]）decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中
+        ///  （同 apply_wheel_to_hit 口径）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_hit_test", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_hit_test(StageHandle* h, float x, float y, ulong* out_node);
+
+        /// <summary>
+        ///  Rich-text-block 子节点命中细化（spec §10）。
+        ///
+        ///  在 [`crate::loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
+        ///  目标是 rich-text-block 容器之后，用本函数把容器内的点细化到源 inline 节点
+        ///  （span / TextNode / Image），供后端 firing span 级点击事件。
+        ///
+        ///  - `node_id`：rich-text-block 容器（须 `rich_text_block=true`，且 solve 已为其填
+        ///    `scene.text_layouts[node_id]`）。
+        ///  - `x`/`y`：相对该容器 border-box 左上的 block-local 点（与 hit_test world_to_local 后
+        ///    的本地坐标同空间）。
+        ///  - `out_source`：命中时写 source inline 节点的 NodeId(u64)；未命中不写。null 安全。
+        ///
+        ///  返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
+        ///  `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_hit_test_rich", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        [return: MarshalAs(UnmanagedType.U1)]
+        internal static extern bool loomgui_hit_test_rich(StageHandle* h, ulong node_id, float x, float y, ulong* out_source);
+
+        /// <summary>
+        ///  读节点可获焦性（interaction.tabindex &gt;= 0，Tab 链判据同源）。null 句柄 / 无 scene /
+        ///  节点缺失 → -1（不与 false 混淆）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_focusable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_focusable(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  读节点 touchable（interaction.touchable，hit_test 同源）。null 句柄 / 无 scene /
+        ///  节点缺失 → -1（不与 false 混淆）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_touchable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_touchable(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  读节点 LOOKUP_SCOPE 查找边界标记（组件展开域 host / ListView slot 根 / 实例根打此位）。
+        ///  C# Query&amp;lt;T&amp;gt;/Query(selector) 的 DFS 剪枝用——遇此标记的子节点 visit 后不下钻
+        /// （Get/TryGet 走 core find_node_by_id_in_subtree 已内置剪枝，本 FFI 补 Query 的 C# 侧路径）。
+        ///  null 句柄 / 无 scene / 节点缺失 → -1（不与 false 混淆）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_node_is_lookup_scope", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_node_is_lookup_scope(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  读 CustomElement 原始 hyphen 标签名（`&lt;game-item-card&gt;` → "game-item-card"；打包期展开
+        ///  保留，tag 选择器 + 诊断用）。双调法：首次 buf_cap 不足返 -2 + out_len 写所需字节数，
+        ///  调用方二次调用取串。非 CustomElement / null 句柄 / 无 scene / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_custom_tag", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_custom_tag(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  返 parent node_id（C# 事件路由沿链用，spec §4.2）。根/越界/无 scene → u64::MAX（sentinel）。
+        ///
+        ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_node_parent", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_node_parent(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  按 CSS id 属性查节点（业务用 id 定位节点替代硬编码 build 序 id）。
+        ///  id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → 0xFFFF_FFFF（sentinel，同 node_parent）。
+        ///
+        ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_find_node_by_id", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_find_node_by_id(StageHandle* h, byte* id, nuint id_len);
+
+        /// <summary>
+        ///  在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root 的直接子开始 DFS，root 自身 id_attr 不参与匹配，与 DOM querySelectorAll/Query&lt;T&gt; 一致）。
+        ///  root、id = UTF-8 字节（指针+len）。返 node_id；null 句柄/非 UTF-8/无匹配 → u64::MAX（sentinel）。
+        ///  替代"全局首匹配 + 父链后过滤"——C# TryGet/Get 用此入口避免 list slot 间 id 碰撞。
+        ///
+        ///  **常驻（不 gate）：**runtime 稳定入口。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_find_node_by_id_in_subtree", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_find_node_by_id_in_subtree(StageHandle* h, ulong root, byte* id, nuint id_len);
+
+        /// <summary>
+        ///  读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_layout_rect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_layout_rect(StageHandle* h, ulong node_id, float* out_x, float* out_y, float* out_w, float* out_h);
+
+        /// <summary>
+        ///  读节点 world transform（compute_world_transforms 产物）。null/无效 → 写 identity。
+        ///  out: a,b,c,d,tx,ty（6 个 f32，Affine2 列主序）。对齐 get_node_layout_rect 惯例
+        ///  （独立 *mut out + 无状态码 + null/无效写默认）。空 div（merge_meshes 后 RenderNode
+        ///  消失）仍可查——world_transforms 保留全节点（与 node_sort_keys 同）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_world_matrix", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_world_matrix(StageHandle* h, ulong node_id, float* out_a, float* out_b, float* out_c, float* out_d, float* out_tx, float* out_ty);
+
+        /// <summary>
+        ///  读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_sort_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_sort_key(StageHandle* h, ulong node_id, uint* @out);
+
+        /// <summary>
+        ///  读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_visible", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_visible(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值；非 0 = 失败（节点不存在
+        ///  或 `out` = null）。不用 `-&gt; u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，
+        ///  会与「不存在」撞。`NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_kind", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_kind(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  读节点 HTML `id` 属性（authoring id；未声明 → rc=0 + len=0 空串）。
+        ///  return-code + out-param（ptr+len）双调法（同 get_control_text）：buf_cap 足够 →
+        ///  rc=0 写 buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 /
+        ///  无 scene / 死节点 → rc=-1。调试探针（pick 命中链）与 authoring id 读取用。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_id_attr", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_id_attr(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读节点 computed opacity（rematch 后 style.opacity，与渲染/命中同源）。
+        ///  调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
+        ///  rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_opacity", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_opacity(StageHandle* h, ulong node_id, float* @out);
+
+        /// <summary>
+        ///  读节点 class 列表（空格 join；无 class → rc=0 + len=0）。双调法同
+        ///  [`loomgui_stage_get_node_id_attr`]。调试探针用（ClassList 公共面是
+        ///  Contains/Add 族，无全量枚举——本出口补齐只读枚举）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_classes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_classes(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
+        ///  或 `out` = null）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_computed_style", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_node_computed_style(StageHandle* h, ulong node_id, ComputedNodeStyleRepr* @out);
+
+        /// <summary>
+        ///  读节点子节点数。返回 i32：≥0 = 子节点数；-1 = err（null 句柄 / 节点不 live）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_child_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_child_count(StageHandle* h, ulong node);
+
+        /// <summary>
+        ///  读节点子节点 NodeId 列表，写入 `out` buffer（u64 per slot）。
+        ///  返回 i32：≥0 = 实际写入数；负值 = err（-1 = null 句柄 / 节点不 live；
+        ///  -(n+2) = buffer 不够，n = 所需 cap）。调用方遇负值重分配 n+ 容量再调。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_children", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_children(StageHandle* h, ulong node, ulong* @out, nuint cap);
+
+        /// <summary>
+        ///  读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。
+        ///  与 `loomgui_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_disabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_get_node_disabled(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  业务设节点 disabled 状态（伪类源 + active/click 抑制）。NodeId.0 越界静默跳过。
+        ///  null 句柄 → no-op。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_disabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_node_disabled(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool disabled);
+
+        /// <summary>
+        ///  设节点 touchable（公共 Node.Touchable 的后端；CSS `pointer-events` 的运行时面）。
+        ///  false = 本节点不参与命中（子节点照常——透传语义）。写 interaction（hit 判据）+
+        ///  base_style（rematch 重起源）。null 句柄 / 节点缺失 → no-op。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_touchable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_node_touchable(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool touchable);
+
+        /// <summary>
+        ///  设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=0（Tab 链 0 组）；
+        ///  false → tabindex=-1（Tab 链/点击聚焦排除，编程 Focus() 仍可用——DOM 语义）。
+        ///  null 句柄 / 节点缺失 → no-op。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_node_focusable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_node_focusable(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool focusable);
+
+        /// <summary>
+        ///  设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_reuse_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_reuse_key(StageHandle* h, ulong node_id, uint key);
+
+        /// <summary>
+        ///  克隆场景内子树（游离根，不挂树）。返回新 node_id；u64::MAX = err / null 句柄 / 无效 src。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_clone_subtree", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_clone_subtree(StageHandle* h, ulong src);
+
+        /// <summary>
+        ///  建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；u64::MAX = 失败。
+        ///
+        ///  null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
+        ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_create_root", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_create_root(StageHandle* h, byte* kind, nuint kind_len, byte* css, nuint css_len);
+
+        /// <summary>
+        ///  建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；u64::MAX = 失败。
+        ///  需配合 append_child/insert_before 挂到树。
+        ///
+        ///  null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_create_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong loomgui_stage_create_node(StageHandle* h, byte* kind, nuint kind_len, byte* css, nuint css_len);
+
+        /// <summary>
+        ///  挂子到 parent 末尾。child 必须当前无父。0=ok，-1=err。null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_append_child", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_append_child(StageHandle* h, ulong parent, ulong child);
+
+        /// <summary>
+        ///  在 parent.children 中 ref_id 之前插 child。ref_id=u64::MAX（INVALID）→ 末尾追加。
+        ///  0=ok，-1=err。null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_insert_before", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_insert_before(StageHandle* h, ulong parent, ulong child, ulong ref_id);
+
+        /// <summary>
+        ///  摘子（不删节点）：从 parent.children 移除 + child.parent=None。节点仍 live 可重挂。
+        ///  0=ok，-1=err。null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_child", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_remove_child(StageHandle* h, ulong parent, ulong child);
+
+        /// <summary>
+        ///  删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
+        ///  该 NodeId 句柄此后失效（gen++）。无 scene / 越界 → no-op。返 0（恒成功，no-op 语义）。
+        ///  null 句柄 → 0（no-op，不 panic）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_remove_node(StageHandle* h, ulong node);
+
+        /// <summary>
+        ///  改 Text 节点 content + 标 dirty_text。text = UTF-8 字节。0=ok，-1=err。
+        ///  非 Text 节点 → -1（Stage::set_text Err）。null 句柄 → -1。
+        ///
+        ///  null text 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_text(StageHandle* h, ulong node, byte* text, nuint len);
+
+        /// <summary>
+        ///  重启子树内声明式动画（class 触发 keyframes；programmatic node.Play player 不动）。
+        ///  下帧 sync 依声明重建 player（delay 重计、backwards/both 立即写首帧）。
+        ///  0=ok，-1=err（null 句柄 / node 不 live / 无 scene）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_restart_animations", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_restart_animations(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
+        ///  非 Image 节点 → -1。null 句柄 → -1。
+        ///
+        ///  null src 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_src", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_src(StageHandle* h, ulong node, byte* src, nuint len);
+
+        /// <summary>
+        ///  写 inline override（便签层，优先级 &gt; 动态规则 &gt; base_style）。css = UTF-8 字节。
+        ///  0=ok，-1=err（null 句柄 / 非 UTF-8 / 节点不 live）。下帧 rematch 应用。
+        ///
+        ///  null css 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_inline_override(StageHandle* h, ulong node, byte* css, nuint len);
+
+        /// <summary>
+        ///  清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
+        ///  prop 不可 inline 时为 no-op（仍返 0）。
+        ///
+        ///  null prop 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_unset_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_unset_inline_override(StageHandle* h, ulong node, byte* prop, nuint len);
+
+        /// <summary>
+        ///  加 class（重复名不重复 push）。name = UTF-8 字节。0=ok，-1=err。
+        ///  标 dirty_mesh 触发下帧 rematch。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_add_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_add_class(StageHandle* h, ulong node, byte* name, nuint len);
+
+        /// <summary>
+        ///  移除 class（全部匹配）。name = UTF-8 字节。0=ok，-1=err。标 dirty_mesh。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_remove_class(StageHandle* h, ulong node, byte* name, nuint len);
+
+        /// <summary>
+        ///  查询 class 是否存在。返回 i32：1 = true；0 = false；-1 = err（null 句柄 / 节点不 live）。
+        ///  name = UTF-8 字节，非 UTF-8 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_has_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_has_class(StageHandle* h, ulong node, byte* name, nuint len);
+
+        /// <summary>
+        ///  设节点 user transform（位移/缩放/旋转/原点）。走 `set_user_transform`（dynamic.rs）：
+        ///  只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
+        ///  世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
+        ///  `ox/oy` = 旋转/缩放原点（local 坐标 px），连接 C# `NodeTransform.Origin`。
+        ///  不 live 节点 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_transform", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_transform(StageHandle* h, ulong node_id, float tx, float ty, float sx, float sy, float rot, float ox, float oy);
+
+        /// <summary>
+        ///  设控件 value（ProgressBar / Slider）。ProgressBar clamp [0, max]；
+        ///  Slider clamp [min, max] 并按 step 量化。非 value 控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_value(StageHandle* h, ulong node_id, float value);
+
+        /// <summary>
+        ///  读控件 value（ProgressBar / Slider）。rc=0 且 *out 已填；非 value 控件 / null out /
+        ///  节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_value(StageHandle* h, ulong node_id, float* @out);
+
+        /// <summary>
+        ///  设控件 checked（Toggle / Radio）。非 check 控件 / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_checked", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_checked(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool @checked);
+
+        /// <summary>
+        ///  读控件 checked（Toggle / Radio）。rc=0 且 *out 已填；非 check 控件 / null out /
+        ///  节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_checked", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_checked(StageHandle* h, ulong node_id, bool* @out);
+
+        /// <summary>
+        ///  设控件 max（ProgressBar / Slider / NumberField）。null 句柄 / 非值控件 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_max", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_max(StageHandle* h, ulong node_id, float max);
+
+        /// <summary>
+        ///  读控件 max（ProgressBar / Slider / NumberField）。非值控件 / null out / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_max", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_max(StageHandle* h, ulong node_id, float* @out);
+
+        /// <summary>
+        ///  设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
+        ///  null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_min", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_min(StageHandle* h, ulong node_id, float min);
+
+        /// <summary>
+        ///  读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_min", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_min(StageHandle* h, ulong node_id, float* @out);
+
+        /// <summary>
+        ///  设控件 step（Slider / NumberField；ProgressBar 无 step 语义 → -1）。
+        ///  null 句柄 / 节点缺失 → -1。改 step 不重量化 value（对齐 Slider arm：量化只在
+        ///  set value 时发生，改步长只影响后续写入）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_step(StageHandle* h, ulong node_id, float step);
+
+        /// <summary>
+        ///  读控件 step（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_step(StageHandle* h, ulong node_id, float* @out);
+
+        /// <summary>
+        ///  读 ProgressBar indeterminate（不确定进度态）。非 Progress / null out / 节点缺失 → -1。
+        ///  纯状态位（视觉由作者 CSS 表达，core 不做 marquee 渲染）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_indeterminate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_indeterminate(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  设 ProgressBar indeterminate。写状态位（value/max 不动——不确定态下 value 语义由
+        ///  caller 自定，CSS 视觉切换走作者选择器）。非 Progress / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_indeterminate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_indeterminate(StageHandle* h, ulong node_id, byte v);
+
+        /// <summary>
+        ///  读 RadioButton 分组名（HTML name 语义：同名组互斥，打包期从 data-name bake）。
+        ///  return-code + out-param（ptr+len）双调法，同 get_control_text：buf_cap 足够 → rc=0；
+        ///  不够 → rc=-2 + *out_len=所需（caller 扩容重调）；非 Radio / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_radio_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_radio_name(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读 Dropdown 当前选中项的 value（`value` 属性优先，缺席回落该项文本——HTML 语义）。
+        ///  return-code + out-param（ptr+len）双调法，同 get_radio_name：buf_cap 足够 → rc=0；
+        ///  不够 → rc=-2 + *out_len=所需；非 Dropdown / null 句柄 → -1；无选项（value 为 null
+        ///  语义）→ rc=1（*out_len=0，不写 buf）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_selected_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_dropdown_selected_value(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读单个 option 的 value（同 dropdown_selected_value 的 fallback 语义，按 option
+        ///  自身序号取）。双调法同上；非 option / 上溯无 Dropdown / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_option_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_option_value(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  option 是否为所属 Dropdown 的当前选中项（合成：序号 == 父 selected_index）。
+        ///  1=选中，0=未选中，-1=非 option / 上溯无 Dropdown / null 句柄。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_is_option_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_is_option_selected(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  option 在其所属 Dropdown 的声明序（0 基，与 selected_index / 键盘 seek 同口径）。
+        ///  -1 = 非 option / 上溯无 Dropdown / null 句柄。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_option_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_option_index(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，与
+        ///  aria-selected 派生同源）。1=激活，0=未激活，-1=非 tab / 上溯无 TabList / null 句柄。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_is_tab_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_is_tab_selected(StageHandle* h, ulong node_id);
+
+        /// <summary>
+        ///  读 Dropdown 当前选中项索引（`ControlState::Dropdown.selected_index`）。
+        ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_dropdown_selected_index(StageHandle* h, ulong node_id, uint* @out);
+
+        /// <summary>
+        ///  设 Dropdown 选中项。置 `value_lock=true` 防本轮 cascade 回写（popup option 子项的
+        ///  selected 类规则在 rematch 阶段读 value_lock 跳过回写）。事件发射（EVT_SELECTION_CHANGED）
+        ///  在 tick，非此处——照 ValueChanged 模式。非 Dropdown / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_dropdown_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_dropdown_selected_index(StageHandle* h, ulong node_id, uint index);
+
+        /// <summary>
+        ///  读 TabList 当前选中项索引（`ControlState::TabList.selected_index`）。
+        ///  非 TabList / null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_tablist_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_tablist_selected_index(StageHandle* h, ulong node_id, uint* @out);
+
+        /// <summary>
+        ///  设 TabList 选中项。TabList 无 `value_lock`（aria-selected 是只读合成属性，无 cascade
+        ///  回写环，与 Dropdown 不同）。事件发射（EVT_SELECTION_CHANGED）在 tick（on_pointer_down/键盘），
+        ///  非此处——本 setter 仅 host 驱动的程序化改态。非 TabList / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_tablist_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_tablist_selected_index(StageHandle* h, ulong node_id, uint index);
+
+        /// <summary>
+        ///  读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
+        ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_dropdown_open(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  设 Dropdown popup 展开态。非 Dropdown / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_dropdown_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_dropdown_open(StageHandle* h, ulong node_id, byte open);
+
+        /// <summary>
+        ///  读 NumberField 数值（解析 `EditState.value` 文本→f32）。解析失败 / 非 NumberField /
+        ///  null 句柄 / 节点缺失 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_number_value(StageHandle* h, ulong node_id, float* @out);
+
+        /// <summary>
+        ///  设 NumberField 数值：先 clamp[min,max]（纵深守卫 min&gt;max 不 panic），再 step 量化对齐
+        ///  （step&gt;0 时 round((v-min)/step)*step+min，量化后重 clamp 回区间），最后把量化值格式化为
+        ///  文本写回 `EditState.value`（保持 value 文本与数值约束一致，与 Slider set_control_value
+        ///  同口径，只是 Slider 存 f32 而 NumberField 存文本）。step&lt;=0 跳过量化。
+        ///  非 NumberField / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_number_value(StageHandle* h, ulong node_id, float value);
 
         /// <summary>
         ///  注入本帧字符输入（UTF-32 codepoints 数组，已 shift-mapped 的可打印字符）。tick 前调。
@@ -383,7 +972,7 @@ namespace LoomGUI.Bindings
         ///  **常驻（不 gate）：**IME 是 runtime 稳定入口。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_composition", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_composition(StageHandle* h, uint node, byte* text, nuint text_len, nuint pos);
+        internal static extern int loomgui_stage_set_composition(StageHandle* h, ulong node, byte* text, nuint text_len, nuint pos);
 
         /// <summary>
         ///  提交文本控件的 composition（落定进 value）。返 1 = 有 composition 且 value 改变；
@@ -393,20 +982,7 @@ namespace LoomGUI.Bindings
         ///  **常驻（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_commit_composition", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_commit_composition(StageHandle* h, uint node);
-
-        /// <summary>
-        ///  注册宿主剪贴板回调。set_fn/get_fn = 后端实现的剪贴板桥（如 Unity
-        ///  GUIUtility.systemCopyBuffer）：set 收 (ptr,len) UTF-8 字节拷走，get 写 (out_ptr,out_len)
-        ///  返宿主持有的缓冲区（活到下次 get）。传 null 解除注册。
-        ///
-        ///  core 是 cdylib，不能 extern 调宿主符号——故走回调注册。后端应在 Stage 启动后尽早
-        ///  注册一次。未注册时 Ctrl+C/X 仍走（写丢），Ctrl+V 读空串（no-op）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_register_clipboard", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_register_clipboard(loomgui_register_clipboard_set_fn_delegate set_fn, loomgui_register_clipboard_get_fn_delegate get_fn);
+        internal static extern int loomgui_stage_commit_composition(StageHandle* h, ulong node);
 
         /// <summary>
         ///  读文本控件光标的世界矩形（IME 候选窗定位用，照 Unity Input.compositionCursorPos）。
@@ -418,208 +994,154 @@ namespace LoomGUI.Bindings
         ///  **常驻（不 gate）。**
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_cursor_rect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_cursor_rect(StageHandle* h, uint node, CursorRectRepr* @out);
+        internal static extern int loomgui_stage_get_cursor_rect(StageHandle* h, ulong node, CursorRectRepr* @out);
 
         /// <summary>
-        ///  注入本帧滚轮事件（扁平 WheelEvent 数组）。tick 前调；**累积式**（多次调合并）。
-        ///  null/len=0 = 本帧无滚轮（直接 return，不清空——与 set_key_input 不同；累积语义）。
+        ///  设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到
+        ///  末尾（不走 insert_text 的光标插入路径——这是编程 setter，照 JS `.value = ...` 语义）。
+        ///  改变时产 ValueChanged（经 Stage.pending_events 缓冲，下 tick 入 last_events）。
+        ///  readonly 不拦（编程可写，照 HTML JS 语义）；非文本控件 / null 句柄 → -1。
         ///
-        ///  **常驻（不 gate）：**输入是 runtime 稳定入口。
+        ///  **常驻（不 gate）。**
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_wheel_input", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_wheel_input(StageHandle* h, WheelEvent* events, nuint len);
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_text(StageHandle* h, ulong node_id, byte* text, nuint len);
 
         /// <summary>
-        ///  driver 启动时把所有 atlas.json 合并出的图尺寸批量灌入（一次调用，非逐条）。
-        ///  paths_ptr: count 个 C 字符串指针；ws/hs: count 个 u32。任一为 null 或 count=0 → no-op。
-        ///  首帧 solve 前调（启动加载阶段）。FFI 入口不 panic。
+        ///  读文本控件 value（TextField / TextArea）。return-code + out-param（ptr+len）双调法：
+        ///  buf_cap 足够 → rc=0，写入 buf[..*out_len]；buf_cap 不够 → rc=-2，*out_len = 所需字节数
+        ///  （caller 扩容重调）；非文本控件 / null 句柄 → -1。buf_cap=0 探大小 → rc=-2 + 所需 len。
+        ///
+        ///  **常驻（不 gate）。**
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_image_sizes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_image_sizes(StageHandle* h, byte** paths_ptr, uint* ws, uint* hs, nuint count);
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_text(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  设文本控件选区 (anchor, cursor)（字节偏移）。反向（anchor&gt;cursor）允许，get_selection
+        ///  会归一。越界偏移 clamp 到 [0, value.len()]（不 panic）。非文本控件 / null 句柄 → -1。
+        ///  偏移须落在 char 边界——caller 传字节偏移（同 EditState 约定）；越界字节位置 clamp
+        ///  到最近的合法边界（value.len() 总是合法边界）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_selection", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_selection(StageHandle* h, ulong node_id, nuint anchor, nuint cursor);
+
+        /// <summary>
+        ///  读文本控件选区。写入 *start/*end（闭区间，min/max 归一）。有选区 start&lt;end，退化
+        ///  选区 start==end（零宽光标）。非文本控件 / null 句柄 / null out → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_selection", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_selection(StageHandle* h, ulong node_id, nuint* start, nuint* end);
+
+        /// <summary>
+        ///  设文本控件 placeholder（value 为空时渲染它）。非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_placeholder", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_placeholder(StageHandle* h, ulong node_id, byte* text, nuint len);
+
+        /// <summary>
+        ///  读文本控件 placeholder。return-code + out-param（ptr+len）双调法（同 get_control_text）：
+        ///  buf_cap 足够 → rc=0；buf_cap 不够 → rc=-2 + *out_len=所需；非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_placeholder", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_placeholder(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  设文本控件 readonly 标志（true = 用户不可编辑，编程 setter 仍可改 value）。
+        ///  非文本控件 / null 句柄 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_readonly(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool @readonly);
+
+        /// <summary>
+        ///  设文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1。
+        ///  注意：改 max_length 不追溯裁剪现有 value（照 HTML maxlength 语义，只限后续输入）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_set_control_maxlength(StageHandle* h, ulong node_id, nuint max_length);
+
+        /// <summary>
+        ///  读文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1
+        ///  （与 set_control_maxlength 对称——同为 TextField/TextArea 双变体口径）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_maxlength(StageHandle* h, ulong node_id, nuint* @out);
+
+        /// <summary>
+        ///  读文本控件 readonly（`EditState.readonly`）：TextField / TextArea / NumberField 共享 EditState，
+        ///  故三者皆读。非文本控件 / null 句柄 / 节点缺失 / null out → -1；命中且 `*out` 已填则返 0。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_control_readonly(StageHandle* h, ulong node_id, byte* @out);
 
         /// <summary>
         ///  编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
         ///  animated: u8（0=瞬移 1=缓动 cubic-out）。null 句柄 → no-op。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_scroll_pos", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_scroll_pos(StageHandle* h, uint node_id, float x, float y, byte animated);
+        internal static extern void loomgui_stage_set_scroll_pos(StageHandle* h, ulong node_id, float x, float y, byte animated);
 
         /// <summary>
         ///  driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
         ///  null 句柄 → no-op（不 panic）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_set_content_size", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_content_size(StageHandle* h, uint node_id, float w, float height);
+        internal static extern void loomgui_stage_set_content_size(StageHandle* h, ulong node_id, float w, float height);
 
         /// <summary>
         ///  清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
         ///  null 句柄/无效 node → no-op（不 panic）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_clear_content_size_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_clear_content_size_override(StageHandle* h, uint node_id);
+        internal static extern void loomgui_stage_clear_content_size_override(StageHandle* h, ulong node_id);
 
         /// <summary>
         ///  读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
         ///  out_x/out_y 是 out 参数（C# 传 ref float）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_scroll_pos", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_get_scroll_pos(StageHandle* h, uint node_id, float* out_x, float* out_y);
-
-        /// <summary>
-        ///  读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_layout_rect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_get_node_layout_rect(StageHandle* h, uint node_id, float* out_x, float* out_y, float* out_w, float* out_h);
-
-        /// <summary>
-        ///  读节点 world transform（compute_world_transforms 产物）。null/无效 → 写 identity。
-        ///  out: a,b,c,d,tx,ty（6 个 f32，Affine2 列主序）。对齐 get_node_layout_rect 惯例
-        ///  （独立 *mut out + 无状态码 + null/无效写默认）。空 div（merge_meshes 后 RenderNode
-        ///  消失）仍可查——world_transforms 保留全节点（与 node_sort_keys 同）。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_world_matrix", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_get_node_world_matrix(StageHandle* h, uint node_id, float* out_a, float* out_b, float* out_c, float* out_d, float* out_tx, float* out_ty);
-
-        /// <summary>
-        ///  读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_sort_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_get_node_sort_key(StageHandle* h, uint node_id, uint* @out);
-
-        /// <summary>
-        ///  读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_visible", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_get_node_visible(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  读节点语义类型。return code：0 = ok 且 `*out` = kind 判别值；非 0 = 失败（节点不存在
-        ///  或 `out` = null）。不用 `-&gt; u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，
-        ///  会与「不存在」撞。`NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_kind", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_kind(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  读节点 HTML `id` 属性（authoring id；未声明 → rc=0 + len=0 空串）。
-        ///  return-code + out-param（ptr+len）双调法（同 get_control_text）：buf_cap 足够 →
-        ///  rc=0 写 buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 /
-        ///  无 scene / 死节点 → rc=-1。调试探针（pick 命中链）与 authoring id 读取用。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_id_attr", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_id_attr(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  读节点 computed opacity（rematch 后 style.opacity，与渲染/命中同源）。
-        ///  调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
-        ///  rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_opacity", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_opacity(StageHandle* h, uint node_id, float* @out);
-
-        /// <summary>
-        ///  读节点 class 列表（空格 join；无 class → rc=0 + len=0）。双调法同
-        ///  [`loomgui_stage_get_node_id_attr`]。调试探针用（ClassList 公共面是
-        ///  Contains/Add 族，无全量枚举——本出口补齐只读枚举）。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_classes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_classes(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
-        ///  或 `out` = null）。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_computed_style", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_node_computed_style(StageHandle* h, uint node_id, ComputedNodeStyleRepr* @out);
-
-        /// <summary>
-        ///  拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_dirty_pages", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern nuint loomgui_stage_font_atlas_dirty_pages(StageHandle* h, uint* @out, nuint max);
-
-        /// <summary>
-        ///  读某页 R8 像素 + 尺寸。buf_len 不够返所需大小（双调法：先传小 buf 探大小）。
-        ///  无此页 / null 句柄 / null out_buf → 返 0。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_page", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern nuint loomgui_stage_font_atlas_page(StageHandle* h, uint page, uint* out_w, uint* out_h, byte* out_buf, nuint buf_len);
-
-        /// <summary>
-        ///  清脏页（backend 拉完后调）。null 句柄 → no-op。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_clear_dirty", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_font_atlas_clear_dirty(StageHandle* h);
-
-        /// <summary>
-        ///  设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_reuse_key", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_set_reuse_key(StageHandle* h, uint node_id, uint key);
-
-        /// <summary>
-        ///  克隆场景内子树（游离根，不挂树）。返回新 node_id；0xFFFF_FFFF = err / null 句柄 / 无效 src。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_clone_subtree", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_clone_subtree(StageHandle* h, uint src);
-
-        /// <summary>
-        ///  编程聚焦节点（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
-        ///  （含 tabindex=None/-1）；disabled 拒；越界跳过。null 句柄 → no-op。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_request_focus", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_request_focus(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  读当前焦点节点。无焦点/无 scene → 0xFFFF_FFFF（sentinel，同 node_parent）。null 句柄 → sentinel。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_focused_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_focused_node(StageHandle* h);
-
-        /// <summary>
-        ///  全局 shutdown（Domain reload hook）。C# `LoomStage.ResetStatics`（SubsystemRegistration）调用。
-        ///
-        ///  当前核心无全局 native 态——Stage 是 per-handle（`loomgui_stage_free` drop 全部 Stage 拥有的内存），
-        ///  故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
-        ///  此处自动成为清理入口，无需再改 C# 接线。
-        ///
-        ///  **注意：Font 的 `Box::leak`（`text/layout.rs`）是真泄漏**——`bytes.clone()` 后 leak 取
-        ///  `'static` 切片喂 ttf-parser Face，原 Vec 虽被 `_bytes` 持有但与 leaked 切片不是同一份，
-        ///  Stage drop 时 `_bytes` 释放的是 clone 来源而非 leaked 副本。每次 Stage 创建都 leak 一份字体字节，
-        ///  不可由 shutdown 回收（leak 切片无 handle 跟踪）。若未来域重载内存观测触发阈值，
-        ///  再考虑字体缓存化为进程单例。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_shutdown", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_shutdown();
+        internal static extern void loomgui_stage_get_scroll_pos(StageHandle* h, ulong node_id, float* out_x, float* out_y);
 
         /// <summary>
         ///  注册 tween。start/end 指向 ≥value_size 个 f32（value_size 由 prop 隐含）。
         ///  null 句柄/null 指针 → no-op。越界 node / duration&lt;=0 由 core update 处理（跳过/立即 complete）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_tween", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_tween(StageHandle* h, uint node_id, uint prop, float* start, float* end, float duration, uint ease, float delay, uint tag);
+        internal static extern void loomgui_stage_tween(StageHandle* h, ulong node_id, uint prop, float* start, float* end, float duration, uint ease, float delay, uint tag);
 
         /// <summary>
         ///  停该节点该 prop 的 tween（override 保留末值）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_kill_tween", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_kill_tween(StageHandle* h, uint node_id, uint prop);
+        internal static extern void loomgui_stage_kill_tween(StageHandle* h, ulong node_id, uint prop);
 
         /// <summary>
         ///  清该节点所有动画 override（回 CSS）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_clear_anim", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_clear_anim(StageHandle* h, uint node_id);
+        internal static extern void loomgui_stage_clear_anim(StageHandle* h, ulong node_id);
 
         /// <summary>
         ///  清该节点某 prop 对应通道（回 CSS）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_clear_anim_prop", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_clear_anim_prop(StageHandle* h, uint node_id, uint prop);
+        internal static extern void loomgui_stage_clear_anim_prop(StageHandle* h, ulong node_id, uint prop);
 
         /// <summary>
         ///  程序化启动 @keyframes 动画（spec §7.3 `play_animation`）。
@@ -632,7 +1154,7 @@ namespace LoomGUI.Bindings
         ///  立即写首帧（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_play_animation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern ulong loomgui_stage_play_animation(StageHandle* h, uint node, byte* name, nuint name_len);
+        internal static extern ulong loomgui_stage_play_animation(StageHandle* h, ulong node, byte* name, nuint name_len);
 
         /// <summary>
         ///  同 `loomgui_stage_play_animation`，显式指定时长（秒）。duration_s ≤ 0 / NaN 按 1s
@@ -640,7 +1162,7 @@ namespace LoomGUI.Bindings
         ///  keyframes 无声明层时长，程序化播放节奏由调用方给。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_play_animation_dur", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern ulong loomgui_stage_play_animation_dur(StageHandle* h, uint node, byte* name, nuint name_len, float duration_s);
+        internal static extern ulong loomgui_stage_play_animation_dur(StageHandle* h, ulong node, byte* name, nuint name_len, float duration_s);
 
         /// <summary>
         ///  暂停 player（Playing → Paused，elapsed 冻结位置保持）。key 无效 / 非 Playing → no-op。
@@ -693,545 +1215,29 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_animation_on_key(StageHandle* h, ulong key, float pct);
 
         /// <summary>
-        ///  建根节点并设为 roots[0]。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
-        ///
-        ///  null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
-        ///
-        ///  **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_create_root", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_create_root(StageHandle* h, byte* kind, nuint kind_len, byte* css, nuint css_len);
-
-        /// <summary>
-        ///  建节点（不挂父）。kind/css = UTF-8 字节。返 NodeId；0xFFFF_FFFF = 失败。
-        ///  需配合 append_child/insert_before 挂到树。
-        ///
-        ///  null 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_create_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern uint loomgui_stage_create_node(StageHandle* h, byte* kind, nuint kind_len, byte* css, nuint css_len);
-
-        /// <summary>
-        ///  挂子到 parent 末尾。child 必须当前无父。0=ok，-1=err。null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_append_child", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_append_child(StageHandle* h, uint parent, uint child);
-
-        /// <summary>
-        ///  在 parent.children 中 ref_id 之前插 child。ref_id=0xFFFF_FFFF（INVALID）→ 末尾追加。
-        ///  0=ok，-1=err。null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_insert_before", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_insert_before(StageHandle* h, uint parent, uint child, uint ref_id);
-
-        /// <summary>
-        ///  摘子（不删节点）：从 parent.children 移除 + child.parent=None。节点仍 live 可重挂。
-        ///  0=ok，-1=err。null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_child", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_remove_child(StageHandle* h, uint parent, uint child);
-
-        /// <summary>
-        ///  删节点（递归删子 + 联动清 anim/scroll/tween + slotmap remove）。
-        ///  该 NodeId 句柄此后失效（gen++）。无 scene / 越界 → no-op。返 0（恒成功，no-op 语义）。
-        ///  null 句柄 → 0（no-op，不 panic）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_remove_node(StageHandle* h, uint node);
-
-        /// <summary>
-        ///  改 Text 节点 content + 标 dirty_text。text = UTF-8 字节。0=ok，-1=err。
-        ///  非 Text 节点 → -1（Stage::set_text Err）。null 句柄 → -1。
-        ///
-        ///  null text 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_text(StageHandle* h, uint node, byte* text, nuint len);
-
-        /// <summary>
-        ///  重启子树内声明式动画（class 触发 keyframes；programmatic node.Play player 不动）。
-        ///  下帧 sync 依声明重建 player（delay 重计、backwards/both 立即写首帧）。
-        ///  0=ok，-1=err（null 句柄 / node 不 live / 无 scene）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_restart_animations", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_restart_animations(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  改 Image 节点 src + 标 dirty_mesh。src = UTF-8 字节。0=ok，-1=err。
-        ///  非 Image 节点 → -1。null 句柄 → -1。
-        ///
-        ///  null src 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_src", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_src(StageHandle* h, uint node, byte* src, nuint len);
-
-        /// <summary>
-        ///  写 inline override（便签层，优先级 &gt; 动态规则 &gt; base_style）。css = UTF-8 字节。
-        ///  0=ok，-1=err（null 句柄 / 非 UTF-8 / 节点不 live）。下帧 rematch 应用。
-        ///
-        ///  null css 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_inline_override(StageHandle* h, uint node, byte* css, nuint len);
-
-        /// <summary>
-        ///  清 inline override 的某 prop bit。prop = UTF-8 字节。0=ok，-1=err。
-        ///  prop 不可 inline 时为 no-op（仍返 0）。
-        ///
-        ///  null prop 指针（含 len=0）兜底为空串（spec §6.1 deferred ②：from_raw_parts(null,0) 是 UB）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_unset_inline_override", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_unset_inline_override(StageHandle* h, uint node, byte* prop, nuint len);
-
-        /// <summary>
-        ///  读节点子节点数。返回 i32：≥0 = 子节点数；-1 = err（null 句柄 / 节点不 live）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_child_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_child_count(StageHandle* h, uint node);
-
-        /// <summary>
-        ///  读节点子节点 NodeId 列表，写入 `out` buffer（u32 per slot）。
-        ///  返回 i32：≥0 = 实际写入数；负值 = err（-1 = null 句柄 / 节点不 live；
-        ///  -(n+2) = buffer 不够，n = 所需 cap）。调用方遇负值重分配 n+ 容量再调。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_children", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_children(StageHandle* h, uint node, uint* @out, nuint cap);
-
-        /// <summary>
-        ///  加 class（重复名不重复 push）。name = UTF-8 字节。0=ok，-1=err。
-        ///  标 dirty_mesh 触发下帧 rematch。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_add_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_add_class(StageHandle* h, uint node, byte* name, nuint len);
-
-        /// <summary>
-        ///  移除 class（全部匹配）。name = UTF-8 字节。0=ok，-1=err。标 dirty_mesh。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_remove_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_remove_class(StageHandle* h, uint node, byte* name, nuint len);
-
-        /// <summary>
-        ///  查询 class 是否存在。返回 i32：1 = true；0 = false；-1 = err（null 句柄 / 节点不 live）。
-        ///  name = UTF-8 字节，非 UTF-8 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_has_class", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_has_class(StageHandle* h, uint node, byte* name, nuint len);
-
-        /// <summary>
-        ///  设控件 value（ProgressBar / Slider）。ProgressBar clamp [0, max]；
-        ///  Slider clamp [min, max] 并按 step 量化。非 value 控件 / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_value(StageHandle* h, uint node_id, float value);
-
-        /// <summary>
-        ///  读控件 value（ProgressBar / Slider）。rc=0 且 *out 已填；非 value 控件 / null out /
-        ///  节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_value(StageHandle* h, uint node_id, float* @out);
-
-        /// <summary>
-        ///  设控件 checked（Toggle / Radio）。非 check 控件 / null 句柄 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_checked", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_checked(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool @checked);
-
-        /// <summary>
-        ///  读控件 checked（Toggle / Radio）。rc=0 且 *out 已填；非 check 控件 / null out /
-        ///  节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_checked", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_checked(StageHandle* h, uint node_id, bool* @out);
-
-        /// <summary>
-        ///  设控件 max（ProgressBar / Slider / NumberField）。null 句柄 / 非值控件 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_max", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_max(StageHandle* h, uint node_id, float max);
-
-        /// <summary>
-        ///  读控件 max（ProgressBar / Slider / NumberField）。非值控件 / null out / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_max", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_max(StageHandle* h, uint node_id, float* @out);
-
-        /// <summary>
-        ///  设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
-        ///  null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_min", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_min(StageHandle* h, uint node_id, float min);
-
-        /// <summary>
-        ///  读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_min", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_min(StageHandle* h, uint node_id, float* @out);
-
-        /// <summary>
-        ///  设控件 step（Slider / NumberField；ProgressBar 无 step 语义 → -1）。
-        ///  null 句柄 / 节点缺失 → -1。改 step 不重量化 value（对齐 Slider arm：量化只在
-        ///  set value 时发生，改步长只影响后续写入）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_step(StageHandle* h, uint node_id, float step);
-
-        /// <summary>
-        ///  读控件 step（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_step", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_step(StageHandle* h, uint node_id, float* @out);
-
-        /// <summary>
-        ///  读 ProgressBar indeterminate（不确定进度态）。非 Progress / null out / 节点缺失 → -1。
-        ///  纯状态位（视觉由作者 CSS 表达，core 不做 marquee 渲染）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_indeterminate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_indeterminate(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  设 ProgressBar indeterminate。写状态位（value/max 不动——不确定态下 value 语义由
-        ///  caller 自定，CSS 视觉切换走作者选择器）。非 Progress / null 句柄 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_indeterminate", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_indeterminate(StageHandle* h, uint node_id, byte v);
-
-        /// <summary>
-        ///  读 RadioButton 分组名（HTML name 语义：同名组互斥，打包期从 data-name bake）。
-        ///  return-code + out-param（ptr+len）双调法，同 get_control_text：buf_cap 足够 → rc=0；
-        ///  不够 → rc=-2 + *out_len=所需（caller 扩容重调）；非 Radio / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_radio_name", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_radio_name(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  读 Dropdown 当前选中项的 value（`value` 属性优先，缺席回落该项文本——HTML 语义）。
-        ///  return-code + out-param（ptr+len）双调法，同 get_radio_name：buf_cap 足够 → rc=0；
-        ///  不够 → rc=-2 + *out_len=所需；非 Dropdown / null 句柄 → -1；无选项（value 为 null
-        ///  语义）→ rc=1（*out_len=0，不写 buf）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_selected_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_dropdown_selected_value(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  读单个 option 的 value（同 dropdown_selected_value 的 fallback 语义，按 option
-        ///  自身序号取）。双调法同上；非 option / 上溯无 Dropdown / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_option_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_option_value(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  option 是否为所属 Dropdown 的当前选中项（合成：序号 == 父 selected_index）。
-        ///  1=选中，0=未选中，-1=非 option / 上溯无 Dropdown / null 句柄。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_is_option_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_is_option_selected(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  option 在其所属 Dropdown 的声明序（0 基，与 selected_index / 键盘 seek 同口径）。
-        ///  -1 = 非 option / 上溯无 Dropdown / null 句柄。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_option_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_option_index(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  tab 是否为所属 TabList 的当前激活项（合成：序号 == 父 selected_index，与
-        ///  aria-selected 派生同源）。1=激活，0=未激活，-1=非 tab / 上溯无 TabList / null 句柄。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_is_tab_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_is_tab_selected(StageHandle* h, uint node_id);
-
-        /// <summary>
-        ///  设文本控件 value（TextField / TextArea）。直接替换 EditState.value + 光标/anchor 移到
-        ///  末尾（不走 insert_text 的光标插入路径——这是编程 setter，照 JS `.value = ...` 语义）。
-        ///  改变时产 ValueChanged（经 Stage.pending_events 缓冲，下 tick 入 last_events）。
-        ///  readonly 不拦（编程可写，照 HTML JS 语义）；非文本控件 / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_text(StageHandle* h, uint node_id, byte* text, nuint len);
-
-        /// <summary>
-        ///  读文本控件 value（TextField / TextArea）。return-code + out-param（ptr+len）双调法：
-        ///  buf_cap 足够 → rc=0，写入 buf[..*out_len]；buf_cap 不够 → rc=-2，*out_len = 所需字节数
-        ///  （caller 扩容重调）；非文本控件 / null 句柄 → -1。buf_cap=0 探大小 → rc=-2 + 所需 len。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_text(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  设文本控件选区 (anchor, cursor)（字节偏移）。反向（anchor&gt;cursor）允许，get_selection
-        ///  会归一。越界偏移 clamp 到 [0, value.len()]（不 panic）。非文本控件 / null 句柄 → -1。
-        ///  偏移须落在 char 边界——caller 传字节偏移（同 EditState 约定）；越界字节位置 clamp
-        ///  到最近的合法边界（value.len() 总是合法边界）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_selection", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_selection(StageHandle* h, uint node_id, nuint anchor, nuint cursor);
-
-        /// <summary>
-        ///  读文本控件选区。写入 *start/*end（闭区间，min/max 归一）。有选区 start&lt;end，退化
-        ///  选区 start==end（零宽光标）。非文本控件 / null 句柄 / null out → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_selection", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_selection(StageHandle* h, uint node_id, nuint* start, nuint* end);
-
-        /// <summary>
-        ///  设文本控件 placeholder（value 为空时渲染它）。非文本控件 / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_placeholder", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_placeholder(StageHandle* h, uint node_id, byte* text, nuint len);
-
-        /// <summary>
-        ///  读文本控件 placeholder。return-code + out-param（ptr+len）双调法（同 get_control_text）：
-        ///  buf_cap 足够 → rc=0；buf_cap 不够 → rc=-2 + *out_len=所需；非文本控件 / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_placeholder", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_placeholder(StageHandle* h, uint node_id, byte* @out, nuint buf_cap, nuint* out_len);
-
-        /// <summary>
-        ///  设文本控件 readonly 标志（true = 用户不可编辑，编程 setter 仍可改 value）。
-        ///  非文本控件 / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_readonly(StageHandle* h, uint node_id, [MarshalAs(UnmanagedType.U1)] bool @readonly);
-
-        /// <summary>
-        ///  设文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1。
-        ///  注意：改 max_length 不追溯裁剪现有 value（照 HTML maxlength 语义，只限后续输入）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_control_maxlength(StageHandle* h, uint node_id, nuint max_length);
-
-        /// <summary>
-        ///  读文本控件 max_length（UTF-8 字符上限；0 = 无限）。非文本控件 / null 句柄 → -1
-        ///  （与 set_control_maxlength 对称——同为 TextField/TextArea 双变体口径）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_maxlength", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_maxlength(StageHandle* h, uint node_id, nuint* @out);
-
-        /// <summary>
-        ///  设节点 user transform（位移/缩放/旋转/原点）。走 `set_user_transform`（dynamic.rs）：
-        ///  只写 `node.user_transform`，不触发 layout solve——`compute_world_transforms` 在
-        ///  世界矩阵累计时并入（渲染/命中层，同 CSS transform）。供高频拖拽等运行时定位用。
-        ///  `ox/oy` = 旋转/缩放原点（local 坐标 px），连接 C# `NodeTransform.Origin`。
-        ///  不 live 节点 / null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_transform", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_transform(StageHandle* h, uint node_id, float tx, float ty, float sx, float sy, float rot, float ox, float oy);
-
-        /// <summary>
-        ///  读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。
-        ///  与 `loomgui_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_node_disabled", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_get_node_disabled(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  读文本控件 readonly（`EditState.readonly`）：TextField / TextArea / NumberField 共享 EditState，
-        ///  故三者皆读。非文本控件 / null 句柄 / 节点缺失 / null out → -1；命中且 `*out` 已填则返 0。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_control_readonly(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  清除当前 focus（`Stage::blur` 的 FFI 包装）：记 pending_focus_request = Some(None)，
-        ///  下 tick 消费清焦点（与 `request_focus` 对称）。null 句柄 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_blur", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_blur(StageHandle* h);
-
-        /// <summary>
-        ///  读 Dropdown 当前选中项索引（`ControlState::Dropdown.selected_index`）。
-        ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_dropdown_selected_index(StageHandle* h, uint node_id, uint* @out);
-
-        /// <summary>
-        ///  设 Dropdown 选中项。置 `value_lock=true` 防本轮 cascade 回写（popup option 子项的
-        ///  selected 类规则在 rematch 阶段读 value_lock 跳过回写）。事件发射（EVT_SELECTION_CHANGED）
-        ///  在 tick，非此处——照 ValueChanged 模式。非 Dropdown / null 句柄 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_dropdown_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_dropdown_selected_index(StageHandle* h, uint node_id, uint index);
-
-        /// <summary>
-        ///  读 TabList 当前选中项索引（`ControlState::TabList.selected_index`）。
-        ///  非 TabList / null 句柄 / 节点缺失 / null out → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_tablist_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_tablist_selected_index(StageHandle* h, uint node_id, uint* @out);
-
-        /// <summary>
-        ///  设 TabList 选中项。TabList 无 `value_lock`（aria-selected 是只读合成属性，无 cascade
-        ///  回写环，与 Dropdown 不同）。事件发射（EVT_SELECTION_CHANGED）在 tick（on_pointer_down/键盘），
-        ///  非此处——本 setter 仅 host 驱动的程序化改态。非 TabList / null 句柄 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_tablist_selected_index", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_tablist_selected_index(StageHandle* h, uint node_id, uint index);
-
-        /// <summary>
-        ///  读 Dropdown popup 是否展开（`ControlState::Dropdown.open`）。
-        ///  非 Dropdown / null 句柄 / 节点缺失 / null out → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_dropdown_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_dropdown_open(StageHandle* h, uint node_id, byte* @out);
-
-        /// <summary>
-        ///  设 Dropdown popup 展开态。非 Dropdown / null 句柄 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_dropdown_open", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_dropdown_open(StageHandle* h, uint node_id, byte open);
-
-        /// <summary>
-        ///  读 NumberField 数值（解析 `EditState.value` 文本→f32）。解析失败 / 非 NumberField /
-        ///  null 句柄 / 节点缺失 / null out → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_get_number_value(StageHandle* h, uint node_id, float* @out);
-
-        /// <summary>
-        ///  设 NumberField 数值：先 clamp[min,max]（纵深守卫 min&gt;max 不 panic），再 step 量化对齐
-        ///  （step&gt;0 时 round((v-min)/step)*step+min，量化后重 clamp 回区间），最后把量化值格式化为
-        ///  文本写回 `EditState.value`（保持 value 文本与数值约束一致，与 Slider set_control_value
-        ///  同口径，只是 Slider 存 f32 而 NumberField 存文本）。step&lt;=0 跳过量化。
-        ///  非 NumberField / null 句柄 / 节点缺失 → -1。
-        ///
-        ///  **常驻（不 gate）。**
-        /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_set_number_value(StageHandle* h, uint node_id, float value);
-
-        /// <summary>
         ///  设 ListView 的项数。首次调用若该 node 尚未进入数据驱动模式（无 ListState 条目），
         ///  自动 enter_data_driven（取备用模板 = 第一个设计期 li、分配全局 list_ordinal）。
         ///  这避免 C# 侧需显式调 enter——ItemCount 是业务进入虚拟化的唯一入口。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_set_item_count", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_set_item_count(StageHandle* h, uint node, int count);
+        internal static extern int loomgui_list_set_item_count(StageHandle* h, ulong node, int count);
 
         /// <summary>
         ///  设 ListView 的模板根（覆盖 enter_data_driven 备份的备用 li）。业务通过
         ///  ListView.ItemTemplate 设——指向场景内克隆出的模板子树根。无 ListState 条目 → -1。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_set_template", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_set_template(StageHandle* h, uint node, uint template_node);
+        internal static extern int loomgui_list_set_template(StageHandle* h, ulong node, ulong template_node);
 
         /// <summary>
         ///  拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，
-        ///  拍平成 (node_id[], item_index[]) 两列，cap 限 copy 上限。调用方按 out_nodes[i] 的
+        ///  拍平成 (node_id[], item_index[]) 两列（node_id 为 u64），cap 限 copy 上限。调用方按 out_nodes[i] 的
         ///  node_id 反查其 ListView 祖先实例调 BindItem。cap 不足时不丢 bind——只取装得下的部分，
         ///  余条留在各 ListView 队列里等下一帧再取（走 `drain_pending_binds_bounded` 而非全取）。
         ///  任一指针 null → -1；out_len 写实际返回条数。各参数 null 句柄 guard 在最前。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_take_pending_binds", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_take_pending_binds(StageHandle* h, uint* out_nodes, int* out_indices, uint cap, uint* out_len);
+        internal static extern int loomgui_list_take_pending_binds(StageHandle* h, ulong* out_nodes, int* out_indices, uint cap, uint* out_len);
 
         /// <summary>
         ///  同帧推进虚拟化管线（plan+execute，不取 binds 队列——C# `DrainPendingBinds` 取）。
@@ -1239,7 +1245,7 @@ namespace LoomGUI.Bindings
         ///  同帧克隆、binds 入队等 C# 消费，避免首帧模板原样。null 句柄 → -1；成功 → 0。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_drain_now", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_drain_now(StageHandle* h, uint node);
+        internal static extern int loomgui_list_drain_now(StageHandle* h, ulong node);
 
         /// <summary>
         ///  刷新指定区间当前可见（active）的 slot（重新入 pending_binds，C# 下帧重新 BindItem）。
@@ -1247,7 +1253,7 @@ namespace LoomGUI.Bindings
         ///  start/count：负值拒（越界）。0=ok，-1=err（null 句柄 / 非 ListView / 越界）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_refresh", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_refresh(StageHandle* h, uint node, int start, int count);
+        internal static extern int loomgui_list_refresh(StageHandle* h, ulong node, int start, int count);
 
         /// <summary>
         ///  增删搬通知（单 FFI 多 op，spec §10）。a/b 语义随 op：
@@ -1258,47 +1264,41 @@ namespace LoomGUI.Bindings
         ///  返 0=ok，-1=err（null 句柄 / 未知 op / 越界）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_notify", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_notify(StageHandle* h, uint node, byte op, int a, int b);
+        internal static extern int loomgui_list_notify(StageHandle* h, ulong node, byte op, int a, int b);
 
         /// <summary>
         ///  滚动到指定 item。index 越界 / 负值 → -1。behavior：0=Instant，1=Smooth。
         ///  内部 drain_now 让目标 slot 同帧物化；C# 调后需 DrainPendingBinds 把 binds 灌进 BindItem。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_list_scroll_to", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_list_scroll_to(StageHandle* h, uint node, int index, byte behavior);
+        internal static extern int loomgui_list_scroll_to(StageHandle* h, ulong node, int index, byte behavior);
 
         /// <summary>
-        ///  命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
-        ///  NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
-        ///  （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
-        ///  新节点本帧未命中，1 帧延迟语义）。scrollbar thumb sentinel id（V/H_THUMB_FLAG 位）
-        ///  decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中（同
-        ///  apply_wheel_to_hit 口径）。
-        ///
-        ///  **常驻（不 gate）。**
+        ///  driver 启动时把所有 atlas.json 合并出的图尺寸批量灌入（一次调用，非逐条）。
+        ///  paths_ptr: count 个 C 字符串指针；ws/hs: count 个 u32。任一为 null 或 count=0 → no-op。
+        ///  首帧 solve 前调（启动加载阶段）。FFI 入口不 panic。
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_hit_test", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int loomgui_stage_hit_test(StageHandle* h, float x, float y, uint* out_node);
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_set_image_sizes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_set_image_sizes(StageHandle* h, byte** paths_ptr, uint* ws, uint* hs, nuint count);
 
         /// <summary>
-        ///  Rich-text-block 子节点命中细化（spec §10）。
-        ///
-        ///  在 [`loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
-        ///  目标是 rich-text-block 容器之后，用本函数把容器内的点细化到源 inline 节点
-        ///  （span / TextNode / Image），供后端 firing span 级点击事件。
-        ///
-        ///  - `node_id`：rich-text-block 容器（须 `rich_text_block=true`，且 solve 已为其填
-        ///    `scene.text_layouts[node_id]`）。
-        ///  - `x`/`y`：相对该容器 border-box 左上的 block-local 点（与 hit_test world_to_local 后
-        ///    的本地坐标同空间）。
-        ///  - `out_source`：命中时写 source inline 节点的 NodeId(u32)；未命中不写。null 安全。
-        ///
-        ///  返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
-        ///  `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
+        ///  拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_hit_test_rich", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        [return: MarshalAs(UnmanagedType.U1)]
-        internal static extern bool loomgui_hit_test_rich(StageHandle* h, uint node_id, float x, float y, uint* out_source);
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_dirty_pages", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint loomgui_stage_font_atlas_dirty_pages(StageHandle* h, uint* @out, nuint max);
+
+        /// <summary>
+        ///  读某页 R8 像素 + 尺寸。buf_len 不够返所需大小（双调法：先传小 buf 探大小）。
+        ///  无此页 / null 句柄 / null out_buf → 返 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_page", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint loomgui_stage_font_atlas_page(StageHandle* h, uint page, uint* out_w, uint* out_h, byte* out_buf, nuint buf_len);
+
+        /// <summary>
+        ///  清脏页（backend 拉完后调）。null 句柄 → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_font_atlas_clear_dirty", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_font_atlas_clear_dirty(StageHandle* h);
 
 
     }
@@ -1309,19 +1309,6 @@ namespace LoomGUI.Bindings
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct StageHandle
     {
-    }
-
-    /// <summary>
-    ///  光标世界矩形（IME 候选窗定位用）。#[repr(C)] POD，4 × f32 = 16B。后端读 [`crate::CursorRectRepr`]
-    ///  定位 Unity Input.compositionCursorPos / Win32 IME 候选窗。
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    internal unsafe partial struct CursorRectRepr
-    {
-        public float x;
-        public float y;
-        public float w;
-        public float h;
     }
 
     /// <summary>
@@ -1346,6 +1333,19 @@ namespace LoomGUI.Bindings
         public byte text_align;
         public float line_height;
         public float letter_spacing;
+    }
+
+    /// <summary>
+    ///  光标世界矩形（IME 候选窗定位用）。#[repr(C)] POD，4 × f32 = 16B。后端读 [`crate::CursorRectRepr`]
+    ///  定位 Unity Input.compositionCursorPos / Win32 IME 候选窗。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct CursorRectRepr
+    {
+        public float x;
+        public float y;
+        public float w;
+        public float h;
     }
 
 

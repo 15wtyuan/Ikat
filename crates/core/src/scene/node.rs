@@ -46,66 +46,69 @@ pub struct NodeInteraction {
     pub tabindex: Option<i32>,
 }
 
-/// 不透明节点句柄。对外 u32（FFI/C# 透明），内部 = 高 20 bit index + 低 12 bit generation。
-/// sentinel 0xFFFF_FFFF = INVALID。index 用于并行数组（anim/scroll/world_transforms）索引，
-/// gen 由 slotmap 校验悬空。
+/// 不透明节点句柄。对外 u64（FFI/C# 透明），位型 = bits[31:0] index + bits[55:32]
+/// generation（24 bit）+ bits[63:56] 合成层标签字节。sentinel `u64::MAX` = INVALID。
+///
+/// **tag 字节是 frame blob 合成 id 命名空间的锚**：真实节点 tag 恒 0；渲染层为同一主节点
+/// 派生的合成 RenderNode（box-shadow 层、文本跨页子页、TextField 编辑反馈/文字层、
+/// scrollbar thumb）把层类型+层内 idx 编进 tag 字节，id 单键贯穿 merge/batch/sort_key/
+/// C# MirrorPool。区段分配真相源 = `render/mod.rs` 合成 id 常量注释。
 ///
 /// **与 slotmap 的衔接**：
 /// slotmap 1.1.1 的 `new_key_type!` 生成的 Key 内部是 `KeyData { idx: u32, version: NonZeroU32 }`
-/// （两字段均私有，仅 `as_ffi()/from_ffi()` 公开），其完整编码是 64 bit，**无法无损装入 u32**。
-/// 而 FFI/C#/FrameBlob/`.pkg.bin` 全程硬约定 `node_id: u32` + sentinel `0xFFFF_FFFF`。
-/// 故不采用 `new_key_type!` 重定义 NodeId，而是保留 `NodeId(pub u32)`（应用层句柄），scene.nodes 用
-/// `SlotMap<DefaultKey, Node>`，由 `Scene::key_for(NodeId)` 经 `KeyData::from_ffi` 桥接到 DefaultKey。
+/// （两字段均私有，仅 `as_ffi()/from_ffi()` 公开），其完整编码是 64 bit。`NodeId` 取其
+/// idx 全宽 32 bit + version 低 24 bit，顶端 8 bit 让给 tag 字节。scene.nodes 用
+/// `SlotMap<DefaultKey, Node>`，由 `Scene::key_for(NodeId)` 经 `KeyData::from_ffi` 桥接。
 ///
-/// 位宽 20/12：index 20 bit（~100 万节点上限）+ generation 12 bit（4096 代，slotmap version ≤ 4095
-/// 时无损；超过时 `key_for` 重构的 KeyData version 截断 → slotmap.get 安全返 None，符合
-/// 「4096 代足够」的容量取舍）。
+/// 位宽 32/24：index 32 bit + generation 24 bit（1670 万代/槽，单槽复用烧穿它不现实；
+/// 越界 debug_assert 兜底）。历史：u32 时代 gen 只有 12 bit（4096 代即回卷），已拓宽。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId(pub u32);
+pub struct NodeId(pub u64);
 
 impl NodeId {
-    /// 无效句柄 sentinel（同 FFI None/0 约定）。
-    pub const INVALID: NodeId = NodeId(0xFFFF_FFFF);
+    /// 无效句柄 sentinel（同 FFI None 约定）。tag=0xFF/idx=0xFFFF_FFFF/gen=0xFFFFFF，
+    /// 真实节点与合成 id 均不产出此值。
+    pub const INVALID: NodeId = NodeId(u64::MAX);
     pub fn is_valid(self) -> bool {
-        self.0 != 0xFFFF_FFFF
+        self.0 != u64::MAX
     }
-    /// slotmap 槽位号（高 20 bit）。并行数组按此索引。
+    /// slotmap 槽位号（bits[31:0]）。并行数组按此索引。
     pub fn index(self) -> usize {
-        (self.0 >> 12) as usize
+        (self.0 & 0xFFFF_FFFF) as usize
     }
-    /// generation（低 12 bit）。slotmap 内部校验用。
-    pub fn gen(self) -> u16 {
-        (self.0 & 0xFFF) as u16
+    /// generation（bits[55:32]，24 bit）。slotmap 内部校验用。
+    pub fn gen(self) -> u32 {
+        ((self.0 >> 32) & 0xFF_FFFF) as u32
+    }
+    /// 合成层标签字节（bits[63:56]）。真实节点恒 0；渲染合成层各占区段
+    /// （真相源：`render/mod.rs` 合成 id 常量注释）。
+    pub fn tag_byte(self) -> u8 {
+        (self.0 >> 56) as u8
     }
 
     /// 从 slotmap DefaultKey 构造 NodeId（insert 后回填 Node.id / roots 用）。
-    /// 编码：index = key.idx（slotmap 槽位号，1..=capacity），gen = key.version 低 12 bit。
+    /// 编码：index = key.idx 全宽（bits[31:0]），gen = key.version 低 24 bit。
     ///
-    /// **12-bit gen 截断是硬约束**：单槽复用超过 ~4096 次后版本回卷，产生活着的
-    /// 「幽灵死节点」（节点 id 字段是回卷值，与槽位真实版本不符，get(id) 永久 miss）。
-    /// 超限时显式 panic（非 debug_assert——release 也要炸，静默数据腐坏比崩溃更糟）。
-    /// 高频改写文本须走 TextNode.Text 就地 set_text（C# TextContent 快路径），
-    /// 勿每帧清子重建烧 generation；根治方向是 NodeId 拓宽 u64 ABI。
+    /// 24-bit gen 上限 1670 万代/槽，正常会话到不了；debug_assert 兜底防静默别名
+    /// （release 静默截断最坏产「幽灵死节点」——get(id) 永久 miss，不会错误命中活节点，
+    /// 因为 slotmap get 还要校验完整 version）。
     pub fn from_key(k: DefaultKey) -> NodeId {
         let ffi = k.data().as_ffi();
-        let idx = (ffi & 0xFFFF_FFFF) as u32;
-        let version = (ffi >> 32) as u32;
-        if version > 0xFFF {
-            panic!(
-                "NodeId generation overflow: slot {idx} reused past 12-bit capacity \
-                 (version {version}) — id aliasing would corrupt the scene. \
-                 Reduce per-frame node churn (use TextNode.Text instead of rebuild), \
-                 or widen NodeId ABI (roadmap)."
-            );
-        }
-        NodeId((idx << 12) | (version & 0xFFF))
+        let idx = ffi & 0xFFFF_FFFF;
+        let version = ffi >> 32;
+        debug_assert!(
+            version <= 0xFF_FFFF,
+            "NodeId generation overflow: slot {idx} reused past 24-bit capacity \
+             (version {version}) — id aliasing would corrupt the scene."
+        );
+        NodeId(idx | ((version & 0xFF_FFFF) << 32))
     }
 
     /// 重构 slotmap DefaultKey（Scene::get/get_mut 经此桥接）。
     /// slotmap KeyData::from_ffi 强制 version 奇数（与 slotmap 内部一致）。
     pub fn to_key(self) -> DefaultKey {
-        let idx = (self.0 >> 12) as u64;
-        let version = (self.0 & 0xFFF) as u64;
+        let idx = self.0 & 0xFFFF_FFFF;
+        let version = (self.0 >> 32) & 0xFF_FFFF;
         DefaultKey::from(KeyData::from_ffi((version << 32) | idx))
     }
 }

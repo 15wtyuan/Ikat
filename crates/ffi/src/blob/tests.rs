@@ -17,7 +17,7 @@ fn frame(nodes: &[RenderNode]) -> FrameData {
     }
 }
 
-fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> RenderNode {
+fn mesh_node(id: u64, parent: Option<u64>, x: f32, y: f32, w: f32, h: f32) -> RenderNode {
     RenderNode {
         node_id: id,
         parent_id: parent,
@@ -27,7 +27,7 @@ fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> Re
         world_matrix: transform::from_translate(x, y),
         blend: BlendMode::Normal,
         mask_context: MaskContext(0),
-        sort_key: id,
+        sort_key: id as u32,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
         effect: EffectBlock::default(),
@@ -48,7 +48,7 @@ fn mesh_node(id: u32, parent: Option<u32>, x: f32, y: f32, w: f32, h: f32) -> Re
 
 /// 同 mesh_node 但可指定 image_path（验 path_idx 列 round-trip）。
 /// path=None → idx=0；path=Some(p) → idx>0。
-fn mesh_node_with_path(id: u32, path: Option<&str>) -> RenderNode {
+fn mesh_node_with_path(id: u64, path: Option<&str>) -> RenderNode {
     let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
     let NodePayload::Mesh { image_path, .. } = &mut n.payload;
     *image_path = path.map(|s| s.to_string());
@@ -58,7 +58,7 @@ fn mesh_node_with_path(id: u32, path: Option<&str>) -> RenderNode {
 /// 同 mesh_node 但可指定 program（验 program 列 round-trip）。program 是着色契约：
 /// shader 乘法 tint（tex×vcol）在图透明区不透 bg-color，img 与 Container+bg-image
 /// 共用纹理须靠 program 分流（色图共存 = 加法合成 tex.rgb×tex.a + vcol.rgb×(1-tex.a)）。
-fn mesh_node_with_program(id: u32, program: u32) -> RenderNode {
+fn mesh_node_with_program(id: u64, program: u32) -> RenderNode {
     let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
     let NodePayload::Mesh { program: p, .. } = &mut n.payload;
     *p = program;
@@ -66,7 +66,7 @@ fn mesh_node_with_program(id: u32, program: u32) -> RenderNode {
 }
 
 /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 alpha 不烘焙测试，alpha 走 _Alpha uniform）。
-fn mesh_node_tinted(id: u32, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> RenderNode {
+fn mesh_node_tinted(id: u64, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> RenderNode {
     RenderNode {
         node_id: id,
         parent_id: None,
@@ -76,7 +76,7 @@ fn mesh_node_tinted(id: u32, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> Render
         world_matrix: transform::IDENTITY,
         blend: BlendMode::Normal,
         mask_context: MaskContext(0),
-        sort_key: id,
+        sort_key: id as u32,
         change_level: ChangeLevel::Full,
         reuse_key: 0,
         effect: EffectBlock::default(),
@@ -184,7 +184,7 @@ fn blob_emits_parked_keepalive_entries() {
             parked,
         });
     }
-    let mut want: Vec<u32> = slots
+    let mut want: Vec<u64> = slots
         .iter()
         .filter(|s| s.parked)
         .map(|s| s.node.0)
@@ -214,8 +214,8 @@ fn blob_emits_parked_keepalive_entries() {
     );
     assert_eq!(
         view.version(),
-        13,
-        "parked 复用 visible 字节 bit1，不 bump version"
+        VERSION,
+        "parked 复用 visible 字节 bit1（v14 前不 bump；现版本随 #26 拓宽 bump 到 14）"
     );
 
     let parked: Vec<usize> = (0..view.node_count() as usize)
@@ -233,7 +233,7 @@ fn blob_emits_parked_keepalive_entries() {
         assert_eq!(view.change_level(i), 0, "parked change_level=Skip");
         assert_eq!(view.parent_id(i), -1, "parked 不参与父子渲染关系");
     }
-    let mut got: Vec<u32> = parked.iter().map(|&i| view.node_id(i)).collect();
+    let mut got: Vec<u64> = parked.iter().map(|&i| view.node_id(i)).collect();
     got.sort_unstable();
     assert_eq!(got, want, "keepalive 条目的 node_id 即 parked slot 节点");
 
@@ -278,7 +278,7 @@ fn blob_emits_parked_keepalive_for_slot_subtree() {
     let blob = super::build_blob(&frame(&[]), &scene); // 无 active render 节点
     let view = TestView::parse(&blob);
 
-    let mut parked_ids: Vec<u32> = (0..view.node_count() as usize)
+    let mut parked_ids: Vec<u64> = (0..view.node_count() as usize)
         .filter(|&i| view.parked(i))
         .map(|i| view.node_id(i))
         .collect();
@@ -343,7 +343,7 @@ fn build_blob_has_magic_and_count() {
     assert_eq!(&blob[0..4], &MAGIC.to_le_bytes());
     let v = u32::from_le_bytes(blob[4..8].try_into().unwrap());
     assert_eq!(v, VERSION);
-    assert_eq!(v, 13, "blob 版本应为 13（v13：加 grad_params 列）");
+    assert_eq!(v, 14, "blob 版本应为 14（v14：node_id/parent_id u64 拓宽）");
     let n = u32::from_le_bytes(blob[8..12].try_into().unwrap());
     assert_eq!(n, 1);
 }
@@ -418,7 +418,11 @@ fn program_column_round_trips() {
         mesh_node_with_program(2, 0),           // 无图 Container / Image
     ]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 13, "VERSION=13（v13：加 grad_params 列）");
+    assert_eq!(
+        view.version(),
+        14,
+        "VERSION=14（v14：node_id/parent_id u64 拓宽）"
+    );
     assert_eq!(view.program(0), 2, "Mesh program=2 round-trip");
     assert_eq!(view.program(1), 0, "Mesh program=0 占位");
     assert_eq!(view.program(2), 0, "Mesh program=0 round-trip");
@@ -434,8 +438,8 @@ fn blob_header_has_text_and_clip_arena_fields() {
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        13,
-        "version=13"
+        14,
+        "version=14"
     );
 
     // 23 col offset @ [12 .. 12+23*4)。每 col_offset 非零且单调递增。
@@ -504,7 +508,7 @@ fn test_view_parses_layout_and_text_placeholders() {
     let view = TestView::parse(&blob);
     assert_eq!(view.clip_count(), 0, "clip_count=0");
     assert_eq!(view.payload_kind(0), 1, "Mesh payload_kind=1");
-    assert_eq!(view.version(), 13, "VERSION=13");
+    assert_eq!(view.version(), 14, "VERSION=14");
 }
 
 #[test]
@@ -572,7 +576,7 @@ fn mesh_colors_no_longer_bake_alpha() {
 //              15=path_idx (v7) 16=program (v5) 17=color_matrix (v6)
 //              18=change_level (v8) 19=reuse_key (v9) 20=effect_block (v11)
 //              21=shadow_params (v12) 22=grad_params (v13)
-// v13：加 grad_params 列（22→23）。
+// v14：node_id/parent_id 列 4B→8B（NodeId u64 拓宽，#26）。
 struct TestView<'a> {
     buf: &'a [u8],
     col_off: [usize; 23],
@@ -613,14 +617,14 @@ impl<'a> TestView<'a> {
             path_table_len,
         }
     }
-    fn parent_id(&self, i: usize) -> i32 {
-        let o = self.col_off[1] + i * 4;
-        i32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
+    fn parent_id(&self, i: usize) -> i64 {
+        let o = self.col_off[1] + i * 8;
+        i64::from_le_bytes(self.buf[o..o + 8].try_into().unwrap())
     }
-    /// 第 1 列 node_id（u32）。
-    fn node_id(&self, i: usize) -> u32 {
-        let o = self.col_off[0] + i * 4;
-        u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
+    /// 第 1 列 node_id（u64，#26 拓宽）。
+    fn node_id(&self, i: usize) -> u64 {
+        let o = self.col_off[0] + i * 8;
+        u64::from_le_bytes(self.buf[o..o + 8].try_into().unwrap())
     }
     /// 第 3 列 visible 字节 bit0：本帧要渲染（镐 C# FrameBlob.Visible）。
     fn visible(&self, i: usize) -> bool {
@@ -1089,11 +1093,11 @@ fn blob_world_matrix_roundtrip() {
         nodes: vec![pure, skew],
         clips: vec![],
     });
-    // version=13（v13：23 列，加 grad_params）
+    // version=14（v14：node_id/parent_id 列 u64 拓宽；23 列自 v13 起）
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        13,
-        "VERSION=13"
+        14,
+        "VERSION=14"
     );
     assert!(blob.len() > 100);
 }
@@ -1116,8 +1120,8 @@ fn blob_pure_mesh_kind_is_one() {
     assert_eq!(view.program(0), 0, "纯色 mesh program=0");
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        13,
-        "VERSION=13"
+        14,
+        "VERSION=14"
     );
 }
 
@@ -1158,7 +1162,11 @@ fn blob_color_matrix_column_round_trips() {
         clips: vec![],
     });
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 13, "VERSION=13（v13：加 grad_params 列）");
+    assert_eq!(
+        view.version(),
+        14,
+        "VERSION=14（v14：node_id/parent_id u64 拓宽）"
+    );
     assert_eq!(view.program(0), 3, "program=3 round-trip");
     let m = view.color_matrix(0);
     for i in 0..20 {
@@ -1182,7 +1190,7 @@ fn change_level_column_round_trips() {
     full.change_level = ChangeLevel::Full;
     let blob = build_blob(&frame(&[skip, header, full]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 13, "VERSION=13");
+    assert_eq!(view.version(), 14, "VERSION=14");
     assert_eq!(view.change_level(0), 0, "Skip=0");
     assert_eq!(view.change_level(1), 1, "Header=1");
     assert_eq!(view.change_level(2), 2, "Full=2");
@@ -1222,7 +1230,7 @@ fn blob_v9_round_trips_reuse_key() {
     };
     let blob = build_blob(&frame(&[rn]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 13, "blob VERSION=13");
+    assert_eq!(view.version(), 14, "blob VERSION=14");
     assert_eq!(view.reuse_key(0), 42, "reuse_key round-trip");
 }
 
@@ -1323,8 +1331,8 @@ fn blob_column_count_is_23() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        13,
-        "VERSION=13（v13：加 grad_params 列）"
+        14,
+        "VERSION=14（v14：node_id/parent_id u64 拓宽；23 列自 v13 起）"
     );
     // mesh_arena_off 字段位置 = 12 + N*4。N=23 → offset 104（读出一个 >= header_len 的值）。
     // 反推列数 N = (mesh_arena_off_field_position - 12) / 4 = (104 - 12) / 4 = 23。
@@ -1358,7 +1366,7 @@ fn blob_column_lengths_match_node_count_times_stride() {
     assert_eq!(node_count, 2, "2 render nodes");
 
     let strides: [usize; 22] = [
-        4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24,
+        8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24,
     ];
     // column offsets 从 header byte 12 开始
     let mut col_off = [0usize; 22];

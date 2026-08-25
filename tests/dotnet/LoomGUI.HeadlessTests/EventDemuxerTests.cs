@@ -246,9 +246,9 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint midId = CreateNode(stage, "div");
-                uint leafId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong midId = CreateNode(stage, "div");
+                ulong leafId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, midId);
                 AppendChild(stage, midId, leafId);
                 Node root = ctx._registry.GetOrCreate(rootId);
@@ -288,8 +288,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint childId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong childId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, childId);
                 Container root = (Container)ctx._registry.GetOrCreate(rootId);
                 Node child = ctx._registry.GetOrCreate(childId);
@@ -350,9 +350,9 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint midId = CreateNode(stage, "div");
-                uint leafId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong midId = CreateNode(stage, "div");
+                ulong leafId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, midId);
                 AppendChild(stage, midId, leafId);
                 Container root = (Container)ctx._registry.GetOrCreate(rootId);
@@ -399,8 +399,8 @@ namespace LoomGUI.HeadlessTests
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                uint rootId = CreateRoot(stage, "div");
-                uint childId = CreateNode(stage, "div");
+                ulong rootId = CreateRoot(stage, "div");
+                ulong childId = CreateNode(stage, "div");
                 AppendChild(stage, rootId, childId);
                 Node root = ctx._registry.GetOrCreate(rootId);
                 Node child = ctx._registry.GetOrCreate(childId);
@@ -530,7 +530,7 @@ namespace LoomGUI.HeadlessTests
 
         // ── helpers ───────────────────────────────────────────────────────
 
-        static uint CreateRoot(IntPtr stage, string kind)
+        static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -538,7 +538,7 @@ namespace LoomGUI.HeadlessTests
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        static uint CreateNode(IntPtr stage, string kind)
+        static ulong CreateNode(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind ?? "");
@@ -546,7 +546,7 @@ namespace LoomGUI.HeadlessTests
                 return Native.loomgui_stage_create_node(h, kp, (nuint)k.Length, null, 0);
         }
 
-        static void AppendChild(IntPtr stage, uint parent, uint child)
+        static void AppendChild(IntPtr stage, ulong parent, ulong child)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             int rc = Native.loomgui_stage_append_child(h, parent, child);
@@ -569,45 +569,48 @@ namespace LoomGUI.HeadlessTests
         public IntPtr Ptr => (IntPtr)_buf;
         public int Count => _count;
 
-        // Each event = 20 bytes. Pre-allocate for N events.
+        // Each event = 32 bytes（#26 u64 node_id）. Pre-allocate for N events.
         public NativeEventBuffer(int capacity = 16)
         {
             _buf = (byte*)System.Runtime.InteropServices.Marshal.AllocHGlobal(capacity * RecSize);
         }
 
         /// <summary>
-        /// Write a raw EventRecord into the buffer. Fields in native order:
-        /// nodeId(u32), eventType(u8), clickCount(u8), pad(ushort; pad[0]=modifiers for key events), touchId(i32), x(f32), y(f32).
+        /// Write a raw EventRecord into the buffer. Fields in native order（#26 u64 拓宽，32B）:
+        /// nodeId(u64)@0, eventType(u8)@8, clickCount(u8)@9, pad(ushort)@10, touchId(i32)@12, x(f32)@16, y(f32)@20, dx/dy @24/28.
         /// </summary>
-        public void Add(uint nodeId, byte eventType, byte clickCount = 0, ushort pad = 0, int touchId = -1, float x = 0, float y = 0)
+        public void Add(ulong nodeId, byte eventType, byte clickCount = 0, ushort pad = 0, int touchId = -1, float x = 0, float y = 0)
         {
             int off = _count * RecSize;
-            // nodeId @0 (u32 little-endian)
-            *(uint*)(_buf + off) = nodeId;
-            // eventType @4
-            *(_buf + off + 4) = eventType;
-            // clickCount @5
-            *(_buf + off + 5) = clickCount;
-            // pad @6-7（key events: pad[0]=modifiers）
-            *(ushort*)(_buf + off + 6) = pad;
-            // touchId @8
-            *(int*)(_buf + off + 8) = touchId;
-            // x @12
-            *(float*)(_buf + off + 12) = x;
-            // y @16
-            *(float*)(_buf + off + 16) = y;
+            // nodeId @0 (u64 little-endian)
+            *(ulong*)(_buf + off) = nodeId;
+            // eventType @8
+            *(_buf + off + 8) = eventType;
+            // clickCount @9
+            *(_buf + off + 9) = clickCount;
+            // pad @10-11（key events: pad[0]=modifiers）
+            *(ushort*)(_buf + off + 10) = pad;
+            // touchId @12
+            *(int*)(_buf + off + 12) = touchId;
+            // x @16
+            *(float*)(_buf + off + 16) = x;
+            // y @20
+            *(float*)(_buf + off + 20) = y;
+            // dx @24 / dy @28（显式清零：AllocHGlobal 不保证清零，DragMove 增量读垃圾会假绿/假红）
+            *(float*)(_buf + off + 24) = 0f;
+            *(float*)(_buf + off + 28) = 0f;
             _count++;
         }
 
         /// <summary>Shortcut: Click event with click_count=1。</summary>
-        public void AddClick(uint nodeId) => Add(nodeId, (byte)EventType.Click, clickCount: 1);
+        public void AddClick(ulong nodeId) => Add(nodeId, (byte)EventType.Click, clickCount: 1);
 
         /// <summary>Shortcut: KeyDown event with key_code and modifiers。</summary>
-        public void AddKeyDown(uint nodeId, int keyCode, byte modifiers = 0)
+        public void AddKeyDown(ulong nodeId, int keyCode, byte modifiers = 0)
             => Add(nodeId, (byte)EventType.KeyDown, touchId: keyCode, pad: modifiers);
 
         /// <summary>Shortcut: KeyUp event with key_code and modifiers。</summary>
-        public void AddKeyUp(uint nodeId, int keyCode, byte modifiers = 0)
+        public void AddKeyUp(ulong nodeId, int keyCode, byte modifiers = 0)
             => Add(nodeId, (byte)EventType.KeyUp, touchId: keyCode, pad: modifiers);
 
         public void Dispose()

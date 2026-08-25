@@ -628,7 +628,7 @@ enum NodePayload {
 
 `ChangeLevel::Skip/Header/Full` 表达本帧变化程度。
 
-合成 `node_id` 命名空间：文本跨页子页、TextField 合成层、box-shadow inset/outer 层各占 id 高位区段，scrollbar thumb 用独立 bit 标志——这是跨层 ABI 契约（MirrorPool 按 id 建 GO、命中按位解码；区段分配真相源 = render 代码注释）。渲染 blob 不是节点状态查询通道：批合会让空/透明节点从 blob 消失，按 id 查状态（world matrix/sort_key/visible）必须走独立 FFI getter。
+合成 `node_id` 命名空间：`NodeId` u64 位型 = index(32) + generation(24) + tag 字节(8)。真实节点 tag 恒 0；文本跨页子页、scrollbar thumb、TextField 合成层、box-shadow inset/outer 层各占 tag 字节区段——合成 id 与真 id 靠 tag 位型天然区分，无碰撞可能（区段分配真相源 = render 代码注释）。这是跨层 ABI 契约（MirrorPool 按 id 建 GO、命中按 tag 解码）。渲染 blob 不是节点状态查询通道：批合会让空/透明节点从 blob 消失，按 id 查状态（world matrix/sort_key/visible）必须走独立 FFI getter。
 
 ---
 

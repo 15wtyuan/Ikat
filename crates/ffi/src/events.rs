@@ -141,7 +141,7 @@ pub extern "C" fn loomgui_stage_is_pointer_on_ui(h: *const StageHandle) -> bool 
 pub extern "C" fn loomgui_stage_add_touch_monitor(
     h: *mut StageHandle,
     touch_id: i32,
-    node_id: u32,
+    node_id: u64,
 ) {
     ffi_guard((), || {
         if h.is_null() {
@@ -156,7 +156,7 @@ pub extern "C" fn loomgui_stage_add_touch_monitor(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_touch_monitor(h: *mut StageHandle, node_id: u32) {
+pub extern "C" fn loomgui_stage_remove_touch_monitor(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -248,7 +248,7 @@ pub extern "C" fn loomgui_stage_set_wheel_input(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u32) {
+pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -258,19 +258,19 @@ pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u32)
     })
 }
 
-/// 读当前焦点节点。无焦点/无 scene → 0xFFFF_FFFF（sentinel，同 node_parent）。null 句柄 → sentinel。
+/// 读当前焦点节点。无焦点/无 scene → u64::MAX（sentinel，同 node_parent）。null 句柄 → sentinel。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u32 {
-    ffi_guard(u32::MAX, || {
-        const NONE: u32 = 0xFFFF_FFFF;
+pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u64 {
+    ffi_guard(u64::MAX, || {
+        const NONE: u64 = u64::MAX;
         if h.is_null() {
             return NONE;
         }
         let sh = unsafe { &*h };
         match &sh.stage.scene {
-            Some(scene) => scene.focused_node.map(|n| n.0 as u32).unwrap_or(NONE),
+            Some(scene) => scene.focused_node.map(|n| n.0).unwrap_or(NONE),
             None => NONE,
         }
     })
@@ -293,11 +293,11 @@ pub extern "C" fn loomgui_stage_blur(h: *mut StageHandle) -> i32 {
 }
 
 /// 命中测试（公共 Pick 的后端）：(x,y) 最上层可 touchable 节点。rc=0 命中（out_node 写
-/// NodeId u32）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
+/// NodeId u64）；rc=1 未命中；-1 = null 句柄 / 无 scene / null out。坐标 = design 像素
 /// （左上原点，同 process 输入）。core hit_test 走上帧 world_transforms（结构变更帧的
-/// 新节点本帧未命中，1 帧延迟语义）。scrollbar thumb sentinel id（V/H_THUMB_FLAG 位）
-/// decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中（同
-/// apply_wheel_to_hit 口径）。
+/// 新节点本帧未命中，1 帧延迟语义）。scrollbar thumb 合成 id（tag 字节 16/17，
+/// NodeId bits[63:56]）decode 回容器 id——公共语义树无 thumb 节点，thumb 命中即容器命中
+/// （同 apply_wheel_to_hit 口径）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -305,7 +305,7 @@ pub extern "C" fn loomgui_stage_hit_test(
     h: *const StageHandle,
     x: f32,
     y: f32,
-    out_node: *mut u32,
+    out_node: *mut u64,
 ) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() || out_node.is_null() {
@@ -317,8 +317,10 @@ pub extern "C" fn loomgui_stage_hit_test(
         };
         match loomgui_core::hit::hit_test(scene, (x, y)) {
             Some(id) => {
-                // sentinel thumb flag（bit 29/30）strip——见 scroll.rs V/H_THUMB_FLAG。
-                unsafe { *out_node = id.0 & !0x6000_0000 };
+                // thumb 合成 tag（bits[63:56] = 16/17）strip，还原容器 primary id
+                // （低 56 位）——见 scroll.rs V/H_THUMB_FLAG。hit_test 只产 thumb tag，
+                // 低 56 位掩码即容器 id。
+                unsafe { *out_node = id.0 & 0x00FF_FFFF_FFFF_FFFF };
                 0
             }
             None => 1,
@@ -336,17 +338,17 @@ pub extern "C" fn loomgui_stage_hit_test(
 ///   `scene.text_layouts[node_id]`）。
 /// - `x`/`y`：相对该容器 border-box 左上的 block-local 点（与 hit_test world_to_local 后
 ///   的本地坐标同空间）。
-/// - `out_source`：命中时写 source inline 节点的 NodeId(u32)；未命中不写。null 安全。
+/// - `out_source`：命中时写 source inline 节点的 NodeId(u64)；未命中不写。null 安全。
 ///
 /// 返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
 /// `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
 #[no_mangle]
 pub extern "C" fn loomgui_hit_test_rich(
     h: *const StageHandle,
-    node_id: u32,
+    node_id: u64,
     x: f32,
     y: f32,
-    out_source: *mut u32,
+    out_source: *mut u64,
 ) -> bool {
     ffi_guard(false, || {
         if h.is_null() {

@@ -40,12 +40,12 @@ namespace LoomGUI.Tests.Core
             for (int i = 0; i < n; i++)
             {
                 // node_id：slotmap 句柄（1 基 idx），非 0/非全 F。
-                Assert.NotEqual(0u, blob.NodeId(i));
-                Assert.NotEqual(uint.MaxValue, blob.NodeId(i));
+                Assert.NotEqual(0ul, blob.NodeId(i));
+                Assert.NotEqual(ulong.MaxValue, blob.NodeId(i));   // #26 u64 INVALID
                 if (blob.ParentId(i) != -1)
                 {
                     Assert.NotEqual(0, blob.ParentId(i));
-                    Assert.NotEqual(-0x8000_0000, blob.ParentId(i));
+                    Assert.NotEqual(long.MinValue, blob.ParentId(i));   // #26 i64
                 }
                 // visible 字节：bit0 渲染 / bit1 parked keepalive，至少一位置位。
                 Assert.True(blob.Visible(i) || blob.Parked(i), $"node {i} visible 字节全 0");

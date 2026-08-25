@@ -30,7 +30,7 @@ namespace LoomGUI
         /// FFI 失败（节点不存在 / 句柄无效）→ 抛 InvalidOperationException：投影层契约不允许
         /// 给无效 NodeId 造 wrapper（与公共 API 的 UIContractException 互补——内部不变量违例）。
         /// </summary>
-        internal static Node CreateTyped(UIContext ctx, uint id)
+        internal static Node CreateTyped(UIContext ctx, ulong id)
         {
             StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
 

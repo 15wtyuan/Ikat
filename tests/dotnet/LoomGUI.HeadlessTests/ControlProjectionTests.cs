@@ -21,7 +21,7 @@ namespace LoomGUI.HeadlessTests
     /// </summary>
     public unsafe class ControlProjectionTests
     {
-        private const uint RootSentinel = 0xFFFF_FFFFu;
+        private const ulong RootSentinel = ulong.MaxValue;
 
         // ── 属性 FFI round-trip ──────────────────────────────────────────
 
@@ -301,7 +301,7 @@ namespace LoomGUI.HeadlessTests
             if (File.Exists(fontPath))
                 RegisterFont(h, fontPath);
 
-            uint sceneRootId = CreateRoot(h, "div");
+            ulong sceneRootId = CreateRoot(h, "div");
             ctx._rootId = sceneRootId;
             Container sceneRoot = (Container)ctx._registry.GetOrCreate(sceneRootId);
 
@@ -329,14 +329,14 @@ namespace LoomGUI.HeadlessTests
             }
         }
 
-        static uint CreateRoot(StageHandle* h, string kind)
+        static ulong CreateRoot(StageHandle* h, string kind)
         {
             byte[] k = Encoding.UTF8.GetBytes(kind);
             fixed (byte* kp = k)
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        static void AppendChild(StageHandle* h, uint parent, uint child)
+        static void AppendChild(StageHandle* h, ulong parent, ulong child)
         {
             int rc = Native.loomgui_stage_append_child(h, parent, child);
             if (rc != 0)

@@ -25,7 +25,7 @@ namespace LoomGUI.HeadlessTests
     public unsafe class NodeScopeLookupTests
     {
         // lib.rs create_root 失败哨兵（与 parent / find_node_by_id 未命中同值）。
-        private const uint InvalidNodeId = 0xFFFF_FFFFu;
+        private const ulong InvalidNodeId = ulong.MaxValue;
 
         // ── Query<T>()：按类型 DFS 子树 ────────────────────────────────
 
@@ -102,7 +102,7 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                uint mid = CreateNode(stage, "div");
+                ulong mid = CreateNode(stage, "div");
                 AppendChild(stage, root._id, mid);
                 AppendChild(stage, mid, CreateNode(stage, "button"));
 
@@ -155,8 +155,8 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                uint a = CreateNode(stage, "div");
-                uint b = CreateNode(stage, "div");
+                ulong a = CreateNode(stage, "div");
+                ulong b = CreateNode(stage, "div");
                 AppendChild(stage, root._id, a);
                 AppendChild(stage, root._id, b);
 
@@ -243,8 +243,8 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                uint b1 = CreateNode(stage, "button");
-                uint b2 = CreateNode(stage, "button");
+                ulong b1 = CreateNode(stage, "button");
+                ulong b2 = CreateNode(stage, "button");
                 AppendChild(stage, root._id, b1);
                 AppendChild(stage, root._id, b2);
                 ctx._registry.GetOrCreate(b2).Classes.Add("primary");
@@ -306,11 +306,11 @@ namespace LoomGUI.HeadlessTests
             try
             {
                 Container root = (Container)ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                uint a = CreateNode(stage, "div");
-                uint b = CreateNode(stage, "div");
-                uint c = CreateNode(stage, "div");
-                uint d = CreateNode(stage, "div");
-                uint e = CreateNode(stage, "div");
+                ulong a = CreateNode(stage, "div");
+                ulong b = CreateNode(stage, "div");
+                ulong c = CreateNode(stage, "div");
+                ulong d = CreateNode(stage, "div");
+                ulong e = CreateNode(stage, "div");
                 AppendChild(stage, root._id, a);
                 AppendChild(stage, root._id, b);
                 AppendChild(stage, root._id, e);
@@ -442,11 +442,11 @@ namespace LoomGUI.HeadlessTests
                             cp, (nuint)compName.Length, pkgPtr, outLen);
                         Assert.Equal(0, rc);
 
-                        uint root = CreateRoot(stage, "div");
+                        ulong root = CreateRoot(stage, "div");
                         Container rootNode = (Container)ctx._registry.GetOrCreate(root);
 
                         const int N = 2;
-                        uint[] slots = new uint[N];
+                        ulong[] slots = new ulong[N];
                         for (int i = 0; i < N; i++)
                         {
                             slots[i] = Native.loomgui_stage_instantiate(h,
@@ -463,7 +463,7 @@ namespace LoomGUI.HeadlessTests
                             Container badge = slotNode.Get<Container>("badge");
                             Assert.NotNull(badge);
                             // 验证 badge 是该 slot 的后代（父链验证）
-                            uint parent = Native.loomgui_node_parent(h, badge._id);
+                            ulong parent = Native.loomgui_node_parent(h, badge._id);
                             Assert.Equal(slots[i], parent);
                         }
 
@@ -515,8 +515,8 @@ namespace LoomGUI.HeadlessTests
                             cp, (nuint)compName.Length, pkgPtr, outLen);
                         Assert.Equal(0, rc);
 
-                        uint root = CreateRoot(stage, "div");
-                        uint slot0 = Native.loomgui_stage_instantiate(h,
+                        ulong root = CreateRoot(stage, "div");
+                        ulong slot0 = Native.loomgui_stage_instantiate(h,
                             cp, (nuint)compName.Length, cp, (nuint)compName.Length);
                         AppendChild(stage, root, slot0);
 
@@ -559,14 +559,14 @@ namespace LoomGUI.HeadlessTests
 
         // ── helpers ──────────────────────────────────────────────────────
 
-        private static uint[] AssertConvertIds(System.Collections.Generic.IReadOnlyList<Node> nodes)
+        private static ulong[] AssertConvertIds(System.Collections.Generic.IReadOnlyList<Node> nodes)
         {
-            var arr = new uint[nodes.Count];
+            var arr = new ulong[nodes.Count];
             for (int i = 0; i < nodes.Count; i++) arr[i] = nodes[i]._id;
             return arr;
         }
 
-        private static uint CreateRoot(IntPtr stage, string kind)
+        private static ulong CreateRoot(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind);
@@ -574,7 +574,7 @@ namespace LoomGUI.HeadlessTests
                 return Native.loomgui_stage_create_root(h, kp, (nuint)k.Length, null, 0);
         }
 
-        private static uint CreateNode(IntPtr stage, string kind)
+        private static ulong CreateNode(IntPtr stage, string kind)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             byte[] k = Encoding.UTF8.GetBytes(kind);
@@ -582,7 +582,7 @@ namespace LoomGUI.HeadlessTests
                 return Native.loomgui_stage_create_node(h, kp, (nuint)k.Length, null, 0);
         }
 
-        private static void AppendChild(IntPtr stage, uint parent, uint child)
+        private static void AppendChild(IntPtr stage, ulong parent, ulong child)
         {
             StageHandle* h = (StageHandle*)stage.ToPointer();
             int rc = Native.loomgui_stage_append_child(h, parent, child);
@@ -616,9 +616,9 @@ namespace LoomGUI.HeadlessTests
                             cp, (nuint)compName.Length, pkgPtr, outLen);
                         Assert.Equal(0, rc);
 
-                        uint root = CreateRoot(stage, "div");
+                        ulong root = CreateRoot(stage, "div");
                         Container rootNode = (Container)ctx._registry.GetOrCreate(root);
-                        uint slot = Native.loomgui_stage_instantiate(h,
+                        ulong slot = Native.loomgui_stage_instantiate(h,
                             cp, (nuint)compName.Length, cp, (nuint)compName.Length);
                         Assert.NotEqual(InvalidNodeId, slot);
                         AppendChild(stage, root, slot);

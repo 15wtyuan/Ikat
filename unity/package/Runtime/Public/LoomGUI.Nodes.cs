@@ -18,13 +18,13 @@ namespace LoomGUI
         // _id = Rust NodeId 的 u32 投影（slotmap key）；所有 FFI 调用经此转回 Rust 节点。
         // _ctx = 持有 stage handle + NodeRegistry 的 UIContext；本 Node 入 _ctx._registry 缓存。
         // _disposed = Dispose 后置 true；后续公共读操作抛 ObjectDisposedException。
-        internal readonly uint _id;
+        internal readonly ulong _id;
         internal readonly UIContext _ctx;
         internal bool _disposed;
 
         // 投影层内部 ctor：经 NodeFactory 调（同 assembly 子类 base 链调）。公共 API 无构造路径
         // （业务从 Create<T> / Instantiate 拿现成 Node）。
-        internal Node(UIContext ctx, uint id)
+        internal Node(UIContext ctx, ulong id)
         {
             _ctx = ctx;
             _id = id;
@@ -55,7 +55,7 @@ namespace LoomGUI
             }
         }
 
-        // Root.Parent == null（FFI node_parent 返 sentinel 0xFFFF_FFFF）。
+        // Root.Parent == null（FFI node_parent 返 sentinel ulong.MaxValue）。
         // 非根：registry.GetOrCreate(parent_id) → Container（围栏限定只容器型节点可为父）。
         public Container Parent
         {
@@ -63,7 +63,7 @@ namespace LoomGUI
             {
                 ThrowIfDisposed();
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-                uint parentId = Native.loomgui_node_parent(h, _id);
+                ulong parentId = Native.loomgui_node_parent(h, _id);
                 if (parentId == RootSentinel) return null;
                 return (Container)_ctx._registry.GetOrCreate(parentId);
             }
@@ -187,7 +187,7 @@ namespace LoomGUI
         {
             ThrowIfDisposed();
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-            uint parentId = Native.loomgui_node_parent(h, _id);
+            ulong parentId = Native.loomgui_node_parent(h, _id);
             if (parentId == RootSentinel) return;   // 根：无父可摘
             Native.loomgui_stage_remove_child(h, parentId, _id);
         }
@@ -251,7 +251,7 @@ namespace LoomGUI
 
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             byte[] idb = Encoding.UTF8.GetBytes(id);
-            uint candidate;
+            ulong candidate;
             fixed (byte* p = idb)
                 candidate = Native.loomgui_stage_find_node_by_id_in_subtree(h, _id, p, (nuint)idb.Length);
 
@@ -436,8 +436,8 @@ namespace LoomGUI
         }
 
 
-        // node_parent 哨兵：根 / 越界 / 无 scene 均返 0xFFFF_FFFF。
-        internal const uint RootSentinel = 0xFFFF_FFFFu;
+        // node_parent 哨兵：根 / 越界 / 无 scene 均返 ulong.MaxValue（#26 u64 INVALID）。
+        internal const ulong RootSentinel = ulong.MaxValue;   // #26 u64 INVALID
 
         /// <summary>
         /// Dispose 后访问抛 ObjectDisposedException。所有公共读操作入口都先调本方法。
@@ -454,12 +454,12 @@ namespace LoomGUI
         /// 用 loomgui_node_parent 逐层向上，直到撞 _id（在子树）或 RootSentinel（走出根）。
         /// 单线程同步内树结构稳定；防御性 cycle check（parent == current）防 ABI 异常死循环。
         /// </summary>
-        private bool IsInSubtree(StageHandle* h, uint candidateId)
+        private bool IsInSubtree(StageHandle* h, ulong candidateId)
         {
-            uint current = candidateId;
+            ulong current = candidateId;
             for (int i = 0; i < 10_000; i++)   // 上限防御：scene 树深度受围栏闭合有界，10k 兜底
             {
-                uint parent = Native.loomgui_node_parent(h, current);
+                ulong parent = Native.loomgui_node_parent(h, current);
                 if (parent == RootSentinel) return false;   // 走出根，candidate 在别棵子树
                 if (parent == _id) return true;             // 命中本节点——candidate 是其后代
                 if (parent == current) return false;        // 防御：自循环（理论不达）
@@ -573,16 +573,16 @@ namespace LoomGUI
         /// 本方法只维护 C# 缓存一致性，不调 remove_node per node。
         /// internal：Container.TextContent 清子路径（ClearDirectChildrenFFI）同样需要先 evict。
         /// </summary>
-        internal void DisposeDescendantsInRegistry(uint subtreeRootId)
+        internal void DisposeDescendantsInRegistry(ulong subtreeRootId)
         {
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
 
             // Snapshot 直系子（Rust 侧查询；下面的递归会改 Rust 树结构，不能边遍历边改）。
             int count = Native.loomgui_stage_get_child_count(h, subtreeRootId);
             if (count <= 0) return;
-            uint[] buf = new uint[count];
+            ulong[] buf = new ulong[count];
             int written;
-            fixed (uint* bp = buf)
+            fixed (ulong* bp = buf)
             {
                 written = Native.loomgui_stage_get_children(h, subtreeRootId, bp, (nuint)buf.Length);
             }
@@ -592,7 +592,7 @@ namespace LoomGUI
 
             for (int i = 0; i < written; i++)
             {
-                uint childId = buf[i];
+                ulong childId = buf[i];
                 // 深度优先：先清孙，再清子（清子后该 childId 在 Rust 侧可能已失效，但仍可读 cache）。
                 DisposeDescendantsInRegistry(childId);
                 if (_ctx._registry.TryGet(childId, out var cached))
@@ -946,7 +946,7 @@ namespace LoomGUI
 
     // Geometry = 只读快照，直读 FFI layout/world 产物（滞后一帧，同 web reflow）。
     //
-    // 直读 FFI：readonly struct 持 owner 身份（uint _id + UIContext _ctx）；node.Geometry 每次
+    // 直读 FFI：readonly struct 持 owner 身份（ulong _id + UIContext _ctx）；node.Geometry 每次
     // 返 fresh struct snapshot。读时序——LayoutRect/WorldRect 反映最近一次
     // solve/compute_world_transforms 结果，本帧写 Style/Transform 下帧才反映（滞后一帧）。
     //
@@ -958,8 +958,8 @@ namespace LoomGUI
         // struct 不持 disposed 状态——disposed 检在 node.Geometry getter 入口（Node.ThrowIfDisposed）。
         // 调用方拿到 struct 后假设 owner 活；FFI 在 owner 失效时返 identity/0（h.is_null/无效节点兜底）。
         internal readonly UIContext _ctx;
-        internal readonly uint _id;
-        internal NodeGeometry(UIContext ctx, uint id) { _ctx = ctx; _id = id; }
+        internal readonly ulong _id;
+        internal NodeGeometry(UIContext ctx, ulong id) { _ctx = ctx; _id = id; }
 
         /// <summary>
         /// 节点 layout 产物（solve 输出，左上 + w/h）。直读 get_node_layout_rect FFI（x/y/w/h → LoomRect）。
@@ -1088,7 +1088,7 @@ namespace LoomGUI
 
     public unsafe class Container : Node
     {
-        internal Container(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Container(UIContext ctx, ulong id) : base(ctx, id) { }
 
         /// <summary>
         /// 直系子节点数。每次访问直读 Rust（get_child_count），不缓存——树可变
@@ -1168,7 +1168,7 @@ namespace LoomGUI
                 // 2) 建 TextNode + 写文本 + append。三步 FFI 顺序——建后才有 NodeId，setText 后再挂，
                 //    避免 append 后挂前核心状态不一致窗口（无父 TextNode 也合法，标 dirty_text 即可）。
                 byte[] tag = Encoding.UTF8.GetBytes("span");   // 围栏 kind_from_tag: "span" → TextNode
-                uint textId;
+                ulong textId;
                 fixed (byte* tp = tag)
                     textId = Native.loomgui_stage_create_node(h, tp, (nuint)tag.Length, null, 0);
                 if (textId == RootSentinel)
@@ -1234,7 +1234,7 @@ namespace LoomGUI
 
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             // i == Count：ref_id = INVALID（Rust insert_before：INVALID → 末尾追加）。
-            uint refId = (i == kids.Count) ? RootSentinel : kids[i]._id;
+            ulong refId = (i == kids.Count) ? RootSentinel : kids[i]._id;
             int rc = Native.loomgui_stage_insert_before(h, _id, c._id, refId);
             if (rc != 0)
                 throw new InvalidOperationException(
@@ -1419,7 +1419,7 @@ namespace LoomGUI
             // 根恰一个 role=listitem），克隆目标取该子（SceneSubtree 变体 UITemplate）。
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             byte[] idb = Encoding.UTF8.GetBytes(name);
-            uint candidate;
+            ulong candidate;
             fixed (byte* p = idb)
                 candidate = Native.loomgui_stage_find_node_by_id_in_subtree(h, _id, p, (nuint)idb.Length);
             const byte NodeKindTemplate = 18; // Rust NodeKind::Template（ListView item 蓝图，不进 typed 投影）
@@ -1434,11 +1434,11 @@ namespace LoomGUI
                     $"node with id '{name}' in scope of ({GetType().Name} id={_id}) is not a <template> " +
                     "(GetTemplate takes <template id> only)");
             int count = Native.loomgui_stage_get_child_count(h, candidate);
-            uint[] children = new uint[Math.Max(count, 0)];
-            uint child = RootSentinel;
-            fixed (uint* cp = children)
+            ulong[] children = new ulong[Math.Max(count, 0)];
+            ulong child = RootSentinel;
+            fixed (ulong* cp = children)
                 Native.loomgui_stage_get_children(h, candidate, cp, (nuint)children.Length);
-            foreach (uint c in children)
+            foreach (ulong c in children)
             {
                 byte k = 0;
                 Native.loomgui_stage_get_node_kind(h, c, &k);
@@ -1467,9 +1467,9 @@ namespace LoomGUI
             var list = new List<Node>(count > 0 ? count : 0);
             if (count <= 0) return list;   // 0 子 / FFI err：返空 list（err post-ThrowIfDisposed 理论不达）
 
-            uint[] buf = new uint[count];
+            ulong[] buf = new ulong[count];
             int written;
-            fixed (uint* bp = buf)
+            fixed (ulong* bp = buf)
             {
                 written = Native.loomgui_stage_get_children(h, _id, bp, (nuint)buf.Length);
             }
@@ -1497,9 +1497,9 @@ namespace LoomGUI
             int count = Native.loomgui_stage_get_child_count(h, _id);
             if (count <= 0) return;
 
-            uint[] buf = new uint[count];
+            ulong[] buf = new ulong[count];
             int written;
-            fixed (uint* bp = buf)
+            fixed (ulong* bp = buf)
                 written = Native.loomgui_stage_get_children(h, _id, bp, (nuint)buf.Length);
             if (written < 0) return;
             if (written > buf.Length) written = buf.Length;
@@ -1511,7 +1511,7 @@ namespace LoomGUI
             // 被清子树对作者语义 = DOM textContent 替换（子树销毁，句柄失效）。
             for (int i = 0; i < written; i++)
             {
-                uint cid = buf[i];
+                ulong cid = buf[i];
                 DisposeDescendantsInRegistry(cid);
                 // 直系子自身的 wrapper 也要标 _disposed（DisposeDescendantsInRegistry 只管
                 // 后代）：不标则调用方手里的子句柄 _disposed=false 但 Rust 节点已死，
@@ -1548,7 +1548,7 @@ namespace LoomGUI
     // AbsolutePanel：自身 relative，AddChild 自动施加 absolute 到子节点。API 与 Container 一致。
     public sealed class AbsolutePanel : Container
     {
-        internal AbsolutePanel(UIContext ctx, uint id) : base(ctx, id) { }
+        internal AbsolutePanel(UIContext ctx, ulong id) : base(ctx, id) { }
     }
 
     // 注：无 Panel 类型。作用域是运行时标记（IsScopeRoot），非类型；Instantiate 返回模板根真实类型。
@@ -1570,7 +1570,7 @@ namespace LoomGUI
         // setter 写穿 core（set_text FFI）后更新本字段；getter 直接读，不走 FFI。
         internal string _text = "";
 
-        internal TextNode(UIContext ctx, uint id) : base(ctx, id) { }
+        internal TextNode(UIContext ctx, ulong id) : base(ctx, id) { }
 
         /// <summary>
         /// 文本内容（对应 DOM Text.data / CharacterData.data）。setter 写穿 core（set_text FFI：
@@ -1603,7 +1603,7 @@ namespace LoomGUI
     }
     public unsafe class Image : Node
     {
-        internal Image(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Image(UIContext ctx, ulong id) : base(ctx, id) { }
         string _src = "";   // setter 写穿 core 后镜像；无 get_src FFI，getter 读镜像
 
         /// <summary>
@@ -1632,11 +1632,11 @@ namespace LoomGUI
 
     public class TextElement : Container
     {
-        internal TextElement(UIContext ctx, uint id) : base(ctx, id) { }
+        internal TextElement(UIContext ctx, ulong id) : base(ctx, id) { }
     }    // span
     public class ListItem : Container
     {
-        internal ListItem(UIContext ctx, uint id) : base(ctx, id) { }
+        internal ListItem(UIContext ctx, ulong id) : base(ctx, id) { }
         // 业务逻辑项序号（tick-drain BindItem 时由 UIContext 回填，不走 FFI）。
         // core 不存该值；item_index 进 pending_binds 队列，C# 取后传给本属性。
         internal int _index;
@@ -1645,7 +1645,7 @@ namespace LoomGUI
 
     public unsafe class Button : Container
     {
-        internal Button(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Button(UIContext ctx, ulong id) : base(ctx, id) { }
 
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
         void SetNodeDisabled(bool v) { StageHandle* h = (StageHandle*)_ctx._stage.ToPointer(); Native.loomgui_stage_set_node_disabled(h, _id, v); }
@@ -1686,10 +1686,10 @@ namespace LoomGUI
     {
         // get_control_text/get_control_placeholder 是 return-code + out-param 双调法：
         // buf_cap 足够 → rc=0；不够 → rc=-2 + *out_len=所需（扩容重调）；非文本/null → -1。
-        internal static string GetControlText(StageHandle* h, uint id) =>
+        internal static string GetControlText(StageHandle* h, ulong id) =>
             ReadText(h, id, (hp, buf, cap, len) => Native.loomgui_stage_get_control_text(hp, id, buf, cap, len));
 
-        internal static void SetControlText(StageHandle* h, uint id, string v)
+        internal static void SetControlText(StageHandle* h, ulong id, string v)
         {
             byte[] b = Encoding.UTF8.GetBytes(v ?? "");
             fixed (byte* bp = b)
@@ -1699,10 +1699,10 @@ namespace LoomGUI
             }
         }
 
-        internal static string GetControlPlaceholder(StageHandle* h, uint id) =>
+        internal static string GetControlPlaceholder(StageHandle* h, ulong id) =>
             ReadText(h, id, (hp, buf, cap, len) => Native.loomgui_stage_get_control_placeholder(hp, id, buf, cap, len));
 
-        internal static void SetControlPlaceholder(StageHandle* h, uint id, string v)
+        internal static void SetControlPlaceholder(StageHandle* h, ulong id, string v)
         {
             byte[] b = Encoding.UTF8.GetBytes(v ?? "");
             fixed (byte* bp = b)
@@ -1712,7 +1712,7 @@ namespace LoomGUI
             }
         }
 
-        internal static TextSelection GetSelection(StageHandle* h, uint id)
+        internal static TextSelection GetSelection(StageHandle* h, ulong id)
         {
             nuint start = 0, end = 0;
             int rc = Native.loomgui_stage_get_selection(h, id, &start, &end);
@@ -1720,13 +1720,13 @@ namespace LoomGUI
             return new TextSelection((int)start, (int)end);
         }
 
-        internal static void SetSelection(StageHandle* h, uint id, int anchor, int cursor)
+        internal static void SetSelection(StageHandle* h, ulong id, int anchor, int cursor)
         {
             int rc = Native.loomgui_stage_set_selection(h, id, (nuint)anchor, (nuint)cursor);
             if (rc != 0) throw new InvalidOperationException($"set_selection failed (node {id})");
         }
 
-        internal static void SetControlReadonly(StageHandle* h, uint id, bool v)
+        internal static void SetControlReadonly(StageHandle* h, ulong id, bool v)
         {
             int rc = Native.loomgui_stage_set_control_readonly(h, id, v);
             if (rc != 0) throw new InvalidOperationException($"set_control_readonly failed (node {id})");
@@ -1735,7 +1735,7 @@ namespace LoomGUI
         // get_control_readonly：return-code + byte* out（与 set 对称的读出口）。TextField / TextArea /
         // NumberField 共享 EditState，故三者皆读。非文本控件 / 节点缺失 / null out → rc=-1；命中 → rc=0
         // 且 *out 已填（0/1）。rc<0 升异常不吞（post-ThrowIfDisposed 理论不达）。
-        internal static bool GetControlReadonly(StageHandle* h, uint id)
+        internal static bool GetControlReadonly(StageHandle* h, ulong id)
         {
             byte b = 0;
             int rc = Native.loomgui_stage_get_control_readonly(h, id, &b);
@@ -1743,20 +1743,20 @@ namespace LoomGUI
             return b != 0;
         }
 
-        internal static void SetNodeDisabled(StageHandle* h, uint id, bool v)
+        internal static void SetNodeDisabled(StageHandle* h, ulong id, bool v)
         {
             Native.loomgui_stage_set_node_disabled(h, id, v);
         }
 
         // maxlength：UTF-8 字符上限（0 = 无限）。setter 不追溯裁剪现有 value（HTML maxlength
         // 语义——只限后续输入/粘贴）；getter 与 set 对称（TextField/TextArea 双变体口径）。
-        internal static void SetControlMaxLength(StageHandle* h, uint id, int v)
+        internal static void SetControlMaxLength(StageHandle* h, ulong id, int v)
         {
             int rc = Native.loomgui_stage_set_control_maxlength(h, id, (nuint)v);
             if (rc != 0) throw new InvalidOperationException($"set_control_maxlength failed (node {id})");
         }
 
-        internal static int GetControlMaxLength(StageHandle* h, uint id)
+        internal static int GetControlMaxLength(StageHandle* h, ulong id)
         {
             nuint v = 0;
             int rc = Native.loomgui_stage_get_control_maxlength(h, id, &v);
@@ -1766,7 +1766,7 @@ namespace LoomGUI
 
         // get_node_disabled：void + byte* out（与 set 对称的读出口）。null 句柄 / 节点缺失 → 写 0（false），
         // 不报错（与 set 的「悬空 NodeId 静默跳过」语义一致）。所有 Node 子类的 Disabled getter 经此。
-        internal static bool GetNodeDisabled(StageHandle* h, uint id)
+        internal static bool GetNodeDisabled(StageHandle* h, ulong id)
         {
             byte b = 0;
             Native.loomgui_stage_get_node_disabled(h, id, &b);
@@ -1777,7 +1777,7 @@ namespace LoomGUI
         // 先 stackalloc 256 探；rc=-2 时 *out_len = 所需 → 堆分配按所需重调一次（必合）。非文本/-1 升异常。
         // FFI 写恰好 out_len 字节（copy_nonoverlapping，无 NUL 填充）——不做 TrimEnd('\0')，信任契约
         // （用户合法设 Value 含 '\0' 也不被静默截断；之前防御性 trim 是死代码 + 值腐化风险）。
-        internal static string ReadText(StageHandle* h, uint id, ReadTextFn fn)
+        internal static string ReadText(StageHandle* h, ulong id, ReadTextFn fn)
         {
             nuint needed = 0;
             // stack 探（256 字节够绝大多数 placeholder / 短 value）。
@@ -1801,7 +1801,7 @@ namespace LoomGUI
 
         // ReadText 的可空变体：rc=1 是「语义空值」（如 Dropdown 无选项的 SelectedValue），
         // 返 null 而非抛。其余 rc 语义同 ReadText（0=有值 / -2 扩容重调 / 其他=抛）。
-        internal static string ReadTextOrNull(StageHandle* h, uint id, ReadTextFn fn)
+        internal static string ReadTextOrNull(StageHandle* h, ulong id, ReadTextFn fn)
         {
             nuint needed = 0;
             Span<byte> stackBuf = stackalloc byte[256];
@@ -1828,7 +1828,7 @@ namespace LoomGUI
 
     public unsafe class TextField : Node
     {
-        internal TextField(UIContext ctx, uint id) : base(ctx, id) { }
+        internal TextField(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // Value：编程 setter（照 JS `.value =`）直替换 EditState.value + 光标移末尾；getter 双调法读 UTF-8。
         public string Value
@@ -1935,7 +1935,7 @@ namespace LoomGUI
 
     public unsafe class NumberField : Node
     {
-        internal NumberField(UIContext ctx, uint id) : base(ctx, id) { }
+        internal NumberField(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // Value：直转 NumberField 专用 FFI（get/set_number_value）。setter 在 core 侧做 clamp[min,max]
         // + step 量化后写回 EditState.value 文本（与 Slider set_control_value 同口径，只是 NumberField
@@ -2054,7 +2054,7 @@ namespace LoomGUI
 
     public unsafe class Slider : Node
     {
-        internal Slider(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Slider(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // 投影层填实：value/min/max/step 直转 FFI（value clamp [min,max] + step 量化）。
         public float Value
@@ -2197,7 +2197,7 @@ namespace LoomGUI
 
     public unsafe class Toggle : Node
     {
-        internal Toggle(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Toggle(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // IsChecked 直转 FFI set/get_control_checked（bool* out 经 local + &local）。
         public bool IsChecked
@@ -2262,7 +2262,7 @@ namespace LoomGUI
 
     public unsafe class RadioButton : Node
     {
-        internal RadioButton(UIContext ctx, uint id) : base(ctx, id) { }
+        internal RadioButton(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // IsChecked 直转 FFI set/get_control_checked（与 Toggle 同语义；同组互斥框架自动做）。
         public bool IsChecked
@@ -2338,7 +2338,7 @@ namespace LoomGUI
 
     public unsafe class TextArea : Node
     {
-        internal TextArea(UIContext ctx, uint id) : base(ctx, id) { }
+        internal TextArea(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // TextArea：多行文本框。FFI 通道与 TextField 共用（get/set_control_text 按 node 派发）。
         // 与单行框的差别在 core：sanitize_str 保留换行 / Enter 插换行而非提交（故无 Submitted 事件）。
@@ -2414,7 +2414,7 @@ namespace LoomGUI
 
     public unsafe class Dropdown : Node
     {
-        internal Dropdown(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Dropdown(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // SelectedIndex：直转 FFI get/set_dropdown_selected_index。core ControlState::Dropdown
         // 的 selected_index（打包期 ControlInit::Dropdown.options 由 <option selected> 烘焙初值；运行时
@@ -2512,7 +2512,7 @@ namespace LoomGUI
     // Disabled 读 NodeFlags::DISABLED（通用 node flag）。
     public unsafe class OptionItem : Container
     {
-        internal OptionItem(UIContext ctx, uint id) : base(ctx, id) { }
+        internal OptionItem(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // value 内容属性优先；缺席回落 option 文本（与 Dropdown.SelectedValue 同源同口径）。
         public string Value
@@ -2576,7 +2576,7 @@ namespace LoomGUI
     // 保留的 typed shell（动态建树路径的完备性），正常 pkg 实例化不产生本类实例。
     public class Slot : Container
     {
-        internal Slot(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Slot(UIContext ctx, ulong id) : base(ctx, id) { }
     }
 
     // CustomElement = 带连字符的自定义标签（<my-widget>）的 typed 投影。打包期由组件系统展开：
@@ -2586,7 +2586,7 @@ namespace LoomGUI
     // customElements.define() 角色）。
     public unsafe class CustomElement : Container
     {
-        internal CustomElement(UIContext ctx, uint id) : base(ctx, id) { }
+        internal CustomElement(UIContext ctx, ulong id) : base(ctx, id) { }
 
         /// <summary>
         /// 原始 hyphen 标签名（`<game-item-card>` → "game-item-card"；pkg v35 展开保留字面量，
@@ -2615,7 +2615,7 @@ namespace LoomGUI
     // event struct / demux arm。
     public unsafe class TabList : Container
     {
-        internal TabList(UIContext ctx, uint id) : base(ctx, id) { }
+        internal TabList(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // SelectedIndex：直转 FFI get/set_tablist_selected_index。uint* 出参，公共签名用 int
         // （index 不会超 int 正区）——边界 cast。rc!=0（节点非 TabList / 不 live）升 InvalidOperationException
@@ -2690,7 +2690,7 @@ namespace LoomGUI
     // Disabled 读 NodeFlags::DISABLED（通用 node flag，与 OptionItem 一致）。
     public unsafe class Tab : Container
     {
-        internal Tab(UIContext ctx, uint id) : base(ctx, id) { }
+        internal Tab(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // 序号 == 父 TabList.selected_index 的合成值（core 侧上溯派生，切换即跟随）。
         public bool Selected
@@ -2726,7 +2726,7 @@ namespace LoomGUI
 
     public unsafe class ProgressBar : Node
     {
-        internal ProgressBar(UIContext ctx, uint id) : base(ctx, id) { }
+        internal ProgressBar(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // 投影层填实：直转 FFI set/get_control_value·set/get_control_max（value clamp [0,max]）。
         // rc<0（非值控件 / 节点缺失）经 ThrowIfDisposed 后不该达——升 InvalidOperationException 不吞。
@@ -2853,7 +2853,7 @@ namespace LoomGUI
     // 静态/数据驱动强制互斥（越界抛 UIContractException）。
     public unsafe class ListView : Container
     {
-        internal ListView(UIContext ctx, uint id) : base(ctx, id) { }
+        internal ListView(UIContext ctx, ulong id) : base(ctx, id) { }
 
         // C# 侧缓存（core 无 item-count getter FFI）。setter 过桥后回填本字段，getter 直读。
         // set 0 时回填 0，保证 getter 与 core item_count 同步。
@@ -3398,7 +3398,7 @@ namespace LoomGUI
         // （非包组件）。供虚拟列表 slot 克隆路径用——
         // ListView ItemTemplate 可指向场景内已建子树，Instantiate 走 clone_subtree FFI
         // 而非包组件 instantiate FFI。两种变体共用同一个公共 API 表面（Name/Instantiate）。
-        internal readonly uint _srcNodeId = Node.RootSentinel;
+        internal readonly ulong _srcNodeId = Node.RootSentinel;
         internal bool IsSceneSubtree => _srcNodeId != Node.RootSentinel;
 
         internal UITemplate(UIContext ctx, string pkg, string path)
@@ -3408,7 +3408,7 @@ namespace LoomGUI
 
         // SceneSubtree 变体构造：克隆场景内 srcNodeId 子树。path/pkg 留空（不供人读，
         // Name 返空串——调用方按 IsSceneSubtree 区分两种变体）。
-        internal UITemplate(UIContext ctx, uint srcNodeId)
+        internal UITemplate(UIContext ctx, ulong srcNodeId)
         {
             _ctx = ctx; _pkg = string.Empty; _path = string.Empty;
             _srcNodeId = srcNodeId;
@@ -3430,10 +3430,10 @@ namespace LoomGUI
         /// SceneSubtree 变体实例化：调 clone_subtree FFI → 根 NodeId → registry.GetOrCreate。
         /// 返回游离 Container（调用方负责 append_child 挂到 slot）。
         /// </summary>
-        internal static Container DoInstantiateSubtree(UIContext ctx, uint srcNodeId)
+        internal static Container DoInstantiateSubtree(UIContext ctx, ulong srcNodeId)
         {
             StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
-            uint rootId = Native.loomgui_stage_clone_subtree(h, srcNodeId);
+            ulong rootId = Native.loomgui_stage_clone_subtree(h, srcNodeId);
             if (rootId == Node.RootSentinel)
                 throw new UIPackageException(
                     "clone_subtree failed: invalid source node / no scene created");
@@ -3449,7 +3449,7 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
             byte[] pb = Encoding.UTF8.GetBytes(pkg);
             byte[] cb = Encoding.UTF8.GetBytes(path);
-            uint rootId;
+            ulong rootId;
             fixed (byte* pp = pb)
             fixed (byte* cp = cb)
                 rootId = Native.loomgui_stage_instantiate(h, pp, (nuint)pb.Length, cp, (nuint)cb.Length);
@@ -3467,10 +3467,10 @@ namespace LoomGUI
     internal sealed class UpdateSubscription : IDisposable
     {
         UIContext _ctx;
-        uint _nodeId;
+        ulong _nodeId;
         Action<float> _cb;
         bool _disposed;
-        internal UpdateSubscription(UIContext ctx, uint nodeId, Action<float> cb)
+        internal UpdateSubscription(UIContext ctx, ulong nodeId, Action<float> cb)
         {
             _ctx = ctx; _nodeId = nodeId; _cb = cb;
         }
@@ -3505,7 +3505,7 @@ namespace LoomGUI
         // create_root FFI 返回的根 NodeId。由 harness/集成层调 create_root 后写入本字段；
         // Root getter 据此返回 typed Container。无公共 FFI 直接读 roots[0]——Rust 侧 roots Vec
         // 未暴露 getter，故投影层需自己跟踪。
-        internal uint _rootId = Node.RootSentinel;
+        internal ulong _rootId = Node.RootSentinel;
 
         // 已加载包名集合（load_package 时加入，unload_package 时移除）。
         // 用于同名重复检测（公共契约：LoadPackage 同名重复抛 UIContractException）。
@@ -3514,7 +3514,7 @@ namespace LoomGUI
         // ListView NodeId → C# 实例表。ListView 设 ItemCount/BindItem 时 RegisterListView 进本表；
         // tick-drain 取 pending_binds 后按 slot 的 NodeId 向上走 node_parent，命中本表即找到
         // 所属 ListView 实例、调其 BindItem。公共 API 不见本字段。
-        internal readonly Dictionary<uint, ListView> _listViews = new Dictionary<uint, ListView>();
+        internal readonly Dictionary<ulong, ListView> _listViews = new Dictionary<ulong, ListView>();
 
         // PlayerKey → AnimationHandle 实例注册表（demux 句柄路由查用）。
         // 强引用：句柄生命周期 = 那次播放（END/Stop 时 AnimationHandle.Invalidate 注销）。
@@ -3531,7 +3531,7 @@ namespace LoomGUI
         // Style/数据经既有 flush seam 过桥，本帧 solve 生效（零延迟语义）。
         // 计时与 Step 同一 dt 累积（同源不双钟；TweenManager 单一动画时钟不受影响）。
         // headless 测试在 tick 前手动调 PumpLogic（同 FlushPendingWrites 模式）。
-        internal readonly Dictionary<uint, List<UpdateSubscription>> _updateHooks = new();
+        internal readonly Dictionary<ulong, List<UpdateSubscription>> _updateHooks = new();
         internal readonly List<(float Due, Action Cb)> _timers = new();
         internal readonly Queue<Action> _nextFrame = new();
         // tick 后队列（CallAfterLayout）：LoomHost.Step 在 stage tick 之后泵——新挂载
@@ -3641,7 +3641,7 @@ namespace LoomGUI
         }
 
         /// <summary>注册 per-node 每帧回调（Node.OnUpdate 调）。异常隔离见 PumpLogic。</summary>
-        internal UpdateSubscription RegisterUpdateHook(uint nodeId, Action<float> cb)
+        internal UpdateSubscription RegisterUpdateHook(ulong nodeId, Action<float> cb)
         {
             if (!_updateHooks.TryGetValue(nodeId, out var list))
             {
@@ -3654,7 +3654,7 @@ namespace LoomGUI
         }
 
         /// <summary>撤销单个订阅（UpdateSubscription.Dispose 调）。</summary>
-        internal void RemoveUpdateHook(uint nodeId, UpdateSubscription sub)
+        internal void RemoveUpdateHook(ulong nodeId, UpdateSubscription sub)
         {
             if (_updateHooks.TryGetValue(nodeId, out var list))
             {
@@ -3664,7 +3664,7 @@ namespace LoomGUI
         }
 
         /// <summary>清节点的全部订阅（Node.Dispose 联动调——契约：订阅随 Dispose 自动清理）。</summary>
-        internal void RemoveUpdateHooks(uint nodeId) => _updateHooks.Remove(nodeId);
+        internal void RemoveUpdateHooks(ulong nodeId) => _updateHooks.Remove(nodeId);
 
         // ListView.ItemCount/BindItem setter 调 RegisterListView 进本表；DrainPendingBinds
         // 在 tick 前（raw tick 前或集成层 Step 开头）调一次：拉 core pending_binds 队列、
@@ -3674,7 +3674,7 @@ namespace LoomGUI
         /// <summary>注册 ListView 实例（ItemCount/BindItem setter 调）。幂等。</summary>
         internal void RegisterListView(ListView lv) => _listViews[lv._id] = lv;
         /// <summary>该 NodeId 是否已注册为 ListView（数据驱动模式已激活）。</summary>
-        internal bool IsListViewRegistered(uint id) => _listViews.ContainsKey(id);
+        internal bool IsListViewRegistered(ulong id) => _listViews.ContainsKey(id);
 
         /// <summary>注册 AnimationHandle 句柄（Node.Play 成功后调；demux 按 playerKey 路由）。</summary>
         internal void RegisterAnimation(AnimationHandle a) => _animations[a._playerKey] = a;
@@ -3698,14 +3698,14 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_stage.ToPointer();
             // 缓冲区：虚拟化保证可见 slot 常量级（INITIAL_SLOTS + 2*BUFFER 起），取 1024 冗余上限。
             const int Cap = 1024;
-            uint* nodes = stackalloc uint[Cap];
+            ulong* nodes = stackalloc ulong[Cap];
             int* indices = stackalloc int[Cap];
             uint len = 0;
             int rc = Native.loomgui_list_take_pending_binds(h, nodes, indices, Cap, &len);
             if (rc != 0) return;
             for (int i = 0; i < len; i++)
             {
-                uint slotNode = nodes[i];
+                ulong slotNode = nodes[i];
                 int itemIndex = indices[i];
                 ListView lv = FindListViewAncestor(h, slotNode);
                 if (lv == null || lv._bindItem == null) continue;
@@ -3727,9 +3727,9 @@ namespace LoomGUI
         /// 从 slotNode 向上走 node_parent，找到首个命中 _listViews 的祖先 ListView。
         /// 未找到（slot 已脱离树 / ListView 未注册）返 null。防环：限 10 万层（远超任何合法树深）。
         /// </summary>
-        ListView FindListViewAncestor(StageHandle* h, uint slotNode)
+        ListView FindListViewAncestor(StageHandle* h, ulong slotNode)
         {
-            uint cur = slotNode;
+            ulong cur = slotNode;
             for (int i = 0; i < 100_000; i++)
             {
                 if (cur == Node.RootSentinel) return null;
@@ -3742,7 +3742,7 @@ namespace LoomGUI
         /// <summary>
         /// 场景根节点（Container）。create_root FFI 建根后由 harness/集成层写入 _rootId；
         /// 若 _rootId 尚未设置（根未建），getter 读不到合法值——_rootId 仍是 RootSentinel
-        /// （0xFFFF_FFFF），registry.GetOrCreate 会产无意义的 wrapper。调用方需确保 create_root
+        /// （RootSentinel = ulong.MaxValue），registry.GetOrCreate 会产无意义的 wrapper。调用方需确保 create_root
         /// 先于 Root 访问（集成层保证此顺序）。
         /// </summary>
         public Container Root
@@ -3766,7 +3766,7 @@ namespace LoomGUI
             {
                 if (_stage == IntPtr.Zero) return null;
                 StageHandle* h = (StageHandle*)_stage.ToPointer();
-                uint id = Native.loomgui_stage_focused_node(h);
+                ulong id = Native.loomgui_stage_focused_node(h);
                 if (id == Node.RootSentinel) return null;
                 return _registry.GetOrCreate(id);
             }
@@ -3885,7 +3885,7 @@ namespace LoomGUI
 
             StageHandle* h = (StageHandle*)_stage.ToPointer();
             byte[] tb = Encoding.UTF8.GetBytes(tag);
-            uint id;
+            ulong id;
             fixed (byte* tp = tb)
                 id = Native.loomgui_stage_create_node(h, tp, (nuint)tb.Length, null, 0);
             if (id == Node.RootSentinel)
@@ -3913,7 +3913,7 @@ namespace LoomGUI
         public Node Pick(LoomVector2 globalPoint)
         {
             StageHandle* h = (StageHandle*)_stage.ToPointer();
-            uint id = 0;
+            ulong id = 0;
             int rc = Native.loomgui_stage_hit_test(h, globalPoint.X, globalPoint.Y, &id);
             if (rc == 1) return null;
             if (rc != 0) throw new InvalidOperationException($"hit_test failed rc={rc} at ({globalPoint.X},{globalPoint.Y})");
