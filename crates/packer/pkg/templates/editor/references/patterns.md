@@ -58,6 +58,26 @@ image and the foreground content are both flex items:
 .actor-frame > img { position: absolute; }   /* stretch behind */
 ```
 
+## Viewport panning (scroll containers, not Drag events)
+
+Big content in a small viewport — maps, long feeds, panels — is the
+`overflow:auto` scroll container. The gesture suite ships with it:
+press-drag panning, wheel, inertia, boundary clamping, and
+click-after-scroll cancellation. Write **zero drag math**:
+
+```html
+<div class="map-scroll">       <!-- overflow:auto — the viewport -->
+  <div class="map-layer">      <!-- explicit content size, absolutely
+                                  positioned children --> ... </div>
+</div>
+```
+
+`.map-scroll` typically lives in an elastic flex panel
+(`flex-grow:1; min-height:0`) — both are honored at runtime. The
+low-level Drag events API is for **object dragging** (title bars,
+drag-to-slot), not viewport panning; reaching for it here means
+re-implementing what the scroll container already provides.
+
 ## Data-driven lists (virtualized)
 
 Declare a blueprint; game code sets `ItemCount` and binds data at runtime:

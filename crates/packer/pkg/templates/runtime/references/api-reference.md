@@ -202,9 +202,24 @@ Drag & drop: registering a drag event opts the node into arbitration
 capture / arbitration, you apply the delta. Drop targets are a user
 pattern: `DragEnd` + `ui.Pick(position)`.
 
+`DragMoveEvent.DeltaX/DeltaY` is the **per-move increment** since the
+previous DragMove (the first one includes the pre-threshold travel —
+accumulated, the element tracks the pointer exactly). Derive cumulative
+offset from `DragStartEvent.StartPosition` + `DragMoveEvent.Position`.
+Note `PointerMove` is not dispatched while a button is held — during a
+drag, DragMove is the only pointer stream.
+
+Routing rule: viewport panning/scrolling (big content, small viewport)
+belongs to the `overflow:auto` scroll container (press-drag, wheel,
+inertia, clamping, click-cancel all built in); the Drag API is the
+low-level building block for object dragging (title bars,
+drag-to-slot).
+
 Focus: one focus per UIContext (`ui.FocusedNode`); `Focusable` is
-writable at runtime; no automatic tab-chain navigation (build it with
-`On<KeyDown>` + `Focus()`).
+writable at runtime; Tab/Shift+Tab focus-chain navigation is built in
+(ascending positive tabindex, then DOM order, wraps at the ends);
+arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
+`Focus()`).
 
 ## Controls
 

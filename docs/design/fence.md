@@ -173,6 +173,8 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 
 `display:block/flex/none` 选择布局 Strategy，`overflow:auto/scroll` 选择滚动 Strategy——都是行为切换，不重建节点、不丢状态、不改 SemanticKind。
 
+**交互原语路由**：视口平移/滚动（大内容小视口）用 `overflow:auto` 滚动容器——拖拽跟手、滚轮、惯性、边界钳制、滚动取消点击全自带，作者零拖拽数学；运行时 Drag 事件 API 是对象拖拽（标题栏、拖道具入格）的低层积木，`Delta` 为逐 Move 增量（累计偏移由 StartPosition+Position 推导）。
+
 ---
 
 ## 4. 属性围栏
