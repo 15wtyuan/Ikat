@@ -158,7 +158,8 @@ csbindgen 不为 `#[repr(C)]` struct 生成 C# stub，须手补 C# 镜像文件�
 ## API 适配方法论
 
 - **plan/草稿的 API 常与 crate/Unity 实际不符**——遇编译错按实际源码调，勿硬改依赖版本。Rust crate 差异速查 `docs/pitfalls.md` §1；Unity API 查安装目录 `Editor/Data/Managed/UnityEditor.xml`。
-- **Unity Mono 的 API surface 落后于 .NET**——headless `dotnet test`（net10.0）编过的版本门控 API 在 Unity Mono 可能 CS0117。改 C# 别只跑 headless；优先版本无关写法（指针重解释 `*(uint*)&v`、手动位运算）。
+- **Unity Mono 的 API surface 落后于 .NET**——headless `dotnet test`（net10.0）编过的版本门控 API 在 Unity Mono 可能 CS0117。改 C# 别只跑 headless；优先版本无关写法（指针重解释 `*(uint*)&v`、手动位运算；另防数值提升类 CS0266：`ushort & int` 结果是 `int`，赋 `uint` 要显式 cast）。
+- **本地 headless 工程不编 Runtime/ 层（编译门盲区，两次实锤）**——本地 `dotnet test` 编的是 Tests.Core 子集；改 `unity/package/Runtime/` 任何 C# 后收尾必跑两个 CI 工程：`dotnet build tests/dotnet/LoomGUI.PublicApi/LoomGUI.PublicApi.csproj -warnaserror` + `dotnet build tests/dotnet/LoomGUI.HeadlessTests/LoomGUI.HeadlessTests.csproj`，否则 CS 错误等到 push CI 甚至 tag 后（v0.0.11 曾因此重打 tag）才炸。
 - **FFI 边界**：C-like enum 必须 `#[repr(uN)]`；ABI struct 永远 `size_of::<T>()` 断言；返字符串一律 ptr+len（不靠 NUL）。
 - **移植 fgui 算法**：带数字后缀的变量名不能望文生义——按源码逐行 trace 验。
 

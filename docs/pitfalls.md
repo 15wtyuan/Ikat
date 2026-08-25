@@ -14,6 +14,7 @@
 - **`LengthPercentage` 是 tagged pointer**（`pub struct(CompactLength)`，内字段私有无法 match 变体）——解构用 `into_raw()` + tag 位判 Length 分支。
 - `Style` 无 `order` 字段——flex order 排序做不了，渲染按 DOM 顺序。
 - **`overflow ≠ Visible` 必须显式设置**：flex 自动 min-size=0 只对非 Visible 生效——不设则容器被 content min-content 撑开，scroll overlap=0 失效。
+- **auto-min 是裸 min-content，不实现 CSS 的 specified-size suggestion**：空/无内容容器 min-content=0 → 溢出的 flex 行会把**显式定尺寸的兄弟**也按比例挤扁（76px 顶栏被压成 50px；浏览器以声明尺寸为地板）。近似修法（core layout build 已做）：`size` 为 Length 且 `min_size` 为 Auto 时把 Length 复制进 min——作者显式 min 声明永远赢。
 - `serde` feature 可整体序列化 `Style`（pkg 格式依赖它）；bincode 编码随 taffy/bincode 版本走——升级依赖必 bump `PKG_FORMAT_VERSION`（见 §2）。
 - **行为怪癖**：① span 显式 flex + padding + 文字子 → flex 容器不做文本测量，宽度退化为 padding 值；② 测量不能只看 `known_dimensions`，须结合 `available_space`（否则定宽容器内文本不换行）；③ 某些 sizing 轮次传 `Definite(0)`——首个 0 宽测量若被当最终结果钉死，文字会竖排。
 - **Block 流不实现 gap**（flex 才读 `row_gap`）——block ul 的 spacer 间无 gap，可见区计算盲扣会让 spacer 偏矮、滚动条失真；flex 容器的 gap 必须计入可见区累积位，漏计 = 视口顶部空白。
@@ -48,7 +49,7 @@
 ## 2. 跨层闭环规则
 
 ### pkg 格式 bump 代价链
-改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**。bump 的代价链：重打所有 pkg + 重编 .dll + 重出双 exe（loom + GUI）+ **重打全部 headless fixtures**。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。
+改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `LOOMGUI_UPDATE_GOLDEN=1 cargo test -p loomgui_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。
 
 ### 机制设计/删除前置检查
 - **设计渲染合成机制前先读对端 shader 能力**：曾设计整套合成 RenderNode 机制，被一次 shader 阅读推翻——对端早已做 source-over 合成。core program 编号 ↔ Unity shader 能力是跨层闭环，先核对两端现状再设计。
@@ -58,6 +59,9 @@
 - **快照测试锁 glyph 度量必须钉仓库内字体**：不同 OS 默认字体（Win arial vs Linux DejaVu）度量漂移、Linux CI 无 arial——fixtures 字体入库是前提，不是优化。
 
 ## 3. Unity 平台特性
+
+- **非纯平移节点的 renderer.bounds ≠ 真实视觉 AABB**：rotate/scale 走 `_ObjM` shader 矩阵、GO 只带平移分量 → Unity 剔除/拾取看到的 bounds = GO 平移 × 未旋转 mesh。任何新消费 renderer.bounds 的功能（剔除/遮挡/视口判定）都须过 `MirrorPool.CompensateMeshBoundsForLinear`（bounds 置线性矩阵 × 顶点 AABB）；否则旋转节点滚动/移动中被错误剔除（#66 实锤）。
+- **`git tag` 输出按字典序**：`v0.0.10` 排在 `v0.0.5` 之前——`git tag | tail` 会漏最新版本号、误判「未发过版」。查 tag 存在性用 `git tag | grep <精确版本>` 或 `git ls-remote --tags origin | grep`。
 
 - **EditMode 禁 `Object.Destroy`**（须 `DestroyImmediate`）；Mesh 是独立 Object，GO 销毁不连带——`[ExecuteAlways]` 路径须显式销毁防泄漏。
 - **`.meta` 须入库**，且 Unity 关着时不生成（新增 .cs 要启动 Unity 才产 .meta）——提代码漏 .meta，别人打开工程全断链。
