@@ -18,6 +18,7 @@ use loomgui_core::asset::{
 };
 use loomgui_core::scene::KeyframesRule;
 use loomgui_core::style::dynamic::DynamicRuleTable;
+use loomgui_core::style::resolved::BorderStyle;
 use std::path::Path;
 
 /// Build report: what was produced.
@@ -178,6 +179,48 @@ fn pack_components_inner(
                         kf.name
                     ),
                 )),
+            }
+        }
+        // border 与 background-image/gradient 共存 warning（render 层互斥门：有图/渐变
+        // 时彩色边框环静默不画，fence.md 边框节限制②）。作者端无感知时难分「自己写错
+        // 还是框架不支持」——打包期点破。九宫格 slice 与 clip:text 会抑制渐变（此时
+        // 边框照画），按 render 同款条件排除，不误报。
+        for tn in &out.nodes {
+            let s = &tn.style;
+            let border_renderable = s.border_style != BorderStyle::None
+                && s.border_color.is_some()
+                && [
+                    &s.taffy_style.border.top,
+                    &s.taffy_style.border.right,
+                    &s.taffy_style.border.bottom,
+                    &s.taffy_style.border.left,
+                ]
+                .iter()
+                .any(|e| {
+                    let cl = e.into_raw();
+                    cl.tag() == taffy::style::CompactLength::LENGTH_TAG && cl.value() > 0.0
+                });
+            let has_image = s.background_image.is_some();
+            let has_slice = s.border_image_slice.is_some();
+            let use_gradient = !has_image
+                && !has_slice
+                && !s.background_clip_text
+                && s.background_gradient.is_some();
+            if border_renderable && (has_image || use_gradient) {
+                let where_ = match &tn.id_attr {
+                    Some(id) => format!("#{id}"),
+                    None => format!("{:?}", tn.kind),
+                };
+                diagnostics.push(PackDiagnostic::synthetic_warning(
+                    code::BORDER_BG_EXCLUSIVE,
+                    name,
+                    html_rel,
+                    format!(
+                        "节点 {where_} 的彩色边框与 background-{} 共存——互斥渲染，边框不会画出\
+                         （改纯色背景或去掉边框）",
+                        if has_image { "image" } else { "gradient" },
+                    ),
+                ));
             }
         }
         // 页面文件 <style> class 规则的 background-image / background url() 归一——runtime

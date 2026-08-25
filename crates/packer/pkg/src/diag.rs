@@ -29,6 +29,8 @@ pub mod code {
     pub const PACK_ERROR: &str = "PackError";
     /// workspace 配置值域错误（design 分辨率 / match_mode 枚举）。
     pub const CONFIG_INVALID: &str = "ConfigInvalid";
+    /// 彩色边框与 background-image/gradient 共存（互斥渲染，边框不画）。
+    pub const BORDER_BG_EXCLUSIVE: &str = "BorderBgExclusive";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

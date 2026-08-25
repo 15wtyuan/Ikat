@@ -219,3 +219,28 @@ fn check_reports_missing_link_stylesheet() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// #58：彩色边框与 background-image/gradient 共存——render 层互斥（边框静默不画），
+/// 打包期点破（BorderBgExclusive warning）。纯色背景 + 边框是正常组合，不误报。
+#[test]
+fn check_warns_border_with_gradient_exclusive() {
+    let tmp = std::env::temp_dir().join("loom_check_border_bg_excl_test");
+    let _ = std::fs::remove_dir_all(&tmp);
+    make_workspace(
+        &tmp,
+        r#"<div><div style="border-width:2px;border-style:solid;border-color:#ff0000;background-image:linear-gradient(#ff0000,#0000ff)"></div><div style="border-width:2px;border-style:solid;border-color:#ff0000;background-color:#333"></div></div>"#,
+        "output",
+    );
+    let outcome = analyze(&tmp).expect("warning-only workspace analyzes clean");
+    let count = outcome
+        .packages
+        .iter()
+        .flat_map(|(_, pr)| pr.warnings.iter())
+        .filter(|w| w.code == "BorderBgExclusive")
+        .count();
+    assert_eq!(
+        count, 1,
+        "恰好一个共存 warning（纯色背景的第二个子 div 不报）"
+    );
+    let _ = std::fs::remove_dir_all(&tmp);
+}

@@ -16,6 +16,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 etagere = "0.3"
+# build.rs 的 border/bg 共存 warning 读 taffy_style.border 宽度（Length tag 判定）。
+taffy = { version = "0.12", features = ["serde"] }
 
 [dev-dependencies]
-taffy = { version = "0.12", features = ["serde"] }
