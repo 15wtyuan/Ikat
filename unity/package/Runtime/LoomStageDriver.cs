@@ -387,7 +387,7 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_host.StagePtr.ToPointer();
             byte[] pb = Encoding.UTF8.GetBytes(pkgName ?? "");
             byte[] cb = Encoding.UTF8.GetBytes(compPath ?? "");
-            uint instId;
+            ulong instId;
             fixed (byte* pp = pb)
             fixed (byte* cp = cb)
                 instId = Native.loomgui_stage_instantiate(h, pp, (nuint)pb.Length, cp, (nuint)cb.Length);
