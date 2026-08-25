@@ -868,7 +868,8 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
 /// `set_inline_override` 而非另建并行机制。
 ///
 /// 各控件映射：
-/// - ProgressBar：`value / max` → `data-slot="fill"` 子节点的 `width:%`。
+/// - ProgressBar：`value / max` → `data-slot="fill"` 子节点的 `width:%`；`indeterminate`
+///   时让权——清 fill 的 inline width（几何归作者 `[aria-indeterminate]` 规则）。
 /// - Slider：`value` → `data-slot="fill"` 的 `width:%`（fill 可选）+ `data-slot="thumb"` 的
 ///   `user_transform.translate` = `(slider_w - thumb_w) × pct`（水平，扣自身宽的可滑动距离）
 ///   + `(slider_h - thumb_h)/2`（垂直居中）。thumb 几何取 slider 自身的 layout_rect（新结构
@@ -887,15 +888,26 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
         return;
     };
     match state {
-        ControlState::Progress { value, max, .. } => {
-            let pct = if max > 0.0 {
-                (value / max).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
+        ControlState::Progress {
+            value,
+            max,
+            indeterminate,
+        } => {
             if let Some(fill) = find_child_by_slot(scene, id, SLOT_FILL) {
-                // width:N% — 用百分比，随 progress 宽度自适应（尺寸由布局决定）。
-                let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
+                if indeterminate {
+                    // 让权：indeterminate 期间 fill 几何全归作者 CSS（[aria-indeterminate]
+                    // 规则 + keyframes marquee）。清掉 value 时代写入的 inline width——
+                    // inline 语义优先级最高，残留会压死作者规则（跳过不写不够，必须清 bit）。
+                    let _ = unset_inline_override(scene, fill, "width");
+                } else {
+                    let pct = if max > 0.0 {
+                        (value / max).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    // width:N% — 用百分比，随 progress 宽度自适应（尺寸由布局决定）。
+                    let _ = set_inline_override(scene, fill, &format!("width:{}%", pct * 100.0));
+                }
             }
         }
         // Toggle/Radio：作者用 [aria-checked="true"] 属性选择器表达选中态，
@@ -2137,6 +2149,49 @@ mod tests {
                 .width,
             Dimension::percent(1.0),
             "clamp to 100%"
+        );
+    }
+
+    #[test]
+    fn progress_indeterminate_yields_fill_width_to_author_css() {
+        // indeterminate=true → 不写 width，且清掉 value 时代写入的 inline width（残留会以
+        // inline 优先级压死作者 [aria-indeterminate] 规则——跳过不写不够，必须清 bit）。
+        let mut scene = Scene::default();
+        let id = make_progress(&mut scene, 70.0, 100.0);
+        sync_control_visuals(&mut scene, id, 0.0);
+        let fill = find_child_by_slot(&scene, id, SLOT_FILL).unwrap();
+        use crate::style::dynamic::INLINE_WIDTH;
+        assert_ne!(
+            scene.get(fill).unwrap().inline_set.0 & INLINE_WIDTH,
+            0,
+            "value 时代先写入 width（前置条件）"
+        );
+
+        if let Some(ControlState::Progress { indeterminate, .. }) = scene.controls.get_mut(id) {
+            *indeterminate = true;
+        }
+        sync_control_visuals(&mut scene, id, 0.0);
+        assert_eq!(
+            scene.get(fill).unwrap().inline_set.0 & INLINE_WIDTH,
+            0,
+            "indeterminate 清 width bit，几何权归作者 CSS"
+        );
+
+        // 回到 determinate：恢复每帧写 width。
+        if let Some(ControlState::Progress { indeterminate, .. }) = scene.controls.get_mut(id) {
+            *indeterminate = false;
+        }
+        sync_control_visuals(&mut scene, id, 0.0);
+        assert_eq!(
+            scene
+                .get(fill)
+                .unwrap()
+                .inline_override
+                .taffy_style
+                .size
+                .width,
+            Dimension::percent(0.7),
+            "退出 indeterminate 恢复 width:70%"
         );
     }
 

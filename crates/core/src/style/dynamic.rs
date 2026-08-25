@@ -486,6 +486,11 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             value.to_string()
         }
         ("valuenow", ControlState::NumberField { edit, .. }) => edit.value.clone(),
+        // indeterminate 的入口 = 打包期 aria-valuenow 缺席（ARIA 规范语义）；运行时
+        // C# set_is_indeterminate 后由此合成镜像，作者用 [aria-indeterminate="true"] 定样式。
+        ("indeterminate", ControlState::Progress { indeterminate, .. }) => {
+            indeterminate.to_string()
+        }
         _ => return None,
     })
 }
@@ -1938,6 +1943,28 @@ mod tests {
             compound_matches_node(&sel.compound[0], id, &s),
             "Progress 50.0 → [aria-valuenow=\"50\"] 命中"
         );
+    }
+
+    #[test]
+    fn attr_matches_aria_indeterminate_from_progress() {
+        // indeterminate=true → [aria-indeterminate="true"] 命中。入口 = 打包期
+        // aria-valuenow 缺席（ARIA 语义）；运行时 C# set_is_indeterminate 后靠本合成
+        // 镜像让作者 CSS 感知状态翻转。
+        let (s, id) = control_scene(
+            NodeKind::ProgressBar,
+            ControlState::Progress {
+                value: 0.0,
+                max: 100.0,
+                indeterminate: true,
+            },
+        );
+        let sel = hand_selector(r#"[aria-indeterminate="true"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "indeterminate → [aria-indeterminate=\"true\"] 命中"
+        );
+        let sel_false = hand_selector(r#"[aria-indeterminate="false"]"#);
+        assert!(!compound_matches_node(&sel_false.compound[0], id, &s));
     }
 
     #[test]

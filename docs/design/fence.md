@@ -115,6 +115,8 @@ Dropdown 选中值显示：可选 `data-slot=value` 子（内嵌 TextNode）—�
 
 `switch` / `radio` 无框架槽位（没有 knob slot）：框架只切换 `aria-checked` 状态、不驱动子节点几何——视觉状态全在 CSS 状态选择器（含旋钮位移：`[role="switch"][aria-checked="true"] .knob { transform: translateX(...) }`，rematch 状态变化自动重评）。
 
+`progressbar` 的 indeterminate：初始 `aria-valuenow` 缺席 = indeterminate（ARIA 语义，运行时 API 可翻转）；运行时合成 `aria-indeterminate` 供 CSS 属性选择器（`[role="progressbar"][aria-indeterminate="true"] [data-slot="fill"] { … }`）。indeterminate 期间框架对 fill 让权——清掉 determinate 时代写入的 inline `width`，fill 几何全归作者 CSS（keyframes marquee 等）；determinate 期间框架每帧写 fill 的 `width:%`（inline 语义，占据该属性）。
+
 ### 2.4 自定义元素
 
 标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`），**display 默认 Block（同 div）**——连字符标签不在 TAGS 注册表，须在 css_resolve 显式铺默认，漏铺会落到 taffy Flex Row（模板根无显式宽时被内容收缩，浏览器块级根则撑满）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。
