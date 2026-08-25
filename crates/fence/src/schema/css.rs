@@ -18,6 +18,9 @@ pub struct CssPropSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CssValueParser {
     Keyword(&'static [&'static str]),
+    /// `<number> | <px> | normal`（line-height 专用三形：倍数继承为倍数、px 继承为
+    /// px、normal=缺省）。core mapping 双槽 + effective_line_height 换算（#65）。
+    NumberOrLength,
     Length,
     LengthPercent,
     LengthPercentAuto,
@@ -488,7 +491,7 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         name: "line-height",
         default: "0",
         inherited: true,
-        parser: CssValueParser::Number,
+        parser: CssValueParser::NumberOrLength,
     },
     CssPropSpec {
         name: "letter-spacing",

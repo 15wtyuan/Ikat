@@ -1901,7 +1901,7 @@ fn render_one_node(
                         crate::text::layout::measure_rich_text(
                             &runs,
                             Some(content_w),
-                            s.line_height,
+                            s.effective_line_height(),
                             s.letter_spacing,
                             s.text_align,
                             &stack,
@@ -2059,7 +2059,7 @@ fn render_one_node(
                     measure_text(
                         &content,
                         s.font_size,
-                        s.line_height,
+                        s.effective_line_height(),
                         s.letter_spacing,
                         s.text_align,
                         s.white_space_nowrap,
@@ -2176,7 +2176,7 @@ fn render_one_node(
                 measure_text(
                     &display,
                     s.font_size,
-                    s.line_height,
+                    s.effective_line_height(),
                     s.letter_spacing,
                     s.text_align,
                     s.white_space_nowrap,

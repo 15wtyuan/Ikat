@@ -478,7 +478,12 @@ pub struct ResolvedStyle {
     pub font_family: Option<String>,
     pub font_weight: u16,
     pub text_align: TextAlign,
-    pub line_height: f32, // 单位倍数（1.5 = 1.5x font-size），0 = normal
+    /// CSS `line-height` 的倍数形（`1.5` = 1.5×font-size）。0 = normal。
+    pub line_height: f32,
+    /// CSS `line-height` 的长度形（`27px`）：绝对行高，继承为 px 本身（CSS computed
+    /// 语义），消费点按本元素 font_size 经 [`Self::effective_line_height`] 换算。
+    /// None = 未声明长度形。两槽互斥：mapping 写其一，另一槽保持默认。
+    pub line_height_px: Option<f32>,
     pub letter_spacing: f32,
     pub white_space_nowrap: bool,
     /// flex 顺序（CSS `order`）。taffy Style 无此字段，存在这里由
@@ -616,6 +621,7 @@ impl Default for ResolvedStyle {
             font_weight: 400,
             text_align: TextAlign::Left,
             line_height: 0.0,
+            line_height_px: None,
             letter_spacing: 0.0,
             white_space_nowrap: false,
             order: 0,
@@ -630,6 +636,19 @@ impl Default for ResolvedStyle {
             text_effects: Vec::new(),
             inherited_set: InheritedSet::default(),
             inline_declared: 0,
+        }
+    }
+}
+
+impl ResolvedStyle {
+    /// 有效行高倍数：px 形按本元素 font_size 换算（27px @17px → 1.588×），倍数形
+    /// 原样返回。文本度量/渲染/光标的**唯一**取用入口——两槽并存（px 继承为 px、
+    /// number 继承为 number，CSS computed 语义），直读 `line_height` 会漏 px 形。
+    /// px≤0 或 font_size≤0 视为无效回退倍数槽。
+    pub fn effective_line_height(&self) -> f32 {
+        match self.line_height_px {
+            Some(px) if px > 0.0 && self.font_size > 0.0 => px / self.font_size,
+            _ => self.line_height,
         }
     }
 }

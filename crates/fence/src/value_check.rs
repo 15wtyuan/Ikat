@@ -80,6 +80,26 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
                  layers beyond the limits render incorrectly and are rejected)"
             ))
         }
+        CssValueParser::NumberOrLength => {
+            // line-height 三形：<number>（倍数）| <number>px（绝对）| normal。
+            // em/% 等其余 CSS 形围栏外——此前值域不校验，`27px` 过 check 后被 core
+            // mapping 剥 px 当 27 倍 → 单行高度 ×27（#65 高度爆炸）。
+            let v = value.trim();
+            let ok = v == "normal"
+                || v.parse::<f32>().is_ok_and(|n| n.is_finite() && n >= 0.0)
+                || v.strip_suffix("px").is_some_and(|p| {
+                    p.trim()
+                        .parse::<f32>()
+                        .is_ok_and(|n| n.is_finite() && n >= 0.0)
+                });
+            (!ok).then(|| {
+                format!(
+                    "value \"{value}\" is not valid for CSS property \"line-height\" \
+                     (allowed: a unitless multiplier like 1.6, a px length like 27px, or normal; \
+                     em/% and other forms are outside the fence)"
+                )
+            })
+        }
         CssValueParser::Overflow => {
             // 合法值与 core parse_overflow 同集。`clip` 等浏览器值运行时静默忽略
             // （等同 visible，无裁剪）——按值域外报错。
@@ -239,6 +259,20 @@ mod tests {
         assert!(value_error("color", "transparent").is_none());
         assert!(value_error("background-color", "#ff0000").is_none());
         assert!(value_error("background-color", "rgba(160, 58, 42, 0.25)").is_none());
+    }
+
+    #[test]
+    fn line_height_number_px_normal_forms() {
+        // #65：三形合法。此前 Number 域不校验——`27px` 过 check 后被 core mapping
+        // 剥 px 当 27 倍（单行高度 ×27）。
+        assert!(value_error("line-height", "1.6").is_none());
+        assert!(value_error("line-height", "27px").is_none());
+        assert!(value_error("line-height", "normal").is_none());
+        // em / % / 负数 / 杂串围栏外
+        assert!(value_error("line-height", "1.5em").is_some());
+        assert!(value_error("line-height", "150%").is_some());
+        assert!(value_error("line-height", "-2").is_some());
+        assert!(value_error("line-height", "auto").is_some());
     }
 
     #[test]

@@ -39,7 +39,8 @@ impl ComputedNodeStyle {
             font_size: r.font_size,
             font_weight: r.font_weight,
             text_align: r.text_align,
-            line_height: r.line_height,
+            // 有效倍数（px 形已按本元素 font_size 换算）——对外只读面不给双槽细节。
+            line_height: r.effective_line_height(),
             letter_spacing: r.letter_spacing,
         }
     }

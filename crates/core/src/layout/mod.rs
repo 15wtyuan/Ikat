@@ -180,7 +180,7 @@ pub fn solve(
             let runs = crate::text::rich_compile::compile_rich_runs(scene, id, image_sizes);
             Some(MeasureContext::RichText {
                 runs,
-                line_height: s.line_height,
+                line_height: s.effective_line_height(),
                 letter_spacing: s.letter_spacing,
                 align: s.text_align,
                 nowrap: s.white_space_nowrap,
@@ -197,7 +197,7 @@ pub fn solve(
                     Some(MeasureContext::Text {
                         content: scene.text_contents.get(&id).cloned().unwrap_or_default(),
                         font_size: s.font_size,
-                        line_height: s.line_height,
+                        line_height: s.effective_line_height(),
                         letter_spacing: s.letter_spacing,
                         align: s.text_align,
                         nowrap: s.white_space_nowrap,
@@ -252,7 +252,7 @@ pub fn solve(
                     Some(MeasureContext::Text {
                         content,
                         font_size: s.font_size,
-                        line_height: s.line_height,
+                        line_height: s.effective_line_height(),
                         letter_spacing: s.letter_spacing,
                         align: s.text_align,
                         nowrap: s.white_space_nowrap,
@@ -1592,5 +1592,103 @@ mod tests {
         let r = &scene.get(id).unwrap().layout_rect;
         assert!((r.w - 500.0).abs() < 0.1, "50vw @1000 -> 500, got {}", r.w);
         assert!((r.h - 50.0).abs() < 0.1, "10vh @500 -> 50, got {}", r.h);
+    }
+
+    /// #65 回归：Tripawd 事件卡结构（screen flex column > wrap 居中 > 卡 flex column >
+    /// 17px 结果文本，CSS 写 `line-height: 27px`）。px 形经 mapping 双槽 +
+    /// effective_line_height 换算后，两行文本高度 = 2×27px + 上下 padding，不再
+    /// 被当 27 倍撑爆（修前单行 459px、卡片溢出屏幕）。
+    #[test]
+    fn text_line_height_px_wraps_to_normal_height() {
+        use crate::style::mapping::apply_decl;
+        use crate::style::resolved::TextAlign;
+        use taffy::geometry::Rect;
+        use taffy::style::LengthPercentage;
+
+        fn pad(t: f32, r: f32, b: f32, l: f32) -> Rect<LengthPercentage> {
+            Rect {
+                top: LengthPercentage::length(t),
+                right: LengthPercentage::length(r),
+                bottom: LengthPercentage::length(b),
+                left: LengthPercentage::length(l),
+            }
+        }
+
+        // CSS 声明走真实 mapping 链：font-size 17px + line-height 27px。
+        let mut text_style = ResolvedStyle::default();
+        assert!(apply_decl(&mut text_style, "font-size", "17px"));
+        assert!(apply_decl(&mut text_style, "line-height", "27px"));
+        assert_eq!(text_style.line_height_px, Some(27.0), "px 形进长度槽");
+        assert_eq!(text_style.line_height, 0.0, "倍数槽不动");
+        text_style.text_align = TextAlign::Center;
+        text_style.font_family = Some("wqy-microhei".into());
+        text_style.taffy_style.padding = pad(6.0, 10.0, 6.0, 10.0);
+
+        // 60 个 CJK 字；内容宽 600-88-20=492px，17px/字 → 两行。
+        let content = "山道旁一名老者被悍匪纠缠不休你略一沉吟按剑而立贼人见状色厉内荏落荒而逃乡人皆称义士快哉快哉".to_string();
+
+        let mut screen = ResolvedStyle::default(); // .screen：flex column 1920×1080
+        screen.taffy_style.flex_direction = taffy::style::FlexDirection::Column;
+
+        let mut wrap = ResolvedStyle::default(); // .event-wrap：grow + 双轴居中
+        wrap.taffy_style.flex_grow = 1.0;
+        wrap.taffy_style.align_items = Some(taffy::style::AlignItems::CENTER);
+        wrap.taffy_style.justify_content = Some(taffy::style::JustifyContent::CENTER);
+
+        let mut card = ResolvedStyle::default(); // .event-card：flex column 600px
+        card.taffy_style.flex_direction = taffy::style::FlexDirection::Column;
+        card.taffy_style.size.width = Dimension::length(600.0);
+        card.taffy_style.padding = pad(26.0, 44.0, 22.0, 44.0);
+
+        let entries = [
+            (None, NodeKind::Container, screen, Vec::new(), None),
+            (Some(0), NodeKind::Container, wrap, Vec::new(), None),
+            (Some(1), NodeKind::Container, card, Vec::new(), None),
+            (Some(2), NodeKind::TextNode, text_style, Vec::new(), None),
+        ]
+        .map(|(p, k, s, c, i)| {
+            (
+                p,
+                k,
+                s,
+                c,
+                i,
+                false,
+                None,
+                None,
+                Some(content.clone()),
+                None,
+            )
+        });
+        let mut scene = Scene::build(&entries);
+
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/wqy-microhei.ttc"
+        );
+        let mut fonts = FontTable::new();
+        fonts
+            .register("wqy-microhei", std::fs::read(path).unwrap(), true)
+            .unwrap();
+        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+
+        let wrap_id = scene.get(scene.roots[0]).unwrap().children[0];
+        let card_id = scene.get(wrap_id).unwrap().children[0];
+        let text_id = scene.get(card_id).unwrap().children[0];
+        let tr = scene.get(text_id).unwrap().layout_rect;
+        let lines = scene
+            .text_layouts
+            .get(text_id.index())
+            .cloned()
+            .flatten()
+            .map(|l| l.lines.len())
+            .unwrap_or(0);
+        assert_eq!(lines, 2, "60 字 @492px 内容宽应换两行");
+        // 两行 × 27px + padding 12 = 66；修前 px 被当 27 倍 → 2×459+12 = 930。
+        assert!(
+            (tr.h - 66.0).abs() < 1.0,
+            "两行文本高 ≈66（2×27px + padding 12），got {}",
+            tr.h
+        );
     }
 }

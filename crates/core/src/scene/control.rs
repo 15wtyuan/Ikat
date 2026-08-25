@@ -843,7 +843,7 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         let layout = crate::text::layout::measure_text(
             &display,
             s.font_size,
-            s.line_height,
+            s.effective_line_height(),
             s.letter_spacing,
             s.text_align,
             s.white_space_nowrap,
@@ -3485,7 +3485,7 @@ mod tests {
         let layout = crate::text::layout::measure_text(
             text,
             style.font_size,
-            style.line_height,
+            style.effective_line_height(),
             style.letter_spacing,
             style.text_align,
             style.white_space_nowrap,
@@ -3717,7 +3717,7 @@ mod tests {
         let layout = crate::text::layout::measure_text(
             text,
             style.font_size,
-            style.line_height,
+            style.effective_line_height(),
             style.letter_spacing,
             style.text_align,
             style.white_space_nowrap,
@@ -3822,7 +3822,7 @@ mod tests {
             let layout = crate::text::layout::measure_text(
                 "abcd",
                 style.font_size,
-                style.line_height,
+                style.effective_line_height(),
                 style.letter_spacing,
                 style.text_align,
                 style.white_space_nowrap,

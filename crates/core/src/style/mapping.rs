@@ -1607,12 +1607,34 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "line-height" => {
-            style.line_height = value
-                .trim()
-                .trim_end_matches("px")
-                .parse::<f32>()
-                .unwrap_or(0.0);
-            true
+            // CSS 三形：`1.5`（倍数，继承为倍数）/ `27px`（绝对值，继承为 px）/
+            // `normal`（= 0 哨兵）。倍数形进 line_height 槽、px 形进 line_height_px 槽，
+            // 消费点统一走 effective_line_height()。此前实现剥 px 后裸 parse——
+            // `27px` 被当 27 倍 → 单行 17×27=459px（#65 高度爆炸根因）。
+            let v = value.trim();
+            if let Some(px) = v.strip_suffix("px").map(str::trim) {
+                match px.parse::<f32>() {
+                    Ok(n) if n.is_finite() && n >= 0.0 => {
+                        style.line_height = 0.0; // 后声明完胜：px 形清倍数槽，不留 stale
+                        style.line_height_px = Some(n);
+                        true
+                    }
+                    _ => false,
+                }
+            } else if v == "normal" {
+                style.line_height = 0.0;
+                style.line_height_px = None;
+                true
+            } else {
+                match v.parse::<f32>() {
+                    Ok(n) if n.is_finite() && n >= 0.0 => {
+                        style.line_height = n;
+                        style.line_height_px = None;
+                        true
+                    }
+                    _ => false,
+                }
+            }
         }
         "letter-spacing" => {
             let Some(v) = parse_px(value) else {

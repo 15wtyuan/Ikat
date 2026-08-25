@@ -2319,3 +2319,47 @@ fn viewport_len_resolve_math() {
     };
     assert_eq!(vmax.resolve(root), 192.0);
 }
+
+/// #65：line-height 三形（倍数 / px / normal）双槽 + 级联完胜 + 围栏外形拒收。
+#[test]
+fn apply_decl_line_height_three_forms() {
+    let mut s = ResolvedStyle::default();
+    assert!(apply_decl(&mut s, "line-height", "1.6"));
+    assert_eq!(s.line_height, 1.6);
+    assert_eq!(s.line_height_px, None);
+
+    assert!(apply_decl(&mut s, "line-height", "27px"));
+    assert_eq!(s.line_height_px, Some(27.0));
+    assert_eq!(s.line_height, 0.0, "px 形完胜前声明的倍数（不留 stale）");
+
+    assert!(apply_decl(&mut s, "line-height", "normal"));
+    assert_eq!(s.line_height, 0.0);
+    assert_eq!(s.line_height_px, None);
+
+    // 围栏外形拒收（em / % / 负数）
+    assert!(!apply_decl(&mut s, "line-height", "1.5em"));
+    assert!(!apply_decl(&mut s, "line-height", "150%"));
+    assert!(!apply_decl(&mut s, "line-height", "-2"));
+    assert_eq!(s.line_height_px, None);
+}
+
+/// #65：effective_line_height 换算——px 形按本元素 font_size（px 继承为 px 的
+/// CSS computed 语义），倍数形原样，无效 px 回退倍数槽。
+#[test]
+fn effective_line_height_resolves_px_against_font_size() {
+    let mut s = ResolvedStyle::default();
+    s.font_size = 17.0;
+    s.line_height_px = Some(27.0);
+    assert!((s.effective_line_height() - 27.0 / 17.0).abs() < 1e-4);
+
+    // px 继承为 px：子元素换大字号，换算基准跟着变（27px 仍是 27px 行高）
+    s.font_size = 32.0;
+    assert!((s.effective_line_height() - 27.0 / 32.0).abs() < 1e-4);
+
+    s.line_height_px = None;
+    s.line_height = 1.8;
+    assert_eq!(s.effective_line_height(), 1.8);
+
+    s.line_height_px = Some(0.0); // 无效 px（≤0）回退倍数槽
+    assert_eq!(s.effective_line_height(), 1.8);
+}

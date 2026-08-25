@@ -780,7 +780,9 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     cpy!(font_family, INH_FONT_FAMILY);
     cpy!(font_weight, INH_FONT_WEIGHT);
     cpy!(text_align, INH_TEXT_ALIGN);
+    // line-height 双槽（倍数/px）同一 bit：声明的两形一起保、继承的两形一起拷。
     cpy!(line_height, INH_LINE_HEIGHT);
+    cpy!(line_height_px, INH_LINE_HEIGHT);
     cpy!(letter_spacing, INH_LETTER_SPACING);
     cpy!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
     // 非继承属性（bits 8-31）——taffy_style 子字段
@@ -858,6 +860,7 @@ fn propagate_inherited_rec(
         copy_if_unset!(font_weight, INH_FONT_WEIGHT);
         copy_if_unset!(text_align, INH_TEXT_ALIGN);
         copy_if_unset!(line_height, INH_LINE_HEIGHT);
+        copy_if_unset!(line_height_px, INH_LINE_HEIGHT);
         copy_if_unset!(letter_spacing, INH_LETTER_SPACING);
         copy_if_unset!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
         // per-clone，节点多时换就地改 + 父快照
