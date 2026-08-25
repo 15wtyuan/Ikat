@@ -47,6 +47,12 @@
   .zi-a { left:0; top:0; background-color:#2a5a75; }
   .zi-b { left:28px; top:32px; background-color:#5fb4d4; color:#10202c; }
   .zi-c { left:56px; top:64px; background-color:#d4a44e; color:#2c2410; }
+  /* 节 15：不定态进度条——track/fill 各需一条命中打包期 HTML 的规则（fence 门），
+     态规则 [aria-indeterminate="true"] 是运行时合成属性叠加（不参与打包期命中）。 */
+  [role="progressbar"] { width:200px; height:10px; background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; }
+  [role="progressbar"] [data-slot="fill"] { background-color:#5fb4d4; height:100%; width:100%; }
+  [aria-indeterminate="true"] [data-slot="fill"] { animation:ind-slide 1.2s infinite linear; }
+  @keyframes ind-slide { from { transform:translateX(-100%); } to { transform:translateX(100%); } }
   .vf-rot { transform:rotate(15deg); }
   .vf-scale { transform:scale(1.2); }
   .vf-trans { transform:translate(10px,10px); }
@@ -270,6 +276,28 @@
           <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">DOM 序（C 顶层）</span><div class="zi-stage"><div class="zi-chip zi-a">A</div><div class="zi-chip zi-b">B</div><div class="zi-chip zi-c">C</div></div></div>
           <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">A z-index:3（A 顶层）</span><div class="zi-stage"><div class="zi-chip zi-a" style="z-index:3">A·z3</div><div class="zi-chip zi-b">B</div><div class="zi-chip zi-c">C</div></div></div>
           <div style="display:flex;flex-direction:column;gap:6px"><span style="color:#9aa0b4;font-size:12px">运行时 ZIndex（按钮切换 B）</span><button id="zi-btn" style="align-self:flex-start;background-color:#1a2f45;border-width:0 0 0 2px;border-style:solid;border-color:#2a5a75;color:#8ec5d8;padding:6px 14px;border-radius:4px;font-size:13px">置顶 B</button><div class="zi-stage" id="zi-stage"><div class="zi-chip zi-a">A</div><div class="zi-chip zi-b" id="zi-b">B</div><div class="zi-chip zi-c">C</div></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">15 · 交互输入（long-press / cancel-click / pointer capture / 不定态进度条）</div>
+        <div class="section-desc">长按蓝色块 ~0.6s：读数变「长按触发」（LongPressEvent）且松开后不变「click」（CancelClick 砍掉本次）；短按才走 click。按住紫色块拖出元素外：坐标读数持续跟随（SetPointerCapture 重定向 Move，松手自动释放）。不定态进度条无 aria-valuenow（打包期即 indeterminate），fill 滑动动画由态规则驱动——对照组：character 页 determinate 形态（宽度=value）。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">长按 + CancelClick</span>
+            <div id="lp-target" style="width:120px;height:64px;background-color:#1a2f45;border-radius:8px;border-width:0 0 0 3px;border-style:solid;border-color:#2a5a75"></div>
+            <span id="lp-read" style="color:#e0e6ec;font-size:13px;min-width:220px">—</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">pointer capture（按住拖出仍跟随）</span>
+            <div id="cap-target" style="width:120px;height:64px;background-color:#1a2f45;border-radius:8px;border-width:0 0 0 3px;border-style:solid;border-color:#8a4ab0"></div>
+            <span id="cap-read" style="color:#e0e6ec;font-size:13px;min-width:220px">—</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">不定态进度条（无 aria-valuenow）</span>
+            <div role="progressbar"><div data-slot="fill"></div></div>
+            <span style="color:#6c7080;font-size:12px;max-width:240px">fill 平移动画（控件让位宽度给 CSS）；determinate 对照见 character 页。</span>
+          </div>
         </div>
       </div>
 

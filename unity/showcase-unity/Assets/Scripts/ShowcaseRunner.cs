@@ -691,6 +691,34 @@ public class ShowcaseRunner : MonoBehaviour
                     Debug.Log($"[Showcase] lab #14 B z-index -> {ziB.Style.ZIndex}");
                 };
             }
+            // lab #15 长按 + CancelClick：长按触发后砍掉本次 click（松开读数不得变「click」）；
+            // 短按走 ClickEvent。验证 LongPressEvent 路由 + CancelClick FFI 链。
+            if (page.TryGet<Container>("lp-target", out var lpTarget)
+                && page.TryGet<TextElement>("lp-read", out var lpRead))
+            {
+                lpTarget.On<LongPressEvent>(e =>
+                {
+                    lpTarget.CancelClick(e.TouchId);
+                    lpRead.TextContent = "长按触发 @" + (int)e.Position.X + "," + (int)e.Position.Y + "（click 已取消）";
+                });
+                lpTarget.On<ClickEvent>(e => { lpRead.TextContent = "click 触发（短按）"; });
+            }
+            // lab #15 pointer capture：Down 时 SetPointerCapture(0)（鼠标槽），拖出元素外
+            // Move 仍路由到本节点（读数持续跟随 = capture 生效）；Up 自动释放（契约）。
+            if (page.TryGet<Container>("cap-target", out var capTarget)
+                && page.TryGet<TextElement>("cap-read", out var capRead))
+            {
+                capTarget.On<PointerDownEvent>(e =>
+                {
+                    capTarget.SetPointerCapture(0);
+                    capRead.TextContent = "down（已 capture）";
+                });
+                capTarget.On<PointerMoveEvent>(e =>
+                {
+                    capRead.TextContent = "move " + (int)e.Position.X + "," + (int)e.Position.Y;
+                });
+                capTarget.On<PointerUpEvent>(e => { capRead.TextContent = "up（capture 已自动释放）"; });
+            }
         }
         if (pageName == "settings")
         {
