@@ -105,8 +105,13 @@ pub extern "C" fn loomgui_stage_take_warnings(
             unsafe { *out_len = 0 };
             return std::ptr::null();
         }
-        handle.warnings_blob =
-            CString::new(warnings.join("\n")).unwrap_or_else(|_| CString::new("").unwrap());
+        // 分条截断内嵌 NUL（而非整串丢弃）：任一条含 NUL 时 join+CString::new 整体失败，
+        // 旧兜底静默吞掉全部警告——逐条截到 NUL 前再拼，坏一条不殃及其余。
+        let sanitized: Vec<String> = warnings
+            .iter()
+            .map(|w| w.split('\0').next().unwrap_or_default().to_string())
+            .collect();
+        handle.warnings_blob = CString::new(sanitized.join("\n")).unwrap();
         let bytes = handle.warnings_blob.as_bytes_with_nul();
         unsafe { *out_len = bytes.len() };
         handle.warnings_blob.as_ptr() as *const u8

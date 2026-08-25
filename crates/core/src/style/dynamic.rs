@@ -425,6 +425,8 @@ fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
 /// - `aria-checked`：Toggle / Radio 的 `checked`（"true"/"false"）。
 /// - `aria-expanded`：Dropdown 的 `open`。
 /// - `aria-valuenow`：Progress / Slider 的 `value`（f32）或 NumberField 的数值文本。
+/// - `aria-indeterminate`：Progress 的 `indeterminate`（"true"/"false"；入口 = 打包期
+///   `aria-valuenow` 缺席的 ARIA 语义，运行时 API 可翻转）。
 /// - `aria-multiline`：**静态**，按 NodeKind（TextArea="true"），不查 ControlState——TextArea
 ///   与 TextField 共用 EditState，多行属性由标签（textarea vs input）决定而非运行时状态。
 /// - `aria-selected`：**跨节点**——Tab 无自身 ControlState，选中态从父 TabList.selected_index
