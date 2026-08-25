@@ -1752,6 +1752,10 @@ namespace LoomGUI
         // 语义——只限后续输入/粘贴）；getter 与 set 对称（TextField/TextArea 双变体口径）。
         internal static void SetControlMaxLength(StageHandle* h, ulong id, int v)
         {
+            // 负值拒绝（HTML maxlength 同语义）：FFI 参数是 nuint，直接 cast 会让 -1 回绕成
+            // 0xFFFFFFFF（≈无限）静默通过，getter 再 (int) 回来变 -1——往返对称但语义是错的。
+            if (v < 0)
+                throw new ArgumentOutOfRangeException(nameof(v), v, "MaxLength must be >= 0 (0 = unlimited)");
             int rc = Native.loomgui_stage_set_control_maxlength(h, id, (nuint)v);
             if (rc != 0) throw new InvalidOperationException($"set_control_maxlength failed (node {id})");
         }

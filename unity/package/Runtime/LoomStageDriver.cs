@@ -702,8 +702,18 @@ namespace LoomGUI
                     dw, dh, sw, sh, a.x, sh - (a.y + a.height), a.width, a.height, _modeU32, &r) != 0)
             {
                 Debug.LogError("[LoomStageDriver] loomgui_compute_adaptation failed -> fallback letterbox @design");
-                r = new Bindings.AdaptResult { scale = Mathf.Min(a.width / dw, a.height / dh), root_w = dw, root_h = dh,
-                    offset_x = a.x + (a.width - dw * Mathf.Min(a.width / dw, a.height / dh)) * 0.5f, offset_y = a.y };
+                // 与 Rust adapt::compute 的 Letterbox 同式：top-down safe 原点 + rendered span
+                // 双轴居中。a.y 是 Unity 左下原点，须先转 top-down 且补垂直居中项——直接
+                // 用 a.y 是错坐标系 + 漏 sy + (sah - dh*scale)*0.5（高屏时贴错边）。
+                float syTopDown = sh - (a.y + a.height);
+                float fScale = Mathf.Min(a.width / dw, a.height / dh);
+                r = new Bindings.AdaptResult {
+                    scale = fScale,
+                    root_w = dw,
+                    root_h = dh,
+                    offset_x = a.x + (a.width - dw * fScale) * 0.5f,
+                    offset_y = syTopDown + (a.height - dh * fScale) * 0.5f,
+                };
             }
             _adaptScale = r.scale;
             _adaptOffX = r.offset_x;

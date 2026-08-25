@@ -117,5 +117,40 @@ namespace LoomGUI.Tests
                 if (cam != null) Object.DestroyImmediate(cam);
             }
         }
+
+        /// <summary>
+        /// once handler 调 StopImmediatePropagation 后仍必须退订（DOM 语义：one-time
+        /// listener 触发即移除）。回归（review 抓出）：InvokeHandlers 的 immediate-stop
+        /// break 曾在 once 收集之前——刚触发的 once entry 没进 toRemove，下次事件
+        /// 再触发一次，违反 once 契约。
+        /// </summary>
+        [Test]
+        public void OnceHandler_WithStopImmediatePropagation_IsRemovedAfterFirstFire()
+        {
+            var go = new GameObject("eventbus_once_stop_test");
+            try
+            {
+                var driver = go.AddComponent<LoomStageDriver>();
+                var ctx = driver.Host.Context;
+                var bus = ctx._eventBus;
+
+                int onceCount = 0;
+                using (bus.Subscribe<TestRouteEvent>(ctx._rootId,
+                           e => { onceCount++; e.StopImmediatePropagation(); }, false, true))
+                {
+                    for (int i = 0; i < 3; i++)
+                        bus.Dispatch(ctx._rootId,
+                            new TestRouteEvent { _core = new RouteEventCore() });
+                }
+                Assert.AreEqual(1, onceCount,
+                    "once handler 只触发一次——immediate-stop 不得阻止退订（修前第 2/3 次 dispatch 会再触发）");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                var cam = GameObject.Find("LoomUICamera");
+                if (cam != null) Object.DestroyImmediate(cam);
+            }
+        }
     }
 }

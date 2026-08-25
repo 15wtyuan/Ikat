@@ -195,14 +195,17 @@ namespace LoomGUI
 
                 ((HandlerEntry<T>)entry).Invoke(ref evt);
 
-                // StopImmediatePropagation：当前节点剩余 handler 全跳（DOM 语义——只断本节点
-                // 的 listener 循环；跨节点截断由 _propagationStopped 在 Dispatch 循环承担）。
-                if (evt.Core._immediateStopped) break;
-
+                // once 先摘除再看 immediate-stop：本次已触发的 once entry 无论是否断流都必须
+                // 退订（DOM 语义——one-time listener 在触发即移除）；先 break 会让调了
+                // StopImmediatePropagation 的 once entry 永不退订、下次事件再触发一次。
                 if (entry.Once)
                 {
                     (toRemove ??= new List<IHandlerEntry>()).Add(entry);
                 }
+
+                // StopImmediatePropagation：当前节点剩余 handler 全跳（DOM 语义——只断本节点
+                // 的 listener 循环；跨节点截断由 _propagationStopped 在 Dispatch 循环承担）。
+                if (evt.Core._immediateStopped) break;
             }
 
             if (toRemove != null)
