@@ -46,7 +46,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 # (snapshot 测试已移至 fence crate)
 ```
 
-**基准测试**：暂无 `[[bench]]` 目标（criterion 待后续配置）。
+**基准测试**：`crates/core/benches/solve.rs`（criterion，#29 立）——增量 solve 稳态/单点变更 vs 全重建对拍，api-infra 形状 ~2400 节点。跑法 `cargo bench -p loomgui_core`；`cargo test` 不执行 bench（CI 零负担）。动 solve/layout 面后跑一次看回归。
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
@@ -134,6 +134,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **subagent 协作（多 agent 分工的教训）**：
 - 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。
+- **同一工作树上 subagent 串行派发**：全仓库所有 crate 依赖 loomgui_core，并行 agent 的半成品编辑会互相打爆对方的 `cargo test`（整 crate 编译含他人在途改动）——机械活串行排队才是真并行省时。
 - task 切分别太细：强耦合重构（删共享字段类）的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 - 分支上并行有用户 commit 时，review BASE 用 task commit 的实际 parent（`git rev-parse <taskhead>^`），否则 review 范围混入用户 commit。
 - long-running 分支防 main 漂移：反向 merge（`git merge main` 进 feature 分支），合超集签名，用对方分支的测试当合并验收标准。
