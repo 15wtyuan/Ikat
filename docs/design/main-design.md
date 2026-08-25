@@ -602,8 +602,8 @@ anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不
 
 ```rust
 struct RenderNode {
-    node_id: u32,                     // 与 scene.nodes 索引对齐（build 直填 n.id.0）
-    parent_id: Option<u32>,
+    node_id: u64,                     // NodeId 位型（idx:32+gen:24+tag:8），build 直填 n.id.0
+    parent_id: Option<u64>,
     visible: bool,
     alpha: f32,
     // grayed: bool — deferred（灰化禁用节点渲染，待视觉束落地）

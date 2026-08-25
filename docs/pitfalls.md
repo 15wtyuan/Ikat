@@ -18,6 +18,7 @@
 - `serde` feature 可整体序列化 `Style`（pkg 格式依赖它）；bincode 编码随 taffy/bincode 版本走——升级依赖必 bump `PKG_FORMAT_VERSION`（见 §2）。
 - **行为怪癖**：① span 显式 flex + padding + 文字子 → flex 容器不做文本测量，宽度退化为 padding 值；② 测量不能只看 `known_dimensions`，须结合 `available_space`（否则定宽容器内文本不换行）；③ 某些 sizing 轮次传 `Definite(0)`——首个 0 宽测量若被当最终结果钉死，文字会竖排。
 - **Block 流不实现 gap**（flex 才读 `row_gap`）——block ul 的 spacer 间无 gap，可见区计算盲扣会让 spacer 偏矮、滚动条失真；flex 容器的 gap 必须计入可见区累积位，漏计 = 视口顶部空白。
+- **增量 API 事实**（持久树复用必备）：`set_node_context` 存在（换 ctx + 标脏）；`set_children` 自带从旧父摘挂 + `mark_dirty`；`remove` 只摘自身、**子节点留孤儿滞留树内**（删子树须逐节点 remove）；`mark_dirty` 递归上溯祖先（已脏早退）；`Style`/节点上下文可 `PartialEq` 值比较短路 set；`children()` 返回 `Vec` clone（比较别怕贵）；compute 对干净子树跳过（布局缓存按节点粒度）。
 
 ### ttf-parser 0.20（core/src/text）
 - kerning 在 `face.tables().kern.subtables` 遍历（取 horizontal 非状态机子表），`.glyphs_kerning(GlyphId, GlyphId) -> Option<i16>`。
@@ -25,10 +26,11 @@
 - `.ttc`（TrueType Collection）`Face::parse` 第二参 = collection index，index 0 未必是目标 face。
 
 ### slotmap 1.1（core/src/scene）
-- `new_key_type!` 生成的 Key 是 `KeyData { idx: u32, version: NonZeroU32 }` **64bit**——装不进 u32 FFI 句柄。NodeId 保持手写 `pub struct NodeId(pub u32)` + `from_key/to_key` 桥接，勿改用 new_key_type!。
+- `new_key_type!` 生成的 Key 是 `KeyData { idx: u32, version: NonZeroU32 }` **64bit**，且字段私有不能自定位型——NodeId 保持手写 `pub struct NodeId(pub u64)`（位型 idx:32+gen:24+tag:8，tag 字节归渲染合成 id 命名空间）+ `from_key/to_key` 桥接，勿改用 new_key_type!。
 - idx 从 1 起（0 是 sentinel slot）；version 恒奇 = occupied；`capacity()` 是总槽位且 remove 不缩——并行数组按 `capacity()+1` 分配才不越界。
 
-### csbindgen 1（ffi/build.rs）
+### csbindgen 1（双扫描点：ffi/build.rs + xtask/src/bindings.rs）
+- **两处独立 csbindgen 扫描清单互为镜像**——`input_extern_file` 只显式列文件，FFI 函数挪进新模块必须两处同步补，漏一处绑定**静默缺函数**（编译全绿，运行时 EntryNotFound 才炸）。
 - 默认生成 `internal` 类型——跨程序集访问须 `[assembly: InternalsVisibleTo]`。
 - 类型映射：opaque `*mut T` → `T*`（类型化指针非 IntPtr）；`csharp_use_function_pointer(false)` 切 Mono 模式。
 - C# `fixed (T* p = &localVar)` 非法（CS0213 already fixed）——`fixed` 只 pin 托管对象（数组/string），局部变量直接取址。
@@ -88,3 +90,4 @@
 - **keepalive 保留粒度必须对齐后端 GO 持有粒度**：MirrorPool 是扁平池（slot 根按 reuse_key、叶子按 node_id 独立持有）——core 只发 slot 根 keepalive 保不住叶子 GO，stale 销毁→reactivate 重建→churn 复发；keepalive 须发整子树超集。改 blob 契约或池模型任一侧都要重新对齐粒度。
 - **跨树 id 解析必须作用域化**：每新增一种作用域形态（组件实例/List item），全局 `find_by_id_attr` 首匹配就会串实例（组件多实例全部命中第一个）——解析须向上找最近 LOOKUP_SCOPE 根在其子树内做（`find_node_by_id_in_own_scope`）。
 - **`remove_node` 联动清理是动态契约**：删节点须同步清全部持久附属表（anim/scroll/controls/roles/lists/text_contents/image_srcs…）——新增持久附属表必须同步加清理，漏一个 = 悬空引用/残留状态。
+- **ABI 位型/字段宽度变更的静默错解码**：位掩码/移位常量（`& 0x6000_0000`、`>> 24`、`0xFFFFFFFF` 哨兵）在位型拓宽后**编译全过但语义死掉**——必须 grep 全部位常量逐个对新位型表重审，不能只跟编译器走；C# 侧同理，csbindgen 不生成 struct stub，手写镜像（repr struct、事件 SOA 偏移、`NativeEventBuffer` 手写偏移）的宽度/布局无编译期保护，字段变宽必须人工重排。另防装箱断言陷阱：`Assert.Equal(42u, ulong值)` 经 object 装箱恒 false 但编译过。
