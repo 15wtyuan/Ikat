@@ -176,6 +176,65 @@ pub fn check_control_structure(tree: &IrTree, file: &str, line_map: &LineMap) ->
     diagnostics
 }
 
+/// style 属性串里是否声明了 `display: none`（按 `;` 分隔逐条比对；属性名/值均
+/// 大小写不敏感，空白容忍——照 CSS 声明解析惯例的子集）。
+fn style_declares_display_none(style: &str) -> bool {
+    style.split(';').any(|decl| {
+        let Some((prop, val)) = decl.split_once(':') else {
+            return false;
+        };
+        prop.trim().eq_ignore_ascii_case("display") && val.trim().eq_ignore_ascii_case("none")
+    })
+}
+
+/// 校验 `role="tabpanel"` 未手写内联 `display:none`。返回诊断（error 列表）。
+///
+/// TabList 运行时切面板 = 激活面板 **unset inline display** 回落作者样式——作者把
+/// `display:none` 写进 panel 的 style 属性会烙进打包期 base_style，unset 清不掉：
+/// 激活面板永久不可见且无运行时症状可查。旧 runtime 用 display:block 覆写曾掩盖
+/// 此写法，面板显隐所有权收归控件后（#48）存量写法静默坏——打包期点破。非激活
+/// 面板的初始隐藏由控件运行时首帧负责，作者不可（也无需）手写。
+pub fn check_tabpanel_author_hidden(
+    tree: &IrTree,
+    file: &str,
+    line_map: &LineMap,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for node in tree.nodes.iter() {
+        let IrNodeKind::Element(el) = &node.kind else {
+            continue;
+        };
+        if node_role(el) != Some("tabpanel") {
+            continue;
+        }
+        let Some(hidden) = el
+            .attributes
+            .iter()
+            .find(|a| a.name == "style")
+            .map(|a| style_declares_display_none(&a.value))
+        else {
+            continue;
+        };
+        if hidden {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceTabpanelHiddenByAuthor,
+                format!(
+                    "LoomGUI `<{tag} role=\"tabpanel\">` declares inline `display:none`. \
+                     The TabList runtime shows the ACTIVE panel by clearing its own inline \
+                     display override and falling back to author styles — an author-baked \
+                     display:none survives that (baked into the packed base style) and keeps \
+                     the active panel permanently invisible. Hiding inactive panels is the \
+                     control runtime's job (applied on the first frame) — remove the \
+                     declaration. See docs/design/fence.md §6.8.",
+                    tag = el.tag,
+                ),
+                line_map.source_location(node.span.start, file.to_string()),
+            ));
+        }
+    }
+    diagnostics
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +397,46 @@ mod tests {
         let diags = struct_diags(r#"<div role="slider"></div>"#);
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, crate::diagnostic::Severity::Error);
+    }
+
+    /// 端到端跑 parse_template，只取 tabpanel 手写隐藏诊断。
+    fn panel_diags(html: &str) -> Vec<Diagnostic> {
+        let result = parse_template(html, "t.html");
+        result
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::FenceTabpanelHiddenByAuthor)
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn tabpanel_author_display_none_is_error() {
+        // 回归（review 抓出）：作者把 display:none 烙进 tabpanel 的 style 属性 →
+        // base_style 永久隐藏激活面板（运行时 unset inline 清不掉它），打包期拦截。
+        let diags = panel_diags(
+            r#"<div role="tablist"><button role="tab" aria-controls="p1">A</button></div><div role="tabpanel" id="p1" style="display:none"></div>"#,
+        );
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, crate::diagnostic::Severity::Error);
+    }
+
+    #[test]
+    fn tabpanel_other_inline_styles_pass() {
+        // 非 display 声明 / 非.none 值 / 无 style 属性 → 不误报。
+        let diags = panel_diags(
+            r#"<div role="tabpanel" style="padding:10px"></div><div role="tabpanel" style="display:flex"></div><div role="tabpanel"></div>"#,
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn tabpanel_display_none_variants_caught() {
+        // 大小写/空白容忍：`DISPLAY:NONE`、`; display : None ;` 均拦；普通 div 同写法不拦
+        //（只查 role=tabpanel——普通节点手写 display:none 是作者自己的显隐逻辑）。
+        let diags = panel_diags(
+            r#"<div role="tabpanel" style="DISPLAY:NONE"></div><div role="tabpanel" style="color:red; display : None;"></div><div style="display:none"></div>"#,
+        );
+        assert_eq!(diags.len(), 2, "{diags:?}");
     }
 }

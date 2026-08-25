@@ -97,6 +97,11 @@ pub enum DiagnosticCode {
     /// host，规则运行时恒死；浏览器预览（组件 CSS 全局生效）却正常。跨文件证据版：
     /// 类名在组件模板/本组件投影内容有命中、或全库不出现（运行时挂类）则静默。
     FenceComponentRuleOutOfScope,
+    /// `role="tabpanel"` 手写内联 `display:none`（error）。TabList 运行时切面板 =
+    /// 激活面板 unset inline display 回落作者样式——作者内联 display:none 烙进
+    /// 打包期 base_style，unset 清不掉 → 激活面板永久不可见（静默坏，无运行时
+    /// 症状）。非激活面板的初始隐藏由控件运行时首帧负责，作者不可（也无需）手写。
+    FenceTabpanelHiddenByAuthor,
 }
 
 #[derive(Debug, Clone)]

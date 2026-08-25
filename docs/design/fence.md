@@ -117,6 +117,8 @@ Dropdown 选中值显示：可选 `data-slot=value` 子（内嵌 TextNode）—�
 
 `progressbar` 的 indeterminate：初始 `aria-valuenow` 缺席 = indeterminate（ARIA 语义，运行时 API 可翻转）；运行时合成 `aria-indeterminate` 供 CSS 属性选择器（`[role="progressbar"][aria-indeterminate="true"] [data-slot="fill"] { … }`）。indeterminate 期间框架对 fill 让权——清掉 determinate 时代写入的 inline `width`，fill 几何全归作者 CSS（keyframes marquee 等）；determinate 期间框架每帧写 fill 的 `width:%`（inline 语义，占据该属性）。
 
+**运行时合成属性不参与打包期 CSS 命中**：`aria-indeterminate`（运行时合成）与 `aria-checked` 的 `true` 态（运行时翻转，作者手写的初始 `false` 态除外）在打包期 HTML 里不存在——§6.7 的子节点 CSS 命中门只匹配作者手写属性，若 fill/旋钮**只有** `[aria-indeterminate="true"] [data-slot=fill]` / `[aria-checked="true"] .knob` 一类态规则，会判「无命中」报 `FenceControlChildWithoutCss`。子部件须另有能命中打包期 HTML 的基础规则（如 `[data-slot="fill"] { … }` / `.knob { … }`），运行时态规则叠加其上。
+
 ### 2.4 自定义元素
 
 标签名含 `-`（如 `<my-widget>`）识别为 CustomElement（`SemanticKind::CustomElement`），**display 默认 Block（同 div）**——连字符标签不在 TAGS 注册表，须在 css_resolve 显式铺默认，漏铺会落到 taffy Flex Row（模板根无显式宽时被内容收缩，浏览器块级根则撑满）。围栏放行含 hyphen 的标签名通过 Fence Gate；**注册验证在打包器**（R3 已落地）：每个 package dir 下 `components/<tag>.html` 即该标签的注册（Package 注册表承担 `customElements.define()` 角色，main-design §7.4），打包期见 hyphen 标签即查注册表展开（slot 投影 + 展开域锚定规则），未注册 → `UnregisteredCustomElement` 打包错误。`<slot>` 只在组件模板内合法（页面级 `<slot>` 打包错误）；无效 slot（light 子的 `slot` 属性无对应位 / 无默认 slot 却有游离子）同样打包期报错。
@@ -482,6 +484,8 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 `textbox`/`spinbutton`/`switch`/`radio`/`option`/`listitem`/`tab`/`tabpanel` 无必需子角色（不校验）。
 
+**tabpanel 不得手写内联 `display:none`**：TabList 运行时切面板 = 激活面板 unset inline display 回落作者样式（显隐所有权归控件，激活态布局归作者）——作者内联 `display:none` 烙进打包期 base_style 后 unset 清不掉，激活面板永久不可见（静默坏，无运行时症状）。非激活面板的初始隐藏由控件运行时首帧负责，作者不可（也无需）手写；手写即 `FenceTabpanelHiddenByAuthor` error。
+
 **直接子字面**：校验只看**直接子节点**，与 §2.2 结构字面对齐——把必需子角色嵌进 wrapper div（如 `slider > div.wrap > data-slot=thumb`）不算满足契约，仍报 error。唯一例外是 **`list` 的 template 蓝图模式**：数据驱动 ListView 把 item 蓝图写在 `<template>` 子节点里（运行时克隆产 slot），`role=list > template > role=listitem` 视同满足 list→listitem 契约（template 的首个元素子节点被当成 listitem 检查）。
 
 **教学文案**：诊断 message 按 role 给出作者应写的完整结构（如 combobox 引导 `role=listbox` 子 + `role=option` 孙；slider 引导 `data-slot=thumb` 子），取代旧 `.loom-*` 「照着填」的提示载体。
@@ -526,6 +530,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `FencePageRuleProjectedOnly` | **warning**：页面侧纯类规则只可能命中 slot 投射内容。样式墙下页面规则不穿 host 边界，该规则运行时恒为死代码——给投影内容定样式写在组件 `<style>` 里 |
 | `FenceComponentRuleOutOfScope` | **warning**：组件 `<style>` 纯类规则在本组件样式宇宙（模板 + 本组件投影内容）外恒无命中——类名只出现在页面 host 外区域或其它组件的投影内容上（组件 CSS 不穿出 host）。跨文件证据版：类名在宇宙内可命中或全库不出现（运行时 `Classes.Add` 挂类）则静默，宁漏报不误报 |
 | `FenceSliderThumbPositioned` | **warning**：slider 滑块头（`data-slot="thumb"`）上声明非零定位（`top`/`right`/`bottom`/`left`/`margin` 族）。thumb 位移由控件按 value 全权驱动（水平位移 + 垂直居中，运行时逐帧归零其 inset/margin）——作者定位不生效且叠加双偏移（浏览器预览居中、运行时偏移）。标准写法 `left:0; top:0`（零值锚定）与尺寸/外观声明不受影响 |
+| `FenceTabpanelHiddenByAuthor` | `role="tabpanel"` 手写内联 `display:none`。TabList 激活面板靠 unset inline display 回落作者样式——作者内联 display:none 烙进 base_style 后清不掉，激活面板永久隐身（静默坏）。面板初始隐藏归控件运行时首帧，删掉声明即可（详见 §6.8） |
 
 #### 值域门（打包期 error，双路径统一）
 

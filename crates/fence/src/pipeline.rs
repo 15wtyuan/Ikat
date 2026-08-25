@@ -185,6 +185,13 @@ pub fn parse_template_with_css(
         &tree, file, &line_map,
     ));
 
+    // Stage 6.8b: tabpanel 手写 display:none 拦截。面板显隐所有权归 TabList 运行时
+    //（激活 = unset inline display 回落作者样式），作者内联 display:none 烙进
+    // base_style 后 unset 清不掉 → 激活面板永久隐身（静默坏），打包期点破。
+    diagnostics.extend(
+        crate::control_structure_check::check_tabpanel_author_hidden(&tree, file, &line_map),
+    );
+
     // Extract referenced sprites (img src, background-image url)
     let referenced_sprites = extract_sprites(&tree);
 
