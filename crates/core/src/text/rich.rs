@@ -90,7 +90,8 @@ pub enum RichVAlign {
 }
 
 /// 一段同样式富文本。per-glyph 多色靠多个相邻 run（非 per-glyph 字段）。
-#[derive(Debug, Clone)]
+/// PartialEq 供 layout 增量 solve 的 MeasureContext 变更检测（runs 变 → set_node_context 重测）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct RichRun {
     pub kind: RichKind,
     pub color: [f32; 4],
@@ -106,7 +107,7 @@ pub struct RichRun {
     pub source: NodeId,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RichKind {
     Text {
         text: String,

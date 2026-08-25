@@ -513,6 +513,8 @@ taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -
 
 场景图 Container 树 ↔ taffy 节点树一一对应。增删 Container 同步增删 taffy 节点；改 style 同步改 taffy style 并标记子树 layout dirty。
 
+taffy 树跨帧持久（`Scene.layout_cache`）：每帧 solve 做「期望态 diff」——style/measure context 值比较短路（稳态帧零脏标）、结构变更走 set_children/remove，靠 taffy 自带 dirty 上溯 + 布局缓存跳过干净子树（替代每帧全量重建）。「每帧一次 solve」不变量不变：solve 仍每帧调用，内部对无变更子树短路。正确性由差分守卫测试保障（随机操作序列下增量结果与全重建逐节点 rect 全等）。
+
 taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_with_measure`（内部按节点 `taffy_style.display = Display::Block/Flex` 分派；不再分别调 `compute_block_layout`/`compute_flexbox_layout`）。裸 block 默认标签（当前围栏里 `div`）和显式 `display:block` 都设 `Display::Block`；inline 标签和显式 `display:flex` 设 `Display::Flex`（inline 走 Flex Row）。
 
 ### 11.3 尺寸模型 → 映射

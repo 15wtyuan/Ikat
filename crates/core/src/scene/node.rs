@@ -678,6 +678,9 @@ pub struct Scene {
     /// solve 闭包命中 fingerprint → 复用 TextLayout 跳过 shaping。详见
     /// text::layout::TextMeasureCache。render 不读此（读 text_layouts render 槽）。
     pub text_measure_cache: Vec<Option<crate::text::layout::TextMeasureCache>>,
+    /// 跨帧持久 taffy 布局树（增量 solve 载体：期望态 diff + taffy 自带脏传播，
+    /// 替代每帧全重建）。运行时态，不进 pkg。详见 layout::LayoutCache。
+    pub layout_cache: crate::layout::LayoutCache,
     /// TextNode content (only TextNode nodes have entries).
     pub text_contents: std::collections::HashMap<NodeId, String>,
     /// Image src paths (only Image nodes have entries).

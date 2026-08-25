@@ -21,3 +21,9 @@ slotmap = { version = "1.1", features = [] }
 
 [dev-dependencies]
 loomgui_pkg = { path = "../packer/pkg" }
+# solve 基准（benches/solve.rs）：增量 vs 全重建帧时对拍。cargo test 不跑 bench。
+criterion = "0.5"
+
+[[bench]]
+name = "solve"
+harness = false

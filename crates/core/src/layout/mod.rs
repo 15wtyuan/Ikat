@@ -60,7 +60,10 @@ fn lp(v: taffy::style::LengthPercentage) -> f32 {
 }
 
 /// 叶子节点的测量上下文。Container/Button 无上下文（用 None 叶子或 new_with_children）。
-enum MeasureContext {
+/// PartialEq 供增量 solve 的变更检测（ctx 变 → set_node_context 标脏重测）；
+/// Debug/Clone 供 Scene 的 layout_cache 跨帧持有。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum MeasureContext {
     /// Text 叶子：存全部测量参数（content owned）+ 字体度量字段 + 字体族。
     /// font 实例 *不* 进 context——调用方在测量闭包中按 family 查 FontTable 取 Font。
     Text {
@@ -108,7 +111,33 @@ enum MeasureContext {
     },
 }
 
-/// 就地 solve：建 taffy 树 → 注册测量上下文 → compute_layout → 回写 layout_rect/clip_rect。
+/// 跨帧持久化的 taffy 布局树——增量 solve 的载体（`Scene.layout_cache`，坑 186 根治）。
+///
+/// 每帧 solve 不再重建 taffy 树，做「期望态 diff」：节点 style/measure ctx 变更走
+/// `set_style`/`set_node_context`（值比较短路，稳态帧零脏标），结构变更（增删/重排/
+/// 重挂/排除项转正）走 `set_children`/`remove`，靠 taffy 自带 dirty 上溯 + 布局缓存
+/// 跳过干净子树。
+///
+/// `ids` 按 NodeId.index() 索引（容量而非存活数——remove 后 slotmap idx 不变，
+/// 按存活数分配会越界）。每格存 (scene NodeId, taffy NodeId)：NodeId 含
+/// generation，slot 复用后 gen 不符即判死条目，杜绝新节点错配旧 taffy 节点。
+#[derive(Debug, Clone)]
+pub struct LayoutCache {
+    pub(crate) tree: TaffyTree<MeasureContext>,
+    pub(crate) ids: Vec<Option<(NodeId, taffy::NodeId)>>,
+}
+
+impl Default for LayoutCache {
+    fn default() -> Self {
+        Self {
+            tree: TaffyTree::new(),
+            ids: Vec::new(),
+        }
+    }
+}
+
+/// 就地 solve（增量）：持久 taffy 树期望态 diff → compute_layout → 回写
+/// layout_rect/clip_rect。
 ///
 /// `root_size` 是根节点固定尺寸（viewport / surface 尺寸）。`fonts` borrows
 /// FontTable 到 `compute_layout_with_measure` 结束，闭包内按 family 查字体喂给 `measure_text`。
@@ -127,24 +156,35 @@ pub fn solve(
     if scene.roots.is_empty() {
         return;
     }
-    let mut taffy_tree: TaffyTree<MeasureContext> = TaffyTree::new();
-    // scene NodeId → taffy NodeId 映射（按 NodeId.index() 索引，1 基故 capacity+1）。
-    // **容量而非存活数**：remove_node 后 slotmap idx 不变但存活数减——按 len 分配会越界。
-    let mut taffy_ids: Vec<Option<taffy::NodeId>> = vec![None; scene.nodes.capacity() + 1];
+    // 持久树 mem::take 出 scene（同 text_measure_cache 模式）：sync 借 &Scene +
+    // &mut 树/映射两不相扰，末尾整体写回。
+    let mut cache = std::mem::take(&mut scene.layout_cache);
+    let cap = scene.nodes.capacity() + 1;
+    if cache.ids.len() < cap {
+        cache.ids.resize(cap, None);
+    }
+    // 老映射快照（清退依据）：sync 重建 ids，未被新映射保留的老 taffy 节点
+    //（scene 节点已死 / slot 复用 gen 不符 / 本帧被排除——纯空白文本、rich 折叠子）
+    // 在 walk 后统一 remove。
+    let old = std::mem::replace(&mut cache.ids, vec![None; cap]);
 
+    /// 期望态同步（后序 DFS——子先同步，父的期望子列表才有 tid 可挂；规则与全量
+    /// build 时代一致：纯空白 TextNode 过滤、rich-text-block 折叠、absolute escapee
+    /// 上浮收编）。
     /// 返回 (自身 tid, 冒泡中的 absolute escapee tids)。escapee = 「声明 absolute 且
     /// 任一 inset 显式」的子项，其 taffy 父不是 scene 父而是最近 positioned 祖先——
     /// 未遇到 positioned 祖先前随递归向上冒泡，positioned 节点收编（含根兜底）。
-    fn build(
+    fn sync(
         scene: &Scene,
         tree: &mut TaffyTree<MeasureContext>,
-        taffy_ids: &mut Vec<Option<taffy::NodeId>>,
+        ids: &mut Vec<Option<(NodeId, taffy::NodeId)>>,
+        old: &[Option<(NodeId, taffy::NodeId)>],
         id: NodeId,
         parent_scroll: bool,
         image_sizes: &ImageSizeTable,
         root_size: (f32, f32),
     ) -> (taffy::NodeId, Vec<taffy::NodeId>) {
-        let node = scene.get_live(id, "layout/build");
+        let node = scene.get_live(id, "layout/sync");
         let mut style = node.style.taffy_style.clone();
         // 视口相对长度（vw/vh/vmin/vmax）按当帧 root_size 换算覆写（分辨率适配的
         // 重排语言——root_size 随屏幕/适配模式变，声明 vw 的通道跟画布走）。
@@ -312,7 +352,18 @@ pub fn solve(
                 _ => None,
             }
         };
-        // 递归子节点（先建子，再建父以便 new_with_children）。
+        // min-width=0 让 flex-shrink 生效：taffy 默认 min-size:auto 会把 measure(None) 的
+        // max-content 当 min-content，阻止 shrink → 长文本不收缩、超框。设 0 放开宽度。
+        // 只设宽度：文本不纵向 shrink，min-height=0 无收益却有副作用——让 flex column 父
+        // 容器主轴尺寸算大（按钮等容器被撑高、底图下沿往下拉），所以 height 保留 Auto。
+        // 作者显式声明的 min-width 保留（如 stat-bar 的 label/val 固定列宽）——只在
+        // 未声明（Auto）时才放开 shrink。
+        // 复用路径同享（measure 叶子统一应用）：增量与全重建的期望态必须逐字节同源，
+        // 漏一处即差分漂移。
+        if ctx.is_some() && style.min_size.width == taffy::style::Dimension::AUTO {
+            style.min_size.width = taffy::style::Dimension::length(0.0);
+        }
+        // 递归子节点（后序：子先同步，父随后挂期望子列表）。
         // 过滤纯空白 TextNode（HTML tag 间换行+缩进）——它们不应成 flex item 撑开父容器
         // 主轴或挤压兄弟（HTML 标准空白折叠行为）。被过滤的节点 taffy_ids[id.index()]
         // 保持 None，write_back 跳过、layout_rect 保持默认 0。
@@ -334,17 +385,18 @@ pub fn solve(
                 if is_whitespace_only_text(scene, *c) {
                     continue;
                 }
-                let (ctid, cesc) = build(
+                let (ctid, cesc) = sync(
                     scene,
                     tree,
-                    taffy_ids,
+                    ids,
+                    old,
                     *c,
                     self_scroll,
                     image_sizes,
                     root_size,
                 );
                 escaped.extend(cesc); // 下层冒上来的，随本层定位性收编或继续上浮
-                let child = scene.get_live(*c, "layout/build");
+                let child = scene.get_live(*c, "layout/sync");
                 let abs_escapee = child.style.taffy_style.position
                     == taffy::style::Position::Absolute
                     && child.style.position_declared
@@ -362,22 +414,32 @@ pub fn solve(
             children_ids.append(&mut escaped);
         }
 
-        let tid = if let Some(mctx) = ctx {
-            // min-width=0 让 flex-shrink 生效：taffy 默认 min-size:auto 会把 measure(None) 的
-            // max-content 当 min-content，阻止 shrink → 长文本不收缩、超框。设 0 放开宽度。
-            // 只设宽度：文本不纵向 shrink，min-height=0 无收益却有副作用——让 flex column 父
-            // 容器主轴尺寸算大（按钮等容器被撑高、底图下沿往下拉），所以 height 保留 Auto。
-            // 作者显式声明的 min-width 保留（如 stat-bar 的 label/val 固定列宽）——只在
-            // 未声明（Auto）时才放开 shrink。
-            if style.min_size.width == taffy::style::Dimension::AUTO {
-                style.min_size.width = taffy::style::Dimension::length(0.0);
+        // 复用或创建：老条目 NodeId 吻合同一节点 → 值比较短路 set_style /
+        // set_node_context（taffy 内部标脏上溯）；否则（新节点 / slot 复用 gen 不符）
+        // 创建新 taffy 节点。
+        let tid = match old[id.index()].filter(|&(nid, _)| nid == id) {
+            Some((_, tid)) => {
+                if tree.style(tid).is_ok_and(|s| s != &style) {
+                    tree.set_style(tid, style).ok();
+                }
+                if tree.get_node_context(tid) != ctx.as_ref() {
+                    tree.set_node_context(tid, ctx).ok();
+                }
+                tid
             }
-            // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
-            tree.new_leaf_with_context(style, mctx).unwrap()
-        } else {
-            tree.new_with_children(style, &children_ids).unwrap()
+            None => match ctx {
+                // 叶子：装测量上下文。children 应为空（Text/Image 是叶子）。
+                Some(mctx) => tree.new_leaf_with_context(style, mctx).unwrap(),
+                None => tree.new_with_children(style, &children_ids).unwrap(),
+            },
         };
-        taffy_ids[id.index()] = Some(tid);
+        ids[id.index()] = Some((id, tid));
+        // 子列表同步：new_with_children 创建时已挂期望子（比较短路）；既有节点
+        // 子序/成员漂移（增删/重排/重挂/escapee 迁移）才 set_children（内部自会从
+        // 旧父摘挂 + 标脏上溯）。
+        if tree.children(tid).is_ok_and(|cur| cur != children_ids) {
+            tree.set_children(tid, &children_ids).ok();
+        }
         (tid, escaped)
     }
 
@@ -390,29 +452,38 @@ pub fn solve(
         inset.left != auto || inset.right != auto || inset.top != auto || inset.bottom != auto
     }
 
-    let (root_tid, escaped) = build(
+    let (root_tid, escaped) = sync(
         scene,
-        &mut taffy_tree,
-        &mut taffy_ids,
+        &mut cache.tree,
+        &mut cache.ids,
+        &old,
         scene.roots[0],
         false,
         image_sizes,
         root_size,
     );
     // 根收编余下 escapee：无任何 positioned 祖先时包含块 = 初始包含块（视口），CSS 语义。
+    // 无条件 set_children（罕见路径：持续存在的 escapee 场景根每帧标脏，但子树缓存
+    // 仍干净——taffy 脏传播只上溯，干净子树照跳）。
     if !escaped.is_empty() {
-        let mut kids = taffy_tree.children(root_tid).unwrap_or_default();
+        let mut kids = cache.tree.children(root_tid).unwrap_or_default();
         kids.extend(escaped);
-        taffy_tree.set_children(root_tid, &kids).unwrap();
+        cache.tree.set_children(root_tid, &kids).unwrap();
+    }
+    // 老条目清退：未被新映射保留的 taffy 节点统一 remove。remove 会把子节点的父引用
+    // 清空（孤儿滞留树内）——被清退子树的每个节点都有自己的老条目，逐一 remove 兜净。
+    for &(nid, tid) in old.iter().flatten() {
+        let kept = matches!(cache.ids.get(nid.index()), Some(Some((_, t))) if *t == tid);
+        if !kept {
+            cache.tree.remove(tid).ok();
+        }
     }
 
     // taffy NodeId → scene NodeId 反查，供 measure 闭包按 taffy nid 把 TextLayout
     // 存进 scene 索引的 text_layouts。render 复用，消除 layout/render 双测量不一致。
     let mut taffy_to_scene: HashMap<taffy::NodeId, NodeId> = HashMap::new();
-    for n in scene.nodes.values() {
-        if let Some(tid) = taffy_ids[n.id.index()] {
-            taffy_to_scene.insert(tid, n.id);
-        }
+    for &(nid, tid) in cache.ids.iter().flatten() {
+        taffy_to_scene.insert(tid, nid);
     }
     let mut text_layouts: Vec<Option<TextLayout>> = vec![None; scene.nodes.capacity() + 1];
     // measure memo：跨帧 carry-over。mem::take 出 scene（期间 scene.text_measure_cache 空），
@@ -424,25 +495,25 @@ pub fn solve(
         measure_cache.resize(cap_need, None);
     }
 
-    // 设根 size：覆盖为调用方给的 root_size（viewport）。
+    // 设根 size：覆盖为调用方给的 root_size（viewport）。值比较短路——稳态帧
+    //（viewport 未变）不 set_style，根保持干净缓存。
     // Style.size 字段类型是 Size<Dimension>（不是 LengthPercentageAuto）。
-    let root_style = taffy_tree.style(root_tid).unwrap().clone();
-    taffy_tree
-        .set_style(
-            root_tid,
-            Style {
-                size: Size {
-                    width: Dimension::length(root_size.0),
-                    height: Dimension::length(root_size.1),
-                },
-                ..root_style
-            },
-        )
-        .ok();
+    let root_style = cache.tree.style(root_tid).unwrap().clone();
+    let sized_root = Style {
+        size: Size {
+            width: Dimension::length(root_size.0),
+            height: Dimension::length(root_size.1),
+        },
+        ..root_style.clone()
+    };
+    if sized_root != root_style {
+        cache.tree.set_style(root_tid, sized_root).ok();
+    }
 
     // solve：单一 FnMut 闭包按 context 分派。
     // known.width: Option<f32> —— Some=约束宽，None=不限（→ measure_text max_width=None）。
-    taffy_tree
+    cache
+        .tree
         .compute_layout_with_measure(
             root_tid,
             Size::MAX_CONTENT,
@@ -693,20 +764,20 @@ pub fn solve(
             }
         }
     }
-    walk_taffy_abs(&taffy_tree, root_tid, (0.0, 0.0), &mut taffy_abs);
+    walk_taffy_abs(&cache.tree, root_tid, (0.0, 0.0), &mut taffy_abs);
 
     // 回写 layout_rect + clip_rect（绝对坐标取 taffy 树累加值）。
     fn write_back(
         scene: &mut Scene,
         tree: &TaffyTree<MeasureContext>,
-        taffy_ids: &[Option<taffy::NodeId>],
+        ids: &[Option<(NodeId, taffy::NodeId)>],
         taffy_abs: &HashMap<taffy::NodeId, (f32, f32)>,
         id: NodeId,
     ) {
-        // 被过滤的节点（纯空白 TextNode）：taffy_ids 槽为 None，layout_rect 保持默认 0。
-        // 早返，跳过 solve 结果回写——但递归子节点（无，TextNode 是叶子），安全。
-        let tid = match taffy_ids[id.index()] {
-            Some(tid) => tid,
+        // 被过滤的节点（纯空白 TextNode / rich 折叠子）：ids 槽为 None，layout_rect 保持
+        // 默认 0。早返，跳过 solve 结果回写——但递归子节点（无，TextNode 是叶子），安全。
+        let tid = match ids[id.index()] {
+            Some((_, tid)) => tid,
             None => return,
         };
         let layout = tree.layout(tid).unwrap();
@@ -731,14 +802,28 @@ pub fn solve(
         };
         let kids = node.children.clone();
         for c in kids {
-            write_back(scene, tree, taffy_ids, taffy_abs, c);
+            write_back(scene, tree, ids, taffy_abs, c);
         }
     }
-    write_back(scene, &taffy_tree, &taffy_ids, &taffy_abs, scene.roots[0]);
+    write_back(scene, &cache.tree, &cache.ids, &taffy_abs, scene.roots[0]);
     // layout 阶段 TextLayout 缓存交还 scene，供 render 复用（不重测）。
     scene.text_layouts = text_layouts;
     // measure memo 写回（跨帧持久）。
     scene.text_measure_cache = measure_cache;
+    // 持久 taffy 树写回（增量 solve 载体）。
+    scene.layout_cache = cache;
+}
+
+/// 全重建 solve：清空持久 taffy 树后走同一增量路径（从零 sync = 全量创建）。
+/// 差分守卫测试的基准路径 + 诊断兜底（怀疑增量态腐坏时对照）。
+pub fn solve_rebuild(
+    scene: &mut Scene,
+    fonts: &FontTable,
+    root_size: (f32, f32),
+    image_sizes: &ImageSizeTable,
+) {
+    scene.layout_cache = LayoutCache::default();
+    solve(scene, fonts, root_size, image_sizes);
 }
 
 #[cfg(test)]
@@ -1829,5 +1914,333 @@ mod tests {
             "两行文本高 ≈66（2×27px + padding 12），got {}",
             tr.h
         );
+    }
+
+    // ===== #29 增量 solve 差分守卫 =====
+    // 增量实现的验收主体：随机操作序列下，增量 solve 与全重建 solve（solve_rebuild =
+    // 清缓存重 sync）的逐节点 layout_rect/clip_rect 必须全等。漏一种 diff（结构变更/
+    // 样式变更/内容变更含空白折叠/slot 复用 gen 不符/rich 折叠转正）= 旧布局残留，
+    // 这里当场抓。seed 固定保证可复现。
+
+    /// xorshift64*：测试用确定性 RNG（不引 rand 依赖）。
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            self.0 = x;
+            x.wrapping_mul(0x2545F4914F6CDD1D)
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n as u64) as usize
+        }
+    }
+
+    /// 全 live 节点的 (id, layout_rect, clip_rect) 快照，按 id 排序。
+    fn snap(scene: &Scene) -> Vec<(NodeId, Rect, Option<Rect>)> {
+        let mut v: Vec<_> = scene
+            .nodes
+            .values()
+            .map(|n| (n.id, n.layout_rect, n.clip_rect))
+            .collect();
+        v.sort_by_key(|(id, _, _)| id.0);
+        v
+    }
+
+    /// 建子节点（镜像 Scene::build 的节点字面量），挂到 parent.children 尾部。
+    fn spawn(scene: &mut Scene, parent: NodeId, kind: NodeKind, text: Option<String>) -> NodeId {
+        let node = crate::scene::node::Node {
+            id: NodeId::INVALID,
+            parent: Some(parent),
+            kind,
+            style: ResolvedStyle::default(),
+            base_style: ResolvedStyle::default(),
+            taffy_id: None,
+            layout_rect: Rect::default(),
+            clip_rect: None,
+            children: Vec::new(),
+            dirty_mesh: true,
+            dirty_text: matches!(kind, NodeKind::TextNode),
+            classes: Vec::new(),
+            id_attr: None,
+            custom_tag: None,
+            interaction: crate::scene::node::NodeInteraction {
+                flags: crate::scene::node::NodeFlags::empty(),
+                touchable: true,
+                draggable: false,
+                tabindex: None,
+            },
+            reuse_key: 0,
+            inline_override: ResolvedStyle::default(),
+            inline_set: crate::style::dynamic::InlineSet(0),
+            user_transform: crate::transform::NodeTransform::default(),
+            rich_text_block: false,
+        };
+        let key = scene.nodes.insert(node);
+        let id = NodeId::from_key(key);
+        scene.nodes.get_mut(key).unwrap().id = id;
+        scene.alloc_node_slot(id, kind);
+        if let Some(t) = text {
+            scene.text_contents.insert(id, t);
+        }
+        scene.get_live_mut(parent, "test/spawn").children.push(id);
+        id
+    }
+
+    /// live 节点池（任意 kind）+ 容器池（有 children 槽位的候选）。
+    fn live_nodes(scene: &Scene) -> Vec<NodeId> {
+        scene.nodes.values().map(|n| n.id).collect()
+    }
+
+    #[test]
+    fn incremental_solve_matches_full_rebuild_under_random_ops() {
+        let Some(fonts) = font_table() else {
+            // 无字体 fixture 环境（CI 极端裁剪）跳过——文本测量退 FontTable default 同样可跑，
+            // 但保持与其他 layout 测试一致的跳过语义。
+            return;
+        };
+        // 非平凡初始场景：flex column 根 + 文本/容器/图 + absolute escapee +
+        // 滚动容器（高子）+ 空白文本节点（排除路径）。
+        let mut abs_style = ResolvedStyle::default();
+        abs_style.taffy_style.position = taffy::style::Position::Absolute;
+        abs_style.position_declared = crate::style::resolved::PositionDeclared::Absolute;
+        abs_style.taffy_style.inset.top = taffy::style::LengthPercentageAuto::length(10.0);
+        abs_style.taffy_style.size.width = Dimension::length(80.0);
+        let mut scroll_style = ResolvedStyle::default();
+        scroll_style.overflow_y = OverflowMode::Scroll;
+        scroll_style.taffy_style.size.height = Dimension::length(200.0);
+        let mut tall_style = ResolvedStyle::default();
+        tall_style.taffy_style.size.height = Dimension::length(600.0);
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("hello incremental".into()),
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("   \n  ".into()),
+                None,
+            ), // 纯空白：排除路径
+            (
+                Some(0),
+                NodeKind::Container,
+                abs_style.clone(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ), // escapee：非 positioned 父
+            (
+                Some(0),
+                NodeKind::Container,
+                scroll_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(5),
+                NodeKind::Container,
+                tall_style,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Image,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                Some("a.png".into()),
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        scene.image_srcs.insert(
+            scene
+                .nodes
+                .values()
+                .find(|n| n.kind == NodeKind::Image)
+                .unwrap()
+                .id,
+            "a.png".into(),
+        );
+        let sizes = sizes("a.png", 120, 90);
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let mut tweens = crate::tween::TweenManager::default();
+        let mut root_size = (800.0_f32, 600.0_f32);
+
+        // 预热两帧（首帧全量创建，第二帧稳态复用）。
+        solve(&mut scene, &fonts, root_size, &sizes);
+        solve(&mut scene, &fonts, root_size, &sizes);
+
+        for frame in 0..300 {
+            // ---- 随机操作（8 类，覆盖增量 diff 的全部变更面）----
+            let live = live_nodes(&scene);
+            if live.len() < 4 {
+                return; // 删空保护：场景太小无意义
+            }
+            match rng.below(8) {
+                0 => {
+                    // 内容变更（含偶发置空白 → 排除项转正/转出）
+                    let texts: Vec<_> = scene
+                        .nodes
+                        .values()
+                        .filter(|n| n.kind == NodeKind::TextNode)
+                        .map(|n| n.id)
+                        .collect();
+                    let id = texts[rng.below(texts.len())];
+                    let content = if rng.below(4) == 0 {
+                        "  \n\t ".to_string() // 触发空白过滤路径
+                    } else {
+                        format!("text #{}", rng.next() % 1000)
+                    };
+                    scene.text_contents.insert(id, content);
+                }
+                1 => {
+                    // 样式变更：尺寸/边距/主轴方向
+                    let id = live[rng.below(live.len())];
+                    let n = scene.get_live_mut(id, "test/style");
+                    let r = (rng.next() % 300) as f32 + 10.0;
+                    match rng.below(3) {
+                        0 => n.style.taffy_style.size.width = Dimension::length(r),
+                        1 => n.style.taffy_style.size.height = Dimension::length(r),
+                        _ => {
+                            n.style.taffy_style.padding.left =
+                                taffy::style::LengthPercentage::length(r / 4.0)
+                        }
+                    }
+                }
+                2 | 3 => {
+                    // 增节点（slot 复用 gen 路径：此前帧删过的槽会被重用）
+                    let parents: Vec<_> = live_nodes(&scene)
+                        .into_iter()
+                        .filter(|id| !scene.get_live(*id, "test").rich_text_block)
+                        .collect();
+                    let p = parents[rng.below(parents.len())];
+                    let kind = if rng.below(2) == 0 {
+                        NodeKind::TextNode
+                    } else {
+                        NodeKind::Container
+                    };
+                    let text = (kind == NodeKind::TextNode).then(|| format!("spawn #{}", frame));
+                    spawn(&mut scene, p, kind, text);
+                }
+                4 => {
+                    // 删节点（随机非根；真 remove_node 走 slotmap 摘除 + 旁表清理）
+                    let victim = live[1 + rng.below(live.len() - 1)];
+                    crate::scene::dynamic::remove_node(&mut scene, &mut tweens, victim);
+                }
+                5 => {
+                    // 重排：rotate 父的 children
+                    let p = live[rng.below(live.len())];
+                    let n = scene.get_live_mut(p, "test/reorder");
+                    if n.children.len() >= 2 {
+                        n.children.rotate_left(1);
+                    }
+                }
+                6 => {
+                    // 重挂：A 移到随机容器 B（防环：B 不在 A 子树内）
+                    let all = live_nodes(&scene);
+                    let a = all[1 + rng.below(all.len() - 1)];
+                    let b = all[rng.below(all.len())];
+                    let mut anc = b;
+                    let mut cyclic = false;
+                    loop {
+                        if anc == a {
+                            cyclic = true;
+                            break;
+                        }
+                        match scene.get_live(anc, "test/reparent").parent {
+                            Some(p) => anc = p,
+                            None => break,
+                        }
+                    }
+                    if !cyclic {
+                        let old_parent = scene.get_live(a, "test/reparent").parent;
+                        if let Some(op) = old_parent {
+                            scene
+                                .get_live_mut(op, "test/reparent")
+                                .children
+                                .retain(|c| *c != a);
+                        }
+                        scene.get_live_mut(a, "test/reparent").parent = Some(b);
+                        scene.get_live_mut(b, "test/reparent").children.push(a);
+                    }
+                }
+                _ => {
+                    // root_size 变更（viewport 重排语言）
+                    root_size = (
+                        600.0 + (rng.next() % 400) as f32,
+                        400.0 + (rng.next() % 300) as f32,
+                    );
+                }
+            }
+            // ---- 差分断言：增量 vs 全重建 ----
+            solve(&mut scene, &fonts, root_size, &sizes);
+            let a = snap(&scene);
+            solve_rebuild(&mut scene, &fonts, root_size, &sizes);
+            let b = snap(&scene);
+            assert_eq!(
+                a, b,
+                "frame {frame}: incremental solve diverged from full rebuild"
+            );
+        }
     }
 }
