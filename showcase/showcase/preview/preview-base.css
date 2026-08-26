@@ -28,16 +28,14 @@
    runtime resolves inline -> Flex+Row. Authors must declare display:flex
    explicitly per main-design.md; do not reintroduce a "div is flex" shim. */
 * { box-sizing: border-box; }
+/* iframe 视口 = 设计视口（shell 按设备框呈现）：body 不做任何包装（旧 file://
+   直开时代的 padding:24px + 居中卡片美化会把 1080 高的页面顶成 1128 出滚动条，
+   且与运行时 .root@(0,0) 不符——rect-diff 的 reset.css 一直就是按「无包装」对齐的）。 */
 body {
   margin: 0;
   color: #e0e6ec;
   font-family: 'LXGW WenKai', sans-serif;
   background: #05080d;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  min-height: 100vh;
-  padding: 24px;
 }
 .root {
   background-image: radial-gradient(1100px 560px at 82% -12%, rgba(95, 180, 212, 0.08), transparent 60%);

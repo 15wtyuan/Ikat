@@ -54,15 +54,19 @@
 
       <div class="section">
         <div class="section-title">1 · 折叠面板（transition height 0↔200px）</div>
-        <div class="section-desc">验收：点「展开」按钮，面板高度应在约 0.4 秒内逐帧增高至 200px（无跳变；一次性瞬间到位即失败）；再点「收起」平滑降回 0。终点精确 200px（与旁边 200px 参照条同高）。</div>
+        <div class="section-desc">验收：点「展开」按钮，面板高度应在约 0.4 秒内逐帧增高至 200px（无跳变；一次性瞬间到位即失败）；再点「收起」平滑降回 0。终点精确 200px（与右侧 200px 参照条同高）。</div>
         <div class="stage">
-          <div class="stage" style="background-color:rgba(0,0,0,0);padding:0;flex-direction:column;align-items:flex-start;gap:10px">
+          <div style="display:flex;flex-direction:column;align-items:flex-start;gap:10px">
             <button id="btn-fold" style="color:#8ec5d8;font-size:14px;padding:6px 14px;border-radius:6px;background-color:rgba(95,180,212,0.08)">展开</button>
-            <div class="panel-body" id="fold-body"></div>
+            <div style="display:flex;flex-direction:row;align-items:flex-start">
+              <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px">
+                <div style="width:320px;height:2px;background-color:#2a5a75"></div>
+                <div class="panel-body" id="fold-body"></div>
+              </div>
+              <div style="width:2px;height:200px;background-color:#2a5a75;margin-left:8px"></div>
+            </div>
+            <span class="label">↑ 上横条：320px 参照宽 · 右竖条：200px 参照高</span>
           </div>
-          <div style="width:320px;height:2px;background-color:#2a5a75"></div>
-          <span class="label">↑ 320px 参照宽 · 下面 200px 参照高 →</span>
-          <div style="width:2px;height:200px;background-color:#2a5a75"></div>
         </div>
       </div>
 
@@ -110,13 +114,15 @@
 
       <div class="section">
         <div class="section-title">6 · C# TweenBuilder.Height（运行时 API 摆台）</div>
-        <div class="section-desc">验收：点「C# 动画」按钮，由 driver 代码提交 TweenBuilder（Height 60→220px，0.6s cubic-out）驱动面板增高——视觉节奏应与 #1 的 CSS transition 同类（平滑、终点精确 220px），非跳变。再点回落。</div>
+        <div class="section-desc">验收：点「C# 动画」按钮，由 driver 代码提交 TweenBuilder（Height 60→220px，0.6s cubic-out）驱动面板增高——视觉节奏应与 #1 的 CSS transition 同类（平滑、终点精确 220px），非跳变。再点回落。终点与右侧 220px 参照条同高。</div>
         <div class="stage">
           <div style="display:flex;flex-direction:column;align-items:flex-start;gap:10px">
             <button id="btn-tween" style="color:#8ec5d8;font-size:14px;padding:6px 14px;border-radius:6px;background-color:rgba(95,180,212,0.08)">C# 动画</button>
-            <div id="tween-panel" style="width:260px;height:60px;background-color:#8a5f3f;border-radius:8px"></div>
-            <div style="width:2px;height:220px;background-color:#2a5a75"></div>
-            <span class="label">↑ 220px 终点参照</span>
+            <div style="display:flex;flex-direction:row;align-items:flex-start">
+              <div id="tween-panel" style="width:260px;height:60px;background-color:#8a5f3f;border-radius:8px"></div>
+              <div style="width:2px;height:220px;background-color:#2a5a75;margin-left:8px"></div>
+            </div>
+            <span class="label">↑ 右竖条：220px 终点参照</span>
           </div>
         </div>
       </div>

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **transition 首帧闪现终点值**：transition drain 提交 tween 时未写 `scene.anim`，
+  提交帧 solve 读到的是级联终点——展开面板先满高一帧再塌回起点起播（反向则先
+  消失一帧）。现提交即以 n=0 预写起始值（与 animation player 的 backwards 首帧
+  立即写同纪律）；delay 期间持有起始值亦合 CSS 语义。回归测试
+  `transition_first_frame_holds_start_value_not_endpoint`。
+- **showcase layout-anim 参照条移位**：#1 折叠面板的 320px 参照宽条移到面板正上方、
+  200px 参照高条贴面板右侧（#6 的 220px 终点参照同理）——原在下方/远处，肉眼对比
+  困难。同批：#1 内层容器改纯 div（去掉借 `.stage` 类残留的 `flex-wrap:wrap`，
+  规避 core 列方向 wrap 容器动画误换列问题，另立 issue 跟踪）。
+- **preview：layout-anim 页补交互模拟**（`preview/pages/layout-anim.js`）：浏览器
+  预览里四个验收按钮可驱动（原先只有 Unity 侧接线，预览里是死的）。
+- **preview：去掉 preview-base.css 的 body 卡片包装**（旧 file:// 直开时代的
+  `padding:24px`+居中美化）：iframe 视口即设计视口，包装会把 1080 高页面顶成
+  1128 出 iframe 内滚动条，且 .root@(24,24) 与运行时 (0,0) 不符。rect-diff 的
+  reset.css 本就按无包装对齐，此改动使人类预览与对齐门同语义。
+- **preview shell 适应窗口**：设备框整体等比缩进视口（观察级 transform，不触发
+  iframe reflow，页内仍按设计分辨率渲染——保真语义不变），默认开启、上限 100%
+  不放大；顶栏「适应窗口」可切回 1:1 像素检查（此时恢复滚动）。修「窗口小于
+  1920×1080 就必须滚动」的预览体验问题。随 loom.exe 发布。
+
 ## [0.0.13] - 2026-08-27
 
 v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
