@@ -671,7 +671,7 @@ c. KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/t
 
 ### 13.3 Transition
 
-纯数据 `items: Vec<TransitionSpec>`。class/typed style 变化在下一帧 tick step **k** rematch 生效后，step **l** transition drain 比较 computed style 变化（基线 = 上帧 computed，不含 NodeAnim），把每个 item 翻译成 Tweener 提交 TweenManager。与控件状态（Toggle 切换、TabList 切换）正交，由状态变化触发。transition 与 animation 检测独立——animation 播放期间 computed style 不变，transition 不误触发。
+纯数据 `items: Vec<TransitionSpec>`。class/typed style 变化在下一帧 tick step **k** rematch 生效后，step **l** transition drain 比较 computed style 变化（基线 = 上帧 computed，不含 NodeAnim），把每个 item 翻译成 Tweener 提交 TweenManager；**提交即以 n=0 预写起始值进 NodeAnim**（与 player 的 backwards 首帧立即写同纪律：本帧 solve 读 override 而非级联终点，否则首帧闪现端点值一帧；delay 期间预写兜底 = CSS「延迟期持有旧值」）。与控件状态（Toggle 切换、TabList 切换）正交，由状态变化触发。transition 与 animation 检测独立——animation 播放期间 computed style 不变，transition 不误触发。
 
 ### 13.4 opacity 父级累积传播
 
@@ -785,7 +785,7 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
      i.  process_text_input             ← UTF-32 字符通道（IME/可打印字符）
      j.  list plan/execute_visible      ← ListView 虚拟化 slot 换绑（solve 前：新 slot 本帧布局）
      k.  rematch                        ← 伪类 :hover/:active/:focus/:disabled/:checked 重 cascade（class/style 变更下帧生效）
-     l.  transition drain               ← kill 旧 (node,prop) tween + 提交新 tween（基线 = 上帧 computed）
+     l.  transition drain               ← kill 旧 (node,prop) tween + 提交新 tween + 预写起始值进 NodeAnim（基线 = 上帧 computed）
      m.  sync_animation_players         ← computed animation 声明变化启停 player（rematch 后、solve 前）
      n.  sync_control_visuals           ← 控件态→子 inline_override（solve 前：inline 影响布局）
      o.  solve                          ← Block/Flex 各自算法（每帧一次，帧末一致）

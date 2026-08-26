@@ -19,6 +19,7 @@
 - **行为怪癖**：① span 显式 flex + padding + 文字子 → flex 容器不做文本测量，宽度退化为 padding 值；② 测量不能只看 `known_dimensions`，须结合 `available_space`（否则定宽容器内文本不换行）；③ 某些 sizing 轮次传 `Definite(0)`——首个 0 宽测量若被当最终结果钉死，文字会竖排。
 - **Block 流不实现 gap**（flex 才读 `row_gap`）——block ul 的 spacer 间无 gap，可见区计算盲扣会让 spacer 偏矮、滚动条失真；flex 容器的 gap 必须计入可见区累积位，漏计 = 视口顶部空白。
 - **增量 API 事实**（持久树复用必备）：`set_node_context` 存在（换 ctx + 标脏）；`set_children` 自带从旧父摘挂 + `mark_dirty`；`remove` 只摘自身、**子节点留孤儿滞留树内**（删子树须逐节点 remove）；`mark_dirty` 递归上溯祖先（已脏早退）；`Style`/节点上下文可 `PartialEq` 值比较短路 set；`children()` 返回 `Vec` clone（比较别怕贵）；compute 对干净子树跳过（布局缓存按节点粒度）。
+- **MinContent 约束下子项 min-size 被转成 `Definite(min)` 可用空间，wrap 容器据此真换行且几何泄漏进最终布局**（#82）：滚动容器祖先会触发子树 min-content 测量；flexbox 在 MinContent 约束下测子项时，子项有 min-size 就把可用空间换成 `Definite(min)`——列方向 wrap 容器的主轴行收集在 Definite 下会真换行（MaxContent 才永不换），且该测量相位的换行几何会写进当帧最终布局（子项横排一帧后复原；容器高度仍正常，因 `determine_container_main_size` 取 `max(最长行, available)`）。触发组合 = **列方向 wrap + 自带 min-height + 滚动容器祖先**（Blink 无此泄漏）。页面规避：列容器别带 wrap（含类规则残留）；core 修法在 taffy 内部，见 issue #82。
 
 ### ttf-parser 0.20（core/src/text）
 - kerning 在 `face.tables().kern.subtables` 遍历（取 horizontal 非状态机子表），`.glyphs_kerning(GlyphId, GlyphId) -> Option<i16>`。
@@ -44,6 +45,9 @@
 
 ### unicode-linebreak 0.1（core/src/text）
 - `linebreaks() -> impl Iterator`（非 Vec）；枚举名 `BreakOpportunity`；返回 **byte offset**（非 char index）；在空白**后**断 → 行首无多余空格。
+
+### cargo / crates.io 网络（Windows 本机）
+- 在线 cargo 命令（fetch/test/clippy）半刷新索引时可能**把 Cargo.lock 写到新版本再下载失败**——此后 `--offline` 也挂（lock 指向缓存里没有的版本，报「failed to download X / attempting to make an HTTP request」）。恢复序：① `git diff Cargo.lock` 有漂移先 `git checkout Cargo.lock`（提交态通常全缓存）；② 仍缺的 crate 用 `cargo update -p <crate> --precise <缓存已有版本> --offline` 降回（须满足语义版本约束）；③ 无缓存同系版本的从镜像直下进 `~/.cargo/registry/cache/index.crates.io-*/`——USTC `https://mirrors.ustc.edu.cn/crates.io/crates/<name>/<name>-<ver>.crate` 实测可用，static.crates.io / rsproxy 常被掐断。诊断用 bash 对账：lock 里 name|version 逐个查 cache 目录（别用 MSYS python，glob 不展开 `~`）。
 
 ### Tauri 2（packer/gui 前端）
 - `onDragDropEvent` 的 `position` 是物理像素，须除 `devicePixelRatio` 才是 CSS 逻辑坐标；payload 字段名 `type`/`paths`/`position`。

@@ -123,6 +123,8 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **core dump 复现 Unity solve**：PlayMode layout/视觉 bug 先编码机用对应 dump_*.rs example 喂同样的 pkg.bin 复现 core solve，定位 bug 在 core（dump 错）还是 Unity 后端（dump 对、渲染错）。core 和 Unity 是同一份 solve 的两面，dump 取证再改，别静态猜反复试。
 
+**layout/缓存类疑难先开 taffy debug feature 取证**：core 的 Cargo.toml 给 taffy 临时加 `features=["debug"]` 跑 dump example，日志按节点缩进打印每轮 LayoutInput（known_dimensions/available_space/run_mode）与 RESULT——换行判定、MinContent/Definite 可用空间一类问题一眼定形（#82 用此法定案）。复现锚点可 `git show <旧commit>:页面.html` 喂 example 的 HTML 环境变量，再做减法二分找触发组合。用完还原 feature（勿提交）。
+
 **Unity 侧结构化诊断入口**：`LoomHost.DumpSceneJson()`（Runtime 包内 public，未 instantiate 返 `"[]"`）dump 全场景节点树；showcase 工程另有 dev-only 的 `LoomBridge`（PlayMode-only：DumpScene/DumpMirrorPool）。uloop 探针读空先想这两个入口。
 
 **布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；页面预览模拟脚本（preview/main.js + pages/<页>.js，经 `loom preview` server 注入）是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。**rect 全等 ≠ 渲染全等——行断是独立维度**：文本换行变化不必然改节点 rect（定高容器内换行 rect 不动），布局/测量面改动的守卫必须含行数维度（layout 差分守卫测试已含）；怀疑 core 行为回归时最强取证 = **pre-变更 worktree 对拍**（`git worktree add` 拉变更前 commit、构建同 example、`dump_page --json` 按 id+tag+classes+domIndex 键逐节点比 rect/行断）——#29 验收期十页逐字节全等一锤排除布局回归。**动画页 diff 数字先测噪声底再下结论**：同栈两次采样对拍（old-vs-old 也有 21 diff = 相位噪声实锤）；要一锤定音用「动画/过渡全禁后的终态 A/B」——四页 0 diff 即证明改动 rect-中性（preview 批方法论）。shell 注意 `cmd | tail; echo $?` 捕获的是 tail 退出码。
