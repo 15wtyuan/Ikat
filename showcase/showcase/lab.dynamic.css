@@ -1,0 +1,25 @@
+/*
+ * 动态样式声明位（#88 约定）：只被运行时切换的类（dyn-*）集中放在独立 css，
+ * 由页面 HTML <link rel="stylesheet" href="lab.dynamic.css"> 引入——与静态样式
+ * 同一条围栏校验 / 打包 / 预览管线。C# 侧只做类切换（node.Classes），不拼 CSS 串。
+ */
+.dyn-card {
+  background-color: #1a2f45;
+  border-width: 2px;
+  border-style: solid;
+  border-color: #33507a;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: center;
+}
+
+/* 伪类对运行时实例化的节点照常生效（lab §17 判据 ③④）。声明序在 .dyn-card 后——
+   同特异性下后声明者胜。 */
+#dyn-list .dyn-card:nth-child(even) { background-color: #20344e; }
+.dyn-card:hover { border-color: #e8c46a; }
+
+/* 选中态最后声明：背景必胜（含奇偶行）。 */
+.dyn-selected { background-color: #17331f; border-color: #46a060; }

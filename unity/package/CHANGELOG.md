@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **文本测量公共 API（#86）**：`UIContext.MeasureText(text, family, sizePx,
+  maxWidth)` → `TextMetrics{W, H, LineCount}`——布局前纯文本预估（tips 预分行 /
+  飘字宽估 / 按钮自适应宽），与 solve 内文本测量同一条断行代码，预估即所见；
+  `maxWidth > 0` 按宽断行，缺省单行。family 未注册抛 `UIContractException`
+  （不静默 fallback 到默认字体——拿错字体估宽没有意义）。消灭业务侧手数字数
+  （Tripawd tips「17 字/行」类魔法数字）。
+- **F8 dump 布局归因增强（#85）**：scene JSON 文本节点附 resolved 块
+  （font-size / 行高乘数——`line-height:26` 被当 26 倍乘数类问题从反推变直读 /
+  行数 / 每行宽），滚动容器附几何块（viewport/content/overlap/pos/物理）；
+  新增可读树视图 `LoomHost.DumpSceneTree(filter)`（每节点一行
+  `tag#id.class rect` + 文本/滚动关键值，ASCII 树缩进；filter = id/class
+  子串只出命中子树），F8 诊断输出接入 `[Scene tree]` 段。
+- **运行时告警面（#87）**：滚轮打进「声明 overflow:auto/scroll 但内容未溢出
+  （overlap=0）」的容器 → warn-once 一条 Console 告警（#64 类「滚动容器无效」
+  从半天排查变一行日志）；诊断订阅（缺字报告 / 运行时告警）改
+  Editor/Development build 门控——发布 build 零日志成本。核心告警通道
+  （`Scene.warnings` → `take_warnings` FFI → `RuntimeWarning` 事件）既有，
+  本批补检测规则与门控；transition 通道白名单打包期 warning 既有（fence
+  `TRANSITION_PROPS`），过期注释一并修正。
+- **动态内容范式文档 + lab §17 用例（#88）**：runtime skill 新增「Dynamic
+  content paradigm」章节——何时模板实例化、何时 `Create<T>`、坐标数据与结构
+  样式的分工；动态类（`dyn-*`）的声明位定为独立 css 经 `<link rel="stylesheet">`
+  引入（围栏可校验 / 随 pkg 打包 / 预览可见，零新机制）；伪类（:hover /
+  :nth-child）对实例化节点照常生效的适用面声明。showcase lab §17 摆台验证：
+  `GetTemplate` 实例化 ×3 + Query 注入 + `dyn-selected` 类切换（读 computed
+  背景色进读数）+ hover/斑马纹判据；`lab.dynamic.css` 同批入库。
+
 ## [0.0.13] - 2026-08-27
 
 v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder

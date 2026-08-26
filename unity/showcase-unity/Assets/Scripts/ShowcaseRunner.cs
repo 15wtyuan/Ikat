@@ -797,6 +797,48 @@ public class ShowcaseRunner : MonoBehaviour
                         .Start();
                 };
             }
+            // lab #17 动态内容范式（#88）：模板实例化 + Query 注入 + 运行时切类。
+            // dyn-* 类声明在 lab.dynamic.css（<link> 引入 = 动态样式声明位——围栏可校验、
+            // 随 pkg 打包、预览可见），C# 侧只做类切换、不拼 CSS 串。伪类（:hover /
+            // :nth-child）对实例化节点照常生效，是本节同时验证的点。
+            if (page.TryGet<Button>("dyn-btn", out var dynBtn)
+                && page.TryGet<Button>("dyn-sel-btn", out var dynSelBtn)
+                && page.TryGet<Container>("dyn-list", out var dynList)
+                && page.TryGet<TextElement>("dyn-read", out var dynRead))
+            {
+                var cards = new System.Collections.Generic.List<Container>();
+                string[] names = { "哨塔", "兵营", "金矿" };
+                int[] levels = { 3, 7, 12 };
+                dynBtn.Clicked += () =>
+                {
+                    foreach (var c in cards) c.Dispose(); // 重复点击 = 重建
+                    cards.Clear();
+                    var tpl = page.GetTemplate("dyn-card");
+                    for (int i = 0; i < names.Length; i++)
+                    {
+                        var card = tpl.Instantiate();
+                        card.Get<TextElement>("dyn-name").TextContent = names[i];
+                        card.Get<TextElement>("dyn-count").TextContent = "LV." + levels[i];
+                        dynList.AddChild(card);
+                        cards.Add(card);
+                    }
+                    dynRead.TextContent = "已实例化 " + cards.Count + " 节点（Query 注入完成）";
+                };
+                dynSelBtn.Clicked += () =>
+                {
+                    if (cards.Count < 2) { dynRead.TextContent = "先点「实例化 3 节点」"; return; }
+                    var card = cards[1];
+                    card.Classes.Toggle("dyn-selected");
+                    var bg = card.Computed.Background;
+                    // computed 背景色进读数：选中翻转即级联证据（#17331f ↔ 奇偶行底色）。
+                    string bgHex = bg.HasValue
+                        ? string.Format("#{0:X2}{1:X2}{2:X2}",
+                            (int)(bg.Value.R * 255f), (int)(bg.Value.G * 255f), (int)(bg.Value.B * 255f))
+                        : "null";
+                    dynRead.TextContent = "dyn-selected=" + card.Classes.Contains("dyn-selected")
+                        + " computed bg=" + bgHex;
+                };
+            }
         }
         if (pageName == "settings")
         {

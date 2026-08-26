@@ -135,6 +135,58 @@ ListView modes, animation hooks, exceptions) are in
 `references/api-reference.md` next to this file — consult it before
 guessing an API name.
 
+## Dynamic content paradigm
+
+Repeated or data-driven UI (generated map nodes, battle status rows,
+cards) is **template instantiation + Query injection** — not element-by-
+element `Create<T>` assembly. The division of labor:
+
+- **Structure and interaction styling are declarative.** Author a
+  `<template id="...">` (or a custom component) in the workspace HTML:
+  internal arrangement, hover/selected states, `:nth-child` staggering,
+  transitions — all CSS, all previewable. Instantiate per data item and
+  inject data through the instance-scoped `Get<T>(id)` / `Query`.
+- **Coordinate-like data positions imperatively.** Map pins and similar
+  absolute placement are legitimately `node.Style.Left = Length.Px(x)` —
+  but the node's *internal* structure still comes from the template.
+- **`Create<T>` is for one-off structural wrappers only.** Hand-assembling
+  repeated content forfeits the CSS layer: no hover, no `:nth-child`,
+  no transitions — and no fence validation of what you build.
+
+```csharp
+var tpl = page.GetTemplate("map-node");        // <template id="map-node">
+foreach (var pin in pins)
+{
+    var node = tpl.Instantiate();              // fresh copy per item
+    node.Get<TextElement>("name").TextContent = pin.Name;   // instance-scoped
+    node.Get<TextElement>("count").TextContent = "LV." + pin.Level;
+    node.Style.Left = Length.Px(pin.X);        // coordinates: imperative
+    mapLayer.AddChild(node);
+}
+```
+
+**Runtime class toggling is the styling channel.** Classes that only
+exist for runtime states (`dyn-selected`, `dyn-armed`, ...) are declared
+like any other CSS — put them in a dedicated stylesheet next to the page
+(`my-page.dynamic.css`, loaded via `<link rel="stylesheet">`) so dynamic
+rules have a declared home: fence-validated, packed, and previewed like
+every other stylesheet. Game code never builds CSS strings — it toggles
+classes (`node.Classes.Toggle("dyn-selected")`) and the cascade does the
+rest.
+
+**Pseudo-classes apply to instantiated templates and runtime-created
+nodes alike.** `:hover` / `:active` / `:checked` recompute from live
+pointer and control state every frame; `:nth-child` follows the current
+tree position (runtime-appended children count). They are part of the
+normal cascade — no C# event wiring needed for hover styling.
+
+**Layout-time text sizing needs no magic numbers.** When content decides
+geometry (tips panels, floating damage numbers, auto-width buttons), call
+`driver.Context.MeasureText(text, family, sizePx, maxWidth)` before
+layout: same wrapping code the solver uses, so the prediction is what
+renders. Returns `(W, H, LineCount)`; `maxWidth <= 0` measures a single
+line.
+
 ## Resolution adaptation
 
 Design resolution and adaptation mode are workspace-level config

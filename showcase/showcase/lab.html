@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>LoomGUI 靶子冻结 Showcase · 标本馆</title>
+  <link rel="stylesheet" href="lab.dynamic.css">
   <style>
   .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
   .body {display:flex;flex-direction:column; flex-grow:1; padding:40px 64px; gap:32px; overflow-y:auto; }
@@ -368,6 +369,23 @@
             <div class="tw-track"><div class="tw-block" id="tw-target"></div></div>
             <button id="tw-btn" style="align-self:flex-start;background-color:#1a2f45;border-width:0 0 0 2px;border-style:solid;border-color:#c2605a;color:#e0e6ec;padding:6px 14px;border-radius:4px;font-size:13px">播放 tween</button>
             <span id="tw-read" style="color:#e0e6ec;font-size:13px;min-width:220px">—（点击按钮开始）</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">17 · 动态内容范式（模板实例化 + Query 注入 + 运行时切类 / #88）</div>
+        <div class="section-desc">验收判据：① 点「实例化 3 节点」——右列出现 3 张卡（名字 / 等级角标各不相同，数据由 C# 经 Query 注入实例，非 HTML 写死）。② 点「切换选中」——第 2 张卡整卡变绿（背景 + 描边），读数打出 computed 背景色值翻转；再点复原回原色。dyn-selected 类声明在 lab.dynamic.css（&lt;link&gt; 引入——动态样式的声明位，围栏可校验 / 预览可见）。③ 鼠标悬停任一卡——描边变金色（:hover 对运行时实例化的节点生效）。④ 卡列表奇偶行底色交替（:nth-child 对运行时追加的节点生效）。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button id="dyn-btn" style="align-self:flex-start;background-color:#1a2f45;border-width:0 0 0 2px;border-style:solid;border-color:#2a5a75;color:#e0e6ec;padding:6px 14px;border-radius:4px;font-size:13px">实例化 3 节点</button>
+            <button id="dyn-sel-btn" style="align-self:flex-start;background-color:#1a2f45;border-width:0 0 0 2px;border-style:solid;border-color:#46a060;color:#e0e6ec;padding:6px 14px;border-radius:4px;font-size:13px">切换选中（第 2 张）</button>
+            <span id="dyn-read" style="color:#e0e6ec;font-size:13px;min-width:260px">—（先实例化）</span>
+          </div>
+          <div id="dyn-list" style="display:flex;flex-direction:column;gap:10px;min-width:300px">
+            <template id="dyn-card">
+              <div role="listitem" class="dyn-card"><span id="dyn-name" style="color:#e0e6ec;font-size:15px;font-weight:700">名字</span><span id="dyn-count" style="color:#8ec5d8;font-size:13px">LV.0</span></div>
+            </template>
           </div>
         </div>
       </div>

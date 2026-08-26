@@ -489,6 +489,7 @@ public sealed class UIContext {
     public UIPackage LoadPackage(string name, byte[] bytes);
     public void UnloadPackage(string name);
     public T Create<T>() where T : Node;
+    public TextMetrics MeasureText(string text, string fontFamily, float sizePx, float maxWidth = 0f);
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
     public void CallAfterLayout(Action callback);   // fires after this frame's solve
@@ -504,12 +505,27 @@ public sealed class UITemplate {
     public string Name { get; }
     public Container Instantiate();
 }
+public readonly struct TextMetrics {
+    public float W { get; }        // px
+    public float H { get; }        // px
+    public uint LineCount { get; } // wrapped line count (1 when no maxWidth)
+}
 ```
 
 - `Create<T>` whitelist: `Container`, `AbsolutePanel`, `TextNode`,
   `Image` only. Controls and scope roots come exclusively from
   template instantiation (`Instantiate`) — their semantics need the
   HTML signature. Other `T` throws `UIContractException`.
+- **`MeasureText` is node-free pre-layout measurement** (tips line
+  breaking, floating-text width, auto-width buttons — no hand-counted
+  "N chars per line" constants). It runs the same wrapping code the
+  solver uses, so the prediction is what renders: `maxWidth > 0` wraps
+  greedily at that width; `maxWidth <= 0` (default) measures one line.
+  Line height = `normal`, letter-spacing 0, regular weight (matches
+  default-styled text nodes). `fontFamily` must be a registered family
+  (`LoomHost.RegisterFont` / runtime manifest) — unknown family throws
+  `UIContractException` instead of silently falling back to the default
+  font (measuring with the wrong font is worse than not measuring).
 - `LoadPackage`/`Instantiate` are synchronous (fetch bytes async
   yourself). Duplicate `LoadPackage` with the same name throws
   `UIContractException`; load failures throw `UIPackageException`.
