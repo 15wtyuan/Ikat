@@ -29,6 +29,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-form", "form"),
         ("nav-lab", "lab"),
         ("nav-anim", "m2-animation"),
+        ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
     };
 
@@ -123,6 +124,8 @@ public class ShowcaseRunner : MonoBehaviour
             replay.Clicked += ReplayCurrentPage;
         if (pageName == "m2-animation")
             WireM2AnimationDrivers(page);
+        if (pageName == "layout-anim")
+            WireLayoutAnimDrivers(page);
         if (pageName == "api-infra")
             WireInfraDrivers(page);
         if (pageName == "home")
@@ -134,6 +137,60 @@ public class ShowcaseRunner : MonoBehaviour
                     card.Clicked += () => Show(p);
             }
         }
+    }
+
+
+    /// layout-anim 页 driver（#10 布局动画验收）：
+    /// #1/#3/#4 折叠/侧栏/vw 按钮 add_class 切换（CSS transition 起效）；
+    /// #6 C# TweenBuilder.Height 运行时 API 摆台（60↔220px）。
+    void WireLayoutAnimDrivers(Container page)
+    {
+        bool foldOpen = false;
+        if (page.TryGet<Button>("btn-fold", out var bFold) && page.TryGet<Container>("fold-body", out var foldBody))
+        {
+            bFold.Clicked += () =>
+            {
+                foldOpen = !foldOpen;
+                if (foldOpen) { foldBody.Classes.Add("open"); bFold.TextContent = "收起"; }
+                else { foldBody.Classes.Remove("open"); bFold.TextContent = "展开"; }
+            };
+        }
+        bool sideCollapsed = false;
+        if (page.TryGet<Button>("btn-sidebar", out var bSide) && page.TryGet<Container>("sidebar-pair", out var pair))
+        {
+            bSide.Clicked += () =>
+            {
+                sideCollapsed = !sideCollapsed;
+                if (sideCollapsed) { pair.Classes.Add("collapsed"); bSide.TextContent = "展开侧栏"; }
+                else { pair.Classes.Remove("collapsed"); bSide.TextContent = "收起侧栏"; }
+            };
+        }
+        bool vwWide = false;
+        if (page.TryGet<Button>("btn-vw", out var bVw) && page.TryGet<Container>("vw-panel", out var vwPanel))
+        {
+            bVw.Clicked += () =>
+            {
+                vwWide = !vwWide;
+                if (vwWide) { vwPanel.Classes.Add("wide"); bVw.TextContent = "缩回"; }
+                else { vwPanel.Classes.Remove("wide"); bVw.TextContent = "拉宽"; }
+            };
+        }
+        if (!page.TryGet<Button>("btn-tween", out var bTween) || !page.TryGet<Container>("tween-panel", out var tweenPanel))
+            return;
+        bool tweenTall = false;
+        bTween.Clicked += () =>
+        {
+            // TweenBuilder.Height（#10 新通道）：值+域码载荷（[v, (float)LenDomain.Px]）。
+            tweenTall = !tweenTall;
+            float from = tweenTall ? 60f : 220f;
+            float to = tweenTall ? 220f : 60f;
+            tweenPanel.Tween(TweenChannel.Height)
+                .FromPx(from)
+                .ToPx(to)
+                .Duration(0.6f)
+                .Ease(LoomGUI.EaseKind.CubicOut)
+                .Start();
+        };
     }
 
     /// m2-animation #11/#12：程序化动画（node.Play + 句柄 L3）的 driver 接线。

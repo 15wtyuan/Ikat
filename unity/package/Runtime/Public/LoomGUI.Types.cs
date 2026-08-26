@@ -91,11 +91,38 @@ namespace LoomGUI
     // —— tween builder 面（#9 契约；判别值与 core TweenProp / ease_ffi 对齐，勿重排）——
 
     /// <summary>tween 动画通道（core TweenProp 镜像）。Transform = TRS 五元组
-    /// [tx,ty,sx,sy,rot(rad)]；Translate/Scale 二元；Opacity/Rotation 一元；颜色四元 RGBA。</summary>
+    /// [tx,ty,sx,sy,rot(rad)]；Translate/Scale 二元；Opacity/Rotation/FlexGrow 一元；
+    /// 颜色四元 RGBA。Width/Height 二元 = [value, domainCode]（LenDomain 镜像）——
+    /// 双端必须同域（core FFI 校验拒收）。BoxShadow 走 FromShadow/ToShadow 列表载荷，
+    /// 不用 From/To 数组。</summary>
     public enum TweenChannel
     {
         Opacity = 0, Translate = 1, Scale = 2, Rotation = 3,
         BgColor = 4, TextColor = 5, Transform = 6,
+        Width = 7, Height = 8, FlexGrow = 9, BoxShadow = 10,
+    }
+
+    /// <summary>layout 动画长度域（core LenDomain 镜像；Width/Height tween 载荷第 2 槽）。
+    /// px↔px / %↔% / vw↔vw 各自动（端点同域），vw/vh/vmin/vmax 按画布尺寸解析。</summary>
+    public enum LenDomain
+    {
+        Px = 0, Pct = 1, Vw = 2, Vh = 3, Vmin = 4, Vmax = 5,
+    }
+
+    /// <summary>box-shadow 单层（tween 载荷形态，CSS box-shadow 层镜像）。颜色是
+    /// linear f32 RGBA（Public 层不引 UnityEngine）。多层动画 = params 数组；列表长度
+    /// 不匹配时 core 按浏览器语义补透明零长阴影逐对插值，配对 inset 不匹配整体离散。</summary>
+    public struct TweenShadow
+    {
+        public float OffsetX, OffsetY, Spread, Blur;
+        public float R, G, B, A;
+        /// <summary>true = inset（画在节点内）。双端同序号层 inset 不一致 → 整体离散跳变。</summary>
+        public bool Inset;
+
+        public static TweenShadow Outer(float ox, float oy, float blur, float spread, float r, float g, float b, float a)
+            => new TweenShadow { OffsetX = ox, OffsetY = oy, Blur = blur, Spread = spread, R = r, G = g, B = b, A = a, Inset = false };
+        public static TweenShadow InsetShadow(float ox, float oy, float blur, float spread, float r, float g, float b, float a)
+            => new TweenShadow { OffsetX = ox, OffsetY = oy, Blur = blur, Spread = spread, R = r, G = g, B = b, A = a, Inset = true };
     }
 
     /// <summary>缓动 kind（core ease_ffi 镜像；与 CSS keyword 对应关系见 fence.md「缓动函数

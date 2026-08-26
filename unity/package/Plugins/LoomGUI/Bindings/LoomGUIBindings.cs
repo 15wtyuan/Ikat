@@ -1121,10 +1121,21 @@ namespace LoomGUI.Bindings
         /// <summary>
         ///  注册 tween（spec 形态）。start/end 指向 ≥value_size 个 f32（value_size 由 prop
         ///  隐含）。null 句柄/spec/null 指针 / 越界 prop/ease → no-op。
+        ///  Width/Height 载荷第 2 槽是域码（LenDomain 判别值，双端必须同域）——不一致 → no-op
+        ///  （C# builder 侧前置拦并抛契约异常，这里是防御底线）。
+        ///  BoxShadow 通道不走此入口（列表载荷）——走 `loomgui_stage_tween_shadow`。
         ///  越界 node / duration&lt;=0 由 core update 处理（跳过/立即 complete）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_tween_spec", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void loomgui_stage_tween_spec(StageHandle* h, ulong node_id, LoomTweenSpec* spec, float* start, float* end);
+
+        /// <summary>
+        ///  box-shadow 列表 tween（#10）。每层 9 个 f32：
+        ///  [ox, oy, spread, blur, r, g, b, a, inset_flag]，inset_flag ≠ 0 = inset。
+        ///  层数上限 12（core MAX 层限制内）。null 指针 / 层数越界 / prop 载荷缺失 → no-op。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_tween_shadow", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_tween_shadow(StageHandle* h, ulong node_id, LoomTweenSpec* spec, float* start, uint start_layers, float* end, uint end_layers);
 
         /// <summary>
         ///  停该节点该 prop 的 tween（override 保留末值）。

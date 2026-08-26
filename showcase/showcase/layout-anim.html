@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <script src="preview/loom-preview.js"></script>
+  <title>LoomGUI Showcase · 布局动画验收</title>
+  <style>
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex;flex-direction:column; flex-grow:1; padding:32px 56px; gap:22px; overflow-y:auto; }
+  .page-title { color:#e0e6ec; font-size:30px; font-weight:700; }
+  .page-desc { color:#9aa0b4; font-size:14px; }
+  .section {display:flex;flex-direction:column; background-color:#152433; border-radius:12px; padding:22px; gap:12px; }
+  .section-title { color:#8ec5d8; font-size:19px; font-weight:700; }
+  .section-desc { color:#9aa0b4; font-size:13px; }
+  .stage {display:flex; flex-direction:row; gap:28px; align-items:center; flex-wrap:wrap; background-color:#0e1620; border-radius:8px; padding:18px 22px; min-height:92px; }
+  .label { color:#6c7080; font-size:12px; }
+
+  /* ── #1 折叠面板：height 0↔200px（transition）——按钮 add_class 切换 ── */
+  .panel-body { width:320px; height:0px; background-color:#1a2f45; border-radius:6px; transition:height .4s; overflow:hidden; }
+  .panel-body.open { height:200px; }
+
+  /* ── #2 充能进度条：width keyframes 0→360px 循环 ── */
+  .bar-track { width:360px; height:22px; background-color:#0a141f; border-radius:11px; overflow:hidden; }
+  .bar-fill { width:0px; height:22px; border-radius:11px; background-color:#5fb4d4; }
+  .filling { animation:charge 2.4s linear infinite; }
+  @keyframes charge { from { width:0px; } to { width:360px; } }
+
+  /* ── #3 侧栏 flex-grow 0↔1：份额平滑换手 ── */
+  .sidebar-pair { width:480px; height:56px; display:flex; flex-direction:row; gap:8px; }
+  .sidebar { width:120px; height:56px; background-color:#7d5fbd; border-radius:6px; transition:flex-grow .5s; }
+  .sidebar.main { flex-grow:1; background-color:#2a5a75; }
+  .collapsed .sidebar.side { flex-grow:0.0001; }
+  .sidebar.side { flex-grow:1; }
+
+  /* ── #4 响应式面板：width 50vw↔80vw（transition + 视口域）── */
+  .vw-panel { width:50vw; height:64px; background-color:#3f7d5a; border-radius:8px; transition:width .6s; }
+  .vw-panel.wide { width:80vw; }
+
+  /* ── #5 box-shadow hover：单层→双层（新增层透明淡入）；inset 不配对对照（离散）── */
+  .sh-card { width:220px; height:88px; background-color:#1a2f45; border-radius:10px; padding:14px; color:#9aa0b4; font-size:13px; display:flex; flex-direction:column; gap:4px; }
+  .sh-fade { box-shadow:0 2px 6px rgba(0,0,0,0.4); transition:box-shadow .5s; }
+  .sh-fade:hover { box-shadow:0 2px 6px rgba(0,0,0,0.4), 0 14px 32px rgba(95,180,212,0.55); }
+  .sh-snap { box-shadow:0 4px 10px rgba(0,0,0,0.5); transition:box-shadow .5s; }
+  .sh-snap:hover { box-shadow:inset 0 4px 10px rgba(0,0,0,0.5); }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="topbar" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:18px 32px;background-color:#152433;border-width:0 0 1px 0;border-style:solid;border-color:#2a5a75">
+      <button id="back-home" style="color:#8ec5d8;font-size:15px">← 首页</button><span style="color:#e0e6ec;font-size:20px;font-weight:700">布局动画验收</span><span style="color:#6c7080;font-size:13px">#10 · 6 项</span>
+    </div>
+    <div class="body">
+      <div class="page-title">layout 动画 · width / height / flex-grow / box-shadow</div>
+      <div class="page-desc">同域端点动画（px↔px / vw↔vw）· transition + keyframes + C# TweenBuilder 三通道 · 验收标准逐项写在各节描述里</div>
+
+      <div class="section">
+        <div class="section-title">1 · 折叠面板（transition height 0↔200px）</div>
+        <div class="section-desc">验收：点「展开」按钮，面板高度应在约 0.4 秒内逐帧增高至 200px（无跳变；一次性瞬间到位即失败）；再点「收起」平滑降回 0。终点精确 200px（与旁边 200px 参照条同高）。</div>
+        <div class="stage">
+          <div class="stage" style="background-color:rgba(0,0,0,0);padding:0;flex-direction:column;align-items:flex-start;gap:10px">
+            <button id="btn-fold" style="color:#8ec5d8;font-size:14px;padding:6px 14px;border-radius:6px;background-color:rgba(95,180,212,0.08)">展开</button>
+            <div class="panel-body" id="fold-body"></div>
+          </div>
+          <div style="width:320px;height:2px;background-color:#2a5a75"></div>
+          <span class="label">↑ 320px 参照宽 · 下面 200px 参照高 →</span>
+          <div style="width:2px;height:200px;background-color:#2a5a75"></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">2 · 充能进度条（@keyframes width 0→360px 循环）</div>
+        <div class="section-desc">验收：蓝色填充条应从左端平滑增长到满宽（约 2.4 秒一轮），到头后从 0 重新开始、无限循环。静止不动 / 一次性跳到满宽 / 循环中断即失败。宽度走的是布局通道（不是 scaleX）。</div>
+        <div class="stage">
+          <div class="bar-track"><div class="bar-fill filling"></div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">3 · 侧栏收起（transition flex-grow 1↔0）</div>
+        <div class="section-desc">验收：点「收起侧栏」后紫色侧栏份额应在约 0.5 秒内平滑收缩至零宽，同时蓝色主区平滑扩张占满整行（兄弟份额换手，无跳变）；再点恢复。中段两块宽度都在连续变化即通过。</div>
+        <div class="stage">
+          <div style="display:flex;flex-direction:column;align-items:flex-start;gap:10px">
+            <button id="btn-sidebar" style="color:#8ec5d8;font-size:14px;padding:6px 14px;border-radius:6px;background-color:rgba(95,180,212,0.08)">收起侧栏</button>
+            <div class="sidebar-pair" id="sidebar-pair">
+              <div class="sidebar side"></div>
+              <div class="sidebar main"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">4 · 响应式面板（transition width 50vw↔80vw）</div>
+        <div class="section-desc">验收：点「拉宽」按钮，绿色面板应在约 0.6 秒内平滑增宽；端点是视口百分比——终端宽度应≈设计宽 1920 的 80%（1536px）。再点回 50%（960px）。宽度平滑过渡即通过。</div>
+        <div class="stage">
+          <div style="display:flex;flex-direction:column;align-items:flex-start;gap:10px">
+            <button id="btn-vw" style="color:#8ec5d8;font-size:14px;padding:6px 14px;border-radius:6px;background-color:rgba(95,180,212,0.08)">拉宽</button>
+            <div class="vw-panel" id="vw-panel"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">5 · box-shadow 过渡（透明淡入 vs inset 离散）</div>
+        <div class="section-desc">验收：左卡悬停——第二层青色大阴影应从透明**平滑淡入**（约 0.5 秒，颜色渐现非瞬间弹出；瞬间弹出即失败），移出淡出。右卡悬停——外阴影切到 inset 是**离散跳变**（浏览器同语义：配对 inset 不匹配不插值），瞬间切换即正确行为、出现渐变反而是 bug。</div>
+        <div class="stage">
+          <div class="sh-card sh-fade"><span>左：单层 → 双层（淡入）</span><span>悬停看青色阴影渐现</span></div>
+          <div class="sh-card sh-snap"><span>右：outer → inset（离散）</span><span>悬停看瞬间切换</span></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">6 · C# TweenBuilder.Height（运行时 API 摆台）</div>
+        <div class="section-desc">验收：点「C# 动画」按钮，由 driver 代码提交 TweenBuilder（Height 60→220px，0.6s cubic-out）驱动面板增高——视觉节奏应与 #1 的 CSS transition 同类（平滑、终点精确 220px），非跳变。再点回落。</div>
+        <div class="stage">
+          <div style="display:flex;flex-direction:column;align-items:flex-start;gap:10px">
+            <button id="btn-tween" style="color:#8ec5d8;font-size:14px;padding:6px 14px;border-radius:6px;background-color:rgba(95,180,212,0.08)">C# 动画</button>
+            <div id="tween-panel" style="width:260px;height:60px;background-color:#8a5f3f;border-radius:8px"></div>
+            <div style="width:2px;height:220px;background-color:#2a5a75"></div>
+            <span class="label">↑ 220px 终点参照</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

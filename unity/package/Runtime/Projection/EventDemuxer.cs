@@ -180,6 +180,16 @@ namespace LoomGUI
                         }
                         break;
 
+                    // layout transition 跨域/auto 端点跳变（core EVT_TRANSITION_SNAP=29，#10）：
+                    // 不产 typed struct——诊断日志即可观测（静态端点围栏已拦，这里只有
+                    // 运行时 add_class 组合漏网；click_count = TweenProp 判别值）。
+                    // System.Diagnostics.Debug.WriteLine：headless 双工程无 UnityEngine 引用，
+                    // Unity 侧本行进 Editor.log/Player.log（Console 面板不显示，取舍可接受）。
+                    case (byte)EventType.TransitionSnap:
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[LoomGUI] layout transition snapped (no tween): node {nodeId} prop {evt.clickCount} — endpoints are cross-domain or auto; use one domain (px↔px / %↔% / vw↔vw) with explicit values");
+                        break;
+
                     // 解码（core event.rs）：name 表索引 24-bit LE（click_count+pad）；PlayerKey u64
                     // 拆 touch_id（低 32）+ x（高 32 f32 bits）；y = 载荷（ITERATION=迭代序号 /
                     // KEY=percent / HOOK=hook_name 表索引，均 f32 bits）。

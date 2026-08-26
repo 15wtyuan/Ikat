@@ -3520,6 +3520,9 @@ namespace LoomGUI
         private readonly float[] _end = new float[8];
         private LoomTweenSpec _spec;
         private Action<Node> _onComplete;
+        // BoxShadow 通道列表载荷（其余通道 null）。
+        private TweenShadow[] _shadowStart;
+        private TweenShadow[] _shadowEnd;
 
         internal TweenBuilder(Node node, TweenChannel channel)
         {
@@ -3541,17 +3544,42 @@ namespace LoomGUI
             }
         }
 
-        /// <summary>起始值（分量数按通道，见 <see cref="Node.Tween"/>）。</summary>
+        /// <summary>起始值（分量数按通道，见 <see cref="Node.Tween"/>）。Width/Height 载荷
+        /// = [value, domainCode]（<see cref="LenDomain"/>）——便捷形态用 <see cref="FromPx(float)"/>
+        /// 等单参方法。BoxShadow 通道不用本方法（走 <see cref="FromShadow"/>）。</summary>
         public TweenBuilder From(params float[] values)
         {
             CopyValues(_start, values);
             return this;
         }
 
-        /// <summary>目标值（分量数按通道）。</summary>
+        /// <summary>目标值（分量数按通道）。同 <see cref="From"/> 约定。</summary>
         public TweenBuilder To(params float[] values)
         {
             CopyValues(_end, values);
+            return this;
+        }
+
+        // Width/Height 便捷形态：单值 + 域（默认 px）。双端域必须一致——FFI 侧拒收
+        // 异域提交（C# 这里不重复校验， Start 静默 no-op 由 core 防）。
+        public TweenBuilder FromPx(float v) => From(v, (float)LenDomain.Px);
+        public TweenBuilder ToPx(float v) => To(v, (float)LenDomain.Px);
+        public TweenBuilder FromPct(float v) => From(v, (float)LenDomain.Pct);
+        public TweenBuilder ToPct(float v) => To(v, (float)LenDomain.Pct);
+        public TweenBuilder FromVw(float v) => From(v, (float)LenDomain.Vw);
+        public TweenBuilder ToVw(float v) => To(v, (float)LenDomain.Vw);
+
+        /// <summary>box-shadow 起始列表（空数组 = box-shadow:none 端点）。</summary>
+        public TweenBuilder FromShadow(params TweenShadow[] shadows)
+        {
+            _shadowStart = shadows ?? Array.Empty<TweenShadow>();
+            return this;
+        }
+
+        /// <summary>box-shadow 目标列表（空数组 = 动画到无阴影）。</summary>
+        public TweenBuilder ToShadow(params TweenShadow[] shadows)
+        {
+            _shadowEnd = shadows ?? Array.Empty<TweenShadow>();
             return this;
         }
 
@@ -3615,7 +3643,9 @@ namespace LoomGUI
         }
 
         /// <summary>提交（经 FFI spec-struct 注册进 TweenManager，本帧起生效）。
-        /// bezier x 越界抛 <see cref="UIContractException"/>（FFI 侧静默 no-op，这里前置拦）。</summary>
+        /// bezier x 越界抛 <see cref="UIContractException"/>（FFI 侧静默 no-op，这里前置拦）；
+        /// BoxShadow 通道缺 FromShadow/ToShadow 同抛契约异常；Width/Height 异域提交
+        /// 同抛（FFI 防御拒收在 core）。</summary>
         public void Start()
         {
             _node.ThrowIfDisposed();
@@ -3634,12 +3664,53 @@ namespace LoomGUI
                         $"EaseBezier x1/x2 must be in [0,1] (got x1={x1}, x2={x2})");
             }
             StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+            if (_spec.prop == (uint)TweenChannel.BoxShadow)
+            {
+                if (_shadowStart == null || _shadowEnd == null)
+                    throw new UIContractException(
+                        "BoxShadow tween requires FromShadow(...) and ToShadow(...) list endpoints");
+                if (_shadowStart.Length > 12 || _shadowEnd.Length > 12)
+                    throw new UIContractException(
+                        $"BoxShadow tween supports at most 12 layers per endpoint (got {_shadowStart.Length}/{_shadowEnd.Length})");
+                float[] sp = PackShadows(_shadowStart);
+                float[] ep = PackShadows(_shadowEnd);
+                LoomTweenSpec spec = _spec;
+                fixed (float* sPtr = sp)
+                fixed (float* ePtr = ep)
+                {
+                    Native.loomgui_stage_tween_shadow(h, _node._id, &spec,
+                        sPtr, (uint)_shadowStart.Length, ePtr, (uint)_shadowEnd.Length);
+                }
+                return;
+            }
+            if ((_spec.prop == (uint)TweenChannel.Width || _spec.prop == (uint)TweenChannel.Height)
+                && _start[1] != _end[1])
+            {
+                throw new UIContractException(
+                    $"Width/Height tween endpoints must share one length domain (start domain code {_start[1]}, end {_end[1]}) — px↔px / %↔% / vw↔vw");
+            }
             fixed (float* sp = _start)
             fixed (float* ep = _end)
             {
                 LoomTweenSpec spec = _spec;
                 Native.loomgui_stage_tween_spec(h, _node._id, &spec, sp, ep);
             }
+        }
+
+        /// 每层 9 float：[ox, oy, spread, blur, r, g, b, a, inset?]（core FFI 载荷契约）。
+        private static float[] PackShadows(TweenShadow[] shadows)
+        {
+            float[] buf = new float[shadows.Length * 9];
+            for (int i = 0; i < shadows.Length; i++)
+            {
+                var s = shadows[i];
+                int b = i * 9;
+                buf[b] = s.OffsetX; buf[b + 1] = s.OffsetY;
+                buf[b + 2] = s.Spread; buf[b + 3] = s.Blur;
+                buf[b + 4] = s.R; buf[b + 5] = s.G; buf[b + 6] = s.B; buf[b + 7] = s.A;
+                buf[b + 8] = s.Inset ? 1f : 0f;
+            }
+            return buf;
         }
 
         private static void CopyValues(float[] dst, float[] src)

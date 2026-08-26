@@ -59,5 +59,11 @@ namespace LoomGUI
         // 不广播 EventBus——枚举值仅供 typed struct 关联 + 文档完整（不参与 EventBus 订阅表）。
         AnimationKey = 27,
         AnimationHook = 28,
+        /// layout transition 跨域/auto 端点跳变警告（core EVT_TRANSITION_SNAP = 29，#10）。
+        /// 不产 typed struct / 不进 EventBus——demux 落 debug 日志（可观测信号：
+        /// transition width/height 端点异域或 auto，运行时直接跳变没有动画；
+        /// 静态可见端点已被围栏在打包期拒绝，看到本日志 = 运行时 add_class 组合漏网）。
+        /// payload：click_count = TweenProp 判别值。
+        TransitionSnap = 29,
     }
 }
