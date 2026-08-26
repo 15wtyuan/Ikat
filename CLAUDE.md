@@ -101,6 +101,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - **代码注释**：哲学、出处与范例见 `docs/code-comments.md`（Martin/Ousterhout 之争 → 共识公理 → 开源实践谱系 → 本仓库立场）。判据：非显而易见处写、显而易见处让代码自己说话；契约层写足，复述层零容忍。铁律：注释自包含——读者含 AI 代理，引用内部编号/暗语/文档路径即幻觉入口，确有引用必要直接把结论文本拷进来；踩坑编年史不进代码。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
 - **防文档漂移**：文档写定性不写数字；关键 claim 加可执行测试；改代码后搜 docs/ 是否引用了改动的 struct/函数/列数。
+- **面向消费侧 AI 的文档（handbook/runbook 类，如 `docs/ai-setup.md`）**：指代锚点必须是 **AI 视角可观测的事实**（如「当前会话打开的目录」），不能是决策结果（如「你希望 .loom/ 落在哪」——AI 无从判断）；命令示例不能写死版本号而不提醒替换。验收 = **新鲜 subagent 沙盘**：只给文档本身（严禁读本仓库任何其它文件，模拟消费侧只有链接），判据 = 只问该问的问题 + 全链走绿 + 挑刺清单回收修订——自己复读只算排版检查，不算验收。
 
 ## 调试技巧
 
@@ -135,6 +136,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 **subagent 协作（多 agent 分工的教训）**：
 - 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。
 - **同一工作树上 subagent 串行派发**：全仓库所有 crate 依赖 loomgui_core，并行 agent 的半成品编辑会互相打爆对方的 `cargo test`（整 crate 编译含他人在途改动）——机械活串行排队才是真并行省时。
+- **并行用户会话共享工作树**（非 subagent，用户自己开了多个 agent 会话）：先 `git status` 归因——不属于本批的在途改动（~千行级）别碰也别修；提交只 stage 本批文件；整包 `cargo test` 编译被挡（如 E0063）≠ 本批问题，改用窄 target（`--lib` + 测试名过滤）隔离验证。
 - task 切分别太细：强耦合重构（删共享字段类）的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 - 分支上并行有用户 commit 时，review BASE 用 task commit 的实际 parent（`git rev-parse <taskhead>^`），否则 review 范围混入用户 commit。
 - long-running 分支防 main 漂移：反向 merge（`git merge main` 进 feature 分支），合超集签名，用对方分支的测试当合并验收标准。
