@@ -20,9 +20,9 @@ cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
 # loom CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom，复用核心 parse 层）
-# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / design / scaffold / preview / version；退出码 0=干净（warning 不算失败）/ 1=数据性 / 2=工具性。
+# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / design / scaffold / version；退出码 0=干净（warning 不算失败）/ 1=数据性 / 2=工具性。
 # 输出契约：stdout 单 JSON 文档、stderr 进度（clig.dev）；`format_version` 只增不改；写命令成功回显实体 JSON；`list` 摘要级纪律（全量吐会炸 AI 上下文）。
-# watch / mcp 子命令 rejected by design（AI 循环用 check 轮询 + assets/ 是真相源；业界无 watch 先例）。`preview` 不在此列：长驻本地 server 给人类浏览器预览（工作台外壳 + 注入 AI 手写的 preview/main.js / preview/pages/<页>.js，均不进打包），无文件监听、不自动重建——人类 F5 刷新，源文件每请求现读；稳定端口（路径哈希 41000-41999）+ `.loom/preview.json` server-info + 4h 空闲自杀 + `--stop` token 验归属。
+# watch / mcp 子命令 rejected by design（AI 循环用 check 轮询 + assets/ 是真相源；业界无 watch 先例）。
 # 工作区拓扑：会话根（.loom/ = exe + config.json 双指针 ui_root/unity_root + skills）≠ ui 目录（loom.workspace.json）；
 # 目录解析统一 config 发现（会话根 / ui 本体 / ui 直接子目录均可作参数或 cwd），详见 pkg/src/config.rs。
 cargo build -p loomgui_pkg
