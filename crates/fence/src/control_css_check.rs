@@ -111,7 +111,7 @@ fn compound_matches_element(c: &Compound, el: &IrElement) -> bool {
 
 /// 完整选择器是否命中 node_id：最后一段须命中 node 本身，前面各段沿祖先链匹配
 /// （fence 子集只有后代组合——空格——parse_selector 拒 > + ~）。
-fn selector_matches_node(sel: &ParsedSelector, tree: &IrTree, node_idx: usize) -> bool {
+pub(crate) fn selector_matches_node(sel: &ParsedSelector, tree: &IrTree, node_idx: usize) -> bool {
     let comps = &sel.compound;
     if comps.is_empty() {
         return false;

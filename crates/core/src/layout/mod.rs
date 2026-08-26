@@ -145,6 +145,24 @@ impl Default for LayoutCache {
 /// `image_sizes` = Stage 持有的 path→(w,h) 尺寸表（打包期 PNG IHDR 静态）。
 /// Image measure 查此表算 intrinsic 尺寸（三档：CSS > 真实像素 > 64×64）。
 /// path 缺失或 w/h=0 → fallback 64×64（核心不知图集，但知图尺寸）。
+/// 动画长度 override → taffy Dimension（#10）。px/pct 落原生 tag；vw/vh/vmin/vmax
+/// 按当帧 root_size 换算成 px（与 `ViewportStyle::apply` 同语义，但来源是 anim override）。
+fn anim_len_to_dimension(
+    l: crate::scene::AnimLen,
+    root_size: (f32, f32),
+) -> taffy::style::Dimension {
+    use crate::scene::LenDomain;
+    use taffy::style::Dimension;
+    match l.domain {
+        LenDomain::Px => Dimension::length(l.value),
+        LenDomain::Pct => Dimension::percent(l.value / 100.0),
+        LenDomain::Vw => Dimension::length(l.value / 100.0 * root_size.0),
+        LenDomain::Vh => Dimension::length(l.value / 100.0 * root_size.1),
+        LenDomain::Vmin => Dimension::length(l.value / 100.0 * root_size.0.min(root_size.1)),
+        LenDomain::Vmax => Dimension::length(l.value / 100.0 * root_size.0.max(root_size.1)),
+    }
+}
+
 pub fn solve(
     scene: &mut Scene,
     fonts: &FontTable,
@@ -190,6 +208,21 @@ pub fn solve(
         // 重排语言——root_size 随屏幕/适配模式变，声明 vw 的通道跟画布走）。
         if !node.style.viewport.is_empty() {
             node.style.viewport.apply(&mut style, root_size);
+        }
+        // 动画 layout override（#10）：覆写链末位（base → viewport → anim，动画最高
+        // 优先级）。vw/vh/vmin/vmax 域按当帧 root_size 换算——动画中途 resize 自动
+        // 重解析保持比例；px/pct 直落 taffy 原生形。set_style 值比较短路保证稳态帧
+        // 零成本，动画帧逐帧值变 → 逐帧 set_style（taffy 内部标脏上溯，同 rematch 路径）。
+        if let Some(a) = scene.anim.get(id) {
+            if let Some(l) = a.width {
+                style.size.width = anim_len_to_dimension(l, root_size);
+            }
+            if let Some(l) = a.height {
+                style.size.height = anim_len_to_dimension(l, root_size);
+            }
+            if let Some(g) = a.flex_grow {
+                style.flex_grow = g;
+            }
         }
         // overflow != visible → 设 taffy overflow，让 flex automatic min-size=0（CSS flex §4.5）。
         // 不设则 taffy 默认 Visible → min-size=min-content → 容器被 content 撑开（viewport=content）
@@ -2313,5 +2346,171 @@ mod tests {
             scene.text_layouts[t.index()].is_some(),
             "稳态帧 taffy 跳过干净子树，text_layouts 必须承接上帧（None = render 退化重测换行）"
         );
+    }
+
+    // —— #10 layout 动画 override 覆写链 ——
+
+    #[test]
+    fn anim_width_height_override_drives_solve() {
+        // anim.width/height（px 域）覆写 base 声明：solve 读到的是 override 值。
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let child = scene.get(scene.roots[0]).unwrap().children[0];
+        let id = scene.get(child).unwrap().id;
+        scene.anim.ensure(id).width = Some(crate::scene::AnimLen {
+            domain: crate::scene::LenDomain::Px,
+            value: 123.0,
+        });
+        scene.anim.ensure(id).height = Some(crate::scene::AnimLen {
+            domain: crate::scene::LenDomain::Px,
+            value: 45.0,
+        });
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        let r = &scene.get(id).unwrap().layout_rect;
+        assert!(
+            (r.w - 123.0).abs() < 0.1,
+            "anim width override 123, got {}",
+            r.w
+        );
+        assert!(
+            (r.h - 45.0).abs() < 0.1,
+            "anim height override 45, got {}",
+            r.h
+        );
+    }
+
+    #[test]
+    fn anim_vw_width_reresolves_on_resize_mid_flight() {
+        // resize mid-flight（#10 决策）：vw 域动画中途 root_size 变 → 下帧 solve 按新
+        // root_size 重解析（动画继续走完、比例自动跟随画布，不 snap 不重启）。
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let child = scene.get(scene.roots[0]).unwrap().children[0];
+        let id = scene.get(child).unwrap().id;
+        // 动画进行中：50vw（progress 已到该值，tween 还在跑）
+        scene.anim.ensure(id).width = Some(crate::scene::AnimLen {
+            domain: crate::scene::LenDomain::Vw,
+            value: 50.0,
+        });
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        let w1 = scene.get(id).unwrap().layout_rect.w;
+        assert!((w1 - 400.0).abs() < 0.1, "50vw @800 -> 400, got {w1}");
+        // resize 到 1000：同 override 值（动画未推进），重 solve 跟随新画布
+        solve(&mut scene, &fonts, (1000.0, 500.0), &HashMap::new());
+        let w2 = scene.get(id).unwrap().layout_rect.w;
+        assert!(
+            (w2 - 500.0).abs() < 0.1,
+            "50vw @1000 -> 500（重解析跟随），got {w2}"
+        );
+    }
+
+    #[test]
+    fn anim_flex_grow_override_shares_space() {
+        // flex-grow override：兄弟份额换手（侧栏收起动画的 solve 消费证据）。
+        use crate::style::mapping::apply_decl;
+        let mut st = ResolvedStyle::default();
+        assert!(apply_decl(&mut st, "flex-grow", "1"));
+        let st2 = st.clone();
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                st,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                st2,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let root = scene.roots[0];
+        let kids = scene.get(root).unwrap().children.clone();
+        // 左子动画 override flex-grow = 0（收起中）
+        scene.anim.ensure(kids[0]).flex_grow = Some(0.0);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        let lw = scene.get(kids[0]).unwrap().layout_rect.w;
+        let rw = scene.get(kids[1]).unwrap().layout_rect.w;
+        assert!(lw.abs() < 0.1, "grow=0 的子收缩到 0，got {lw}");
+        assert!((rw - 800.0).abs() < 0.1, "另一子占满，got {rw}");
     }
 }

@@ -101,6 +101,12 @@ pub const EVT_KEY_UP: u8 = 13;
 pub const EVT_FOCUS_IN: u8 = 14;
 pub const EVT_FOCUS_OUT: u8 = 15;
 pub const EVT_TWEEN_COMPLETE: u8 = 16;
+/// layout transition 端点跨域/auto → 不建 tween、直接跳到新值（rematch 检测，#10）。
+/// 围栏对静态可见端点硬拒，此事件只覆盖运行时 add_class 组合出的漏网端点——
+/// payload：click_count = TweenProp 判别值（Width/Height），无字符串载荷。
+/// 值 29 避开 C# EventType 的语义占位（17/21 不进 stream，C# 侧不镜像本枚举值——
+/// demux 对未知类型落 debug 日志即可）。
+pub const EVT_TRANSITION_SNAP: u8 = 29;
 // 动画事件（18/19/20 + 27/28）定义在 event.rs（EVT_ANIMATION_*，payload 走事件字符串表）
 // ——与输入事件共用 EventRecord，字段复用模式一致（见 event.rs 模块文档）。
 

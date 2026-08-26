@@ -9,6 +9,7 @@ pub mod diagnostic;
 pub mod fence_gate;
 pub mod inline_context_check;
 pub mod ir;
+pub mod layout_transition_check;
 pub mod pipeline;
 pub mod projected_check;
 pub mod rich_text_classify;

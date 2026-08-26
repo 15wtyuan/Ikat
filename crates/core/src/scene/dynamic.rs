@@ -794,6 +794,7 @@ mod tests {
                 tag: 0,
                 repeat: 0,
                 yoyo: false,
+                shadow: None,
             },
         );
         // 删 child

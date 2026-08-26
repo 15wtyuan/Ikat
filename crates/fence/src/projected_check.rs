@@ -135,10 +135,11 @@ mod tests {
     }
 
     /// W3：transition 声明属性域外 → FenceTransitionUnsupportedProp 警告。
+    /// （width 自 #10 起是支持通道——本测试换 margin 代表域外属性。）
     #[test]
     fn transition_width_warns() {
         let out = parse_template(
-            "<style>.a { transition: width 0.3s }</style><div class=\"a\">x</div>",
+            "<style>.a { transition: margin 0.3s }</style><div class=\"a\">x</div>",
             "page.html",
         );
         assert!(

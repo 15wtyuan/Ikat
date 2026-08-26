@@ -328,13 +328,21 @@ impl Default for Node {
 }
 
 /// 单节点动画 override（replace-override：Some 覆盖 ResolvedStyle 对应字段，None 退回 CSS）。
-/// 全 None = 无动画。由 TweenManager.update 写，由 compute_world_transforms / build_render_nodes 读。
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+/// 全 None = 无动画。由 TweenManager.update / KeyframePlayer write_frame 写；
+/// 消费点按通道分层：compute_world_transforms / build_render_nodes 读渲染通道
+/// （transform/颜色/box_shadow），layout solve sync 读 layout 通道（width/height/
+/// flex_grow——覆写链最末位，见 layout/mod.rs）。box_shadow 是变长列表 → 本结构
+/// 不可 Copy（仅动画中的节点付费一次 clone）。
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct NodeAnim {
     pub opacity: Option<f32>,
     pub transform: Option<crate::transform::Affine2>, // 覆盖 style.transform.matrix
     pub bg_color: Option<[f32; 4]>,
     pub text_color: Option<[f32; 4]>,
+    pub width: Option<crate::scene::animation::AnimLen>,
+    pub height: Option<crate::scene::animation::AnimLen>,
+    pub flex_grow: Option<f32>,
+    pub box_shadow: Option<Vec<crate::style::resolved::BoxShadow>>,
 }
 
 impl NodeAnim {
@@ -343,6 +351,10 @@ impl NodeAnim {
             && self.transform.is_none()
             && self.bg_color.is_none()
             && self.text_color.is_none()
+            && self.width.is_none()
+            && self.height.is_none()
+            && self.flex_grow.is_none()
+            && self.box_shadow.is_none()
     }
 }
 
@@ -390,6 +402,10 @@ impl AnimTable {
             | TweenProp::Transform => a.transform = None,
             TweenProp::BgColor => a.bg_color = None,
             TweenProp::TextColor => a.text_color = None,
+            TweenProp::Width => a.width = None,
+            TweenProp::Height => a.height = None,
+            TweenProp::FlexGrow => a.flex_grow = None,
+            TweenProp::BoxShadow => a.box_shadow = None,
         }
     }
 }
@@ -688,6 +704,9 @@ pub struct Scene {
     /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
     /// kill 旧 tween + 提交新 tween）。运行时态，不进 pkg。
     pub pending_transitions: Vec<crate::tween::TransitionRequest>,
+    /// layout transition 跨域/auto 端点的跳变警告（rematch 推入；Stage tick drain 进
+    /// 事件流）。围栏拦静态端点，这里只漏运行时 add_class 组合。
+    pub pending_anim_warnings: Vec<crate::input::EventRecord>,
     /// 全局 @keyframes 查找表（CSS `@keyframes` 全局语义）。instantiate 时
     /// 组件 keyframes 合并进来（同名后实例化覆盖）；KeyframePlayer 按 `AnimationSpec.name`
     /// 查此表。运行时态，不进 pkg（pkg 按组件存于 ComponentTemplate.keyframes）。

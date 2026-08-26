@@ -985,25 +985,19 @@ pub fn sync_animation_players(scene: &mut Scene) {
                 .players
                 .values()
                 .filter(|q| q.node == p.node)
-                .fold([false; 4], |acc, q| {
+                .fold([false; 8], |acc, q| {
                     let m = owned_channels(q);
-                    [
-                        acc[0] || m[0],
-                        acc[1] || m[1],
-                        acc[2] || m[2],
-                        acc[3] || m[3],
-                    ]
+                    let mut out = acc;
+                    for (o, b) in out.iter_mut().zip(m) {
+                        *o |= b;
+                    }
+                    out
                 });
-        clear_channels(
-            &mut scene.anim,
-            p.node,
-            [
-                own[0] && !remaining[0],
-                own[1] && !remaining[1],
-                own[2] && !remaining[2],
-                own[3] && !remaining[3],
-            ],
-        );
+        let mut clear = [false; 8];
+        for (i, c) in clear.iter_mut().enumerate() {
+            *c = own[i] && !remaining[i];
+        }
+        clear_channels(&mut scene.anim, p.node, clear);
     }
     for (node, spec) in insert_specs {
         let Some(rule) = scene.keyframes.get(&spec.name).cloned() else {
@@ -1058,6 +1052,7 @@ fn emit_transition_requests(
                 ease: ts.ease,
                 delay: ts.delay,
                 duration: ts.duration,
+                shadow: None,
             });
         }
     }
@@ -1075,6 +1070,7 @@ fn emit_transition_requests(
                 ease: ts.ease,
                 delay: ts.delay,
                 duration: ts.duration,
+                shadow: None,
             });
         }
     }
@@ -1089,6 +1085,7 @@ fn emit_transition_requests(
             ease: ts.ease,
             delay: ts.delay,
             duration: ts.duration,
+            shadow: None,
         });
     }
     // transform：整矩阵 TRS 分解 → 单复合通道插值（CSS 对结构不同的 transform 列表
@@ -1111,8 +1108,156 @@ fn emit_transition_requests(
                 ease: ts.ease,
                 delay: ts.delay,
                 duration: ts.duration,
+                shadow: None,
             });
         }
+    }
+    // #10 layout/box-shadow 通道。width/height 端点须同域且非 auto（域判定：viewport
+    // 平行槽优先——vw 声明的 taffy 槽是 length(0) 占位）；违反 → snap（不建 tween，
+    // rematch 已写新值 = 直接跳变）+ 警告事件。围栏对静态可见端点硬拒，这里漏的
+    // 只有运行时 add_class 组合。mid-flight start 全部先取值（anim 引用不跨任何 push）。
+    let anim_width = anim.and_then(|x| x.width);
+    let anim_height = anim.and_then(|x| x.height);
+    let anim_flex = anim.and_then(|x| x.flex_grow);
+    let anim_shadow = anim.and_then(|x| x.box_shadow.clone());
+    emit_size_transition(scene, node, ts, anim_width, TweenProp::Width, old, new);
+    emit_size_transition(scene, node, ts, anim_height, TweenProp::Height, old, new);
+    if wants(TweenProp::FlexGrow) {
+        let a = old.taffy_style.flex_grow;
+        let b = new.taffy_style.flex_grow;
+        if (a - b).abs() > 1e-6 {
+            let start = anim_flex.unwrap_or(a);
+            scene.pending_transitions.push(TransitionRequest {
+                node,
+                prop: TweenProp::FlexGrow,
+                start: [start, 0.0, 0.0, 0.0, 0.0],
+                end: [b, 0.0, 0.0, 0.0, 0.0],
+                ease: ts.ease,
+                delay: ts.delay,
+                duration: ts.duration,
+                shadow: None,
+            });
+        }
+    }
+    if wants(TweenProp::BoxShadow) && old.box_shadow != new.box_shadow {
+        let start = anim_shadow.unwrap_or_else(|| old.box_shadow.clone());
+        scene.pending_transitions.push(TransitionRequest {
+            node,
+            prop: TweenProp::BoxShadow,
+            start: [0.0; 5],
+            end: [0.0; 5],
+            ease: ts.ease,
+            delay: ts.delay,
+            duration: ts.duration,
+            shadow: Some(Box::new(crate::tween::ShadowPair {
+                start,
+                end: new.box_shadow.clone(),
+            })),
+        });
+    }
+}
+
+/// width/height 单通道的 transition 检测。载荷 = [value, domain_code]
+/// （domain_code = LenDomain 判别值；同域保证由端点检测给出，否则 snap 不建 tween）。
+/// `anim_start` = mid-flight override 的 AnimLen（None = 用旧级联值起点）。
+#[allow(clippy::too_many_arguments)]
+fn emit_size_transition(
+    scene: &mut Scene,
+    node: NodeId,
+    ts: crate::style::resolved::TransitionSpec,
+    anim_start: Option<crate::scene::AnimLen>,
+    prop: crate::tween::TweenProp,
+    old: &ResolvedStyle,
+    new: &ResolvedStyle,
+) {
+    use crate::tween::{TransitionRequest, TweenProp};
+    let wants = ts.prop.is_none() || matches!(ts.prop, Some(q) if q == prop);
+    if !wants {
+        return;
+    }
+    let len_of = |style: &ResolvedStyle| -> Option<crate::scene::AnimLen> {
+        let (vp, dim) = match prop {
+            TweenProp::Width => (style.viewport.width, &style.taffy_style.size.width),
+            _ => (style.viewport.height, &style.taffy_style.size.height),
+        };
+        size_anim_len(vp, dim)
+    };
+    let (Some(a), Some(b)) = (len_of(old), len_of(new)) else {
+        // 任一端 auto / 未声明（未声明端 = 无宽度变化可动，双端齐全才有动画语义）。
+        return;
+    };
+    if (a.value - b.value).abs() <= 1e-6 && a.domain == b.domain {
+        return;
+    }
+    if a.domain != b.domain {
+        // 跨域端点：snap + 警告（异域混合是 fence 硬拒项的运行时漏网兜底）。
+        push_snap_warning(scene, node, prop);
+        return;
+    }
+    let start = anim_start.unwrap_or(a);
+    scene.pending_transitions.push(TransitionRequest {
+        node,
+        prop,
+        start: [start.value, start.domain as u32 as f32, 0.0, 0.0, 0.0],
+        end: [b.value, b.domain as u32 as f32, 0.0, 0.0, 0.0],
+        ease: ts.ease,
+        delay: ts.delay,
+        duration: ts.duration,
+        shadow: None,
+    });
+}
+
+/// 跨域端点跳变警告（EVT_TRANSITION_SNAP；payload click_count = prop 判别值）。
+/// 语义：新级联值已生效（直接跳变），tween 不建——作者侧日志可观测，非静默。
+fn push_snap_warning(scene: &mut Scene, node: NodeId, prop: crate::tween::TweenProp) {
+    scene.pending_anim_warnings.push(crate::input::EventRecord {
+        node_id: node.0,
+        event_type: crate::input::EVT_TRANSITION_SNAP,
+        click_count: prop as u8,
+        pad: [0, 0],
+        touch_id: 0,
+        x: 0.0,
+        y: 0.0,
+        dx: 0.0,
+        dy: 0.0,
+    });
+}
+
+/// width/height 声明值 → AnimLen（viewport 平行槽优先；px/percent 读 taffy Dimension；
+/// auto → None = 不可动画端点）。taffy 0.12 Dimension 是 tagged-pointer struct 非 enum，
+/// tag 判别走 CompactLength（mapping.rs parse 同款手法）。percent 从 0..1 分数还原为
+/// CSS 原始数（25% ↔ 25）。
+fn size_anim_len(
+    vp: Option<crate::style::resolved::ViewportLen>,
+    dim: &taffy::style::Dimension,
+) -> Option<crate::scene::AnimLen> {
+    use crate::scene::{AnimLen, LenDomain};
+    if let Some(v) = vp {
+        let domain = match v.unit {
+            crate::style::resolved::ViewportUnit::Vw => LenDomain::Vw,
+            crate::style::resolved::ViewportUnit::Vh => LenDomain::Vh,
+            crate::style::resolved::ViewportUnit::Vmin => LenDomain::Vmin,
+            crate::style::resolved::ViewportUnit::Vmax => LenDomain::Vmax,
+        };
+        return Some(AnimLen {
+            domain,
+            value: v.value,
+        });
+    }
+    if dim.is_auto() {
+        return None;
+    }
+    let cl = dim.into_raw();
+    match cl.tag() {
+        taffy::style::CompactLength::LENGTH_TAG => Some(AnimLen {
+            domain: LenDomain::Px,
+            value: cl.value(),
+        }),
+        taffy::style::CompactLength::PERCENT_TAG => Some(AnimLen {
+            domain: LenDomain::Pct,
+            value: cl.value() * 100.0,
+        }),
+        _ => None,
     }
 }
 
@@ -2829,5 +2974,164 @@ mod tests {
             0,
             "unset 后回落 base_style 默认 0"
         );
+    }
+
+    // —— #10 layout / box-shadow transition 通道 ——
+
+    #[test]
+    fn rematch_emits_width_transition_same_domain() {
+        // .btn:hover height 100px→0px 同域 → Width/Height 请求，载荷 [value, domain_code]。
+        // base 须显式声明（auto 端不建 tween——双端齐全才有动画语义）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        {
+            let n = s.get_mut(bid).unwrap();
+            use crate::style::mapping::apply_decl;
+            assert!(apply_decl(&mut n.base_style, "height", "100px"));
+            n.base_style.transition = vec![TransitionSpec {
+                prop: Some(TweenProp::Height),
+                duration: 0.3,
+                ease: Ease::Linear,
+                delay: 0.0,
+            }];
+            n.interaction
+                .flags
+                .insert(crate::scene::node::NodeFlags::CASCALED);
+            // 首帧级联产物（old_style 读 n.style 非 base_style）
+            n.style = n.base_style.clone();
+        }
+        push_global(&mut s, rule(".btn:hover", "height", "0px"));
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(s.pending_transitions.len(), 1, "同域 height 变化 → 1 请求");
+        let r = &s.pending_transitions[0];
+        assert!(matches!(r.prop, TweenProp::Height));
+        assert_eq!(
+            r.end[1] as u32,
+            crate::scene::LenDomain::Px as u32,
+            "载荷第 2 槽 = 域码"
+        );
+    }
+
+    #[test]
+    fn rematch_cross_domain_width_snaps_with_warning() {
+        // 端点跨域（默认 auto base 100px? —— btn_scene 无显式 height，auto 端 = 不建 tween）；
+        // 这里构造 px→% 跨域：base 显式 100px + hover 50%。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        {
+            let n = s.get_mut(bid).unwrap();
+            use crate::style::mapping::apply_decl;
+            assert!(apply_decl(&mut n.base_style, "height", "100px"));
+            n.base_style.transition = vec![TransitionSpec {
+                prop: Some(TweenProp::Height),
+                duration: 0.3,
+                ease: Ease::Linear,
+                delay: 0.0,
+            }];
+            n.interaction
+                .flags
+                .insert(crate::scene::node::NodeFlags::CASCALED);
+            // 首帧级联产物（old_style 读 n.style 非 base_style）
+            n.style = n.base_style.clone();
+        }
+        push_global(&mut s, rule(".btn:hover", "height", "50%"));
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        s.pending_anim_warnings.clear();
+        rematch_pseudo_classes(&mut s);
+        assert!(
+            s.pending_transitions.is_empty(),
+            "跨域端点不建 tween（新级联值直接生效 = snap）"
+        );
+        assert_eq!(s.pending_anim_warnings.len(), 1, "snap 警告事件入队");
+        assert_eq!(
+            s.pending_anim_warnings[0].event_type,
+            crate::input::EVT_TRANSITION_SNAP
+        );
+        assert_eq!(
+            s.pending_anim_warnings[0].click_count,
+            TweenProp::Height as u8
+        );
+    }
+
+    #[test]
+    fn rematch_auto_endpoint_no_tween_no_warning() {
+        // auto 端点（base 未声明 height → auto）：不建 tween 也不警告（CSS 语义：
+        // auto→显式值的变化 rematch 已写新值 = 直接跳变；警告只留给跨域——auto 端点
+        // 与显式端点的组合在静态视野已被围栏拦，运行时 auto base 是常见常态
+        // （未声明 = auto），逐次警告太吵）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
+            prop: Some(TweenProp::Height),
+            duration: 0.3,
+            ease: Ease::Linear,
+            delay: 0.0,
+        }];
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(crate::scene::node::NodeFlags::CASCALED);
+        push_global(&mut s, rule(".btn:hover", "height", "200px"));
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        s.pending_anim_warnings.clear();
+        rematch_pseudo_classes(&mut s);
+        assert!(s.pending_transitions.is_empty(), "auto 端不建 tween");
+        assert!(s.pending_anim_warnings.is_empty(), "auto 端不产跨域警告");
+    }
+
+    #[test]
+    fn rematch_emits_box_shadow_transition_with_payload() {
+        // .btn:hover 换 box-shadow + transition:box-shadow → BoxShadow 请求 + ShadowPair 载荷。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        s.get_mut(bid).unwrap().base_style.transition = vec![TransitionSpec {
+            prop: Some(TweenProp::BoxShadow),
+            duration: 0.3,
+            ease: Ease::Linear,
+            delay: 0.0,
+        }];
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(crate::scene::node::NodeFlags::CASCALED);
+        push_global(
+            &mut s,
+            rule(".btn:hover", "box-shadow", "0 8px 16px rgba(0,0,0,0.5)"),
+        );
+        s.get_mut(bid)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        s.pending_transitions.clear();
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(s.pending_transitions.len(), 1);
+        let r = &s.pending_transitions[0];
+        assert!(matches!(r.prop, TweenProp::BoxShadow));
+        let pair = r.shadow.as_ref().expect("列表载荷在 shadow 字段");
+        assert!(
+            pair.start.is_empty(),
+            "base 无阴影 → 空列表起点（透明淡入）"
+        );
+        assert_eq!(pair.end.len(), 1);
+        assert!((pair.end[0].oy - 8.0).abs() < 1e-5);
     }
 }

@@ -2165,6 +2165,11 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
             "color" => prop = Some(TweenProp::TextColor),
             "background-color" => prop = Some(TweenProp::BgColor),
             "transform" => prop = Some(TweenProp::Transform),
+            // #10 layout/box-shadow 通道
+            "width" => prop = Some(TweenProp::Width),
+            "height" => prop = Some(TweenProp::Height),
+            "flex-grow" => prop = Some(TweenProp::FlexGrow),
+            "box-shadow" => prop = Some(TweenProp::BoxShadow),
             _ => {
                 if let Some(secs) = parse_time_seconds(t) {
                     // 首遇 = duration，次遇 = delay（CSS 语义；time_count 防 0s duration 被吞）

@@ -75,9 +75,16 @@ pub enum DiagnosticCode {
     /// `display: inline` 声明（warning）。围栏没有 inline flow——inline 运行时映射为
     /// flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同；显式声明多半是先验误用。
     FenceDisplayInline,
+    /// layout transition（width/height）端点域不一致或含 auto（error）。#10 layout
+    /// 动画端点要求同域显式值（px↔px / %↔% / vw↔vw 各自动，auto 不可动画）——
+    /// 扫描元素静态可见的全部同属性声明（inline + 结构匹配 class 规则，含伪类变体），
+    /// 域不齐或含 auto → 硬拒（运行时行为是离散跳变，浏览器却是平滑过渡，先验分歧）。
+    /// 运行时 add_class 组合出的动态端点不在静态视野内，运行时兜底 snap + 警告事件。
+    FenceLayoutTransitionEndpoint,
     /// `transition` 声明了运行时不支持的属性（warning）。transition 引擎覆盖
-    /// background-color / color / opacity / transform 四通道（transform 按 TRS 分解
-    /// 插值）；布局属性（width 等）声明了也不过渡，浏览器先验会翻车。
+    /// background-color / color / opacity / transform / width / height / flex-grow /
+    /// box-shadow 八通道（transform 按 TRS 分解插值；layout 通道要求同域端点，见
+    /// FenceLayoutTransitionEndpoint）；其余属性声明了也不过渡，浏览器先验会翻车。
     FenceTransitionUnsupportedProp,
     /// 行内文本元素（rich-text-block 归类的 span 等）上声明 width/height 族（warning）。
     /// 该类元素被折进父级 inline flow，无独立盒子——尺寸声明恒无效（与浏览器对

@@ -2,6 +2,7 @@
 //! Rust-internal（packager 写、runtime 读，C# 不解析）。
 //! 布局锁：同一 fixture 的打包字节哈希有 CI 门（packer `schema_lock.rs`）——
 //! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
+//! v44：KeyframeStop 加 layout/box-shadow 通道（width/height 域+值、flex_grow、box_shadow 列表，#10 layout 动画）。手编 keyframes 布局变，旧 v43 pkg 加载报 TooOld。
 //! v42：ResolvedStyle 加 line_height_px 字段（CSS line-height px 形双槽，#65 高度爆炸修复）。
 //! v41：ResolvedStyle 加 viewport 字段（vw/vh/vmin/vmax 平行长度声明，分辨率适配重排语言，bincode 布局变）。
 //! v40：ResolvedStyle 加 position_declared（absolute 包含块语义）。
@@ -46,9 +47,9 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 43; // v43: KeyframeStop 加 timing（per-stop ease）+ transform translate f32→LenPct(px+pct, #77) + ResolvedStyle 加 transform_origin（#21 CSS 半边）。手编 keyframes 布局变，旧包拒绝。
-pub(crate) const MIN_VERSION: u32 = 43;
-pub(crate) const MAX_VERSION: u32 = 43;
+pub const PKG_FORMAT_VERSION: u32 = 44; // v44: KeyframeStop 加 layout/box-shadow 通道（width/height 域+值、flex_grow、box_shadow 列表，#10）。手编 keyframes 布局变，旧包拒绝。
+pub(crate) const MIN_VERSION: u32 = 44;
+pub(crate) const MAX_VERSION: u32 = 44;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
@@ -195,6 +196,7 @@ pub enum PkgError {
     Bincode(bincode::Error),
     BadKind(u8),
     BadKeyframeSelector(u8),
+    BadLenDomain(u8),
     BadEaseTag(u8),
     DupComponent(String),
 }
@@ -215,6 +217,9 @@ impl std::fmt::Display for PkgError {
             PkgError::BadKind(k) => write!(f, "bad node kind tag {k}"),
             PkgError::BadKeyframeSelector(t) => {
                 write!(f, "bad keyframe stop selector tag {t}")
+            }
+            PkgError::BadLenDomain(d) => {
+                write!(f, "bad animatable length domain tag {d}")
             }
             PkgError::BadEaseTag(t) => write!(f, "bad ease tag {t}"),
             PkgError::DupComponent(n) => {
@@ -857,6 +862,42 @@ fn encode_keyframes(
                 }
                 None => out.push(0),
             }
+            // v44：layout/box-shadow 通道（#10）。width/height = 域(u8)+值(f32)；
+            // flex_grow = 标量；box_shadow = 层数(u8) + 逐层 [ox,oy,spread,blur,color4,inset]。
+            for len in [stop.props.width, stop.props.height] {
+                match len {
+                    Some(l) => {
+                        out.push(1);
+                        out.push(l.domain as u8);
+                        out.extend_from_slice(&l.value.to_le_bytes());
+                    }
+                    None => out.push(0),
+                }
+            }
+            match stop.props.flex_grow {
+                Some(v) => {
+                    out.push(1);
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+                None => out.push(0),
+            }
+            match &stop.props.box_shadow {
+                Some(list) => {
+                    out.push(1);
+                    out.push(list.len() as u8);
+                    for s in list {
+                        out.extend_from_slice(&s.ox.to_le_bytes());
+                        out.extend_from_slice(&s.oy.to_le_bytes());
+                        out.extend_from_slice(&s.spread.to_le_bytes());
+                        out.extend_from_slice(&s.blur.to_le_bytes());
+                        for v in s.color {
+                            out.extend_from_slice(&v.to_le_bytes());
+                        }
+                        out.push(u8::from(s.inset));
+                    }
+                }
+                None => out.push(0),
+            }
             // v43：per-stop timing（None = 单字节 0；Some = 1 + encode_ease 载荷）
             match stop.timing {
                 None => out.push(0),
@@ -952,6 +993,54 @@ fn decode_keyframes(bytes: &[u8], strings: &[String]) -> Result<Vec<KeyframesRul
             } else {
                 None
             };
+            // v44：layout/box-shadow 通道（encode 侧同序）。
+            fn anim_len(r: &mut Reader) -> Result<Option<crate::scene::AnimLen>, PkgError> {
+                if r.u8("kf_len_flag")? == 0 {
+                    return Ok(None);
+                }
+                let domain = match r.u8("kf_len_domain")? {
+                    0 => crate::scene::LenDomain::Px,
+                    1 => crate::scene::LenDomain::Pct,
+                    2 => crate::scene::LenDomain::Vw,
+                    3 => crate::scene::LenDomain::Vh,
+                    4 => crate::scene::LenDomain::Vmin,
+                    5 => crate::scene::LenDomain::Vmax,
+                    d => return Err(PkgError::BadLenDomain(d)),
+                };
+                Ok(Some(crate::scene::AnimLen {
+                    domain,
+                    value: r.f32("kf_len_value")?,
+                }))
+            }
+            let width = anim_len(&mut r)?;
+            let height = anim_len(&mut r)?;
+            let flex_grow = if r.u8("kf_flex_grow_flag")? != 0 {
+                Some(r.f32("kf_flex_grow")?)
+            } else {
+                None
+            };
+            let box_shadow = if r.u8("kf_box_shadow_flag")? != 0 {
+                let count = r.u8("kf_box_shadow_count")? as usize;
+                let mut list = Vec::with_capacity(count);
+                for _ in 0..count {
+                    list.push(crate::style::resolved::BoxShadow {
+                        ox: r.f32("kf_shadow_ox")?,
+                        oy: r.f32("kf_shadow_oy")?,
+                        spread: r.f32("kf_shadow_spread")?,
+                        blur: r.f32("kf_shadow_blur")?,
+                        color: [
+                            r.f32("kf_shadow_r")?,
+                            r.f32("kf_shadow_g")?,
+                            r.f32("kf_shadow_b")?,
+                            r.f32("kf_shadow_a")?,
+                        ],
+                        inset: r.u8("kf_shadow_inset")? != 0,
+                    });
+                }
+                Some(list)
+            } else {
+                None
+            };
             let timing = if r.u8("kf_timing_flag")? != 0 {
                 Some(decode_ease(&mut r)?)
             } else {
@@ -970,6 +1059,10 @@ fn decode_keyframes(bytes: &[u8], strings: &[String]) -> Result<Vec<KeyframesRul
                     transform,
                     bg_color,
                     text_color,
+                    width,
+                    height,
+                    flex_grow,
+                    box_shadow,
                 },
                 timing,
                 hook,

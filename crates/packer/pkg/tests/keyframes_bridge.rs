@@ -7,6 +7,7 @@
 
 use loomgui_core::asset::read_package;
 use loomgui_core::scene::animation::{AnimatableProps, KeyframeStopSelector, TransformAnim};
+use loomgui_core::scene::LenDomain;
 use loomgui_pkg::build::{pack_components, Component};
 
 /// 单组件 HTML：@keyframes slideIn（from 带 hook 注释 + translateY，to 为终态）
@@ -63,6 +64,10 @@ fn keyframes_survive_roundtrip_with_hook_and_trs() {
             }),
             bg_color: None,
             text_color: None,
+            width: None,
+            height: None,
+            flex_grow: None,
+            box_shadow: None,
         },
         "from stop 的 props（opacity + translateY TRS 分解）"
     );
@@ -154,4 +159,43 @@ fn transform_origin_bakes_into_base_style() {
                 .iter()
                 .any(|d| d.prop == "transform-origin" && d.value == "30% 10px")
     }));
+}
+
+// —— #10 layout/box-shadow 通道桥接 ——
+
+#[test]
+fn keyframes_layout_and_shadow_channels_survive_roundtrip() {
+    // width（vw 域）/ box-shadow 列表进 pkg：v44 手编 keyframes 布局的四新字段。
+    let html = r#"<style>
+@keyframes grow{from{width:0px;height:10vh;box-shadow:0 0 0 rgba(0,0,0,0)} to{width:400px;height:20vh;box-shadow:0 8px 16px rgba(0,0,0,0.5), 0 16px 32px rgba(0,0,0,0.25)}}
+.p{animation:grow .5s}
+</style>
+<div class="p">grow</div>"#;
+    let comps = vec![Component {
+        name: "grow".to_string(),
+        src: html.to_string(),
+        html_rel: "grow.html".to_string(),
+    }];
+    let bytes = pack_components(&comps).unwrap().bytes;
+    let pkg = read_package(&bytes).unwrap();
+    let comp = pkg.components.get("grow").expect("grow component");
+    let kf = &comp.keyframes[0];
+    let from = &kf.stops[0].props;
+    let to = &kf.stops[1].props;
+    let (w0, w1) = (from.width.unwrap(), to.width.unwrap());
+    assert_eq!(
+        (w0.domain, w1.domain),
+        (LenDomain::Px, LenDomain::Px),
+        "width 同域 px"
+    );
+    assert!((w1.value - 400.0).abs() < 1e-5);
+    assert_eq!(
+        (from.height.unwrap().domain, to.height.unwrap().domain),
+        (LenDomain::Vh, LenDomain::Vh)
+    );
+    let sh = to.box_shadow.as_ref().expect("box-shadow 列表进 pkg");
+    assert_eq!(sh.len(), 2);
+    assert!((sh[0].oy - 8.0).abs() < 1e-5 && (sh[0].blur - 16.0).abs() < 1e-5);
+    assert!((sh[1].color[3] - 0.25).abs() < 1e-5, "第二层 alpha");
+    assert_eq!(from.flex_grow, None, "未声明的 flex_grow 缺席");
 }

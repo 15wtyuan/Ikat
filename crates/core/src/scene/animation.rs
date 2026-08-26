@@ -59,13 +59,59 @@ pub struct KeyframesRule {
     pub stops: Vec<KeyframeStop>,
 }
 
+/// 可动画长度值的声明域（#10 layout 动画端点值域）。`value` 存 CSS 原始数值
+/// （`25%`/`50vw` 的 25/50），域内线性插值、域间不可插（fence 拒，运行时兜底离散）；
+/// px/pct 写回 taffy Dimension 原生形，vw/vh/vmin/vmax 在 solve sync 期按当帧
+/// root_size 换算（动画中途 resize 自动重解析，保持比例正确）。
+///
+/// 判别值与 FFI/C# `LenDomain` 镜像对齐；bincode 进 pkg（variant index = 声明序），
+/// 只从末尾追加。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum LenDomain {
+    Px = 0,
+    Pct = 1,
+    Vw = 2,
+    Vh = 3,
+    Vmin = 4,
+    Vmax = 5,
+}
+
+impl LenDomain {
+    /// u32 → LenDomain（FFI 域码校验用）。越界 → None。
+    pub fn try_from_code(v: u32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Px),
+            1 => Some(Self::Pct),
+            2 => Some(Self::Vw),
+            3 => Some(Self::Vh),
+            4 => Some(Self::Vmin),
+            5 => Some(Self::Vmax),
+            _ => None,
+        }
+    }
+}
+
+/// 带域的可动画长度（width/height 动画端点与逐帧 override 值）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AnimLen {
+    pub domain: LenDomain,
+    pub value: f32,
+}
+
 /// 单个 stop 声明的可动画属性（围栏动画子集，与 `NodeAnim` 通道一一对应）。
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+/// box-shadow 是变长列表（≤12 层）→ 本结构不可 Copy（Clone 即可；采样/写帧每帧
+/// 至多一次 clone，仅动画中的节点付费）。
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct AnimatableProps {
     pub opacity: Option<f32>,
     pub transform: Option<TransformAnim>,
     pub bg_color: Option<[f32; 4]>,
     pub text_color: Option<[f32; 4]>,
+    pub width: Option<AnimLen>,
+    pub height: Option<AnimLen>,
+    pub flex_grow: Option<f32>,
+    pub box_shadow: Option<Vec<crate::style::resolved::BoxShadow>>,
 }
 
 /// transform 的 TRS 分解存储（围栏 transform 子集只有 translate/rotate/scale，1:1 无信息
@@ -99,7 +145,8 @@ pub enum PlayerPlayState {
 
 /// 一帧推进结果（`KeyframePlayer::advance` 返回值，纯数据）。
 /// 消费方（tick 集成 / 事件层）拿它写 NodeAnim、发 START/END/ITERATION 事件。
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Clone 非 Copy：AnimatableProps 含 box-shadow 变长列表。
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlayerFrame {
     /// 本帧应取的属性 override（全 None = 无 override，回退 base）。
     pub props: AnimatableProps,
@@ -326,11 +373,11 @@ fn sample(keyframes: &KeyframesRule, progress: f32, default_ease: Ease) -> Anima
 
     let first = stops[0];
     if progress <= first.selector.percent() {
-        return first.props;
+        return first.props.clone();
     }
     let last = stops[stops.len() - 1];
     if progress >= last.selector.percent() {
-        return last.props;
+        return last.props.clone();
     }
     for pair in stops.windows(2) {
         let (a, b) = (pair[0], pair[1]);
@@ -339,17 +386,20 @@ fn sample(keyframes: &KeyframesRule, progress: f32, default_ease: Ease) -> Anima
             let local_t = (progress - pa) / (pb - pa);
             let ease = a.timing.unwrap_or(default_ease);
             let t = ease.evaluate(local_t, 1.0);
-            return lerp_props(a.props, b.props, t);
+            return lerp_props(&a.props, &b.props, t);
         }
     }
     // 全 stop 同 percent（退化段）→ 去重后仅剩一个，直接取它。
-    last.props
+    last.props.clone()
 }
 
 /// 段内 per-property 插值。opacity/颜色：双端 Some 才插值，单端保持（None = 该通道无
 /// override）；transform：TRS 分量级 lerp，单端缺失分量用 identity（translate 0 /
-/// scale [1,1] / rotate 0）。
-fn lerp_props(from: AnimatableProps, to: AnimatableProps, t: f32) -> AnimatableProps {
+/// scale [1,1] / rotate 0）；width/height：同域数值插值（异域为 fence 拒的兜底：
+/// t<0.5 取 from、否则取 to 的离散跳变，与 box-shadow inset 不配对同一离散语义）；
+/// box-shadow：短列表补透明零长空阴影逐对插值，任一配对 inset 不匹配 → 整表离散
+/// （css-backgrounds-3 插值规则）。
+fn lerp_props(from: &AnimatableProps, to: &AnimatableProps, t: f32) -> AnimatableProps {
     AnimatableProps {
         opacity: lerp_opt_hold(from.opacity, to.opacity, t),
         bg_color: lerp_opt4_hold(from.bg_color, to.bg_color, t),
@@ -360,6 +410,28 @@ fn lerp_props(from: AnimatableProps, to: AnimatableProps, t: f32) -> AnimatableP
             (None, Some(v)) => normalize_transform(lerp_transform(TransformAnim::default(), v, t)),
             (None, None) => None,
         },
+        width: lerp_len_hold(from.width, to.width, t),
+        height: lerp_len_hold(from.height, to.height, t),
+        flex_grow: lerp_opt_hold(from.flex_grow, to.flex_grow, t),
+        box_shadow: match (&from.box_shadow, &to.box_shadow) {
+            (Some(a), Some(b)) => Some(crate::tween::lerp_shadow_list(a, b, t)),
+            // 单端保持（稀疏 keyframes：未声明通道沿用，同颜色语义）。
+            (a, b) => a.clone().or_else(|| b.clone()),
+        },
+    }
+}
+
+/// 带域长度插值：双端 Some 且同域 → 域内数值 lerp（vw/vh/vmin/vmax 各自域内等价，
+/// 解析推迟到 solve sync）；异域/单端 → 保持语义（异域是 fence 拒后的运行时兜底，
+/// 离散跳变而非静默混合出无意义数值）。
+fn lerp_len_hold(a: Option<AnimLen>, b: Option<AnimLen>, t: f32) -> Option<AnimLen> {
+    match (a, b) {
+        (Some(x), Some(y)) if x.domain == y.domain => Some(AnimLen {
+            domain: x.domain,
+            value: x.value + (y.value - x.value) * t,
+        }),
+        (Some(x), Some(y)) => Some(if t < 0.5 { x } else { y }),
+        (a, b) => a.or(b),
     }
 }
 
@@ -621,7 +693,7 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
     // 本帧 fill-none 完成转变的 player：(node, 自有通道掩码)。
     // （不需要 key：清掩码按"同节点其他活跃 player 的推进后状态"算，状态足以排除自己——
     //   完成者已是 Completed-fill-none，`holds_channels` 为 false。）
-    let mut completions: Vec<(NodeId, [bool; 4])> = Vec::new();
+    let mut completions: Vec<(NodeId, ChannelMask)> = Vec::new();
     for k in keys {
         let Some(p) = scene.players.get_mut(k) else {
             continue; // 防御：key 集合快照内理论不可达
@@ -745,28 +817,17 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
     // 只清"本 player 持有且无活跃他人持有"的通道：共享通道保留他人本帧已写的值（不闪
     // base）；同帧全部完成时（他人已变 Completed-fill-none 惰性）通道回 None（base 接管）。
     for (node, own) in completions {
-        let mut others = [false; 4];
+        let mut others = [false; 8];
         for q in scene.players.values() {
             if q.node == node && holds_channels(q) {
-                let m = owned_channels(q);
-                others = [
-                    others[0] || m[0],
-                    others[1] || m[1],
-                    others[2] || m[2],
-                    others[3] || m[3],
-                ];
+                others = mask_or(others, owned_channels(q));
             }
         }
-        clear_channels(
-            &mut scene.anim,
-            node,
-            [
-                own[0] && !others[0],
-                own[1] && !others[1],
-                own[2] && !others[2],
-                own[3] && !others[3],
-            ],
-        );
+        let mut clear = [false; 8];
+        for i in 0..8 {
+            clear[i] = own[i] && !others[i];
+        }
+        clear_channels(&mut scene.anim, node, clear);
     }
     // 回收（Stopped / 悬空）：通道已在槽序原位清过（与写入交错，语义同 retain）。
     for k in remove_keys {
@@ -789,9 +850,10 @@ fn holds_channels(p: &KeyframePlayer) -> bool {
     }
 }
 
-/// 按帧值写 NodeAnim 四通道。通道 None = 本帧无 override（不动该通道）。
+/// 按帧值写 NodeAnim 全通道。通道 None = 本帧无 override（不动该通道）。
 /// `node_size = [w, h]`：transform translate 的 LenPct 百分比在此解析（#77——
-/// 采样端保持描述符，尺寸解析统一在写入期）。
+/// 采样端保持描述符，尺寸解析统一在写入期）。width/height 保持 AnimLen 描述符
+/// （px/pct/vw 的解析统一推迟到 solve sync 覆写期，见 layout/mod.rs）。
 /// `pub(crate)`：sync_animation_players 启动时立即写首帧（backwards fill）用。
 pub(crate) fn write_frame(
     anim: &mut AnimTable,
@@ -815,6 +877,18 @@ pub(crate) fn write_frame(
     if let Some(v) = props.text_color {
         a.text_color = Some(v);
     }
+    if let Some(v) = props.width {
+        a.width = Some(v);
+    }
+    if let Some(v) = props.height {
+        a.height = Some(v);
+    }
+    if let Some(v) = props.flex_grow {
+        a.flex_grow = Some(v);
+    }
+    if let Some(v) = props.box_shadow {
+        a.box_shadow = Some(v);
+    }
 }
 
 /// TransformAnim TRS → Affine2（SRT：点先 scale 再 rotate 再 translate，缩放旋转绕自身
@@ -835,24 +909,46 @@ fn compose_transform(ta: TransformAnim, w: f32, h: f32) -> Option<Affine2> {
     )
 }
 
+/// 通道掩码（player 持有/回收清通道的按位集）。顺序固定：
+/// [opacity, transform, bg_color, text_color, width, height, flex_grow, box_shadow]。
+pub type ChannelMask = [bool; 8];
+
+fn mask_or(acc: ChannelMask, m: ChannelMask) -> ChannelMask {
+    let mut out = acc;
+    for (o, b) in out.iter_mut().zip(m) {
+        *o |= b;
+    }
+    out
+}
+
 /// 该 player 的 keyframes 声明的通道掩码（stops props 的 Some 通道并集）。
-/// 顺序固定：[opacity, transform, bg_color, text_color]。
 /// `pub(crate)`：sync_animation_players（dynamic.rs）回收 player 时算"谁还持有该通道"用。
-pub(crate) fn owned_channels(p: &KeyframePlayer) -> [bool; 4] {
+pub(crate) fn owned_channels(p: &KeyframePlayer) -> ChannelMask {
     stops_channels(&p.keyframes.stops)
 }
 
-/// stops 声明的通道掩码（props 的 Some 通道并集）。顺序固定：
-/// [opacity, transform, bg_color, text_color]。
-fn stops_channels(stops: &[KeyframeStop]) -> [bool; 4] {
-    let (mut opacity, mut transform, mut bg, mut text) = (false, false, false, false);
+/// stops 声明的通道掩码（props 的 Some 通道并集）。顺序见 [`ChannelMask`]。
+fn stops_channels(stops: &[KeyframeStop]) -> ChannelMask {
+    let mut mask = [false; 8];
     for stop in stops {
-        opacity |= stop.props.opacity.is_some();
-        transform |= stop.props.transform.is_some();
-        bg |= stop.props.bg_color.is_some();
-        text |= stop.props.text_color.is_some();
+        let props = &stop.props;
+        for (i, held) in [
+            props.opacity.is_some(),
+            props.transform.is_some(),
+            props.bg_color.is_some(),
+            props.text_color.is_some(),
+            props.width.is_some(),
+            props.height.is_some(),
+            props.flex_grow.is_some(),
+            props.box_shadow.is_some(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            mask[i] |= held;
+        }
     }
-    [opacity, transform, bg, text]
+    mask
 }
 
 /// 重启子树内全部声明式（class 触发）动画：programmatic player（node.Play 句柄持有）
@@ -889,7 +985,7 @@ pub fn restart_animations(scene: &mut Scene, root: NodeId) {
 /// 按通道掩码清 NodeAnim（None = 回退 tween/base）。全 false 掩码 no-op；清空后整条
 /// anim 条目移除。`pub(crate)`：sync_animation_players 回收 player 时按"持有 ∩ 无剩余
 /// 持有"掩码调用（多 player 共享通道时只清真正没人写的）。
-pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]) {
+pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: ChannelMask) {
     if !mask.iter().any(|&b| b) {
         return;
     }
@@ -905,6 +1001,18 @@ pub(crate) fn clear_channels(anim: &mut AnimTable, node: NodeId, mask: [bool; 4]
         }
         if mask[3] {
             a.text_color = None;
+        }
+        if mask[4] {
+            a.width = None;
+        }
+        if mask[5] {
+            a.height = None;
+        }
+        if mask[6] {
+            a.flex_grow = None;
+        }
+        if mask[7] {
+            a.box_shadow = None;
         }
         if a.is_empty() {
             anim.0.remove(&node);
@@ -923,30 +1031,16 @@ fn clear_owned_channels(anim: &mut AnimTable, p: &KeyframePlayer) {
 /// 摘出该 player（掩码计算不得把被移除者自己算作幸存者）。
 fn remove_player_clearing_channels(scene: &mut Scene, p: KeyframePlayer) {
     let own = owned_channels(&p);
-    let remaining =
-        scene
-            .players
-            .values()
-            .filter(|q| q.node == p.node)
-            .fold([false; 4], |acc, q| {
-                let m = owned_channels(q);
-                [
-                    acc[0] || m[0],
-                    acc[1] || m[1],
-                    acc[2] || m[2],
-                    acc[3] || m[3],
-                ]
-            });
-    clear_channels(
-        &mut scene.anim,
-        p.node,
-        [
-            own[0] && !remaining[0],
-            own[1] && !remaining[1],
-            own[2] && !remaining[2],
-            own[3] && !remaining[3],
-        ],
-    );
+    let remaining = scene
+        .players
+        .values()
+        .filter(|q| q.node == p.node)
+        .fold([false; 8], |acc, q| mask_or(acc, owned_channels(q)));
+    let mut clear = [false; 8];
+    for i in 0..8 {
+        clear[i] = own[i] && !remaining[i];
+    }
+    clear_channels(&mut scene.anim, p.node, clear);
 }
 
 #[cfg(test)]
@@ -1158,5 +1252,153 @@ mod restart_tests {
         restart_animations(&mut scene, ids[0]); // 只重启 ids[0] 子树
         assert_eq!(scene.players.len(), 1, "子树外 player 保留");
         assert_eq!(scene.players.values().next().unwrap().node, ids[1]);
+    }
+
+    // —— #10 layout/box-shadow keyframes 采样 ——
+
+    #[test]
+    fn sample_interpolates_width_same_domain() {
+        let kf = KeyframesRule {
+            name: "grow".into(),
+            stops: vec![
+                KeyframeStop {
+                    selector: KeyframeStopSelector::From,
+                    props: AnimatableProps {
+                        width: Some(AnimLen {
+                            domain: LenDomain::Px,
+                            value: 0.0,
+                        }),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::To,
+                    props: AnimatableProps {
+                        width: Some(AnimLen {
+                            domain: LenDomain::Px,
+                            value: 200.0,
+                        }),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+            ],
+        };
+        let mid = sample(&kf, 0.5, crate::tween::Ease::Linear);
+        let w = mid.width.expect("width 通道采样");
+        assert_eq!(w.domain, LenDomain::Px);
+        assert!((w.value - 100.0).abs() < 1e-5, "px 同域半程 = 100");
+    }
+
+    #[test]
+    fn sample_discrete_jump_on_cross_domain_width() {
+        // 异域（px→%）是围栏硬拒后的运行时兜底：离散跳变（t<0.5 from / ≥0.5 to），
+        // 不静默混合出无意义数值。
+        let kf = KeyframesRule {
+            name: "mixed".into(),
+            stops: vec![
+                KeyframeStop {
+                    selector: KeyframeStopSelector::From,
+                    props: AnimatableProps {
+                        width: Some(AnimLen {
+                            domain: LenDomain::Px,
+                            value: 100.0,
+                        }),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::To,
+                    props: AnimatableProps {
+                        width: Some(AnimLen {
+                            domain: LenDomain::Pct,
+                            value: 50.0,
+                        }),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+            ],
+        };
+        let before = sample(&kf, 0.49, crate::tween::Ease::Linear);
+        assert_eq!(
+            before.width.unwrap().domain,
+            LenDomain::Px,
+            "t<0.5 取 from 域"
+        );
+        let after = sample(&kf, 0.5, crate::tween::Ease::Linear);
+        assert_eq!(
+            after.width.unwrap().domain,
+            LenDomain::Pct,
+            "t≥0.5 取 to 域"
+        );
+    }
+
+    #[test]
+    fn sample_pads_box_shadow_lists_per_browser_semantics() {
+        // 1 层→2 层：短列表补透明零长阴影，第二层中点 alpha=0.5（规范语义，非跳现）。
+        use crate::style::resolved::BoxShadow;
+        let one = vec![BoxShadow {
+            ox: 0.0,
+            oy: 4.0,
+            spread: 0.0,
+            blur: 8.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+            inset: false,
+        }];
+        let two = vec![
+            BoxShadow {
+                ox: 0.0,
+                oy: 4.0,
+                spread: 0.0,
+                blur: 8.0,
+                color: [0.0, 0.0, 0.0, 1.0],
+                inset: false,
+            },
+            BoxShadow {
+                ox: 0.0,
+                oy: 8.0,
+                spread: 0.0,
+                blur: 16.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                inset: false,
+            },
+        ];
+        let kf = KeyframesRule {
+            name: "sh".into(),
+            stops: vec![
+                KeyframeStop {
+                    selector: KeyframeStopSelector::From,
+                    props: AnimatableProps {
+                        box_shadow: Some(one),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::To,
+                    props: AnimatableProps {
+                        box_shadow: Some(two),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+            ],
+        };
+        let mid = sample(&kf, 0.5, crate::tween::Ease::Linear);
+        let list = mid.box_shadow.expect("box-shadow 通道采样");
+        assert_eq!(list.len(), 2, "补齐空阴影成对");
+        assert!(
+            (list[1].color[3] - 0.5).abs() < 1e-5,
+            "新增层透明淡入 alpha=0.5"
+        );
     }
 }

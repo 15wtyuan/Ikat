@@ -20,6 +20,16 @@ pub enum TweenProp {
     ///（不拆 Translate/Scale/Rotation 三 tween——apply 各臂整矩阵覆写会互踩）。
     /// 追加到末尾保持既有判别值稳定。
     Transform = 6,
+    /// #10 layout 动画通道。Width/Height 载荷 = [value, domain_code]（域码为
+    /// LenDomain 判别值，start/end 必须同域——同域保证下 lerp 域码恒等）；
+    /// solve sync 覆写链最末位消费（base → viewport → anim）。
+    Width = 7,
+    Height = 8,
+    /// flex-grow 标量（无域）。
+    FlexGrow = 9,
+    /// box-shadow 列表通道：值不走 TweenValue（≤12 层×9 分量远超 8 槽），
+    /// 载荷在 `TweenSpec.shadow`（None 视为无效提交，tween() 拒收）。
+    BoxShadow = 10,
 }
 
 impl TweenProp {
@@ -33,18 +43,25 @@ impl TweenProp {
             4 => Some(Self::BgColor),
             5 => Some(Self::TextColor),
             6 => Some(Self::Transform),
+            7 => Some(Self::Width),
+            8 => Some(Self::Height),
+            9 => Some(Self::FlexGrow),
+            10 => Some(Self::BoxShadow),
             _ => None,
         }
     }
 }
 
-/// 每个 prop 的 lerp 分量数（start/end [f32;5] 取前 N 个）。
+/// 每个 prop 的 lerp 分量数（start/end 前 N 个分量有效；Width/Height 的第 2 槽是
+/// 域码——同域保证下 lerp 恒等，apply 端从结果槽位读回）。BoxShadow = 0（列表载荷
+/// 在 shadow 字段，TweenValue 不参与）。
 pub fn prop_value_size(prop: TweenProp) -> u8 {
     match prop {
-        TweenProp::Opacity | TweenProp::Rotation => 1,
-        TweenProp::Translate | TweenProp::Scale => 2,
+        TweenProp::Opacity | TweenProp::Rotation | TweenProp::FlexGrow => 1,
+        TweenProp::Translate | TweenProp::Scale | TweenProp::Width | TweenProp::Height => 2,
         TweenProp::BgColor | TweenProp::TextColor => 4,
         TweenProp::Transform => 5,
+        TweenProp::BoxShadow => 0,
     }
 }
 
@@ -379,8 +396,9 @@ pub fn lerp_n(a: &TweenValue, b: &TweenValue, t: f32, n: usize) -> TweenValue {
     out
 }
 
-/// tween 提交单元（builder/FFI spec 的 core 内形态）。
-#[derive(Debug, Clone, Copy)]
+/// tween 提交单元（builder/FFI spec 的 core 内形态）。`shadow` 仅 BoxShadow 通道
+/// 使用（其余通道 None）；prop=BoxShadow 且 shadow=None 是无效提交，`tween()` 拒收。
+#[derive(Debug, Clone)]
 pub struct TweenSpec {
     pub prop: TweenProp,
     pub start: TweenValue,
@@ -393,6 +411,8 @@ pub struct TweenSpec {
     pub repeat: u32,
     /// 往返：偶数轮 start→end、奇数轮 end→start（CSS alternate 同义）。
     pub yoyo: bool,
+    /// box-shadow 双端列表（BoxShadow 通道载荷；Box 包内嵌防 TweenSpec 膨胀）。
+    pub shadow: Option<Box<ShadowPair>>,
 }
 
 impl TweenSpec {
@@ -408,22 +428,33 @@ impl TweenSpec {
             tag: 0,
             repeat: 0,
             yoyo: false,
+            shadow: None,
         }
     }
 }
 
+/// box-shadow 通道的双端列表（tween 与 transition 请求共用形态）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShadowPair {
+    pub start: Vec<crate::style::resolved::BoxShadow>,
+    pub end: Vec<crate::style::resolved::BoxShadow>,
+}
+
 /// transition 请求（rematch 检测 data-page 通道变化时推入 Scene.pending_transitions；
 /// Stage tick drain 后 kill 旧 tween + 提交新 tween）。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TransitionRequest {
     pub node: crate::scene::node::NodeId,
     pub prop: TweenProp,
-    /// 通道载荷（前 prop_value_size 个分量有效；Transform = [tx,ty,sx,sy,rot]）。
+    /// 通道载荷（前 prop_value_size 个分量有效；Transform = [tx,ty,sx,sy,rot]；
+    /// Width/Height = [value, domain_code]）。
     pub start: [f32; 5],
     pub end: [f32; 5],
     pub ease: Ease,
     pub delay: f32,
     pub duration: f32,
+    /// box-shadow 通道的双端列表（其余通道 None）。
+    pub shadow: Option<Box<ShadowPair>>,
 }
 
 use crate::input::{EventRecord, EVT_TWEEN_COMPLETE};
@@ -448,6 +479,8 @@ pub(crate) struct Tween {
     pub(crate) tag: u32,
     started: bool,
     pub(crate) killed: bool,
+    /// BoxShadow 通道载荷（其余通道 None；与 start/end 并列存储）。
+    shadow: Option<Box<ShadowPair>>,
 }
 
 impl Tween {
@@ -466,6 +499,7 @@ impl Tween {
         self.tag = spec.tag;
         self.started = false;
         self.killed = false;
+        self.shadow = spec.shadow;
     }
 }
 
@@ -503,7 +537,11 @@ impl TweenManager {
     }
 
     /// 注册一个 tween（优先复用池槽）。越界 node 由 update 跳过。
+    /// prop=BoxShadow 须带 shadow 载荷（缺 = 无效提交，拒收）。
     pub fn tween(&mut self, node: NodeId, spec: TweenSpec) {
+        if spec.prop == TweenProp::BoxShadow && spec.shadow.is_none() {
+            return;
+        }
         if let Some(mut t) = self.pool.pop() {
             t.recycle(node, spec);
             self.active.push(t);
@@ -522,6 +560,7 @@ impl TweenManager {
                 tag: spec.tag,
                 started: false,
                 killed: false,
+                shadow: spec.shadow,
             });
         }
     }
@@ -583,7 +622,15 @@ impl TweenManager {
                 }
                 (n, false)
             };
-            apply(&mut scene.anim, t.node, t.prop, &t.start, &t.end, norm);
+            apply(
+                &mut scene.anim,
+                t.node,
+                t.prop,
+                &t.start,
+                &t.end,
+                t.shadow.as_deref(),
+                norm,
+            );
             if done {
                 t.killed = true;
                 out.push(EventRecord {
@@ -616,12 +663,14 @@ impl TweenManager {
 
 /// 逐分量 lerp start→end 写入 anim 对应通道（n=已算的 normalized；TweenValue 共享原语）。
 /// 经 AnimTable::ensure(node) 取可变 NodeAnim（HashMap entry，缺则插 default）。
+/// Width/Height 的域码在载荷第 2 槽（同域保证下 lerp 恒等，apply 端读回）。
 fn apply(
     anim: &mut AnimTable,
     node: NodeId,
     prop: TweenProp,
     start: &TweenValue,
     end: &TweenValue,
+    shadow: Option<&ShadowPair>,
     n: f32,
 ) {
     let a = anim.ensure(node);
@@ -637,7 +686,100 @@ fn apply(
         }
         TweenProp::BgColor => a.bg_color = Some([v[0], v[1], v[2], v[3]]),
         TweenProp::TextColor => a.text_color = Some([v[0], v[1], v[2], v[3]]),
+        TweenProp::Width | TweenProp::Height => {
+            let Some(domain) = crate::scene::animation::LenDomain::try_from_code(v[1] as u32)
+            else {
+                return; // 防御：域码非整数/越界（FFI 已拦，这里不 panic）
+            };
+            let len = crate::scene::animation::AnimLen {
+                domain,
+                value: v[0],
+            };
+            match prop {
+                TweenProp::Width => a.width = Some(len),
+                _ => a.height = Some(len),
+            }
+        }
+        TweenProp::FlexGrow => a.flex_grow = Some(v[0]),
+        TweenProp::BoxShadow => {
+            if let Some(pair) = shadow {
+                a.box_shadow = Some(lerp_shadow_list(&pair.start, &pair.end, n));
+            }
+        }
     }
+}
+
+/// box-shadow 列表插值（css-backgrounds-3 / MDN 语义，tween 与 keyframes 共用）：
+/// 短列表末尾补「透明色、零偏移/模糊/spread」空阴影后逐对插值（补齐阴影继承配对
+/// 方的 inset——空阴影无自身几何，inset 由配对实影决定）；**任一实配对 inset 不匹配
+/// → 整表离散**（t<0.5 取 start、否则取 end）。
+pub fn lerp_shadow_list(
+    start: &[crate::style::resolved::BoxShadow],
+    end: &[crate::style::resolved::BoxShadow],
+    t: f32,
+) -> Vec<crate::style::resolved::BoxShadow> {
+    use crate::style::resolved::BoxShadow;
+    let mismatch = start
+        .iter()
+        .zip(end.iter())
+        .any(|(a, b)| a.inset != b.inset);
+    if mismatch {
+        return (if t < 0.5 { start } else { end }).to_vec();
+    }
+    let n = start.len().max(end.len());
+    let null = |inset: bool| BoxShadow {
+        ox: 0.0,
+        oy: 0.0,
+        spread: 0.0,
+        blur: 0.0,
+        color: [0.0; 4],
+        inset,
+    };
+    let pick = |list: &[BoxShadow], i: usize| list.get(i).copied();
+    (0..n)
+        .map(|i| {
+            let (a, b) = (pick(start, i), pick(end, i));
+            match (a, b) {
+                (Some(mut x), Some(y)) => {
+                    x.ox += (y.ox - x.ox) * t;
+                    x.oy += (y.oy - x.oy) * t;
+                    x.spread += (y.spread - x.spread) * t;
+                    x.blur += (y.blur - x.blur) * t;
+                    x.color = lerp_arr4(x.color, y.color, t);
+                    x
+                }
+                // 单端存在 → 与补齐空阴影插值（透明淡入/淡出，浏览器同语义）。
+                (Some(mut x), None) => {
+                    let e = null(x.inset);
+                    x.ox += (e.ox - x.ox) * t;
+                    x.oy += (e.oy - x.oy) * t;
+                    x.spread += (e.spread - x.spread) * t;
+                    x.blur += (e.blur - x.blur) * t;
+                    x.color = lerp_arr4(x.color, e.color, t);
+                    x
+                }
+                (None, Some(mut y)) => {
+                    let s = null(y.inset);
+                    y.ox = s.ox + (y.ox - s.ox) * t;
+                    y.oy = s.oy + (y.oy - s.oy) * t;
+                    y.spread = s.spread + (y.spread - s.spread) * t;
+                    y.blur = s.blur + (y.blur - s.blur) * t;
+                    y.color = lerp_arr4(s.color, y.color, t);
+                    y
+                }
+                (None, None) => null(false),
+            }
+        })
+        .collect()
+}
+
+fn lerp_arr4(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+    [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+        a[2] + (b[2] - a[2]) * t,
+        a[3] + (b[3] - a[3]) * t,
+    ]
 }
 
 #[cfg(test)]
@@ -655,6 +797,7 @@ mod tests {
             tag: 0,
             repeat: 0,
             yoyo: false,
+            shadow: None,
         }
     }
 
@@ -673,6 +816,12 @@ mod tests {
         assert_eq!(prop_value_size(TweenProp::BgColor), 4);
         assert_eq!(prop_value_size(TweenProp::TextColor), 4);
         assert_eq!(prop_value_size(TweenProp::Transform), 5);
+        // #10 layout/box-shadow 通道：Width/Height = 值 + 域码双槽；FlexGrow 标量；
+        // BoxShadow 列表载荷在 shadow 字段（TweenValue 0 槽）。
+        assert_eq!(prop_value_size(TweenProp::Width), 2);
+        assert_eq!(prop_value_size(TweenProp::Height), 2);
+        assert_eq!(prop_value_size(TweenProp::FlexGrow), 1);
+        assert_eq!(prop_value_size(TweenProp::BoxShadow), 0);
     }
 
     #[test]
@@ -1228,5 +1377,133 @@ mod tests {
         mgr2.update(1.0, &mut s, &mut out2);
         let tags: Vec<u32> = mgr2.active.iter().map(|t| t.tag).collect();
         assert_eq!(tags, vec![1, 3], "活槽保序（tag2 完成回池）");
+    }
+
+    // —— #10 layout / box-shadow 通道 ——
+
+    use crate::style::resolved::BoxShadow;
+
+    fn shadow(
+        ox: f32,
+        oy: f32,
+        blur: f32,
+        r: f32,
+        g: f32,
+        b: f32,
+        a: f32,
+        inset: bool,
+    ) -> BoxShadow {
+        BoxShadow {
+            ox,
+            oy,
+            spread: 0.0,
+            blur,
+            color: [r, g, b, a],
+            inset,
+        }
+    }
+
+    #[test]
+    fn lerp_shadow_list_pads_shorter_list_with_transparent_null() {
+        // 1 层 → 2 层：浏览器语义（css-backgrounds-3）——短列表末尾补透明零长空阴影，
+        // 新增层从透明淡入（非跳现）。t=0.5 时第二层 alpha = 0.5、几何 = 端点一半。
+        let a = vec![shadow(0.0, 4.0, 8.0, 0.0, 0.0, 0.0, 1.0, false)];
+        let b = vec![
+            shadow(0.0, 4.0, 8.0, 0.0, 0.0, 0.0, 1.0, false),
+            shadow(0.0, 8.0, 16.0, 1.0, 1.0, 1.0, 1.0, false),
+        ];
+        let mid = lerp_shadow_list(&a, &b, 0.5);
+        assert_eq!(mid.len(), 2);
+        assert!((mid[0].oy - 4.0).abs() < 1e-5, "既有层几何不变");
+        assert!(
+            (mid[1].color[3] - 0.5).abs() < 1e-5,
+            "新增层 alpha 从 0 淡入"
+        );
+        assert!(
+            (mid[1].oy - 4.0).abs() < 1e-5,
+            "新增层几何半程（端点 8 的中点）"
+        );
+        assert!((mid[1].blur - 8.0).abs() < 1e-5, "新增层 blur 半程");
+    }
+
+    #[test]
+    fn lerp_shadow_list_discrete_on_inset_mismatch() {
+        // 配对 inset 不匹配 → 整表离散（t<0.5 start / t≥0.5 end）。
+        let a = vec![shadow(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, false)];
+        let b = vec![shadow(0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, true)];
+        let before = lerp_shadow_list(&a, &b, 0.49);
+        assert!(
+            !before[0].inset && (before[0].color[0] - 1.0).abs() < 1e-5,
+            "t<0.5 取 start"
+        );
+        let after = lerp_shadow_list(&a, &b, 0.5);
+        assert!(
+            after[0].inset && (after[0].color[1] - 1.0).abs() < 1e-5,
+            "t≥0.5 取 end"
+        );
+    }
+
+    #[test]
+    fn lerp_shadow_list_fades_out_to_empty() {
+        // → 空列表（box-shadow:none 端点）：既有层向空阴影插值 = alpha 衰减淡出。
+        let a = vec![shadow(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, false)];
+        let mid = lerp_shadow_list(&a, &[], 0.5);
+        assert_eq!(mid.len(), 1);
+        assert!((mid[0].color[3] - 0.5).abs() < 1e-5, "alpha 半程衰减");
+    }
+
+    #[test]
+    fn update_writes_width_override_with_domain() {
+        // Width tween：载荷 [value, domain_code]（域码 lerp 恒等——同域保证下双端相等）。
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            TweenSpec {
+                start: [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                end: [50.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                ..spec(TweenProp::Width, [0.0; 5], [0.0; 5])
+            },
+        );
+        let mut out = Vec::new();
+        mgr.update(0.5, &mut s, &mut out);
+        let w = s.anim.0.get(&nid).unwrap().width.unwrap();
+        assert!((w.value - 25.0).abs() < 1e-5, "半程 width=25");
+        assert_eq!(w.domain, crate::scene::LenDomain::Pct, "域码 = 载荷第 2 槽");
+    }
+
+    #[test]
+    fn update_writes_box_shadow_override() {
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            TweenSpec {
+                shadow: Some(Box::new(ShadowPair {
+                    start: vec![shadow(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, false)],
+                    end: vec![shadow(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, false)],
+                })),
+                ..spec(TweenProp::BoxShadow, [0.0; 5], [0.0; 5])
+            },
+        );
+        let mut out = Vec::new();
+        mgr.update(0.5, &mut s, &mut out);
+        let list = s.anim.0.get(&nid).unwrap().box_shadow.clone().unwrap();
+        assert_eq!(list.len(), 1);
+        assert!((list[0].color[3] - 0.5).abs() < 1e-5, "alpha 半程");
+    }
+
+    #[test]
+    fn tween_rejects_boxshadow_without_payload() {
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            spec(TweenProp::BoxShadow, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
+        );
+        assert!(mgr.active.is_empty(), "BoxShadow 缺列表载荷 = 无效提交拒收");
+        let mut out = Vec::new();
+        mgr.update(1.0, &mut s, &mut out);
+        assert!(out.is_empty() && !s.anim.0.contains_key(&nid));
     }
 }

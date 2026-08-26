@@ -209,12 +209,22 @@ pub fn display_inline_warning(value: &str) -> Option<&'static str> {
 }
 
 /// `transition` 引擎实际驱动的属性集（core emit_transition_requests 检测
-/// BgColor/TextColor/Opacity/Transform 四通道——transform 走整矩阵 TRS 分解插值；
-/// 布局属性走每帧离散 solve 无过渡）。
-const TRANSITION_PROPS: &[&str] = &["background-color", "color", "opacity", "transform"];
+/// BgColor/TextColor/Opacity/Transform/Width/Height/FlexGrow/BoxShadow 八通道——
+/// transform 走整矩阵 TRS 分解插值；layout 通道要求端点同域显式值，见
+/// `layout_transition_endpoint_check`；box-shadow 走逐对列表插值）。
+const TRANSITION_PROPS: &[&str] = &[
+    "background-color",
+    "color",
+    "opacity",
+    "transform",
+    "width",
+    "height",
+    "flex-grow",
+    "box-shadow",
+];
 
 /// transition 声明的属性域外警告（每条越界 spec 一条）。`all` 单独提示——它对
-/// 支持通道有效，但其余属性（width/transform 等）静默 snap，浏览器先验会翻车。
+/// 支持通道有效，但其余属性（margin/filter 等）静默 snap，浏览器先验会翻车。
 pub fn transition_warnings(value: &str) -> Vec<String> {
     let mut out = Vec::new();
     for seg in value.split(',') {
@@ -227,16 +237,16 @@ pub fn transition_warnings(value: &str) -> Vec<String> {
         }
         if prop == "all" {
             out.push(
-                "transition \"all\": only background-color / color / opacity / transform are \
-                 transitioned in LoomGUI — all other properties (width, transform, \
-                 filter, ...) change instantly"
+                "transition \"all\": only background-color / color / opacity / transform / \
+                 width / height / flex-grow / box-shadow are transitioned in LoomGUI — all \
+                 other properties (margin, filter, ...) change instantly"
                     .into(),
             );
         } else if !TRANSITION_PROPS.contains(&prop) {
             out.push(format!(
                 "transition property \"{prop}\" has no runtime transition — \
-                 only background-color / color / opacity / transform are animated; \
-                 this property changes instantly"
+                 only background-color / color / opacity / transform / width / height / \
+                 flex-grow / box-shadow are animated; this property changes instantly"
             ));
         }
     }

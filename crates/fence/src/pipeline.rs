@@ -177,6 +177,20 @@ pub fn parse_template_with_css(
         &line_map,
     ));
 
+    // Stage 6.7d: layout transition 端点扫描（#10，error）。transition width/height 的
+    // 静态可见端点（inline + 结构匹配 class 规则含伪类变体）必须同域显式——异域/auto
+    // 端点运行时是离散跳变而浏览器平滑过渡，先验分歧打包期硬拒。运行时 add_class
+    // 组合的动态端点由 core rematch 兜底（snap + EVT_TRANSITION_SNAP 警告事件）。
+    diagnostics.extend(
+        crate::layout_transition_check::check_layout_transition_endpoints(
+            &tree,
+            &styles,
+            &dynamic_rules,
+            file,
+            &line_map,
+        ),
+    );
+
     // Stage 6.8: role 驱动控件结构契约（必需子角色）。作者自写控件结构
     // （`<div role="combobox"><div role="listbox">...`），可能漏写必需子节点。
     // 打包期严格拦截，不依赖运行时 reparent 兜底。只校验 role 驱动节点（带 role 属性

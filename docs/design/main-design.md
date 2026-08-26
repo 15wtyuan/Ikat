@@ -681,9 +681,13 @@ c. KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/t
 
 独立通用周期/延时回调（unscaled_dt），与动画解耦。`CallLater`（下一帧）、`CallNextFrame`、`OnUpdate`（每帧 recurring，返 IDisposable）。OnUpdate 是逻辑驱动每帧钩子，非动画系统。
 
-### 13.6 M2.5 layout 动画（deferred）
+### 13.6 Layout 动画与 box-shadow 通道（#10，M3）
 
-当前 player/tween 只动**渲染层属性**（transform/opacity/bg_color/text_color），不动布局。layout 动画（动 width/height/flex）需要 `prop_type` 分层（transform 属性置 `transform_dirty` 不 solve vs layout 属性置 `layout_dirty` 触发 solve 重入）+ tick 时序重构，归 M2.5（进入判据：第一个需 layout 动画的 showcase 页 / M5 NodeTransform 升级合并 / 动画并发使单 Vec 抖动）。详见 roadmap milestones M2.5。
+player/tween 可动**布局属性**：width / height / flex-grow（端点同域显式值 px↔px / %↔% / vw↔vw；auto 与异域混合是围栏硬拒项，运行时 add_class 组合漏网端 snap + `EVT_TRANSITION_SNAP` 警告事件兜底）+ box-shadow 列表（css-backgrounds-3 语义：短列表补透明零长空阴影逐对插值，配对 inset 不匹配整体离散）。
+
+**不需要 solve 重入**（v0.0.13 前设计稿设想的「prop_type 分层 + layout_dirty + solve 重入」前提已过时）：tween 推进在 tick 序 ①、solve 在 ⑦——layout 属性的动画 override 经 `NodeAnim.width/height/flex_grow` 写入，由 solve 的 taffy 树 sync 消费，覆写链末位（base → viewport 换算 → anim），「每帧一次 solve」不变量保持。vw/vh 域 override 在 solve sync 期按当帧 root_size 换算——动画中途 resize 自动重解析（继续走完、比例跟画布）。`set_style` 值比较短路保证稳态帧零成本。
+
+三通道共享同一插值底层：CSS `transition`（rematch 检测端点变化）、CSS `@keyframes`（AnimatableProps 扩展，pkg v44）、C# `TweenBuilder`（`.FromPx/.ToPx` 值+域码载荷；box-shadow 走 `FromShadow/ToShadow` 列表载荷，FFI 专用入口）。
 
 ---
 

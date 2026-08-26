@@ -111,6 +111,7 @@ fn bench_tween_update(c: &mut Criterion) {
                     tag: 0,
                     repeat: 0,
                     yoyo: false,
+                    shadow: None,
                 },
             );
         }
@@ -157,6 +158,7 @@ fn bench_tween_churn(c: &mut Criterion) {
                     tag: 0,
                     repeat: 0,
                     yoyo: false,
+                    shadow: None,
                 },
             );
             mgr.update(0.016, &mut scene, &mut Vec::new()); // 完成即回池

@@ -392,7 +392,13 @@ pub fn parse_style_block_named(
             let (at_name, at_rest) = split_at_keyword(at_kw_str);
             match at_name.as_str() {
                 "keyframes" => match parse_keyframes_rule(&at_rest, at_body, &loc) {
-                    Ok(kf) => keyframes.push(kf),
+                    Ok(kf) => {
+                        // #10：layout 通道（width/height）端点校验——值必须显式长度域且
+                        // 全 rule 同域（auto 不可动画、异域混合无法插值；transition 侧的
+                        // 元素级扫描在 layout_transition_check，这里是 keyframes 停靠点侧）。
+                        validate_keyframes_layout_endpoints(&kf, &loc, &mut diagnostics);
+                        keyframes.push(kf);
+                    }
                     Err(d) => diagnostics.push(d),
                 },
                 _ => diagnostics.push(Diagnostic::error(
@@ -776,6 +782,69 @@ fn parse_declarations(
         });
     }
     decls
+}
+
+/// @keyframes 停靠点内 layout 通道（width/height）的端点校验（#10）：
+/// - 值必须是显式长度域（`<n>px|%|vw|vh|vmin|vmax`，裸数字按 px）——auto / calc /
+///   keyword 是不可动画端点，error（浏览器会平滑过渡到 auto，先验分歧必须响亮拒绝）；
+/// - 同一 rule 内所有停靠点的同属性域必须一致（异域无法插值，error）。
+///
+/// 诊断定位用 rule 起点（`<style>` 内无 per-stop 精确 span，同选择器近似先例）。
+fn validate_keyframes_layout_endpoints(
+    kf: &KeyframesRule,
+    loc: &crate::diagnostic::SourceLocation,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::layout_transition_check::endpoint_domain_of;
+    use crate::layout_transition_check::EndpointDomain;
+    for prop in ["width", "height"] {
+        // (stop 序号, 值, 域) —— 序号进报文，作者好定位停靠点。
+        let mut seen: Vec<(usize, String, EndpointDomain)> = Vec::new();
+        for (i, stop) in kf.stops.iter().enumerate() {
+            for d in &stop.declarations {
+                if d.prop == prop {
+                    seen.push((i, d.value.clone(), endpoint_domain_of(&d.value)));
+                }
+            }
+        }
+        if seen.is_empty() {
+            continue;
+        }
+        let mut domains: Vec<EndpointDomain> = seen.iter().map(|(_, _, d)| *d).collect();
+        domains.sort_by_key(|d| d.label());
+        domains.dedup();
+        let values = seen
+            .iter()
+            .map(|(i, v, d)| format!("stop#{i} `{v}` ({})", d.label()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if domains.len() > 1 {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceLayoutTransitionEndpoint,
+                format!(
+                    "@keyframes {name}: {prop} endpoints mix domains — layout animation \
+                     endpoints must stay in ONE domain (px↔px, %↔%, vw↔vw). Endpoints: \
+                     {values}. Mixed-domain endpoints jump instantly instead of animating, \
+                     so the fence rejects them.",
+                    name = kf.name
+                ),
+                loc.clone(),
+            ));
+        } else if matches!(domains[0], EndpointDomain::Auto | EndpointDomain::Other) {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceLayoutTransitionEndpoint,
+                format!(
+                    "@keyframes {name}: {prop} endpoint {} is not animatable — use explicit \
+                     px / % / vw / vh / vmin / vmax values. `auto` and non-length values \
+                     jump instantly instead of animating (browsers animate them), so the \
+                     fence rejects them. Endpoints: {values}.",
+                    domains[0].label(),
+                    name = kf.name
+                ),
+                loc.clone(),
+            ));
+        }
+    }
 }
 
 #[cfg(test)]

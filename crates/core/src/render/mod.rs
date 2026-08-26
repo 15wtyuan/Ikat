@@ -1930,7 +1930,10 @@ fn render_one_node(
                 );
                 // box-shadow：rich-text-block 容器提前 return，须在此补推阴影层，否则
                 // 背景 + 文字画了但阴影丢（功能缺失，同 Container 正常路径的 post-match 块）。
-                if n.kind.is_container() && !n.style.box_shadow.is_empty() {
+                let shadows = anim
+                    .and_then(|a| a.box_shadow.as_ref())
+                    .unwrap_or(&n.style.box_shadow);
+                if n.kind.is_container() && !shadows.is_empty() {
                     push_container_shadows(
                         nodes,
                         back_layer_pairs,
@@ -1940,7 +1943,7 @@ fn render_one_node(
                         wm,
                         alpha,
                         color_tint,
-                        &n.style.box_shadow,
+                        shadows,
                         &n.style.border_radius,
                     );
                 }
@@ -2424,7 +2427,10 @@ fn render_one_node(
     // inset 层画在最顶（最离 primary 上）。outer 按 CSS 序 push（propagate_back_shadow
     // 按 CSS 序赋最高=primary-1 给首层）；inset 按 CSS 逆序 push（propagate_text_sub_page
     // 按 push 序赋 offset，逆序 push 使首层得最大 offset=最上）。
-    if n.kind.is_container() && !n.style.box_shadow.is_empty() {
+    let shadows = anim
+        .and_then(|a| a.box_shadow.as_ref())
+        .unwrap_or(&n.style.box_shadow);
+    if n.kind.is_container() && !shadows.is_empty() {
         push_container_shadows(
             nodes,
             back_layer_pairs,
@@ -2434,7 +2440,7 @@ fn render_one_node(
             wm,
             alpha,
             color_tint,
-            &n.style.box_shadow,
+            shadows,
             &n.style.border_radius,
         );
     }

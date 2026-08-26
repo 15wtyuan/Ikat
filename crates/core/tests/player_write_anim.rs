@@ -270,6 +270,7 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
             tag: 0,
             repeat: 0,
             yoyo: false,
+            shadow: None,
         },
     );
     let mut s = spec();
@@ -304,6 +305,7 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
             tag: 0,
             repeat: 0,
             yoyo: false,
+            shadow: None,
         },
     );
     stage.advance_time(0.2);

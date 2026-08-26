@@ -5,7 +5,8 @@ use loomgui_core::scene::animation::{
     player_key_as_u64, player_key_from_u64, register_on_key, PlayerPlayState,
 };
 use loomgui_core::scene::NodeId;
-use loomgui_core::tween::{ease_from_ffi, prop_value_size, TweenProp, TweenSpec};
+use loomgui_core::style::resolved::BoxShadow;
+use loomgui_core::tween::{ease_from_ffi, prop_value_size, ShadowPair, TweenProp, TweenSpec};
 
 use crate::{ffi_guard, StageHandle};
 
@@ -32,6 +33,9 @@ const _: () = assert!(std::mem::size_of::<LoomTweenSpec>() == 44);
 
 /// 注册 tween（spec 形态）。start/end 指向 ≥value_size 个 f32（value_size 由 prop
 /// 隐含）。null 句柄/spec/null 指针 / 越界 prop/ease → no-op。
+/// Width/Height 载荷第 2 槽是域码（LenDomain 判别值，双端必须同域）——不一致 → no-op
+/// （C# builder 侧前置拦并抛契约异常，这里是防御底线）。
+/// BoxShadow 通道不走此入口（列表载荷）——走 `loomgui_stage_tween_shadow`。
 /// 越界 node / duration<=0 由 core update 处理（跳过/立即 complete）。
 #[no_mangle]
 pub extern "C" fn loomgui_stage_tween_spec(
@@ -54,12 +58,22 @@ pub extern "C" fn loomgui_stage_tween_spec(
             return;
         };
         let sz = prop_value_size(prop) as usize;
+        if sz == 0 {
+            return; // BoxShadow 走 shadow 专用入口
+        }
         let st = unsafe { std::slice::from_raw_parts(start, sz) };
         let en = unsafe { std::slice::from_raw_parts(end, sz) };
         let mut s = [0.0f32; 8];
         let mut e = [0.0f32; 8];
         s[..sz].copy_from_slice(st);
         e[..sz].copy_from_slice(en);
+        // Width/Height 域码槽：双端同域且为合法 LenDomain 判别值。
+        if matches!(prop, TweenProp::Width | TweenProp::Height) {
+            let (a, b) = (s[1] as i32, e[1] as i32);
+            if a != b || loomgui_core::scene::LenDomain::try_from_code(a as u32).is_none() {
+                return;
+            }
+        }
         sh.stage.tween(
             NodeId(node_id),
             TweenSpec {
@@ -72,6 +86,80 @@ pub extern "C" fn loomgui_stage_tween_spec(
                 tag: spec.tag,
                 repeat: spec.repeat,
                 yoyo: spec.yoyo != 0,
+                shadow: None,
+            },
+        );
+    })
+}
+
+/// box-shadow 列表 tween（#10）。每层 9 个 f32：
+/// [ox, oy, spread, blur, r, g, b, a, inset_flag]，inset_flag ≠ 0 = inset。
+/// 层数上限 12（core MAX 层限制内）。null 指针 / 层数越界 / prop 载荷缺失 → no-op。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_tween_shadow(
+    h: *mut StageHandle,
+    node_id: u64,
+    spec: *const LoomTweenSpec,
+    start: *const f32,
+    start_layers: u32,
+    end: *const f32,
+    end_layers: u32,
+) {
+    ffi_guard((), || {
+        if h.is_null() || spec.is_null() || start.is_null() || end.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        let spec = unsafe { &*spec };
+        if TweenProp::try_from(spec.prop) != Some(TweenProp::BoxShadow) {
+            return;
+        }
+        let Some(ease) = ease_from_ffi(spec.ease_kind, spec.ease_params) else {
+            return;
+        };
+        const MAX_LAYERS: usize = 12;
+        if start_layers as usize > MAX_LAYERS || end_layers as usize > MAX_LAYERS {
+            return;
+        }
+        let unpack = |ptr: *const f32, n: u32| -> Option<Vec<BoxShadow>> {
+            if n == 0 {
+                return None; // 空列表端点 = box-shadow:none（合法端点，动画淡出）
+            }
+            let raw = unsafe { std::slice::from_raw_parts(ptr, n as usize * 9) };
+            Some(
+                raw.chunks_exact(9)
+                    .map(|c| BoxShadow {
+                        ox: c[0],
+                        oy: c[1],
+                        spread: c[2],
+                        blur: c[3],
+                        color: [c[4], c[5], c[6], c[7]],
+                        inset: c[8] != 0.0,
+                    })
+                    .collect(),
+            )
+        };
+        let (Some(start_list), Some(end_list)) =
+            (unpack(start, start_layers), unpack(end, end_layers))
+        else {
+            return;
+        };
+        sh.stage.tween(
+            NodeId(node_id),
+            TweenSpec {
+                prop: TweenProp::BoxShadow,
+                start: [0.0; 8],
+                end: [0.0; 8],
+                ease,
+                delay: spec.delay,
+                duration: spec.duration,
+                tag: spec.tag,
+                repeat: spec.repeat,
+                yoyo: spec.yoyo != 0,
+                shadow: Some(Box::new(ShadowPair {
+                    start: start_list,
+                    end: end_list,
+                })),
             },
         );
     })

@@ -2,8 +2,12 @@
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
 use loomgui_core::asset::{ControlInit, EditInit, TemplateNode};
-use loomgui_core::scene::{AnimatableProps, KeyframeStopSelector, KeyframesRule, NodeKind};
-use loomgui_core::style::mapping::{parse_color, parse_ease, parse_transform_trs};
+use loomgui_core::scene::{
+    AnimLen, AnimatableProps, KeyframeStopSelector, KeyframesRule, LenDomain, NodeKind,
+};
+use loomgui_core::style::mapping::{
+    parse_box_shadow, parse_color, parse_ease, parse_transform_trs,
+};
 use loomgui_fence::css_rules::{
     KeyframeStopSelector as FenceKeyframeStopSelector, KeyframesRule as FenceKeyframesRule,
 };
@@ -136,6 +140,16 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                             "color" => {
                                 props.text_color = parse_color(&declaration.value);
                             }
+                            // #10 layout/box-shadow 通道（fence 端点校验已拦 auto/异域；
+                            // 理论不可达的解析失败按通道缺席处理，运行时该 stop 不参与）。
+                            "width" => props.width = parse_anim_len(&declaration.value),
+                            "height" => props.height = parse_anim_len(&declaration.value),
+                            "flex-grow" => {
+                                props.flex_grow = declaration.value.parse::<f32>().ok();
+                            }
+                            "box-shadow" => {
+                                props.box_shadow = parse_box_shadow(&declaration.value);
+                            }
                             // per-stop timing（CSS 语义：作用于本 stop 到下一 stop 区段）
                             "animation-timing-function" => {
                                 timing = parse_ease(&declaration.value);
@@ -159,6 +173,34 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                 .collect(),
         })
         .collect()
+}
+
+/// keyframes 停靠点长度值 → AnimLen（`<n>px|%|vw|vh|vmin|vmax`，裸数字按 px——
+/// core parse_length 同语义）。fence 端点校验已拒 auto/异域，这里是值域提取；
+/// 不认识的形态返 None（该通道此 stop 缺席）。
+fn parse_anim_len(value: &str) -> Option<AnimLen> {
+    let v = value.trim();
+    for (suffix, domain) in [
+        ("px", LenDomain::Px),
+        ("%", LenDomain::Pct),
+        ("vw", LenDomain::Vw),
+        ("vh", LenDomain::Vh),
+        ("vmin", LenDomain::Vmin),
+        ("vmax", LenDomain::Vmax),
+    ] {
+        if let Some(stripped) = v.strip_suffix(suffix) {
+            let stripped = stripped.trim();
+            if !stripped.is_empty() {
+                if let Ok(n) = stripped.parse::<f32>() {
+                    return Some(AnimLen { domain, value: n });
+                }
+            }
+        }
+    }
+    v.parse::<f32>().ok().map(|n| AnimLen {
+        domain: LenDomain::Px,
+        value: n,
+    })
 }
 
 /// `<template>` 是 ListView item 蓝图：根必须为**恰好一个** ListItem

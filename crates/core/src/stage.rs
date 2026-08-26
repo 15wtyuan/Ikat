@@ -1122,9 +1122,14 @@ impl Stage {
                     tag: TRANSITION_TAG,
                     repeat: 0,
                     yoyo: false,
+                    shadow: r.shadow,
                 },
             );
         }
+        // 4.55 layout transition 跨域/auto 端点的跳变警告（rematch 推入；进本帧事件流，
+        // C# EventDemuxer 转日志——运行时 add_class 漏网端的可观测信号）。
+        let warns = std::mem::take(&mut scene.pending_anim_warnings);
+        self.last_events.extend(warns);
         // 4.6 animation 声明同步：rematch 后读 computed style.animation
         //     启停 player。新 player 的 backwards 首帧立即写 NodeAnim，本帧 solve+render 消费；
         //     回收时通道回 None（tween/base 下帧接管）。在 transition drain 之后：两者都只读

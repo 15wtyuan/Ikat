@@ -61,7 +61,7 @@ pub(crate) fn collect_flex_class_rules(dynamic_rules: &[DynamicRule]) -> (Vec<&C
 /// 值随运行时状态变化的属性：写这些的选择器（如 `[aria-checked="true"]`）是
 /// 条件化命中——匹配与否取决于运行时状态，不能当无条件的静态 display 来源。
 /// 未列出的属性（role、data-*、type、id ...）字面静态，可安全判定。
-const RUNTIME_MUTABLE_ATTRS: &[&str] = &[
+pub(crate) const RUNTIME_MUTABLE_ATTRS: &[&str] = &[
     "aria-checked",
     "aria-expanded",
     "aria-selected",
