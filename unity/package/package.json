@@ -1,6 +1,6 @@
 {
   "name": "com.loomgui.unity",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "displayName": "LoomGUI",
   "description": "跨引擎游戏 UI 框架——Rust 核心 + HTML/CSS DSL，Unity 后端",
   "unity": "2021.3",

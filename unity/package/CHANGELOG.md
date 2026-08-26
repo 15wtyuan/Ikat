@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-08-27
+
+v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
+全接线）+ `loom preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
+AI 安装手册重写。
+
+### Added
+- **动画引擎终态基建（#9）**：ease 全集、统一 `TweenValue`、tween 池化、
+  percent keyframes（#77）、transform-origin；C# 侧 `TweenBuilder`
+  fluent wrapper + `TweenComplete` 标签路由 + lab §16 运行时用例
+  （pkg v43）。
+- **layout & box-shadow 动画通道（#10）**：同域端点插值，box-shadow
+  渐变动画；C# `TweenBuilder` layout/box-shadow 接线 + showcase
+  layout-anim 页（pkg v44）。
+- **`loom preview` 预览工作台**：CLI 新子命令——起本地 server 供人工
+  浏览器预览设计工作区；showcase 预览栈迁移其上（ESM 入口改写）。
+- **AI 安装手册**：`docs/ai-setup.md` 重写安装链路（两问流程——输出目录
+  也询问）；README install 章节同步改版。
+
+### Fixed
+- **稳态帧文本换行回归**：稳定帧必须携带 text_layouts 下发渲染——修
+  高帧率稳态下长文本换行丢失的回归。
+- showcase 不定态进度条滑动 keyframes 从 percent 改 px（percent
+  translate 被静默跳过不动画）。
+
 ## [0.0.12] - 2026-08-25
 
 v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补齐）+ M3 P0 开工批
