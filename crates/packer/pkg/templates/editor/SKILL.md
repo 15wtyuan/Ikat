@@ -20,6 +20,7 @@ trust the build message.
 ## Boundaries
 
 - Editing C# game code that drives pages/nodes/events → `loomgui-runtime`.
+- Preview simulation scripts and the `loom preview` loop → `loomgui-preview`.
 - Workspace configuration, build invocation, CLI flags → `loom`.
 - HTML/CSS authoring and fence diagnostics → this skill.
 
@@ -114,17 +115,28 @@ demand, not upfront.
 3. **Check and fix in rounds.** `loom check` (from the session root, or
    `loom check <ui-dir>`) → fix EVERY diagnostic in one editing pass →
    repeat until exit 0. Diagnostics carry code/file/line/column/help.
-4. **Visual self-check.** Open the page HTML in a browser (screenshot it
-   headless, or ask the user to look). Trust: flex layout, `gap`, px,
-   colors, gradients subset, `position:absolute`, `border-radius`,
-   `@keyframes` timing. Distrust: the browser-difference list in
-   `references/css-reference.md` — the build already flags each of those
-   with a warning (border without style, bg-image without size,
-   non-transitionable `transition` properties, dead sizing on inline
-   text, page rules over projected content); if there are no warnings,
-   the preview is honest.
-5. **Build on approval.** Ask the user before publishing; then `loom
-   build` and report the artifact paths from the report.
+4. **Write preview simulation.** If the page has `data-fill` lists,
+   custom elements, interactive controls, or game-code-driven content,
+   write the preview scripts per the `loomgui-preview` skill
+   (`preview/main.js` + `preview/pages/<page>.js` — the server injects
+   them; HTML stays clean). A `PreviewDataFillWithoutSim` warning means
+   this step is missing.
+5. **Human preview (the gate).** Start or reuse `loom preview` (running
+   instance reports the same URL; also recorded in
+   `.loom/preview.json`), give the human the URL, and iterate on their
+   feedback — they refresh to see each fix. Self-check the same way if
+   in doubt: the preview workbench renders at the design resolution
+   under `match_mode` scaling and never reflows. Trust: flex layout,
+   `gap`, px, colors, gradients subset, `position:absolute`,
+   `border-radius`, `@keyframes` timing. Distrust: the
+   browser-difference list in `references/css-reference.md` — the build
+   already flags each of those with a warning (border without style,
+   bg-image without size, non-transitionable `transition` properties,
+   dead sizing on inline text, page rules over projected content); if
+   there are no warnings, the preview is honest.
+6. **Build on approval.** Only after the human approved the preview (or
+   explicitly waived it): `loom build` and report the artifact paths
+   from the report.
 
 ## Pre-flight checklist (before reporting done)
 
@@ -133,7 +145,9 @@ demand, not upfront.
       `FenceBgImageWithoutSize` mean the preview will NOT match the runtime.
 - [ ] No id of an interactive element was renamed (game code depends on it).
 - [ ] New images are covered by an atlas dir; new fonts registered.
-- [ ] Visual self-check done (step 4); artifacts rebuilt if sources changed.
+- [ ] Preview simulation written (step 4) — no `PreviewDataFillWithoutSim`.
+- [ ] Human previewed the page via `loom preview` and approved (or
+      explicitly waived preview); artifacts rebuilt if sources changed.
 
 ## Failure patterns
 

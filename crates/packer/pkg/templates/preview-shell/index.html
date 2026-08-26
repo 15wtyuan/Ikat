@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- loom preview workbench shell（嵌在 loom.exe 内，版本随 CLI；手写无构建）。
+     左树按包分组 / 右 iframe 预览（按 match_mode 缩放设计分辨率，永不 reflow）
+     / 分辨率切换 + 安全区参考线 / 设置存 localStorage。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>loom preview</title>
+<link rel="stylesheet" href="/shell/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div id="ws-info">
+    <span id="ws-name">workspace</span>
+    <span id="ws-design" class="chip"></span>
+    <span id="ws-match" class="chip"></span>
+  </div>
+  <div id="controls">
+    <label>设备
+      <select id="preset"></select>
+    </label>
+    <label>自定义
+      <input id="custom-w" type="number" min="100" max="7680" placeholder="W"> ×
+      <input id="custom-h" type="number" min="100" max="4320" placeholder="H">
+      <button id="custom-go">应用</button>
+    </label>
+    <label><input type="checkbox" id="safe-area"> 安全区参考线</label>
+    <button id="reload" title="重载页面（重播 CSS 动画）">↻</button>
+    <button id="settings">⚙</button>
+  </div>
+  <div id="zoom" class="chip">100%</div>
+</header>
+<div id="main">
+  <nav id="tree"></nav>
+  <section id="stage">
+    <div id="device">
+      <div id="safe-top" class="safe-band"></div>
+      <div id="safe-bottom" class="safe-band"></div>
+      <iframe id="frame" title="page preview"></iframe>
+    </div>
+  </section>
+</div>
+<dialog id="settings-box">
+  <h3>设置</h3>
+  <p class="hint">设置存于浏览器 localStorage（个人检视偏好，不进工作区）。</p>
+  <div id="res-list"></div>
+  <div class="row">
+    <input id="new-name" placeholder="名称">
+    <input id="new-w" type="number" placeholder="宽">
+    <input id="new-h" type="number" placeholder="高">
+    <input id="new-safe" type="checkbox" title="显示安全区参考线">
+    <label for="new-safe">安全区</label>
+    <button id="add-res">添加</button>
+  </div>
+  <div class="row right">
+    <button id="close-settings">关闭</button>
+  </div>
+</dialog>
+<script type="module" src="/shell/app.js"></script>
+</body>
+</html>

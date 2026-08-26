@@ -22,7 +22,7 @@ configuring a LoomGUI UI workspace.
   .loom/                       ← committed to git (team shares the CLI)
     loom(.exe)                 ← bundled CLI, version-matched to the release
     config.json                ← { "ui_root": "ui", "unity_root": "unity" }
-  .agents/skills/              ← loomgui-editor / loomgui-runtime / loom
+  .agents/skills/              ← loomgui-editor / loomgui-runtime / loomgui-preview / loom
   ui/                          ← the UI workspace (ui_root's target)
     loom.workspace.json        ← build configuration (edit via commands only)
     ui/ assets/ fonts/ ...
@@ -57,6 +57,7 @@ loom font add <file> --family <f> [--default] [--fallback]
 loom atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
 loom design [WxH] [--match letterbox|fit-width|fit-height] [--clear]
 loom scaffold [--agent claude|agents]...      refresh workspace generated artifacts (skills + .loom CLI + version stamp)
+loom preview [<dir>] [--port <n>] [--idle-timeout <s>] [--stop]
 loom version [--format json]
 ```
 
@@ -65,6 +66,33 @@ config discovery (see Workspace topology). **Editing
 `loom.workspace.json` always goes through these commands — never
 hand-edit it.** The workspace holds an entire game's UI; hand edits are
 how configurations break silently.
+
+## `loom preview` — the human preview workbench
+
+Long-running local server for HUMANS to review pages in a browser
+before anything reaches the engine. Prints ONE JSON document with `url`
+to stdout, then keeps serving (access log on stderr). The workbench:
+package/page tree on the left, preview on the right at the design
+resolution under `match_mode` scaling (never reflows — preview must
+predict the runtime), device-frame switching with safe-area guides,
+settings in browser localStorage. It auto-injects the workspace's
+preview simulation entries (`<pkg-dir>/preview/main.js` +
+`preview/pages/<page>.js`) when they exist — sources stay clean and the
+`preview/` dir never packs. Simulation scripts themselves are the
+`loomgui-preview` skill's business.
+
+Lifecycle (absorbed from real-world server pain): stable port per
+workspace (path-hash in 41000–41999 — an open tab survives restarts,
+just refresh); server info persisted to `.loom/preview.json` (find the
+URL there if stdout got swallowed by backgrounding); reuse — a second
+`loom preview` on the same workspace reports the running instance's URL
+and exits; auto-exit after 4h idle (override with `--idle-timeout <s>`)
+and when the owning shell dies; `loom preview --stop` shuts the instance
+down (verifies ownership via a token before killing). Binds 127.0.0.1
+only.
+
+This is NOT the rejected `watch`/`mcp` idea: no file watching, no auto
+rebuild — the human refreshes; sources are read live on every request.
 
 ## Exit codes (frozen contract)
 

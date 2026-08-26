@@ -20,9 +20,9 @@ cargo build -p loomgui_core
 cargo test  -p loomgui_core
 
 # loom CLI（HTML+CSS+资源 → .pkg.bin + 自绘图集 + fonts；二进制名 loom，复用核心 parse 层）
-# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / design / scaffold / version；退出码 0=干净（warning 不算失败）/ 1=数据性 / 2=工具性。
+# 命令面：check / build / init(--ui) / new / list / show / font add / atlas add / design / scaffold / preview / version；退出码 0=干净（warning 不算失败）/ 1=数据性 / 2=工具性。
 # 输出契约：stdout 单 JSON 文档、stderr 进度（clig.dev）；`format_version` 只增不改；写命令成功回显实体 JSON；`list` 摘要级纪律（全量吐会炸 AI 上下文）。
-# watch / mcp 子命令 rejected by design（AI 循环用 check 轮询 + assets/ 是真相源；业界无 watch 先例）。
+# watch / mcp 子命令 rejected by design（AI 循环用 check 轮询 + assets/ 是真相源；业界无 watch 先例）。`preview` 不在此列：长驻本地 server 给人类浏览器预览（工作台外壳 + 注入 AI 手写的 preview/main.js / preview/pages/<页>.js，均不进打包），无文件监听、不自动重建——人类 F5 刷新，源文件每请求现读；稳定端口（路径哈希 41000-41999）+ `.loom/preview.json` server-info + 4h 空闲自杀 + `--stop` token 验归属。
 # 工作区拓扑：会话根（.loom/ = exe + config.json 双指针 ui_root/unity_root + skills）≠ ui 目录（loom.workspace.json）；
 # 目录解析统一 config 发现（会话根 / ui 本体 / ui 直接子目录均可作参数或 cwd），详见 pkg/src/config.rs。
 cargo build -p loomgui_pkg
@@ -124,7 +124,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **Unity 侧结构化诊断入口**：`LoomHost.DumpSceneJson()`（Runtime 包内 public，未 instantiate 返 `"[]"`）dump 全场景节点树；showcase 工程另有 dev-only 的 `LoomBridge`（PlayMode-only：DumpScene/DumpMirrorPool）。uloop 探针读空先想这两个入口。
 
-**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；loom-preview.js 是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。**rect 全等 ≠ 渲染全等——行断是独立维度**：文本换行变化不必然改节点 rect（定高容器内换行 rect 不动），布局/测量面改动的守卫必须含行数维度（layout 差分守卫测试已含）；怀疑 core 行为回归时最强取证 = **pre-变更 worktree 对拍**（`git worktree add` 拉变更前 commit、构建同 example、`dump_page --json` 按 id+tag+classes+domIndex 键逐节点比 rect/行断）——#29 验收期十页逐字节全等一锤排除布局回归。shell 注意 `cmd | tail; echo $?` 捕获的是 tail 退出码。
+**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；页面预览模拟脚本（preview/main.js + pages/<页>.js，经 `loom preview` server 注入）是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。**rect 全等 ≠ 渲染全等——行断是独立维度**：文本换行变化不必然改节点 rect（定高容器内换行 rect 不动），布局/测量面改动的守卫必须含行数维度（layout 差分守卫测试已含）；怀疑 core 行为回归时最强取证 = **pre-变更 worktree 对拍**（`git worktree add` 拉变更前 commit、构建同 example、`dump_page --json` 按 id+tag+classes+domIndex 键逐节点比 rect/行断）——#29 验收期十页逐字节全等一锤排除布局回归。shell 注意 `cmd | tail; echo $?` 捕获的是 tail 退出码。
 
 **Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间，同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
 

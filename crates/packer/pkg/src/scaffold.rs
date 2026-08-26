@@ -1,7 +1,7 @@
-//! 会话根脚手架：三个 agent skills（loomgui-editor 围栏规则手册 / loomgui-runtime
-//! 运行时接线手册 / loom CLI 手册），从模板覆盖拷入。CLI `loom init` / `loom scaffold`
-//! 与 GUI「新建工作区」共用（模板只此一份，防两端口径漂移）。模板文件在 crate 的
-//! templates/ 下（include_str! 嵌进二进制——CLI 单 exe 分发）。
+//! 会话根脚手架：四个 agent skills（loomgui-editor 围栏规则手册 / loomgui-runtime
+//! 运行时接线手册 / loomgui-preview 预览模拟手册 / loom CLI 手册），从模板覆盖拷入。
+//! CLI `loom init` / `loom scaffold` 与 GUI「新建工作区」共用（模板只此一份，防两端口径
+//! 漂移）。模板文件在 crate 的 templates/ 下（include_str! 嵌进二进制——CLI 单 exe 分发）。
 
 use std::path::Path;
 
@@ -35,6 +35,12 @@ const RUNTIME_REFERENCES: &[(&str, &str)] = &[(
     include_str!("../templates/runtime/references/api-reference.md"),
 )];
 
+/// preview skill 的深度参考表（可拷贝 recipe：组件展开 / 各控件模拟 / 演示数据）。
+const PREVIEW_REFERENCES: &[(&str, &str)] = &[(
+    "references/recipes.md",
+    include_str!("../templates/preview/references/recipes.md"),
+)];
+
 fn skill_artifacts() -> Vec<SkillArtifacts> {
     vec![
         SkillArtifacts {
@@ -44,6 +50,10 @@ fn skill_artifacts() -> Vec<SkillArtifacts> {
         SkillArtifacts {
             dir: "loomgui-runtime",
             files: vec![("SKILL.md", include_str!("../templates/runtime/SKILL.md"))],
+        },
+        SkillArtifacts {
+            dir: "loomgui-preview",
+            files: vec![("SKILL.md", include_str!("../templates/preview/SKILL.md"))],
         },
         SkillArtifacts {
             dir: "loom",
@@ -61,9 +71,11 @@ pub fn write_agent_scaffold(root: &Path, agents: &[String]) -> Result<(), String
         return Err("no agent kind selected (expected `claude` and/or `agents`)".to_string());
     }
     let mut skills = skill_artifacts();
-    // references/ 并入对应 skill 的产物清单（editor 三件 + runtime API 查找表）。
+    // references/ 并入对应 skill 的产物清单（editor 三件 + runtime API 查找表 +
+    // preview recipe 查找表）。
     skills[0].files.extend_from_slice(EDITOR_REFERENCES);
     skills[1].files.extend_from_slice(RUNTIME_REFERENCES);
+    skills[2].files.extend_from_slice(PREVIEW_REFERENCES);
 
     for agent in agents {
         let skills_dir = match agent.as_str() {

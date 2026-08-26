@@ -7,6 +7,7 @@ pub mod config;
 pub mod diag;
 pub mod expand;
 pub mod init;
+pub mod preview;
 pub mod report;
 pub mod runtime;
 pub mod scaffold;

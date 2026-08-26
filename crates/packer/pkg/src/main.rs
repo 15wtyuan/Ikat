@@ -85,6 +85,14 @@ enum Cmd {
     Scaffold {
         agents: Vec<String>,
     },
+    /// 本地预览工作台（长驻 HTTP server，给人类浏览器看；stdout 单 JSON 含 URL）。
+    /// `--stop` 停已跑的实例（先验 token 归属再杀）。
+    Preview {
+        root: PathBuf,
+        port: Option<u16>,
+        idle_timeout: Option<u64>,
+        stop: bool,
+    },
     Version {
         format: Format,
     },
@@ -123,6 +131,14 @@ fn usage() -> ! {
     eprintln!(
         "  {bin} scaffold [--agent <kind>]...           refresh agent docs + skills only (safe for existing workspaces)"
     );
+    eprintln!("  {bin} preview [<dir>] [--port <n>] [--idle-timeout <s>] [--stop]");
+    eprintln!(
+        "                                            local preview workbench for humans (long-running;"
+    );
+    eprintln!(
+        "                                            prints one JSON with url; stable port per workspace;"
+    );
+    eprintln!("                                            auto-exits when idle, default 4h)");
     eprintln!("  {bin} version [--format json]");
     eprintln!();
     eprintln!("exit codes: 0 clean (warnings allowed) · 1 errors / command conflict · 2 usage/config failure");
@@ -328,6 +344,17 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
                 agents,
             })
         }
+        "preview" => Some(Cmd::Preview {
+            root: match scan.positional() {
+                Some(d) => PathBuf::from(d),
+                None => std::env::current_dir().ok()?,
+            },
+            port: scan.flag_value("--port").and_then(|v| v.parse().ok()),
+            idle_timeout: scan
+                .flag_value("--idle-timeout")
+                .and_then(|v| v.parse().ok()),
+            stop: scan.has("--stop"),
+        }),
         "version" => Some(Cmd::Version {
             format: parse_format(rest)?,
         }),
@@ -373,6 +400,12 @@ fn main() -> ExitCode {
             clear,
         } => run_design(size, match_mode, clear),
         Cmd::Scaffold { agents } => run_scaffold(agents),
+        Cmd::Preview {
+            root,
+            port,
+            idle_timeout,
+            stop,
+        } => run_preview(&root, port, idle_timeout, stop),
         Cmd::Version { format } => {
             let v = VersionInfo::current();
             match format {
@@ -630,6 +663,37 @@ fn print_human_list(json: &serde_json::Value) {
             parts.push(format!("{k}={vv}"));
         }
         println!("{}", parts.join("  "));
+    }
+}
+
+/// `loom preview`：长驻服务（stdout 单 JSON 含 URL）或 `--stop` 停实例。
+/// 注意 stop/start 都要会话根（server-info 落盘 `.loom/preview.json`），
+/// 不走 locate_arg（那只给 ui）。
+fn run_preview(
+    root: &std::path::Path,
+    port: Option<u16>,
+    idle_timeout: Option<u64>,
+    stop: bool,
+) -> ExitCode {
+    let located = match loomgui_pkg::config::locate(root) {
+        Ok(l) => l,
+        Err(f) => return failure_exit("preview", &f, Format::Human),
+    };
+    let res = if stop {
+        loomgui_pkg::preview::stop(&located)
+    } else {
+        loomgui_pkg::preview::start(
+            &located,
+            &loomgui_pkg::preview::PreviewOpts { port, idle_timeout },
+        )
+    };
+    match res {
+        Ok(code) => std::process::ExitCode::from(code as u8),
+        Err(msg) => failure_exit(
+            "preview",
+            &loomgui_pkg::diag::BuildFailure::config(msg),
+            Format::Human,
+        ),
     }
 }
 

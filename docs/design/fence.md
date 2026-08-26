@@ -134,7 +134,7 @@ Dropdown 选中值显示：可选 `data-slot=value` 子（内嵌 TextNode）—�
 
 **组件 @keyframes 两级裁决**：打包期——同名同内容静默去重（同组件多实例必然同名）；同名异内容宿主胜 + warning。运行时——keyframes 全局按名表，后实例化的组件覆盖同名。
 
-**已知降级**：手工 file:// 双击打开 HTML 不展开组件（展开依赖浏览器预览工具链的脚本注入）——组件页一律走预览工具链看。
+**已知降级**：手工 file:// 双击打开 HTML 已退役（预览脚本改由 `loom preview` server 注入，HTML 源零 `<script>` 引用）——一切预览（含组件页）走 `loom preview` 工作台。
 
 ---
 

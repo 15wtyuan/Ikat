@@ -564,6 +564,42 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
         &atlas_refs,
     ));
 
+    // 预览兜底：`data-fill` 是「本列表运行时才填充」的标记（loomgui-preview skill
+    // 约定）；缺按页模拟脚本 = 人类预览看到空列表。不靠 AI 记得写，靠 check 提醒。
+    for pkg in &ws.packages {
+        for rel in resolve_html_list(workspace_root, pkg).unwrap_or_default() {
+            let Ok(src) = std::fs::read_to_string(workspace_root.join(&rel)) else {
+                continue;
+            };
+            if !src.contains("data-fill") {
+                continue;
+            }
+            let Some(dir) = Path::new(&rel).parent() else {
+                continue;
+            };
+            let stem = Path::new(&rel)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            let has_sim = workspace_root
+                .join(dir)
+                .join(format!("preview/pages/{stem}.js"))
+                .is_file();
+            if !has_sim {
+                diags.push(PackDiagnostic::synthetic_warning(
+                    code::PREVIEW_DATA_FILL_WITHOUT_SIM,
+                    &pkg.name,
+                    &rel,
+                    format!(
+                        "页面带 data-fill（运行时填充）但缺 {}/preview/pages/{stem}.js \
+                         ——人类预览（loom preview）将看到空列表；按 loomgui-preview skill 补演示数据脚本",
+                        dir.display()
+                    ),
+                ));
+            }
+        }
+    }
+
     if diags.iter().any(|d| d.severity == Severity::Error) {
         let errors = diags
             .iter()
@@ -574,11 +610,15 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
             diags,
         ));
     }
+    // 顶层 diags（此处只剩 Warning 级——Error 已提前整体失败）并进 outcome，
+    // 否则成功路径静默丢弃（修前无症状只因顶层诊断恰好全是 Error 级）。
+    let mut warnings = comp_warnings;
+    warnings.extend(diags);
     Ok(AnalyzeOutcome {
         workspace: ws,
         atlases,
         packages,
-        warnings: comp_warnings,
+        warnings,
     })
 }
 

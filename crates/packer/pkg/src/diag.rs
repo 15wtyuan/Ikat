@@ -31,6 +31,9 @@ pub mod code {
     pub const CONFIG_INVALID: &str = "ConfigInvalid";
     /// 彩色边框与 background-image/gradient 共存（互斥渲染，边框不画）。
     pub const BORDER_BG_EXCLUSIVE: &str = "BorderBgExclusive";
+    /// 页面有 `data-fill`（运行时填充标记）但缺按页预览模拟脚本——人类预览
+    /// 将看到空列表。见 loomgui-preview skill。
+    pub const PREVIEW_DATA_FILL_WITHOUT_SIM: &str = "PreviewDataFillWithoutSim";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

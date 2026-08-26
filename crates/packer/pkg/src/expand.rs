@@ -54,6 +54,11 @@ impl ComponentRegistry {
         }
     }
 
+    /// 注册条目迭代（名 → 定义）。preview 的 /api 数据面用（名字 → 源文件路径）。
+    pub fn entries(&self) -> impl Iterator<Item = (&String, &ComponentDef)> {
+        self.defs.iter()
+    }
+
     /// 从 (名, HTML 源, html_rel) 构建注册表。单测/字符串入口。
     ///
     /// collect-all：单个组件的注册错误（fence Error / 命名 / 单根 / 子树校验）收集成
