@@ -191,6 +191,7 @@ Two paths, same underlying routing:
 | Focus | Focus/Blur |
 | Scroll | ScrollChanged |
 | AnimationHandle | AnimationStart/End/Iteration, TransitionEnd |
+| Tween | TweenComplete (tag-routed; powers `TweenBuilder.OnComplete`) |
 
 Unsubscribing: routed / per-frame / stylesheet return `IDisposable`
 handles (`On<T>`, `OnUpdate`, `StyleSheet.Add`) — dispose to withdraw;
@@ -306,9 +307,11 @@ recycled after `AnimationEnd`.
 
 ## AnimationHandle
 
-All animation is defined in CSS; there is no imperative tween.
+Two authoring planes: **declarative CSS** (class toggle, `Play`) and the
+**imperative `TweenBuilder`** (single-channel programmatic tween; see the
+next section).
 
-Three triggers:
+Declarative triggers:
 
 1. Class toggle (declarative): `node.Classes.Add("slide-out")`; watch
    `On<AnimationEndEvent>`.
@@ -322,7 +325,9 @@ Three triggers:
    `Play(name, durationSeconds)` overrides the 1s default.
    CSS contrast: the `animation` shorthand defaults to 0s — the 1s
    here is a programmatic-play default, not the CSS initial value.
-3. `Style.SetVar` (dynamic values escape hatch).
+3. Imperative single-channel tween: `node.Tween(channel)` →
+   `TweenBuilder` (below).
+4. `Style.SetVar` (dynamic values escape hatch).
 
 Timing invariants: class / typed-style changes take effect at the next
 frame's rematch (not immediately) — within one frame only the final
@@ -364,6 +369,93 @@ node.OnUpdate(Action<float> cb);        // recurring, dt = frame step
 
 Style/data writes inside callbacks flush in the same frame's solve. A
 throwing callback is isolated (logged, does not break other callbacks).
+
+## TweenBuilder (imperative tween)
+
+```csharp
+node.Tween(TweenChannel.Height).FromPx(60).ToPx(220)
+    .Duration(0.6f).Ease(EaseKind.CubicOut)
+    .OnComplete(n => Debug.Log("done"))
+    .Start();
+```
+
+Entry: `Node.Tween(TweenChannel channel) → TweenBuilder` (fluent, one
+chain per tween). Defaults: duration **0.3s**, ease = the exact CSS
+`ease` bezier (.25,.1,.25,1) — same truth as the CSS/fence side.
+
+```csharp
+public enum TweenChannel {
+    Opacity = 0, Translate = 1, Scale = 2, Rotation = 3,
+    BgColor = 4, TextColor = 5, Transform = 6,
+    Width = 7, Height = 8, FlexGrow = 9, BoxShadow = 10,
+}
+```
+
+`From`/`To` component counts: Opacity/Rotation 1; Translate/Scale 2;
+BgColor/TextColor 4 (RGBA); Transform 5 (`[tx, ty, sx, sy, rotRad]` —
+always px/radians at runtime; percent forms exist only in CSS
+@keyframes). Width/Height payload is `[value, domainCode]` — prefer the
+one-arg conveniences:
+
+```csharp
+FromPx(v) / ToPx(v) / FromPct(v) / ToPct(v) / FromVw(v) / ToVw(v)
+// domainCode = LenDomain { Px, Pct, Vw, Vh, Vmin, Vmax }
+```
+
+**Width/Height endpoints must share one domain** (px↔px / %↔% / vw↔vw);
+a cross-domain `Start()` throws `UIContractException`. Layout channels
+(Width/Height/FlexGrow) relayout per frame — same-frame solve consumes
+them, no extra solve is issued.
+
+BoxShadow animates lists: `FromShadow(params TweenShadow[])` /
+`ToShadow(...)` (empty array = `box-shadow:none` endpoint). Mismatched
+list lengths pad with transparent zero-length shadows pairwise
+(css-backgrounds-3); paired `Inset` mismatch degrades the whole list to
+a discrete jump (browser semantics).
+
+```csharp
+public struct TweenShadow {
+    public float OffsetX, OffsetY, Spread, Blur;
+    public float R, G, B, A;          // linear RGBA
+    public bool Inset;
+    public static TweenShadow Outer(float ox, float oy, float blur,
+                                    float spread, float r, float g, float b, float a);
+    public static TweenShadow InsetShadow(... same args ...);
+}
+```
+
+Chain tail: `Duration(s)` / `Delay(s)` / `Ease(EaseKind)` /
+`EaseBezier(x1, y1, x2, y2)` (x∈[0,1]; out-of-range throws
+`UIContractException` — exact CSS keyword curves: ease=(.25,.1,.25,1),
+ease-in=(.42,0,1,1), ease-out=(0,0,.58,1), ease-in-out=(.42,0,.58,1)) /
+`Repeat(extraRepeats, yoyo)` (0 = single run; yoyo reverses odd
+iterations, CSS alternate) / `Tag(uint)` / `OnComplete(Action<Node>)` /
+`Start()`.
+
+```csharp
+public enum EaseKind {
+    Linear, QuadIn, QuadOut, QuadInOut,
+    CubicIn, CubicOut, CubicInOut,
+    BackIn, BackOut, BackInOut,
+    StepEnd, StepStart, CubicBezier,   // CubicBezier params via EaseBezier(...)
+    ElasticIn, ElasticOut, ElasticInOut,
+    BounceIn, BounceOut, BounceInOut,
+}
+```
+
+`OnComplete` routes through the `TweenComplete` event by tag: auto-
+allocated when omitted; **one-shot** (fires once after ALL repeats, then
+unregisters); re-registering the same tag replaces the earlier callback.
+Transition-emitted tweens fire the legacy `TransitionEnd` path —
+unregistered tags never disturb it. `Start()` contract exceptions
+(also: BoxShadow channel without both shadow endpoints) throw
+`UIContractException` instead of the FFI's defensive no-op.
+
+Channels vs CSS transitions: same engine, no conflict resolution needed
+beyond write order (animation players overwrite tweens on the same
+channel within a frame). CSS-side cross-domain/auto endpoint combos snap
+with a `TransitionSnap` debug-log event (=29); the TweenBuilder side
+rejects them up front instead.
 
 ## Styling
 

@@ -114,9 +114,12 @@ public class GameUI : MonoBehaviour
   `BindItem`, visual state via `node.Classes.Add(...)`, show/hide via
   `node.Style.Display = DisplayMode.None` (collapses layout + removes
   hit-testing; `DisplayMode.Block` / `Flex` restores — no need to
-  hand-roll `.hide` classes), animations via `node.Play("name")`
-  (no-declaration keyframes play at a fixed 1s; `Play(name, seconds)`
-  overrides), text color inline via `node.Style.TextColor`, per-node
+  hand-roll `.hide` classes), declarative animations via
+  `node.Play("name")` (no-declaration keyframes play at a fixed 1s;
+  `Play(name, seconds)` overrides), imperative single-channel tweens
+  via `node.Tween(TweenChannel.X)...Start()` (fluent builder — layout
+  channels Width/Height/FlexGrow, box-shadow lists, full ease set;
+  endpoints in `references/api-reference.md`), text color inline via `node.Style.TextColor`, per-node
   logic via `node.OnUpdate(dt)` and `driver.Context.CallLater` /
   `CallNextFrame` (fires before solve — fresh-subtree Geometry is still
   zero there; use `CallAfterLayout` to read solved Geometry the same
