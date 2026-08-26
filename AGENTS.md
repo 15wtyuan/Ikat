@@ -1,6 +1,6 @@
 ﻿# LoomGUI 开发指南
 
-本文件为在本仓库工作的 AI 编码代理（Claude Code / Codex 等）提供指引。
+本文件为在本仓库工作的 AI 编码代理提供指引。
 
 ## ⚠️ 模型禁令（硬规则，违者罚钱）
 
@@ -50,7 +50,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红（且**本地绿 ≠ CI 绿**：CI stable 滚动可超前本地一档 + clippy 增量缓存跳过未变更 crate，见 pitfalls §2）。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
-**发版（tag 触发 Release workflow）**：三道硬门：tag 名 == `unity/package/package.json` 的 version，且 == `crates/packer/pkg/Cargo.toml` 的 version（不齐则 `loom version` 撒谎），且 **`unity/package/CHANGELOG.md`**（仓库唯一 CHANGELOG，根目录无）有对应 `## [<ver>]` 段落——**打 tag 前先双 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内（Release workflow 只验证+出 artifact；release-check 只查 dll 存在性，字节 staleness 无法校验）。**移 tag 的两个坑**：① 远端常有 CI bot 的 CLAUDE.md 镜像 commit（[skip ci]）挡 push——rebase 后本地 tag 仍指 rebase 前的孤儿 commit，须 `git tag -f` 重打再 `--force` 推；② 多 refspec push（`push origin main tag`）在 main 被拒时 tag 可能已单独上远端，忘了重打会留脏 tag——推完 `git ls-remote` 核对。移 tag 后 CHANGELOG 里记在 Unreleased 的新批要折进版本段（移 tag = 成为版本一部分）。
+**发版（tag 触发 Release workflow）**：三道硬门：tag 名 == `unity/package/package.json` 的 version，且 == `crates/packer/pkg/Cargo.toml` 的 version（不齐则 `loom version` 撒谎），且 **`unity/package/CHANGELOG.md`**（仓库唯一 CHANGELOG，根目录无）有对应 `## [<ver>]` 段落——**打 tag 前先双 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内（Release workflow 只验证+出 artifact；release-check 只查 dll 存在性，字节 staleness 无法校验）。**移 tag 的两个坑**：① 远端 main 有本地没有的新 commit（他人/自动化的 push）挡 push——rebase 后本地 tag 仍指 rebase 前的孤儿 commit，须 `git tag -f` 重打再 `--force` 推；② 多 refspec push（`push origin main tag`）在 main 被拒时 tag 可能已单独上远端，忘了重打会留脏 tag——推完 `git ls-remote` 核对。移 tag 后 CHANGELOG 里记在 Unreleased 的新批要折进版本段（移 tag = 成为版本一部分）。
 
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 

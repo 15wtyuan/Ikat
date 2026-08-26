@@ -70,19 +70,11 @@ tests/dotnet/obj/
 Thumbs.db
 desktop.ini
 
-# ===== Claude / 工具缓存 =====
-.claude/cache/
-.claude/state/
-.claude/projects/
-.claude/worktrees/
-
 # ===== open-design 调研 =====
 # open-design 源码（只读调研参考，不入库）
 /temp/
 
 # editor init 注入生成物（samples/ 自测注入）
-samples/CLAUDE.md
-samples/.claude/
 samples/*/*.artifact.json
 samples/.od-skills
 

@@ -17,7 +17,7 @@
 - **围栏属性**：[`design/fence.md`](design/fence.md) —— 权威清单（真相源 `crates/fence/src/schema/`）
 - **工作项/路线**：GitHub issues（milestone 门控 M2 → M3 → v1.0；label 按 track）；北极星判据见 [`roadmap/roadmap.md`](roadmap/roadmap.md)
 - **踩坑/依赖 API 适配**：[`pitfalls.md`](pitfalls.md)（精炼规则手册；历史全文见 [`archive/`](archive/)）
-- **AI 工作约束**：根 [`CLAUDE.md`](../CLAUDE.md)
+- **AI 工作约束**：根 [`AGENTS.md`](../AGENTS.md)
 
 ## 维护原则
 
@@ -25,5 +25,5 @@
 - **决策理由**体现在主设计各章节的设计说明里；历史决策追溯见 git。
 - **围栏属性权威 = `fence.md`**（真相源 `crates/fence/src/schema/`）；主设计 §3 只写哲学/原则，不重复属性表。
 - **踩坑**进 `pitfalls.md`——只收可复用规则、按主题归位、不编号；bug 编年史不记（代码 + git history 是载体；历史 231 条见 `archive/pitfalls-2026-08.md`）。
-- **AI 工作约束 + 高价值可复用经验**进根 `CLAUDE.md`。
+- **AI 工作约束 + 高价值可复用经验**进根 `AGENTS.md`。
 - **工作项**进 GitHub issues（2026-08-24 起；`roadmap/` 目录只留北极星判据 stub + 归档历史）。

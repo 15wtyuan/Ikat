@@ -12,7 +12,7 @@
   ```
 - **Unity 6.5（URP）**：打开 `unity/showcase-unity/`，PlayMode 从 `StreamingAssets/` 加载 `.pkg.bin`。
 
-详见 [CLAUDE.md](CLAUDE.md) 的「构建/测试命令」「Rust → Unity .dll 闭环」。
+详见 [AGENTS.md](AGENTS.md) 的「构建/测试命令」「Rust → Unity .dll 闭环」。
 
 ## 两机工作流
 
