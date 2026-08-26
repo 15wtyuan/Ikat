@@ -720,6 +720,26 @@ public class ShowcaseRunner : MonoBehaviour
                 });
                 capTarget.On<PointerUpEvent>(e => { capRead.TextContent = "up（capture 已自动释放）"; });
             }
+            // lab #16 runtime TweenBuilder：按钮触发 C# 链式 tween（Transform 五元组，
+            // EaseBezier 精确 CSS ease + Repeat+yoyo 两轮 + OnComplete tag 路由收尾）。
+            // HTML 只摆台（块/按钮/读数），动画全走运行时 API——CSS 面 + 运行时面的分工演示。
+            if (page.TryGet<Button>("tw-btn", out var twBtn)
+                && page.TryGet<Container>("tw-target", out var twTarget)
+                && page.TryGet<TextElement>("tw-read", out var twRead))
+            {
+                twBtn.Clicked += () =>
+                {
+                    twRead.TextContent = "tween 播放中（2 轮 yoyo）…";
+                    twTarget.Tween(TweenChannel.Transform)
+                        .From(0f, 0f, 1f, 1f, 0f)
+                        .To(176f, 0f, 1f, 1f, 0f)
+                        .Duration(0.5f)
+                        .EaseBezier(0.25f, 0.1f, 0.25f, 1f)
+                        .Repeat(1, yoyo: true)
+                        .OnComplete(_ => twRead.TextContent = "tween 完成（OnComplete 触发）")
+                        .Start();
+                };
+            }
         }
         if (pageName == "settings")
         {
