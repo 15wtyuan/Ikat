@@ -15,8 +15,9 @@ use loomgui_core::stage::Stage;
 use loomgui_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
+use loomgui_core::transform::LenPct;
 use loomgui_core::transform::{from_scale, from_translate, Affine2Ext};
-use loomgui_core::tween::{Ease, TweenProp};
+use loomgui_core::tween::{Ease, TweenProp, TweenSpec};
 
 fn assert_close(a: f32, b: f32) {
     assert!((a - b).abs() < 1e-4, "expected {b} ± 1e-4, got {a}");
@@ -44,6 +45,7 @@ fn stop(selector: KeyframeStopSelector, props: AnimatableProps) -> KeyframeStop 
     KeyframeStop {
         selector,
         props,
+        timing: None,
         hook: None,
     }
 }
@@ -81,7 +83,10 @@ fn slide_fade() -> KeyframesRule {
                 AnimatableProps {
                     opacity: Some(0.0),
                     transform: Some(TransformAnim {
-                        translate: Some([0.0, 20.0]),
+                        translate: Some([
+                            LenPct { px: 0.0, pct: 0.0 },
+                            LenPct { px: 20.0, pct: 0.0 },
+                        ]),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -92,7 +97,10 @@ fn slide_fade() -> KeyframesRule {
                 AnimatableProps {
                     opacity: Some(1.0),
                     transform: Some(TransformAnim {
-                        translate: Some([0.0, 0.0]),
+                        translate: Some([
+                            LenPct { px: 0.0, pct: 0.0 },
+                            LenPct { px: 0.0, pct: 0.0 },
+                        ]),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -111,7 +119,10 @@ fn translate_only() -> KeyframesRule {
                 KeyframeStopSelector::From,
                 AnimatableProps {
                     transform: Some(TransformAnim {
-                        translate: Some([0.0, 20.0]),
+                        translate: Some([
+                            LenPct { px: 0.0, pct: 0.0 },
+                            LenPct { px: 20.0, pct: 0.0 },
+                        ]),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -121,7 +132,10 @@ fn translate_only() -> KeyframesRule {
                 KeyframeStopSelector::To,
                 AnimatableProps {
                     transform: Some(TransformAnim {
-                        translate: Some([0.0, 0.0]),
+                        translate: Some([
+                            LenPct { px: 0.0, pct: 0.0 },
+                            LenPct { px: 0.0, pct: 0.0 },
+                        ]),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -168,7 +182,10 @@ fn update_all_writes_opacity_and_transform_srt_order() {
                 AnimatableProps {
                     opacity: Some(0.0),
                     transform: Some(TransformAnim {
-                        translate: Some([10.0, 0.0]),
+                        translate: Some([
+                            LenPct { px: 10.0, pct: 0.0 },
+                            LenPct { px: 0.0, pct: 0.0 },
+                        ]),
                         scale: Some([2.0, 1.0]),
                         ..Default::default()
                     }),
@@ -180,7 +197,10 @@ fn update_all_writes_opacity_and_transform_srt_order() {
                 AnimatableProps {
                     opacity: Some(1.0),
                     transform: Some(TransformAnim {
-                        translate: Some([10.0, 0.0]),
+                        translate: Some([
+                            LenPct { px: 10.0, pct: 0.0 },
+                            LenPct { px: 0.0, pct: 0.0 },
+                        ]),
                         scale: Some([2.0, 1.0]),
                         ..Default::default()
                     }),
@@ -240,13 +260,17 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
     let node = stage.create_node("div", "").unwrap();
     stage.tweens.tween(
         node,
-        TweenProp::Opacity,
-        [0.3, 0.0, 0.0, 0.0, 0.0],
-        [0.7, 0.0, 0.0, 0.0, 0.0],
-        Ease::Linear,
-        0.0,
-        0.2,
-        0,
+        TweenSpec {
+            prop: TweenProp::Opacity,
+            start: [0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            end: [0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ease: Ease::Linear,
+            delay: 0.0,
+            duration: 0.2,
+            tag: 0,
+            repeat: 0,
+            yoyo: false,
+        },
     );
     let mut s = spec();
     s.fill_mode = AnimationFillMode::Both;
@@ -270,13 +294,17 @@ fn tick_step_b_animation_overrides_transition_same_channel() {
     let node = stage.create_node("div", "").unwrap();
     stage.tweens.tween(
         node,
-        TweenProp::Opacity,
-        [0.3, 0.0, 0.0, 0.0, 0.0],
-        [0.7, 0.0, 0.0, 0.0, 0.0],
-        Ease::Linear,
-        0.0,
-        0.2,
-        0,
+        TweenSpec {
+            prop: TweenProp::Opacity,
+            start: [0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            end: [0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ease: Ease::Linear,
+            delay: 0.0,
+            duration: 0.2,
+            tag: 0,
+            repeat: 0,
+            yoyo: false,
+        },
     );
     stage.advance_time(0.2);
     stage.tick_and_render();
@@ -398,7 +426,10 @@ fn fill_none_completion_keeps_other_players_shared_channel_value() {
                     AnimatableProps {
                         opacity: Some(0.9),
                         transform: Some(TransformAnim {
-                            translate: Some([0.0, 10.0]),
+                            translate: Some([
+                                LenPct { px: 0.0, pct: 0.0 },
+                                LenPct { px: 10.0, pct: 0.0 },
+                            ]),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -409,7 +440,10 @@ fn fill_none_completion_keeps_other_players_shared_channel_value() {
                     AnimatableProps {
                         opacity: Some(0.3),
                         transform: Some(TransformAnim {
-                            translate: Some([0.0, 0.0]),
+                            translate: Some([
+                                LenPct { px: 0.0, pct: 0.0 },
+                                LenPct { px: 0.0, pct: 0.0 },
+                            ]),
                             ..Default::default()
                         }),
                         ..Default::default()

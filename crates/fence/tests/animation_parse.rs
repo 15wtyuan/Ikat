@@ -2,12 +2,15 @@
 //!
 //! 解析产 `Vec<AnimationSpec>` / `Vec<TransitionSpec>`（core 类型），bake 进
 //! `base_style.animation` / `base_style.transition`。语义：首个 time=duration、
-//! 次个=delay；ease 按对齐表映射（fence 7 关键字 → core Ease）。
+//! 次个=delay；ease 按对齐表映射（CSS 标准关键字 → 精确 bezier，#9 起 cubic-bezier()
+//! 函数形 + loom 超集 keyword 也收）。
 
 use loomgui_core::style::resolved::{AnimationDirection, AnimationFillMode, AnimationPlayState};
 use loomgui_core::tween::{Ease, TweenProp};
 use loomgui_fence::css_resolve::resolve_inline_styles;
-use loomgui_fence::schema::css::{parse_animation_value, parse_transition_value};
+use loomgui_fence::schema::css::{
+    parse_animation_value, parse_transition_value, validate_animation_value,
+};
 use loomgui_fence::tree_builder::parse_html_to_ir;
 
 #[test]
@@ -22,7 +25,16 @@ fn animation_full_shorthand() {
     assert_eq!(s.iteration_count, None, "infinite → None");
     assert_eq!(s.direction, AnimationDirection::Alternate);
     assert_eq!(s.fill_mode, AnimationFillMode::Both);
-    assert_eq!(s.timing_function, Ease::CubicOut, "ease → CubicOut（§8.3）");
+    assert_eq!(
+        s.timing_function,
+        Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0
+        },
+        "ease → 精确 bezier(0.25,0.1,0.25,1)（CSS Easing L1）"
+    );
     assert_eq!(s.play_state, AnimationPlayState::Running);
 }
 
@@ -52,21 +64,64 @@ fn animation_first_time_duration_second_delay() {
 }
 
 #[test]
-fn animation_ease_keywords_match_spec_83() {
-    // ease 对齐表：linear / ease / ease-in-out / step-start / step-end。
+fn animation_ease_keywords_exact_css() {
+    // CSS 标准关键字 → 精确 bezier（CSS Easing Functions L1 定义值；早期 Quad/Cubic
+    // 幂函数近似已在 #9 废除）。
+    let b = |p: [f32; 4]| Ease::CubicBezier {
+        x1: p[0],
+        y1: p[1],
+        x2: p[2],
+        y2: p[3],
+    };
     let cases = [
         ("linear", Ease::Linear),
-        ("ease", Ease::CubicOut),
-        ("ease-in", Ease::QuadIn),
-        ("ease-out", Ease::QuadOut),
-        ("ease-in-out", Ease::QuadInOut),
+        ("ease", b([0.25, 0.1, 0.25, 1.0])),
+        ("ease-in", b([0.42, 0.0, 1.0, 1.0])),
+        ("ease-out", b([0.0, 0.0, 0.58, 1.0])),
+        ("ease-in-out", b([0.42, 0.0, 0.58, 1.0])),
         ("step-start", Ease::Step { start: true }),
         ("step-end", Ease::Step { start: false }),
+        // loom 超集（游戏 UI 刚需；fence.md 登记）
+        ("ease-in-back", Ease::BackIn),
+        ("ease-out-elastic", Ease::ElasticOut),
+        ("ease-in-out-bounce", Ease::BounceInOut),
     ];
     for (kw, want) in cases {
         let s = &parse_animation_value(&format!("fadeIn .4s {kw}"))[0];
         assert_eq!(s.timing_function, want, "timing keyword {kw}");
     }
+}
+
+#[test]
+fn animation_cubic_bezier_functional_form() {
+    // cubic-bezier(x1,y1,x2,y2)：x∈[0,1] 约束（y 可越界 overshoot）。
+    let s = &parse_animation_value("fadeIn .4s cubic-bezier(.3,0,.7,1)")[0];
+    assert_eq!(
+        s.timing_function,
+        Ease::CubicBezier {
+            x1: 0.3,
+            y1: 0.0,
+            x2: 0.7,
+            y2: 1.0
+        }
+    );
+    // y 越界合法（overshoot 表达）
+    let s = &parse_animation_value("fadeIn .4s cubic-bezier(.3,1.5,.7,-0.5)")[0];
+    assert!(matches!(s.timing_function, Ease::CubicBezier { .. }));
+    // x 越界拒：parse 侧未知 token 静默回落缺省（与默认值同形不可辨），真正的拦截在
+    // validate 门（is_animation_keyword → parse_ease 判 false → 整条声明拒）。
+    assert!(
+        !validate_animation_value("fadeIn .4s cubic-bezier(-0.3,0,.7,1)"),
+        "x 越界的 bezier 在 validate 门拒"
+    );
+    assert!(
+        !validate_animation_value("fadeIn .4s cubic-bezier(.3,0)"),
+        "参数个数错的 bezier 在 validate 门拒"
+    );
+    assert!(
+        validate_animation_value("fadeIn .4s cubic-bezier(.3,0,.7,1)"),
+        "合法 bezier 过门"
+    );
 }
 
 #[test]
@@ -78,12 +133,21 @@ fn animation_iteration_count_integer() {
 #[test]
 fn animation_defaults_match_css_initial() {
     // 无关键字声明 → CSS initial：direction=normal / fill=none / play-state=running /
-    // timing=ease（→CubicOut）/ iteration-count=1。
+    // timing=ease（精确 bezier(0.25,0.1,0.25,1)；#9 前用 CubicOut 近似）/ iteration-count=1。
     let s = &parse_animation_value("fadeIn .4s")[0];
     assert_eq!(s.direction, AnimationDirection::Normal);
     assert_eq!(s.fill_mode, AnimationFillMode::None);
     assert_eq!(s.play_state, AnimationPlayState::Running);
-    assert_eq!(s.timing_function, Ease::CubicOut, "CSS animation 默认 ease");
+    assert_eq!(
+        s.timing_function,
+        Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0
+        },
+        "CSS animation 默认 ease（精确 bezier）"
+    );
     assert_eq!(s.iteration_count, Some(1));
     assert_eq!(s.delay, 0.0);
 }
@@ -114,7 +178,16 @@ fn transition_prop_duration_ease_delay() {
     assert_eq!(ts.len(), 1);
     assert_eq!(ts[0].prop, Some(TweenProp::Opacity));
     assert!((ts[0].duration - 0.3).abs() < 1e-6);
-    assert_eq!(ts[0].ease, Ease::CubicOut, "ease → CubicOut（§8.3）");
+    assert_eq!(
+        ts[0].ease,
+        Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0,
+        },
+        "ease → 精确 bezier(0.25,0.1,0.25,1)"
+    );
     assert!((ts[0].delay - 0.05).abs() < 1e-6);
 }
 
@@ -144,7 +217,16 @@ fn transition_multi_declaration_comma() {
     assert_eq!(ts.len(), 2);
     assert_eq!(ts[0].prop, Some(TweenProp::Opacity));
     assert_eq!(ts[1].prop, Some(TweenProp::BgColor));
-    assert_eq!(ts[1].ease, Ease::QuadIn);
+    assert_eq!(
+        ts[1].ease,
+        Ease::CubicBezier {
+            x1: 0.42,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+        },
+        "ease-in → 精确 bezier(0.42,0,1,1)"
+    );
 }
 
 #[test]
@@ -157,9 +239,17 @@ fn transition_missing_prop_defaults_to_all() {
 
 #[test]
 fn transition_defaults_match_css_initial() {
-    // CSS transition-timing-function 初始值 = ease（→CubicOut）。
+    // CSS transition-timing-function 初始值 = ease（精确 bezier；#9 前用 CubicOut 近似）。
     let ts = parse_transition_value("opacity .3s");
-    assert_eq!(ts[0].ease, Ease::CubicOut);
+    assert_eq!(
+        ts[0].ease,
+        Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0
+        }
+    );
     assert_eq!(ts[0].delay, 0.0);
 }
 
@@ -200,5 +290,13 @@ fn inline_transition_bakes_into_base_style() {
     let ts = &styles[id.0].transition;
     assert_eq!(ts.len(), 1, "transition 应解析存值");
     assert_eq!(ts[0].prop, Some(TweenProp::Opacity));
-    assert_eq!(ts[0].ease, Ease::CubicOut);
+    assert_eq!(
+        ts[0].ease,
+        Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0,
+        }
+    );
 }

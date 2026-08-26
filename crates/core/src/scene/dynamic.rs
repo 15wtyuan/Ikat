@@ -664,7 +664,7 @@ mod tests {
     use super::*;
     use crate::scene::node::NodeKind;
     use crate::style::resolved::ResolvedStyle;
-    use crate::tween::{Ease, TweenProp};
+    use crate::tween::{Ease, TweenProp, TweenSpec};
 
     /// 建 3 层树：root → child → grandchild。用 Scene::build（不依赖动态建树 API）。
     fn build_3level() -> (Scene, NodeId, NodeId, NodeId) {
@@ -780,20 +780,28 @@ mod tests {
         scene.scroll.ensure(child);
         tweens.tween(
             child,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            TweenSpec {
+                prop: TweenProp::Opacity,
+                start: [0.0; 8],
+                end: {
+                    let mut e = [0.0f32; 8];
+                    e[0] = 1.0;
+                    e
+                },
+                ease: Ease::Linear,
+                delay: 0.0,
+                duration: 1.0,
+                tag: 0,
+                repeat: 0,
+                yoyo: false,
+            },
         );
         // 删 child
         remove_node(&mut scene, &mut tweens, child);
         assert!(scene.anim.get(child).is_none(), "anim 清");
         assert!(scene.scroll.get(child).is_none(), "scroll 清");
         assert!(
-            tweens.tweens.iter().all(|t| t.node != child || t.killed),
+            tweens.active.iter().all(|t| t.node != child || t.killed),
             "tween killed"
         );
         assert!(

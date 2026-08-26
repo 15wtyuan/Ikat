@@ -3,7 +3,7 @@
 
 use loomgui_core::asset::{ControlInit, EditInit, TemplateNode};
 use loomgui_core::scene::{AnimatableProps, KeyframeStopSelector, KeyframesRule, NodeKind};
-use loomgui_core::style::mapping::{parse_color, parse_transform_trs};
+use loomgui_core::style::mapping::{parse_color, parse_ease, parse_transform_trs};
 use loomgui_fence::css_rules::{
     KeyframeStopSelector as FenceKeyframeStopSelector, KeyframesRule as FenceKeyframesRule,
 };
@@ -121,6 +121,7 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                 .iter()
                 .map(|fence_stop| {
                     let mut props = AnimatableProps::default();
+                    let mut timing = None;
                     for declaration in &fence_stop.declarations {
                         match declaration.prop.as_str() {
                             "opacity" => {
@@ -135,6 +136,10 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                             "color" => {
                                 props.text_color = parse_color(&declaration.value);
                             }
+                            // per-stop timing（CSS 语义：作用于本 stop 到下一 stop 区段）
+                            "animation-timing-function" => {
+                                timing = parse_ease(&declaration.value);
+                            }
                             _ => {}
                         }
                     }
@@ -147,6 +152,7 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                             }
                         },
                         props,
+                        timing,
                         hook: fence_stop.hook.clone(),
                     }
                 })

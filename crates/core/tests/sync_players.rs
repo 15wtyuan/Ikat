@@ -75,6 +75,7 @@ fn stop(selector: KeyframeStopSelector, props: AnimatableProps) -> KeyframeStop 
     KeyframeStop {
         selector,
         props,
+        timing: None,
         hook: None,
     }
 }

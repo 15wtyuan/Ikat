@@ -1,6 +1,8 @@
-//! GTween-lite：tween 引擎（TweenManager + Ease/TweenProp）。
-//! 动 opacity / transform(translate·scale·rotate) / 颜色(bg·text)。
+//! GTween-lite：tween 引擎（TweenManager + Ease/TweenSpec/TweenValue）。
+//! 动 opacity / transform(translate·scale·rotate) / 颜色(bg·text)；支持 delay /
+//! repeat+yoyo 多轮播放；active/pool 双池复用（完成/被杀槽回炉，spawn 零分配稳态）。
 //! replace-override：动画值覆盖 ResolvedStyle 读取点（None 退回 CSS）。
+//! `TweenValue`/`lerp_n` 是 tween 与 keyframes 共享的插值原语（#9 统一）。
 
 use serde::{Deserialize, Serialize};
 
@@ -46,8 +48,24 @@ pub fn prop_value_size(prop: TweenProp) -> u8 {
     }
 }
 
-/// easing 子集（11 个）。u8 值与 FFI / C# enum 对齐。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// CSS 标准 easing 关键字的精确 bezier 等价（CSS Easing Functions Level 1）。
+/// 早期版本用 Quad/Cubic 幂函数近似这些 keyword，现统一为标准 bezier。
+pub const EASE_BEZIER: [f32; 4] = [0.25, 0.1, 0.25, 1.0];
+pub const EASE_IN_BEZIER: [f32; 4] = [0.42, 0.0, 1.0, 1.0];
+pub const EASE_OUT_BEZIER: [f32; 4] = [0.0, 0.0, 0.58, 1.0];
+pub const EASE_IN_OUT_BEZIER: [f32; 4] = [0.42, 0.0, 0.58, 1.0];
+
+/// easing 函数全集（CSS 标准 + loom 超集）。u8 判别值与 FFI / C# enum 对齐。
+///
+/// 变体追加纪律：**只从末尾追加**，既有判别值（0..9 keyword + Step）稳定——Ease 走
+/// bincode 进 pkg（variant index = 声明序），中途插入会错读旧包。
+///
+/// - CSS 标准：`linear` / `ease` / `ease-in` / `ease-out` / `ease-in-out`（精确 bezier）、
+///   `cubic-bezier(x1,y1,x2,y2)`（x∈[0,1] 由 parse 侧校验）、`steps` 单步（start/end）。
+/// - loom 超集（fence 认收的非标 keyword，游戏 UI 刚需）：`ease-{in,out,in-out}-{back,
+///   elastic,bounce}` 固定系数族——参数化 elastic（amplitude/period）不做，DSL 侧用
+///   cubic-bezier 近似或运行时 API 表达。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Ease {
     Linear = 0,
@@ -61,15 +79,88 @@ pub enum Ease {
     BackOut = 8,
     BackInOut = 9,
     /// CSS `steps(start|end)` 阶跃函数。start=true → steps(start)（跳变在区间起点），
-    /// false → steps(end)（末尾跳变）。追加到末尾保持既有判别值（0..9）稳定。
+    /// false → steps(end)（末尾跳变）。
     Step {
         start: bool,
     },
+    /// CSS `cubic-bezier(x1,y1,x2,y2)`。x 须 ∈[0,1]（y 不限，可 overshoot）；
+    /// 运行时 Newton 迭代求逆（见 `evaluate`）。
+    CubicBezier {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+    },
+    ElasticIn,
+    ElasticOut,
+    ElasticInOut,
+    BounceIn,
+    BounceOut,
+    BounceInOut,
+}
+
+/// FFI 侧 Ease 描述（`LoomTweenSpec.ease_kind` 值域）。core enum 的带数据变体
+/// （Step/CubicBezier）拆成 kind+params 平面形；与 core 判别值**有意不对齐**
+/// （数据变体无法用单 u32 表达），转换在 `ease_from_ffi`。
+pub mod ease_ffi {
+    pub const LINEAR: u32 = 0;
+    pub const QUAD_IN: u32 = 1;
+    pub const QUAD_OUT: u32 = 2;
+    pub const QUAD_IN_OUT: u32 = 3;
+    pub const CUBIC_IN: u32 = 4;
+    pub const CUBIC_OUT: u32 = 5;
+    pub const CUBIC_IN_OUT: u32 = 6;
+    pub const BACK_IN: u32 = 7;
+    pub const BACK_OUT: u32 = 8;
+    pub const BACK_IN_OUT: u32 = 9;
+    pub const STEP_END: u32 = 10;
+    pub const STEP_START: u32 = 11;
+    /// params = [x1, y1, x2, y2]
+    pub const CUBIC_BEZIER: u32 = 12;
+    pub const ELASTIC_IN: u32 = 13;
+    pub const ELASTIC_OUT: u32 = 14;
+    pub const ELASTIC_IN_OUT: u32 = 15;
+    pub const BOUNCE_IN: u32 = 16;
+    pub const BOUNCE_OUT: u32 = 17;
+    pub const BOUNCE_IN_OUT: u32 = 18;
+}
+
+/// FFI kind+params → core Ease。越界/NaN 参数 → None（FFI 校验用）。
+pub fn ease_from_ffi(kind: u32, params: [f32; 4]) -> Option<Ease> {
+    use ease_ffi::*;
+    Some(match kind {
+        LINEAR => Ease::Linear,
+        QUAD_IN => Ease::QuadIn,
+        QUAD_OUT => Ease::QuadOut,
+        QUAD_IN_OUT => Ease::QuadInOut,
+        CUBIC_IN => Ease::CubicIn,
+        CUBIC_OUT => Ease::CubicOut,
+        CUBIC_IN_OUT => Ease::CubicInOut,
+        BACK_IN => Ease::BackIn,
+        BACK_OUT => Ease::BackOut,
+        BACK_IN_OUT => Ease::BackInOut,
+        STEP_END => Ease::Step { start: false },
+        STEP_START => Ease::Step { start: true },
+        CUBIC_BEZIER => {
+            let [x1, y1, x2, y2] = params;
+            if !(0.0..=1.0).contains(&x1) || !(0.0..=1.0).contains(&x2) {
+                return None;
+            }
+            Ease::CubicBezier { x1, y1, x2, y2 }
+        }
+        ELASTIC_IN => Ease::ElasticIn,
+        ELASTIC_OUT => Ease::ElasticOut,
+        ELASTIC_IN_OUT => Ease::ElasticInOut,
+        BOUNCE_IN => Ease::BounceIn,
+        BOUNCE_OUT => Ease::BounceOut,
+        BOUNCE_IN_OUT => Ease::BounceInOut,
+        _ => return None,
+    })
 }
 
 impl Ease {
     /// u32 → Ease（FFI 校验用）。越界 → None。判别值与 C# enum / FFI u32 对齐。
-    /// Step 变体带数据（start），u32 无法表达 → 不入 FFI 映射（动画 FFI 走独立通道）。
+    /// 只覆盖无数据变体（0..9）；Step/CubicBezier 走 `ease_from_ffi`。
     pub fn try_from(v: u32) -> Option<Self> {
         match v {
             0 => Some(Self::Linear),
@@ -158,6 +249,165 @@ impl Ease {
                     0.0
                 }
             }
+            Ease::CubicBezier { x1, y1, x2, y2 } => {
+                let p = (t / dur).clamp(0.0, 1.0);
+                cubic_bezier_y(p, x1, y1, x2, y2)
+            }
+            Ease::ElasticIn => {
+                let p = t / dur;
+                if p == 0.0 || p == 1.0 {
+                    p
+                } else {
+                    -(2.0f32.powf(10.0 * p - 10.0))
+                        * ((p * 10.0 - 10.75) * (std::f32::consts::TAU / 3.0)).sin()
+                }
+            }
+            Ease::ElasticOut => {
+                let p = t / dur;
+                if p == 0.0 || p == 1.0 {
+                    p
+                } else {
+                    2.0f32.powf(-10.0 * p)
+                        * ((p * 10.0 - 0.75) * (std::f32::consts::TAU / 3.0)).sin()
+                        + 1.0
+                }
+            }
+            Ease::ElasticInOut => {
+                let p = t / dur;
+                if p == 0.0 || p == 1.0 {
+                    p
+                } else if p < 0.5 {
+                    -(2.0f32.powf(20.0 * p - 10.0))
+                        * ((20.0 * p - 11.125) * (std::f32::consts::TAU / 4.5)).sin()
+                } else {
+                    2.0f32.powf(-20.0 * p + 10.0)
+                        * ((20.0 * p - 11.125) * (std::f32::consts::TAU / 4.5)).sin()
+                        + 1.0
+                }
+            }
+            Ease::BounceIn => 1.0 - bounce_out(1.0 - t / dur),
+            Ease::BounceOut => bounce_out(t / dur),
+            Ease::BounceInOut => {
+                let p = t / dur;
+                if p < 0.5 {
+                    (1.0 - bounce_out(1.0 - 2.0 * p)) / 2.0
+                } else {
+                    (1.0 + bounce_out(2.0 * p - 1.0)) / 2.0
+                }
+            }
+        }
+    }
+}
+
+/// easeOutBounce（Penner 标准分段，BounceIn/InOut 由它组合）。
+fn bounce_out(p: f32) -> f32 {
+    const N1: f32 = 7.5625;
+    const D1: f32 = 2.75;
+    if p < 1.0 / D1 {
+        N1 * p * p
+    } else if p < 2.0 / D1 {
+        let p = p - 1.5 / D1;
+        N1 * p * p + 0.75
+    } else if p < 2.5 / D1 {
+        let p = p - 2.25 / D1;
+        N1 * p * p + 0.9375
+    } else {
+        let p = p - 2.625 / D1;
+        N1 * p * p + 0.984375
+    }
+}
+
+/// cubic-bezier 曲线 y(p)：给定 x 进度 p，解三次 bezier 的 x(u)=p 得参数 u，返 y(u)。
+///
+/// bezier 控制点 (x1,y1)/(x2,y2)（端点固定 (0,0)/(1,1)）。x 单调性由 x1,x2∈[0,1]
+/// 保证（CSS 有效性约束），可用二分兜底。Newton 4 轮 + 二分收敛，足够 f32 精度。
+fn cubic_bezier_y(p: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    if p <= 0.0 {
+        return 0.0;
+    }
+    if p >= 1.0 {
+        return 1.0;
+    }
+    // bezier 分量导数：3(1-u)²(x1-0) + 6(1-u)u(x2-x1) + 3u²(1-x2)
+    let dx = |u: f32| {
+        3.0 * (1.0 - u) * (1.0 - u) * x1
+            + 6.0 * (1.0 - u) * u * (x2 - x1)
+            + 3.0 * u * u * (1.0 - x2)
+    };
+    let bx =
+        |u: f32| 3.0 * (1.0 - u) * (1.0 - u) * u * x1 + 3.0 * (1.0 - u) * u * u * x2 + u * u * u;
+    let by =
+        |u: f32| 3.0 * (1.0 - u) * (1.0 - u) * u * y1 + 3.0 * (1.0 - u) * u * u * y2 + u * u * u;
+    // Newton 迭代
+    let mut u = p;
+    for _ in 0..4 {
+        let x = bx(u) - p;
+        let d = dx(u);
+        if d.abs() < 1e-6 {
+            break;
+        }
+        u -= x / d;
+        if !(0.0..=1.0).contains(&u) {
+            break; // 越界交二分兜底
+        }
+    }
+    // 兜底二分（Newton 未收敛/越界时）
+    if !(0.0..=1.0).contains(&u) || (bx(u) - p).abs() > 1e-4 {
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..24 {
+            u = (lo + hi) * 0.5;
+            if bx(u) < p {
+                lo = u;
+            } else {
+                hi = u;
+            }
+        }
+    }
+    by(u)
+}
+
+/// tween/动画共用的定长插值缓冲（前 `prop_value_size` 个分量有效）。
+/// 8 槽对齐：TRS+百分比扩展（7 分量）与颜色（4）都装得下，余量给未来通道。
+pub type TweenValue = [f32; 8];
+
+/// 定长逐分量 lerp（前 n 个）。tween apply 与 keyframes 通道插值共用（插值原语统一）。
+pub fn lerp_n(a: &TweenValue, b: &TweenValue, t: f32, n: usize) -> TweenValue {
+    let mut out = [0.0; 8];
+    for i in 0..n.min(8) {
+        out[i] = a[i] + (b[i] - a[i]) * t;
+    }
+    out
+}
+
+/// tween 提交单元（builder/FFI spec 的 core 内形态）。
+#[derive(Debug, Clone, Copy)]
+pub struct TweenSpec {
+    pub prop: TweenProp,
+    pub start: TweenValue,
+    pub end: TweenValue,
+    pub ease: Ease,
+    pub delay: f32,
+    pub duration: f32,
+    pub tag: u32,
+    /// 额外重播次数（0 = 单次；总播放 = repeat+1 轮）。
+    pub repeat: u32,
+    /// 往返：偶数轮 start→end、奇数轮 end→start（CSS alternate 同义）。
+    pub yoyo: bool,
+}
+
+impl TweenSpec {
+    /// 便捷构造：单次、无 delay、linear、tag=0（builder 各字段覆写）。
+    pub fn new(prop: TweenProp, start: TweenValue, end: TweenValue) -> Self {
+        Self {
+            prop,
+            start,
+            end,
+            ease: Ease::Linear,
+            delay: 0.0,
+            duration: 0.3,
+            tag: 0,
+            repeat: 0,
+            yoyo: false,
         }
     }
 }
@@ -180,93 +430,118 @@ use crate::input::{EventRecord, EVT_TWEEN_COMPLETE};
 use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::transform::{self};
 
-/// 一个进行中的 tween（内部结构，TweenManager 内部 Vec 管理）。
+/// 一个进行中的 tween（`TweenManager.active`/`pool` 复用槽）。
 /// pub(crate) 字段供测试断言（kill 后验全 killed、transition drain 验 start/end/tag）+
 /// Stage 联动查（killed/node）。
 #[derive(Debug, Clone)]
 pub(crate) struct Tween {
     pub(crate) node: NodeId,
     pub(crate) prop: TweenProp,
-    pub(crate) start: [f32; 5],
-    pub(crate) end: [f32; 5],
+    pub(crate) start: TweenValue,
+    pub(crate) end: TweenValue,
     ease: Ease,
     delay: f32,
     duration: f32,
+    repeat: u32,
+    yoyo: bool,
     elapsed: f32,
     pub(crate) tag: u32,
     started: bool,
     pub(crate) killed: bool,
 }
 
-/// Tween 引擎：持一组 Tween，每 tick 推进、写 scene.anim，完成时产 EVT_TWEEN_COMPLETE。
+impl Tween {
+    /// 池化复用：覆写全部可变字段，回炉当新 tween（省 per-spawn 分配）。
+    fn recycle(&mut self, node: NodeId, spec: TweenSpec) {
+        self.node = node;
+        self.prop = spec.prop;
+        self.start = spec.start;
+        self.end = spec.end;
+        self.ease = spec.ease;
+        self.delay = spec.delay;
+        self.duration = spec.duration;
+        self.repeat = spec.repeat;
+        self.yoyo = spec.yoyo;
+        self.elapsed = 0.0;
+        self.tag = spec.tag;
+        self.started = false;
+        self.killed = false;
+    }
+}
+
+/// Tween 引擎：active 池推进每 tick、完成/被杀回 pool 复用，写 scene.anim，
+/// 完成时产 EVT_TWEEN_COMPLETE。
 #[derive(Debug, Default)]
 pub struct TweenManager {
     /// pub(crate) 供测试断言（kill_node 后验全 killed）+ Stage 联动查。
-    pub(crate) tweens: Vec<Tween>,
+    pub(crate) active: Vec<Tween>,
+    /// 回收池：update 末尾死 tween（完成/被杀/悬空）入池，tween() 优先复用。
+    pub(crate) pool: Vec<Tween>,
 }
 
 impl TweenManager {
     pub fn new() -> Self {
-        Self { tweens: Vec::new() }
+        Self::default()
     }
 
     /// 清空所有 tween（load 重建 scene 时调，防残留指向失效 node_id）。
+    /// pool 一并清——池内槽同样可能持过期 node 语义（tag/ease 等由 recycle 全覆写，
+    /// 清不清皆可，但保持「clear = 全归零」的直觉一致）。
     pub fn clear(&mut self) {
-        self.tweens.clear();
+        self.active.clear();
+        self.pool.clear();
     }
 
-    /// 杀该节点所有 tween（remove_node 联动调）。标 killed，update 末尾 retain 清出。
+    /// 杀该节点所有 tween（remove_node 联动调）。标 killed，update 末尾回池。
     /// 与 `kill(node, prop)`（单 prop）不同——此杀该 node 全部 prop 的 tween。
     pub fn kill_node(&mut self, node: NodeId) {
-        for t in &mut self.tweens {
+        for t in &mut self.active {
             if t.node == node && !t.killed {
                 t.killed = true;
             }
         }
     }
 
-    /// 注册一个 tween。越界 node 由 update 跳过。
-    pub fn tween(
-        &mut self,
-        node: NodeId,
-        prop: TweenProp,
-        start: [f32; 5],
-        end: [f32; 5],
-        ease: Ease,
-        delay: f32,
-        duration: f32,
-        tag: u32,
-    ) {
-        self.tweens.push(Tween {
-            node,
-            prop,
-            start,
-            end,
-            ease,
-            delay,
-            duration,
-            elapsed: 0.0,
-            tag,
-            started: false,
-            killed: false,
-        });
+    /// 注册一个 tween（优先复用池槽）。越界 node 由 update 跳过。
+    pub fn tween(&mut self, node: NodeId, spec: TweenSpec) {
+        if let Some(mut t) = self.pool.pop() {
+            t.recycle(node, spec);
+            self.active.push(t);
+        } else {
+            self.active.push(Tween {
+                node,
+                prop: spec.prop,
+                start: spec.start,
+                end: spec.end,
+                ease: spec.ease,
+                delay: spec.delay,
+                duration: spec.duration,
+                repeat: spec.repeat,
+                yoyo: spec.yoyo,
+                elapsed: 0.0,
+                tag: spec.tag,
+                started: false,
+                killed: false,
+            });
+        }
     }
 
     /// 停该节点该 prop 的 tween（killed，override 保留末值）。
     pub fn kill(&mut self, node: NodeId, prop: TweenProp) {
-        for t in &mut self.tweens {
+        for t in &mut self.active {
             if t.node == node && t.prop == prop && !t.killed {
                 t.killed = true;
             }
         }
     }
 
-    /// 每 tick：推进 active tween，写 scene.anim，产 complete 事件。
+    /// 每 tick：推进 active tween，写 scene.anim，产 complete 事件；
+    /// 死槽（完成/被杀/悬空）原位分流回 pool（保活序稳定）。
     pub fn update(&mut self, dt: f32, scene: &mut Scene, out: &mut Vec<EventRecord>) {
-        if self.tweens.is_empty() {
+        if self.active.is_empty() {
             return;
         }
-        for t in &mut self.tweens {
+        for t in &mut self.active {
             if t.killed {
                 continue;
             }
@@ -283,10 +558,33 @@ impl TweenManager {
             }
             t.started = true;
             let tt = t.elapsed - t.delay;
-            let clamped = if tt >= t.duration { t.duration } else { tt };
-            let norm = t.ease.evaluate(clamped, t.duration);
-            apply(&mut scene.anim, t.node, t.prop, t.start, t.end, norm);
-            if tt >= t.duration {
+            // 多轮播放：cycles 轮 × duration；yoyo 奇偶轮反向（末值↔首值往返）。
+            let cycles = t.repeat.saturating_add(1) as f32;
+            let total = t.duration * cycles;
+            let (norm, done) = if tt >= total {
+                // 完成帧：取最后一轮的终态（yoyo 且末轮为奇数轮 → 回到 start）。
+                let last_forward = !t.yoyo || t.repeat % 2 == 0;
+                (if last_forward { 1.0 } else { 0.0 }, true)
+            } else {
+                let cycle = if t.duration > 0.0 {
+                    (tt / t.duration) as u32
+                } else {
+                    0
+                };
+                let local = tt - cycle as f32 * t.duration;
+                let clamped = if local >= t.duration {
+                    t.duration
+                } else {
+                    local
+                };
+                let mut n = t.ease.evaluate(clamped, t.duration);
+                if t.yoyo && cycle % 2 == 1 {
+                    n = 1.0 - n;
+                }
+                (n, false)
+            };
+            apply(&mut scene.anim, t.node, t.prop, &t.start, &t.end, norm);
+            if done {
                 t.killed = true;
                 out.push(EventRecord {
                     node_id: t.node.0,
@@ -301,45 +599,70 @@ impl TweenManager {
                 });
             }
         }
-        self.tweens.retain(|t| !t.killed);
+        // 死槽回池：活槽稳定前移（保序），死槽从尾部 pop 入 pool。
+        let mut w = 0usize;
+        for r in 0..self.active.len() {
+            if !self.active[r].killed {
+                self.active.swap(w, r);
+                w += 1;
+            }
+        }
+        while self.active.len() > w {
+            let t = self.active.pop().expect("len > w 保证有槽");
+            self.pool.push(t);
+        }
     }
 }
 
-/// 逐分量 lerp start→end 写入 anim 对应通道（n=已算的 normalized）。
+/// 逐分量 lerp start→end 写入 anim 对应通道（n=已算的 normalized；TweenValue 共享原语）。
 /// 经 AnimTable::ensure(node) 取可变 NodeAnim（HashMap entry，缺则插 default）。
 fn apply(
     anim: &mut AnimTable,
     node: NodeId,
     prop: TweenProp,
-    start: [f32; 5],
-    end: [f32; 5],
+    start: &TweenValue,
+    end: &TweenValue,
     n: f32,
 ) {
     let a = anim.ensure(node);
-    let lerp = |i: usize| start[i] + (end[i] - start[i]) * n;
+    let v = lerp_n(start, end, n, prop_value_size(prop) as usize);
     match prop {
-        TweenProp::Opacity => a.opacity = Some(lerp(0)),
-        TweenProp::Translate => a.transform = Some(transform::from_translate(lerp(0), lerp(1))),
-        TweenProp::Scale => a.transform = Some(transform::from_scale(lerp(0), lerp(1))),
-        TweenProp::Rotation => a.transform = Some(transform::from_rotate(lerp(0))),
+        TweenProp::Opacity => a.opacity = Some(v[0]),
+        TweenProp::Translate => a.transform = Some(transform::from_translate(v[0], v[1])),
+        TweenProp::Scale => a.transform = Some(transform::from_scale(v[0], v[1])),
+        TweenProp::Rotation => a.transform = Some(transform::from_rotate(v[0])),
         // TRS 五元组逐分量 lerp 后 SRT 合成（与 keyframe 的 transform 插值同一语义）。
         TweenProp::Transform => {
-            a.transform = Some(transform::from_trs(
-                lerp(0),
-                lerp(1),
-                lerp(2),
-                lerp(3),
-                lerp(4),
-            ))
+            a.transform = Some(transform::from_trs(v[0], v[1], v[2], v[3], v[4]))
         }
-        TweenProp::BgColor => a.bg_color = Some([lerp(0), lerp(1), lerp(2), lerp(3)]),
-        TweenProp::TextColor => a.text_color = Some([lerp(0), lerp(1), lerp(2), lerp(3)]),
+        TweenProp::BgColor => a.bg_color = Some([v[0], v[1], v[2], v[3]]),
+        TweenProp::TextColor => a.text_color = Some([v[0], v[1], v[2], v[3]]),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn spec(prop: TweenProp, start: [f32; 5], end: [f32; 5]) -> TweenSpec {
+        TweenSpec {
+            prop,
+            start: pad5(start),
+            end: pad5(end),
+            ease: Ease::Linear,
+            delay: 0.0,
+            duration: 1.0,
+            tag: 0,
+            repeat: 0,
+            yoyo: false,
+        }
+    }
+
+    fn pad5(v: [f32; 5]) -> TweenValue {
+        let mut out = [0.0; 8];
+        out[..5].copy_from_slice(&v);
+        out
+    }
 
     #[test]
     fn prop_value_size_mapping() {
@@ -353,8 +676,39 @@ mod tests {
     }
 
     #[test]
+    fn lerp_n_leading_components_only() {
+        let a = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+        let b = [10.0; 8];
+        let v = lerp_n(&a, &b, 0.5, 3);
+        assert!((v[0] - 5.0).abs() < 1e-6);
+        assert!((v[1] - 5.5).abs() < 1e-6);
+        assert!((v[2] - 6.0).abs() < 1e-6);
+        assert_eq!(v[3], 0.0, "n 之外分量不动（保持 0 槽）");
+    }
+
+    #[test]
     fn ease_endpoints_are_0_and_1() {
         let dur = 1.0;
+        let beziers = [
+            Ease::CubicBezier {
+                x1: 0.25,
+                y1: 0.1,
+                x2: 0.25,
+                y2: 1.0,
+            },
+            Ease::CubicBezier {
+                x1: 0.42,
+                y1: 0.0,
+                x2: 1.0,
+                y2: 1.0,
+            },
+            Ease::CubicBezier {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 0.58,
+                y2: 1.0,
+            },
+        ];
         for ease in [
             Ease::Linear,
             Ease::QuadIn,
@@ -366,10 +720,19 @@ mod tests {
             Ease::BackIn,
             Ease::BackOut,
             Ease::BackInOut,
-        ] {
-            assert!((ease.evaluate(0.0, dur)).abs() < 1e-5, "{:?}@0 != 0", ease);
+            Ease::ElasticIn,
+            Ease::ElasticOut,
+            Ease::ElasticInOut,
+            Ease::BounceIn,
+            Ease::BounceOut,
+            Ease::BounceInOut,
+        ]
+        .into_iter()
+        .chain(beziers)
+        {
+            assert!((ease.evaluate(0.0, dur)).abs() < 1e-4, "{:?}@0 != 0", ease);
             assert!(
-                (ease.evaluate(dur, dur) - 1.0).abs() < 1e-5,
+                (ease.evaluate(dur, dur) - 1.0).abs() < 1e-4,
                 "{:?}@dur != 1",
                 ease
             );
@@ -392,6 +755,96 @@ mod tests {
         assert_eq!(Ease::Step { start: false }.evaluate(dur, dur), 1.0);
         // dur<=0 入口统一返 1（与其它 ease 一致，防除零）
         assert_eq!(Ease::Step { start: false }.evaluate(0.0, 0.0), 1.0);
+    }
+
+    #[test]
+    fn cubic_bezier_matches_css_reference_values() {
+        // CSS ease（bezier .25,.1,.25,1）的中点参考值 ≈ 0.8024（浏览器实现共识，
+        // Newton+二分混合解在 1e-3 内一致即可——f32 曲线求逆不追求位级对齐）。
+        let ease = Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0,
+        };
+        let mid = ease.evaluate(0.5, 1.0);
+        assert!((mid - 0.8024).abs() < 2e-3, "ease@0.5 ≈ 0.8024, got {mid}");
+        // linear bezier 恒等：bezier(0,0,1,1) == linear
+        let lin = Ease::CubicBezier {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+        };
+        for i in 0..=10 {
+            let p = i as f32 / 10.0;
+            assert!((lin.evaluate(p, 1.0) - p).abs() < 1e-3);
+        }
+    }
+
+    #[test]
+    fn cubic_bezier_overshoot_y_outside_unit() {
+        // y 分量可越 [0,1]（back 类 overshoot 由 y2>1 表达）。
+        let e = Ease::CubicBezier {
+            x1: 0.3,
+            y1: 1.5,
+            x2: 0.7,
+            y2: 1.5,
+        };
+        let mut max = 0.0f32;
+        for i in 0..=100 {
+            max = max.max(e.evaluate(i as f32 / 100.0, 1.0));
+        }
+        assert!(max > 1.0, "bezier y 越界 overshoot，got max {max}");
+    }
+
+    #[test]
+    fn elastic_bounce_shapes() {
+        // ElasticOut 中段超 1（弹过冲）；BounceOut 值域 [0,1] 且有分段弹跳（非单调）。
+        let mut over = false;
+        for i in 0..100 {
+            if Ease::ElasticOut.evaluate(i as f32 / 100.0, 1.0) > 1.0 {
+                over = true;
+            }
+        }
+        assert!(over, "ElasticOut 中段须 >1");
+        let mut prev = 0.0f32;
+        let mut bounced = false;
+        for i in 1..=100 {
+            let p = i as f32 / 100.0;
+            let v = Ease::BounceOut.evaluate(p, 1.0);
+            assert!((0.0..=1.0).contains(&v), "BounceOut 值域 [0,1]，got {v}");
+            if v < prev {
+                bounced = true; // 出现回落 = 弹跳
+            }
+            prev = v;
+        }
+        assert!(bounced, "BounceOut 须有回落段");
+    }
+
+    #[test]
+    fn ease_from_ffi_roundtrip_kinds() {
+        use ease_ffi::*;
+        assert_eq!(ease_from_ffi(LINEAR, [0.0; 4]), Some(Ease::Linear));
+        assert_eq!(
+            ease_from_ffi(STEP_START, [0.0; 4]),
+            Some(Ease::Step { start: true })
+        );
+        assert_eq!(
+            ease_from_ffi(CUBIC_BEZIER, [0.25, 0.1, 0.25, 1.0]),
+            Some(Ease::CubicBezier {
+                x1: 0.25,
+                y1: 0.1,
+                x2: 0.25,
+                y2: 1.0
+            })
+        );
+        assert_eq!(
+            ease_from_ffi(CUBIC_BEZIER, [-0.1, 0.0, 1.0, 1.0]),
+            None,
+            "x1 越界 [0,1] 拒"
+        );
+        assert_eq!(ease_from_ffi(999, [0.0; 4]), None, "未知 kind 拒");
     }
 
     #[test]
@@ -460,13 +913,10 @@ mod tests {
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            42,
+            TweenSpec {
+                tag: 42,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
         );
         let mut out = Vec::new();
         // dt=0.5 → norm=0.5 → opacity=0.5
@@ -484,13 +934,14 @@ mod tests {
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
-            TweenProp::Scale,
-            [1.0, 1.0, 0.0, 0.0, 0.0],
-            [2.0, 3.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            7,
+            TweenSpec {
+                tag: 7,
+                ..spec(
+                    TweenProp::Scale,
+                    [1.0, 1.0, 0.0, 0.0, 0.0],
+                    [2.0, 3.0, 0.0, 0.0, 0.0],
+                )
+            },
         );
         let mut out = Vec::new();
         mgr.update(1.0, &mut s, &mut out); // 恰好结束
@@ -513,6 +964,70 @@ mod tests {
     }
 
     #[test]
+    fn update_repeat_plays_multiple_cycles() {
+        // repeat=2（共 3 轮）× dur=1：t=0.5 → 第 1 轮中点 0.5；t=3.0 才完成。
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            TweenSpec {
+                repeat: 2,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
+        let mut out = Vec::new();
+        mgr.update(0.5, &mut s, &mut out);
+        assert!(
+            (s.anim.0.get(&nid).unwrap().opacity.unwrap() - 0.5).abs() < 1e-5,
+            "第 1 轮中点 0.5"
+        );
+        mgr.update(2.5, &mut s, &mut out); // tt=3.0 = 完成
+        assert_eq!(out.len(), 1, "3 轮跑满产 1 次 complete");
+        assert!(
+            (s.anim.0.get(&nid).unwrap().opacity.unwrap() - 1.0).abs() < 1e-5,
+            "末值 = end"
+        );
+    }
+
+    #[test]
+    fn update_yoyo_alternates_direction() {
+        // yoyo repeat=1（共 2 轮）：第 2 轮（奇数轮）end→start。t=1.5（第 2 轮中点）
+        // → norm = 1-0.5 = 0.5（线性对称看不出）；用 ease 也不对称——线性下值=0.5。
+        // 判据改用边界：t=2.0 完成 → 回到 start（奇数轮终态）。
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            TweenSpec {
+                repeat: 1,
+                yoyo: true,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
+        let mut out = Vec::new();
+        mgr.update(2.0, &mut s, &mut out); // tt=2.0 完成
+        assert_eq!(out.len(), 1);
+        assert!(
+            (s.anim.0.get(&nid).unwrap().opacity.unwrap() - 0.0).abs() < 1e-5,
+            "yoyo 偶数次轮（repeat=1）末轮奇 → 终态回 start"
+        );
+        // 对照：非 yoyo repeat=1 完成在 end
+        mgr.tween(
+            nid,
+            TweenSpec {
+                repeat: 1,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
+        let mut out2 = Vec::new();
+        mgr.update(2.0, &mut s, &mut out2);
+        assert!(
+            (s.anim.0.get(&nid).unwrap().opacity.unwrap() - 1.0).abs() < 1e-5,
+            "非 yoyo 末态 = end"
+        );
+    }
+
+    #[test]
     fn update_transform_composes_srt_midway() {
         // Transform 通道半程：TRS 逐分量 lerp 后 SRT 合成。
         // start = T(0,0)·S(1,1)·R(0)（identity），end = T(10,4)·S(2,1)·R(π/2)。
@@ -521,13 +1036,11 @@ mod tests {
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
-            TweenProp::Transform,
-            [0.0, 0.0, 1.0, 1.0, 0.0],
-            [10.0, 4.0, 2.0, 1.0, std::f32::consts::FRAC_PI_2],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            spec(
+                TweenProp::Transform,
+                [0.0, 0.0, 1.0, 1.0, 0.0],
+                [10.0, 4.0, 2.0, 1.0, std::f32::consts::FRAC_PI_2],
+            ),
         );
         let mut out = Vec::new();
         mgr.update(0.5, &mut s, &mut out);
@@ -550,14 +1063,11 @@ mod tests {
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            1.0,
-            1.0,
-            0,
-        ); // delay=1
+            TweenSpec {
+                delay: 1.0,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
         let mut out = Vec::new();
         mgr.update(0.5, &mut s, &mut out); // elapsed 0.5 < delay 1 → 不写
         assert!(
@@ -578,13 +1088,7 @@ mod tests {
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
         );
         let mut out = Vec::new();
         mgr.update(0.3, &mut s, &mut out);
@@ -607,13 +1111,7 @@ mod tests {
         let oob = NodeId(99 | (1 << 32)); // 新位型：index=99, gen=1
         mgr.tween(
             oob,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
         );
         let mut out = Vec::new();
         mgr.update(1.0, &mut s, &mut out); // index 99 越界 → 跳过
@@ -640,45 +1138,27 @@ mod tests {
         let mut mgr = TweenManager::new();
         mgr.tween(
             nid,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
         );
         mgr.tween(
             nid,
-            TweenProp::BgColor,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            spec(TweenProp::BgColor, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
         );
         mgr.tween(
             other,
-            TweenProp::Opacity,
-            [0.0; 5],
-            [1.0, 0.0, 0.0, 0.0, 0.0],
-            Ease::Linear,
-            0.0,
-            1.0,
-            0,
+            spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
         );
         mgr.kill_node(nid);
         assert!(
-            mgr.tweens.iter().all(|t| t.node != nid || t.killed),
+            mgr.active.iter().all(|t| t.node != nid || t.killed),
             "kill_node 杀该 node 全 tween"
         );
         assert!(
-            mgr.tweens.iter().any(|t| t.node == other && !t.killed),
+            mgr.active.iter().any(|t| t.node == other && !t.killed),
             "其他 node tween 不被误杀"
         );
-        // update 后 killed(nid) 的被 retain 清出；nid 不产 complete（被 kill 不推进）。
-        // other 的 tween 会完成（dur=1.0,dt=1.0）→ 产 complete + 被 retain 清出。
+        // update 后 killed(nid) 的被分流回池；nid 不产 complete（被 kill 不推进）。
+        // other 的 tween 会完成（dur=1.0,dt=1.0）→ 产 complete + 回池。
         let mut out = Vec::new();
         mgr.update(1.0, &mut s, &mut out);
         assert!(
@@ -686,8 +1166,67 @@ mod tests {
             "nid killed tween 不产 complete"
         );
         assert!(
-            mgr.tweens.iter().all(|t| t.node != nid),
-            "nid killed tween 被 retain 清出"
+            mgr.active.iter().all(|t| t.node != nid),
+            "nid killed tween 被清出 active"
         );
+    }
+
+    #[test]
+    fn completed_tweens_recycle_into_pool_and_reuse() {
+        // 池化闭环：完成后槽入 pool；再 spawn 优先复用池槽（active+pool 总量不变）。
+        let (mut s, nid) = one_node_scene();
+        let mut mgr = TweenManager::new();
+        mgr.tween(
+            nid,
+            spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0]),
+        );
+        assert_eq!(mgr.pool.len(), 0);
+        let mut out = Vec::new();
+        mgr.update(1.0, &mut s, &mut out);
+        assert_eq!(mgr.active.len(), 0, "完成后清出 active");
+        assert_eq!(mgr.pool.len(), 1, "完成槽回池");
+        // 复用：新 spawn 不再分配
+        mgr.tween(
+            nid,
+            TweenSpec {
+                tag: 9,
+                duration: 2.0,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
+        assert_eq!(mgr.pool.len(), 0, "spawn 复用池槽");
+        assert_eq!(mgr.active.len(), 1);
+        assert_eq!(mgr.active[0].tag, 9, "复用槽字段已覆写");
+        assert!((mgr.active[0].duration - 2.0).abs() < 1e-6);
+        // 活序稳定：三个 tween，中间一个完成，其余两个保序留在 active。
+        let mut mgr2 = TweenManager::new();
+        mgr2.tween(
+            nid,
+            TweenSpec {
+                tag: 1,
+                duration: 5.0,
+                ..spec(TweenProp::Opacity, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
+        mgr2.tween(
+            nid,
+            TweenSpec {
+                tag: 2,
+                duration: 1.0,
+                ..spec(TweenProp::Scale, [1.0; 5], [2.0, 2.0, 0.0, 0.0, 0.0])
+            },
+        );
+        mgr2.tween(
+            nid,
+            TweenSpec {
+                tag: 3,
+                duration: 5.0,
+                ..spec(TweenProp::BgColor, [0.0; 5], [1.0, 0.0, 0.0, 0.0, 0.0])
+            },
+        );
+        let mut out2 = Vec::new();
+        mgr2.update(1.0, &mut s, &mut out2);
+        let tags: Vec<u32> = mgr2.active.iter().map(|t| t.tag).collect();
+        assert_eq!(tags, vec![1, 3], "活槽保序（tag2 完成回池）");
     }
 }

@@ -13,6 +13,7 @@ use loomgui_core::scene::{
     AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, Node, NodeId, NodeKind,
     PlayerPlayState, Scene, TransformAnim,
 };
+use loomgui_core::transform::LenPct;
 
 /// 2-stop translate-only keyframes。
 fn lunge() -> KeyframesRule {
@@ -20,11 +21,12 @@ fn lunge() -> KeyframesRule {
         selector: sel,
         props: AnimatableProps {
             transform: Some(TransformAnim {
-                translate: Some([tx, 0.0]),
+                translate: Some([LenPct { px: tx, pct: 0.0 }, LenPct { px: 0.0, pct: 0.0 }]),
                 ..Default::default()
             }),
             ..Default::default()
         },
+        timing: None,
         hook: None,
     };
     KeyframesRule {
@@ -44,6 +46,7 @@ fn flash_opacity() -> KeyframesRule {
             opacity: Some(o),
             ..Default::default()
         },
+        timing: None,
         hook: None,
     };
     KeyframesRule {
@@ -242,10 +245,10 @@ fn explicit_duration_controls_programmatic_playback() {
     assert_eq!(anim_translate_x(&scene, node), 0.0);
     tick(&mut scene, 0.15); // 0.3s 的正中
     let mid = anim_translate_x(&scene, node);
-    // cubic-out 半程进度 = 1-(1-0.5)^3 = 0.875。
+    // CSS ease（精确 bezier(0.25,0.1,0.25,1)）半程进度 ≈ 0.8024（#9 前用 cubic-out 近似 0.875）。
     assert!(
-        (mid - 87.5).abs() < 3.0,
-        "halfway of a 0.3s run ≈ 87.5 (cubic-out), got {mid}"
+        (mid - 80.24).abs() < 3.0,
+        "halfway of a 0.3s run ≈ 80.24 (CSS ease bezier), got {mid}"
     );
     tick(&mut scene, 0.2); // 总计 0.35s > 0.3s → 终态（fill both 保持）
     assert_eq!(anim_translate_x(&scene, node), 100.0);

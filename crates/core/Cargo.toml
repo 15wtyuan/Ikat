@@ -27,3 +27,8 @@ criterion = "0.5"
 [[bench]]
 name = "solve"
 harness = false
+
+# #9 动画并发基准（tween 池化推进 / player update_all / churn 回池）。
+[[bench]]
+name = "anim"
+harness = false

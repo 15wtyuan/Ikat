@@ -417,6 +417,27 @@ pub enum BorderStyle {
     Double,
 }
 
+/// CSS `transform-origin` 描述符：`<length-percentage>` × 2（x y），默认 50% 50%。
+///
+/// **延迟解析**：百分比相对节点布局尺寸，打包期无尺寸 → 存描述符，世界矩阵累计
+/// （`compute_world_transforms`）按当帧 `layout_rect` 解析成 pivot 点。default 50% 50%
+/// = 既有硬编码盒心 pivot，未声明时零行为变化。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TransformOrigin {
+    pub x: crate::transform::LenPct,
+    pub y: crate::transform::LenPct,
+}
+
+impl Default for TransformOrigin {
+    /// CSS 初始值 `50% 50%`（元素几何中心）。
+    fn default() -> Self {
+        TransformOrigin {
+            x: crate::transform::LenPct { px: 0.0, pct: 50.0 },
+            y: crate::transform::LenPct { px: 0.0, pct: 50.0 },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedStyle {
     /// taffy 布局字段（flex/padding/margin/size/min/max/gap/position 等）
@@ -497,6 +518,9 @@ pub struct ResolvedStyle {
     pub touchable: bool,
     /// CSS transform 解析产物（Affine2 矩阵，含多函数复合剪切）。默认 identity。
     pub transform: crate::style::LocalTransform,
+    /// CSS `transform-origin`（#21 CSS 半边）：`<length|%>` × 2 描述符，默认 50% 50%
+    /// （盒心 = 既有硬编码 pivot，零回归）。compute_world_transforms 按布局尺寸延迟解析。
+    pub transform_origin: TransformOrigin,
     /// CSS filter → 4×5 颜色矩阵（行主序，20 float）。None=无 filter。
     /// grayscale/brightness/contrast/saturate/hue-rotate/invert/sepia → fgui 预设矩阵。
     pub color_filter: Option<[f32; 20]>,
@@ -628,6 +652,7 @@ impl Default for ResolvedStyle {
             z_index: 0,
             touchable: true,
             transform: LocalTransform::default(),
+            transform_origin: TransformOrigin::default(),
             color_filter: None,
             border_image_slice: None,
             box_shadow: Vec::new(),

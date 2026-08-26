@@ -12,6 +12,7 @@ use loomgui_core::scene::{
 use loomgui_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
+use loomgui_core::transform::LenPct;
 use loomgui_core::tween::Ease;
 
 fn assert_close(a: f32, b: f32) {
@@ -59,6 +60,7 @@ fn stop(selector: KeyframeStopSelector, props: AnimatableProps) -> KeyframeStop 
     KeyframeStop {
         selector,
         props,
+        timing: None,
         hook: None,
     }
 }
@@ -316,7 +318,10 @@ fn transform_trs_component_lerp_with_identity() {
                 KeyframeStopSelector::From,
                 AnimatableProps {
                     transform: Some(TransformAnim {
-                        translate: Some([0.0, 20.0]),
+                        translate: Some([
+                            LenPct { px: 0.0, pct: 0.0 },
+                            LenPct { px: 20.0, pct: 0.0 },
+                        ]),
                         scale: Some([1.0, 1.0]),
                         rotate: Some(0.0),
                     }),
@@ -327,7 +332,10 @@ fn transform_trs_component_lerp_with_identity() {
                 KeyframeStopSelector::To,
                 AnimatableProps {
                     transform: Some(TransformAnim {
-                        translate: Some([0.0, 0.0]),
+                        translate: Some([
+                            LenPct { px: 0.0, pct: 0.0 },
+                            LenPct { px: 0.0, pct: 0.0 },
+                        ]),
                         scale: None,
                         rotate: None,
                     }),
@@ -340,7 +348,10 @@ fn transform_trs_component_lerp_with_identity() {
     p.advance(0.0);
     let f = p.advance(0.2); // progress .5（linear）
     let t = f.props.transform.expect("transform override");
-    assert_eq!(t.translate, Some([0.0, 10.0]));
+    assert_eq!(
+        t.translate,
+        Some([LenPct::ZERO, LenPct { px: 10.0, pct: 0.0 }])
+    );
     assert_eq!(
         t.scale,
         Some([1.0, 1.0]),

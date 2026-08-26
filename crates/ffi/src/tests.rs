@@ -1540,6 +1540,7 @@ fn make_anim_stage() -> (*mut StageHandle, u64) {
                         opacity: Some(0.0),
                         ..Default::default()
                     },
+                    timing: None,
                     hook: None,
                 },
                 KeyframeStop {
@@ -1548,6 +1549,7 @@ fn make_anim_stage() -> (*mut StageHandle, u64) {
                         opacity: Some(1.0),
                         ..Default::default()
                     },
+                    timing: None,
                     hook: None,
                 },
             ],
@@ -2116,4 +2118,56 @@ fn ffi_guard_swallows_panic_returns_fallback_and_counts() {
     assert_eq!(ffi_guard(9i32, || 9), 9, "happy path passes through");
     assert_eq!(loomgui_ffi_panic_count(), 1, "happy path not counted");
     crate::FFI_PANIC_COUNT.store(0, Ordering::Relaxed);
+}
+
+/// #9 builder 契约 FFI 面：spec-struct 注册 tween → 推进 → complete 事件带 tag；
+/// repeat/yoyo 多轮；bezier ease kind + 参数跨 FFI。
+#[test]
+fn stage_tween_spec_end_to_end_with_repeat_and_bezier() {
+    use crate::animation::LoomTweenSpec;
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(root, u64::MAX);
+
+    let start = [0.0f32];
+    let end = [1.0f32];
+    // opacity，bezier ease（kind=12），repeat=2 + yoyo，tag=7
+    let spec = LoomTweenSpec {
+        prop: 0,       // TweenProp::Opacity
+        ease_kind: 12, // CUBIC_BEZIER
+        ease_params: [0.25, 0.1, 0.25, 1.0],
+        duration: 1.0,
+        delay: 0.0,
+        tag: 7,
+        repeat: 2,
+        yoyo: 1,
+    };
+    crate::loomgui_stage_tween_spec(h, root, &spec, start.as_ptr(), end.as_ptr());
+    // 推进 3 秒 = 3 轮跑满 → complete
+    {
+        let sh = unsafe { &mut *h };
+        assert!(sh.stage.scene.is_some());
+    }
+    // 一次大 dt tick = 3 秒 → 3 轮跑满产 complete。
+    loomgui_stage_tick(h, 3.0);
+    let evs = drain_events(h);
+    let found = evs.iter().any(|e| e.event_type == 16 && e.touch_id == 7);
+    assert!(found, "3 轮跑满产 complete（tag=7）");
+
+    // 非法 kind → no-op（不 panic）
+    let bad = LoomTweenSpec {
+        prop: 0,
+        ease_kind: 999,
+        ease_params: [0.0; 4],
+        duration: 1.0,
+        delay: 0.0,
+        tag: 0,
+        repeat: 0,
+        yoyo: 0,
+    };
+    crate::loomgui_stage_tween_spec(h, root, &bad, start.as_ptr(), end.as_ptr());
+    // null spec → no-op
+    crate::loomgui_stage_tween_spec(h, root, std::ptr::null(), start.as_ptr(), end.as_ptr());
+
+    loomgui_stage_free(h);
 }

@@ -270,9 +270,9 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **视觉**
 
-`opacity`, `box-shadow`, `pointer-events`, `transform`, `filter`
+`opacity`, `box-shadow`, `pointer-events`, `transform`, `transform-origin`, `filter`
 
-> **transform 原点**：`transform-origin` 不在围栏——变换只绕元素**几何中心**（默认原点）。绕非中心点旋转（连线、指针）用「中点定位 + 默认中心旋转」换算等价实现。
+> **transform 原点**：`transform-origin` 在围栏——`<length|%>` × 2 + 位置关键字（`left`/`center`/`right`/`top`/`bottom`；单值时 y 缺省 `center`）。缺省 `50% 50%`（= 元素几何中心）。百分比相对自身布局尺寸，**延迟解析**（存描述符、世界矩阵累计期按当帧尺寸解析）。绕非中心点旋转（连线、指针）直接声明 origin，不再需要「中点定位 + 换算」绕路。
 
 > **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。层数硬限：inset 最多 8 层、outer 最多 4 层（渲染层合成 id 的编码容量，超限层会撞相邻编码区错渲染）——超限整条声明打包期 `FenceBadCssValue`（inline 走 `apply_decl` 返 false、`<style>` 规则走共享值域门，单一真相源 = core 解析器）。
 
@@ -291,9 +291,9 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 `animation`——`<name> <duration> [easing] [iteration-count|infinite] [fill-mode] [direction] [play-state] [delay]` 简写。对齐 public-api.md「动画定义全在 CSS」终态契约：fence 校验拼写错误并解析存值（逗号多声明 → 多个 `AnimationSpec` bake 进 `base_style.animation`，委托 core `parse_animation` 共用同一解析器防双源语义漂移）。8 个长划子属性（`animation-name`/`animation-duration`/`animation-timing-function`/`animation-delay`/`animation-iteration-count`/`animation-direction`/`animation-fill-mode`/`animation-play-state`）已加入——**单值**子集（逗号列表不收，多动画用简写）：写入既有简写 spec 的对应字段，无简写时创建惰性 spec（`animation-name` 到位才启播，CSS「无 name 不播」）；`animation-name: none` 清空；长划在简写后出现则改字段、简写在长划后出现则整体替换；runtime 驱动（@keyframes 表查询 + KeyframePlayer 时间轴）**M2 已交付**（见 main-design §13）。`transition`——`<prop?> <dur> <ease?> <delay?>` 简写，逗号多 spec 解析存值（bake 进 `base_style.transition`，core transition 引擎消费）；ease 关键字按 §5.2 对齐表映射。
 
-`@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
+`@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。stop 声明块内可写 `animation-timing-function`（**per-stop timing**，CSS 标准语义：作用于本 stop 到下一 stop 的区段；未写回落 spec 级 timing）。transform 的 translate 分量收**百分比形**（`translateX(-50%)` / `translate(50%, 10px)`——相对自身布局尺寸，存储描述符、采样写入期解析；scale/rotate 无百分比概念照旧数值）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
 
-`/* @loom-hook <name> */` 注释锦点——写在 keyframes 的 stop 声明块内或块间（如 `from{...}/* @loom-hook start */ to{...}` 或 `from{/* @loom-hook start */ ...} to{...}`），挂在该 stop 上。合法锦点注释保留为内部 marker 供 stop 解析，普通注释照常移除；纯文本 `@loom-hook`（非注释上下文）不识别。运行时 player 跨越该 stop 百分比时 emit `AnimationHookEvent`，C# 经 `Animation.OnHook(name)` 或 `On<AnimationHookEvent>` 路由（见 public-api §9.3）。
+`/* @loom-hook <name> */` 注释锦点——写在 keyframes 的 stop 声明块内或块间（如 `from{...}/* @loom-hook start */ to{...}` 或 `from{/* @loom-hook start */ ...} to{...}`），挂在该 stop 上。合法锦点注释保留为内部 marker 供 stop 解析，普通注释照常移除；纯文本 `@loom-hook`（非注释上下文）不识别。运行时 player 跨越该 stop 百分比时 emit `AnimationHookEvent`，C# 经 `Animation.OnHook(name)` 或 `On<AnimationHookEvent>` 路由（见 public-api §9.4）。
 
 **:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation` 简写实现错峰入场（delay 作简写第 2 个 time token，如 `.nav-card:nth-child(N){animation:fadeIn .4s .05s both}`——错峰单值也可用 `animation-delay` 长划单独声明）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
 
@@ -335,7 +335,12 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 关键字值校验在 `css_resolve` 阶段进行。非关键字值由 `apply_decl` 的值解析逻辑处理，解析失败也产生 `FenceBadCssValue` diagnostic。
 
-**ease 关键字 → core Ease 对齐表**（真相源 = core 的 `css_ease_keyword`，fence/core 共用同一解析器防漂移）：`ease` → CubicOut 近似；`ease-in` / `ease-out` / `ease-in-out` → Quad In / Out / InOut；`step-start` / `step-end` → Step{start}；缺省 timing = `ease`。`cubic-bezier()` / Elastic / Bounce 不收（→ `FenceBadCssValue`）。
+**缓动函数全集**（真相源 = core 的 `parse_ease`/`css_ease_keyword`，fence/core 共用同一解析器防漂移）。
+
+- **CSS 标准**：`linear` / `ease` / `ease-in` / `ease-out` / `ease-in-out`（映射到 CSS Easing Functions L1 的**精确 bezier 等价**——早期 Quad/Cubic 幂函数近似已废除，缺省 timing = `ease`）；`cubic-bezier(x1,y1,x2,y2)`（x∈[0,1] 约束，y 可越界表 overshoot）；`step-start` / `step-end`（单步 steps；`steps(n,…)` 多步形不收）。
+- **loom 超集 keyword**（非 CSS 标准，游戏 UI 刚需，命名照 CSS keyword 惯例）：`ease-{in,out,in-out}-back` / `ease-{in,out,in-out}-elastic` / `ease-{in,out,in-out}-bounce`（固定系数；参数化 elastic 不收，要参数用 cubic-bezier 近似）。
+- **运行时专属**（不进 DSL）：`quad-*`/`cubic-*` 幂函数族在运行时 API（ScrollTo 等）可用，DSL 侧不收。
+- 非法值（未知 keyword / bezier x 越界 / 坏参数个数）→ `FenceBadCssValue`。
 
 ### 5.3 简写展开（ShorthandSpec）
 
@@ -546,7 +551,9 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 - **filter**：仅 `grayscale` / `brightness` / `contrast` / `saturate` / `hue-rotate` /
   `invert` / `sepia`；`blur` / `drop-shadow` 等被静默跳过。
 - **transform**：仅 `translate(X/Y)` / `rotate` / `scale(X/Y)`；`skew` / `matrix` 等
-  被静默跳过（唯一函数时整条声明退化为 identity）。
+  被静默跳过（唯一函数时整条声明退化为 identity）。translate 的 px 参数在**静态声明**下
+  仍是唯一形态（百分比相对自身尺寸，静态路径打包期无法解析）；**@keyframes stop 内**的
+  translate 收百分比形（运行时按节点布局尺寸解析，见 §4 @keyframes 节）。
 - `<style>` 规则的 Keyword 值域（此前不校验）与行内路径同门。
 
 ---

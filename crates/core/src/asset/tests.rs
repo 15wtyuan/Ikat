@@ -777,8 +777,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 42,
-        "pkg format version must be 42 after line_height_px bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 43,
+        "pkg format version must be 43 after v43 keyframes timing/LenPct/transform_origin bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -839,8 +839,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 42,
-        "pkg format version must be 42 after line_height_px bump"
+        PKG_FORMAT_VERSION, 43,
+        "pkg format version must be 43 after v43 keyframes timing/LenPct/transform_origin bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -870,19 +870,30 @@ fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
                     opacity: Some(0.0),
                     ..Default::default()
                 },
+                timing: None,
                 hook: None,
             },
             KeyframeStop {
                 selector: KeyframeStopSelector::Percent(50),
+                // v43：translate 是 LenPct（px/pct 分域）——10px/20px + 顺带验 pct 域
                 props: AnimatableProps {
                     transform: Some(TransformAnim {
-                        translate: Some([10.0, 20.0]),
+                        translate: Some([
+                            crate::transform::LenPct { px: 10.0, pct: 0.0 },
+                            crate::transform::LenPct { px: 20.0, pct: 0.0 },
+                        ]),
                         scale: None,
                         rotate: Some(0.5),
                     }),
                     bg_color: Some([1.0, 0.0, 0.0, 1.0]),
                     ..Default::default()
                 },
+                timing: Some(crate::tween::Ease::CubicBezier {
+                    x1: 0.25,
+                    y1: 0.1,
+                    x2: 0.25,
+                    y2: 1.0,
+                }),
                 hook: Some("done".into()),
             },
             KeyframeStop {
@@ -892,6 +903,7 @@ fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
                     text_color: Some([0.0, 1.0, 0.0, 1.0]),
                     ..Default::default()
                 },
+                timing: None,
                 hook: None,
             },
         ],
@@ -974,8 +986,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v33_roundtrip_preserves_rich_text_block() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 42,
-        "pkg format version must be 42 after line_height_px bump"
+        PKG_FORMAT_VERSION, 43,
+        "pkg format version must be 43 after v43 keyframes timing/LenPct/transform_origin bump"
     );
     // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
     let mut root = tn(NodeKind::Container);
@@ -1021,8 +1033,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 42,
-        "pkg format version must be 42 after line_height_px bump"
+        PKG_FORMAT_VERSION, 43,
+        "pkg format version must be 43 after v43 keyframes timing/LenPct/transform_origin bump"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

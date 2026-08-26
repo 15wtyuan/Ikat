@@ -371,7 +371,7 @@ public class ListView : Container {
 
 ## 9. 动画
 
-全 CSS 定义，无命令式 tween。
+视觉定义全在 CSS（keyframes/transition）；运行时另提供一条**程序化 tween 通道**（TweenBuilder，#9）——服务 CSS keyframes 表达不了的逻辑驱动演出（跟随数值、动态目标、连续往复的 UI 反馈）。
 
 ### 9.1 三种触发
 
@@ -387,7 +387,27 @@ public class ListView : Container {
 
 **`:nth-child(An+B|odd|even|N)` selector**（M2）配合 `animation-delay` 实现错峰入场——同一规则按子序号算 delay，常用于导航卡/列表项依次淡入（showcase `home.html` 7 条 `.nav-card:nth-child(N){animation-delay:...}`）。
 
-### 9.2 AnimationHandle 句柄
+### 9.2 TweenBuilder（程序化 tween，#9）
+
+```csharp
+node.Tween(TweenChannel.Opacity)      // 通道：Opacity/Translate/Scale/Rotation/BgColor/TextColor/Transform
+    .From(0f).To(1f)                  // 分量数按通道（Transform=TRS 五元组 [tx,ty,sx,sy,rotRad]，恒 px/弧度）
+    .Duration(0.3f).Delay(0.1f)
+    .Ease(EaseKind.CubicOut)          // keyword 族；精确 CSS ease 用 EaseBezier(.25f,.1f,.25f,1f)
+    .Repeat(2, yoyo: true)            // 额外重播次数 + 奇数轮反向（CSS alternate 同义）
+    .Tag(7)                           // complete 事件路由键（可省，OnComplete 时自动分配）
+    .OnComplete(n => ...)             // 一次性：全部轮次跑满触发一次，触发即注销
+    .Start();
+```
+
+**语义不变量**：
+- **replace-override**：与 CSS transition 同通道互踩——新 tween 覆写同节点同通道的旧值；kill 保留末值（`KillTween(channel)`）。
+- **单一动画时钟**：TweenManager 与 keyframes player 同帧推进（tween 先写、player 后写——player 同通道覆盖 tween）。
+- **OnComplete 走事件通道**：core TweenComplete 事件按 tag 路由（与 TransitionEnd 同源事件；tag 未注册的 TweenComplete 仍是 transition 旧路径，两路径互不干扰）。
+- **缺省 ease = CSS `ease`**（精确 bezier(0.25,0.1,0.25,1)，与 CSS/fence 侧同一真值）。
+- 值域约束：`EaseBezier` 的 x1/x2 ∈[0,1]（y 可越界表 overshoot），越界抛 `UIContractException`。
+
+### 9.3 AnimationHandle 句柄
 
 ```csharp
 public sealed class AnimationHandle {
@@ -412,16 +432,16 @@ public sealed class AnimationHandle {
 | `AnimationEndEvent` | `OnEnd` | 完成（最后一次 iteration 结束帧；class 触发也走此）|
 | `AnimationIterationEvent` | — | 非最后一次的 iteration 边界跨越（最后一次只发 End，对齐浏览器 `animationiteration`）|
 | `AnimationKeyEvent` | `OnKey(float pct)` | 时间轴跨越注册的百分比键 |
-| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@loom-hook` 命名键（见 §9.3）|
+| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@loom-hook` 命名键（见 §9.4）|
 | `TransitionEndEvent` | — | transition 完成后发（type=TweenComplete 分流）|
 
 class 触发的动画无句柄，只走 EventBus 全局 `On<T>` 广播；`Play` 触发的动画句柄回调与全局广播并存（同一事件两路由都触发）。
 
-### 9.3 @loom-hook
+### 9.4 @loom-hook
 
 `/* @loom-hook name */` 注释标记命名锚点。百分比 + 语义名双锚并存。
 
-### 9.4 调度
+### 9.5 调度
 
 ```csharp
 ui.CallLater(float delay, Action cb);    // one-shot 延迟（秒，帧级粒度；d≤0 视为下一帧）

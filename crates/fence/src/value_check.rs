@@ -44,6 +44,27 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
         _ => None,
     })?;
     let value = value.trim();
+    // Raw parser 的定向值域门（无 parser 枚举污染）：transform-origin / per-stop timing。
+    // core 解析器是唯一真相源，这里只借它判定合法性（防校验/解析两张表漂移）。
+    match prop {
+        "transform-origin" => {
+            if loomgui_core::style::mapping::parse_transform_origin(value).is_some() {
+                return None;
+            }
+            return Some(format!(
+                "value \"{value}\" is not valid for CSS property \"transform-origin\"                  (expected: <length|%> × 2, or left|center|right / top|center|bottom keywords)"
+            ));
+        }
+        "animation-timing-function" => {
+            if loomgui_core::style::mapping::parse_ease(value).is_some() {
+                return None;
+            }
+            return Some(format!(
+                "value \"{value}\" is not valid for CSS property \"animation-timing-function\"                  (see fence.md 缓动函数全集: CSS keyword + cubic-bezier(x1,y1,x2,y2)                  + loom superset ease-in/out/in-out-back/elastic/bounce)"
+            ));
+        }
+        _ => {}
+    }
     match parser {
         CssValueParser::Color => {
             // core parse_color 认 #hex / rgb() / rgba()（含全透明 rgba(0,0,0,0)，显式

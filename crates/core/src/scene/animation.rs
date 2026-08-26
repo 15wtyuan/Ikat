@@ -14,7 +14,7 @@ use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
-use crate::transform::{self, Affine2, Affine2Ext};
+use crate::transform::{self, Affine2, Affine2Ext, LenPct};
 use crate::tween::Ease;
 
 /// `@keyframes` 一条 stop 的选择器位置。CSS 标准：`from`=`0%`，`to`=`100%`。
@@ -45,6 +45,9 @@ pub struct KeyframeStop {
     pub selector: KeyframeStopSelector,
     /// 该 stop 声明的可动画属性值（fence 解析声明块后提取，缺省字段 = None = 不参与插值）。
     pub props: AnimatableProps,
+    /// 该 stop 的 `animation-timing-function`（CSS per-keyframe timing：作用于本 stop
+    /// 到下一 stop 的区段）。None = 用 spec 级 timing。
+    pub timing: Option<Ease>,
     /// `/* @loom-hook name */` 锚点：player 播放到该 stop 时发事件。None = 无锚点。
     pub hook: Option<String>,
 }
@@ -66,10 +69,11 @@ pub struct AnimatableProps {
 }
 
 /// transform 的 TRS 分解存储（围栏 transform 子集只有 translate/rotate/scale，1:1 无信息
-/// 丢失）。每帧分量级 lerp 合成矩阵，不做 CSS 矩阵插值。
+/// 丢失）。每帧分量级 lerp 合成矩阵，不做 CSS 矩阵插值。translate 分量是 `LenPct`
+/// 混合长度（`translateX(-50%)` 相对自身尺寸，采样后写入期解析，#77）。
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct TransformAnim {
-    pub translate: Option<[f32; 2]>,
+    pub translate: Option<[LenPct; 2]>,
     pub scale: Option<[f32; 2]>,
     /// radians
     pub rotate: Option<f32>,
@@ -293,9 +297,11 @@ fn apply_direction(direction: AnimationDirection, iteration: u32, progress: f32)
 /// - p 落在段外（无 0%/100% stop）→ 保持最近端 stop 原始值（CSS：from/to 取首个/末个 keyframe）；
 ///   恰等于某 stop 位置也取原始值（不经 ease，避免 Step 边界跳变）；
 /// - 段内 per-property lerp：opacity/颜色双端 Some 才插值（单端保持）；transform TRS
-///   各分量 lerp，缺分量用 identity（translate 0 / scale [1,1] / rotate 0）；
-/// - ease 应用于段内 local_t（整体 AnimationSpec.timing_function；per-stop ease 暂不支持）。
-fn sample(keyframes: &KeyframesRule, progress: f32, ease: Ease) -> AnimatableProps {
+///   各分量 lerp（translate 是 LenPct 双域各自 lerp），缺分量用 identity
+///   （translate 0 / scale [1,1] / rotate 0）；
+/// - ease 取**段起始 stop** 的 per-stop timing（CSS per-keyframe animation-timing-function
+///   作用于该 keyframe 到下一 keyframe 的区段），None 回落 spec 级 timing。
+fn sample(keyframes: &KeyframesRule, progress: f32, default_ease: Ease) -> AnimatableProps {
     if keyframes.stops.is_empty() {
         return AnimatableProps::default();
     }
@@ -331,6 +337,7 @@ fn sample(keyframes: &KeyframesRule, progress: f32, ease: Ease) -> AnimatablePro
         let (pa, pb) = (a.selector.percent(), b.selector.percent());
         if pb > pa && pa <= progress && progress <= pb {
             let local_t = (progress - pa) / (pb - pa);
+            let ease = a.timing.unwrap_or(default_ease);
             let t = ease.evaluate(local_t, 1.0);
             return lerp_props(a.props, b.props, t);
         }
@@ -356,10 +363,11 @@ fn lerp_props(from: AnimatableProps, to: AnimatableProps, t: f32) -> AnimatableP
     }
 }
 
-/// TRS 分量级 lerp。缺分量用 identity（translate [0,0] / scale [1,1] / rotate 0）。
+/// TRS 分量级 lerp。缺分量用 identity（translate 0 / scale [1,1] / rotate 0）。
+/// translate 是 LenPct：px/pct 两域各自线性 lerp（CSS calc 混合插值），解析在合成端。
 fn lerp_transform(a: TransformAnim, b: TransformAnim, t: f32) -> TransformAnim {
     TransformAnim {
-        translate: lerp_opt2(a.translate, b.translate, t, [0.0, 0.0]),
+        translate: lerp_opt_len2(a.translate, b.translate, t),
         scale: lerp_opt2(a.scale, b.scale, t, [1.0, 1.0]),
         rotate: lerp_opt(a.rotate, b.rotate, t, 0.0),
     }
@@ -396,6 +404,20 @@ fn lerp_opt2(
         (Some(x), Some(y)) => Some(lerp_arr2(x, y, t)),
         (Some(x), None) => Some(lerp_arr2(x, identity, t)),
         (None, Some(y)) => Some(lerp_arr2(identity, y, t)),
+        (None, None) => None,
+    }
+}
+
+/// LenPct 双分量插值（identity = LenPct::ZERO：px/pct 都归零；scale 的 [1,1] 对应物）。
+fn lerp_opt_len2(a: Option<[LenPct; 2]>, b: Option<[LenPct; 2]>, t: f32) -> Option<[LenPct; 2]> {
+    let lerp1 = |x: LenPct, y: LenPct| LenPct {
+        px: x.px + (y.px - x.px) * t,
+        pct: x.pct + (y.pct - x.pct) * t,
+    };
+    match (a, b) {
+        (Some(x), Some(y)) => Some([lerp1(x[0], y[0]), lerp1(x[1], y[1])]),
+        (Some(x), None) => Some([lerp1(x[0], LenPct::ZERO), lerp1(x[1], LenPct::ZERO)]),
+        (None, Some(y)) => Some([lerp1(LenPct::ZERO, y[0]), lerp1(LenPct::ZERO, y[1])]),
         (None, None) => None,
     }
 }
@@ -458,7 +480,8 @@ pub fn register_on_key(scene: &mut Scene, key: PlayerKey, pct: f32) {
 /// （`sync_animation_players` 完全跳过：声明消失不回收、同名不视为已启动；回收靠
 /// Stop/句柄，或下次 Play 的入口接管——同名与同通道旧 player 先回收，见函数体注释）。
 /// C# `Play(name)` 无时长参数 → 默认：**1s / 无 delay / 单次迭代 / normal / fill both /
-/// cubic-out**（CSS 默认 ease）。fill both = 播放结束停终态；改默认须同步 C# 侧测试。
+/// ease（CSS 默认，精确 bezier(0.25,0.1,0.25,1)；#9 前用 cubic-out 近似）**。
+/// fill both = 播放结束停终态；改默认须同步 C# 侧测试。
 ///
 /// 立即算首帧写 NodeAnim（不等下一帧 update_all，防 delay 期闪 base）。
 /// 返 PlayerKey；name 未找到 / 节点悬空 → None（调用方转 FFI 无效 key）。
@@ -516,7 +539,12 @@ pub fn play_programmatic_with_duration(
         iteration_count: Some(1),
         direction: AnimationDirection::Normal,
         fill_mode: AnimationFillMode::Both,
-        timing_function: Ease::CubicOut,
+        timing_function: Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0,
+        },
         play_state: AnimationPlayState::Running,
     };
     let mut player = KeyframePlayer::new(node, spec.clone(), rule);
@@ -527,9 +555,19 @@ pub fn play_programmatic_with_duration(
         spec.fill_mode,
         AnimationFillMode::Backwards | AnimationFillMode::Both
     ) {
-        write_frame(&mut scene.anim, node, first.props);
+        let size = node_size(scene, node);
+        write_frame(&mut scene.anim, node, first.props, size);
     }
     Some(key)
+}
+
+/// 节点布局尺寸（write_frame 解析 LenPct 百分比用）。悬空节点不可达
+/// （调用方已校验 live），防御性返 0×0（百分比分量归零，px 分量照常）。
+fn node_size(scene: &Scene, node: NodeId) -> [f32; 2] {
+    scene
+        .get(node)
+        .map(|n| [n.layout_rect.w, n.layout_rect.h])
+        .unwrap_or([0.0, 0.0])
 }
 
 /// 阈值跨越判定：prev→cur 单调扫过 pct（双向——reverse/alternate 反向迭代也触发）。
@@ -692,7 +730,13 @@ pub fn update_all(scene: &mut Scene, dt: f32, out: &mut Vec<EventRecord>) {
                 AnimationFillMode::Forwards | AnimationFillMode::Both
             )
         {
-            write_frame(&mut scene.anim, p.node, frame.props);
+            // nodes 与 players 是不相交字段，p 的可变借用下可直取 nodes（避整 scene 不可变借）。
+            let size = scene
+                .nodes
+                .get(p.node.to_key())
+                .map(|n| [n.layout_rect.w, n.layout_rect.h])
+                .unwrap_or([0.0, 0.0]);
+            write_frame(&mut scene.anim, p.node, frame.props, size);
         }
         // 其余（Completed + fill none 的后续 tick）：惰性，不写不清。
     }
@@ -746,13 +790,23 @@ fn holds_channels(p: &KeyframePlayer) -> bool {
 }
 
 /// 按帧值写 NodeAnim 四通道。通道 None = 本帧无 override（不动该通道）。
+/// `node_size = [w, h]`：transform translate 的 LenPct 百分比在此解析（#77——
+/// 采样端保持描述符，尺寸解析统一在写入期）。
 /// `pub(crate)`：sync_animation_players 启动时立即写首帧（backwards fill）用。
-pub(crate) fn write_frame(anim: &mut AnimTable, node: NodeId, props: AnimatableProps) {
+pub(crate) fn write_frame(
+    anim: &mut AnimTable,
+    node: NodeId,
+    props: AnimatableProps,
+    node_size: [f32; 2],
+) {
     let a = anim.ensure(node);
     if let Some(v) = props.opacity {
         a.opacity = Some(v);
     }
-    if let Some(m) = props.transform.and_then(compose_transform) {
+    if let Some(m) = props
+        .transform
+        .and_then(|ta| compose_transform(ta, node_size[0], node_size[1]))
+    {
         a.transform = Some(m);
     }
     if let Some(v) = props.bg_color {
@@ -764,17 +818,18 @@ pub(crate) fn write_frame(anim: &mut AnimTable, node: NodeId, props: AnimatableP
 }
 
 /// TransformAnim TRS → Affine2（SRT：点先 scale 再 rotate 再 translate，缩放旋转绕自身
-/// 原点，图形学标准）。缺分量用 identity（translate [0,0] / scale [1,1] / rotate 0）。
+/// 原点，图形学标准）。缺分量用 identity（translate 0 / scale [1,1] / rotate 0）。
+/// translate LenPct 按 `w`/`h` 解析（x 用 w、y 用 h——CSS 百分比 translate 相对自身盒）。
 /// 全 None → None（不 override base transform）。
-fn compose_transform(ta: TransformAnim) -> Option<Affine2> {
+fn compose_transform(ta: TransformAnim, w: f32, h: f32) -> Option<Affine2> {
     if ta.translate.is_none() && ta.scale.is_none() && ta.rotate.is_none() {
         return None;
     }
-    let t = ta.translate.unwrap_or([0.0, 0.0]);
+    let t = ta.translate.unwrap_or([LenPct::ZERO, LenPct::ZERO]);
     let s = ta.scale.unwrap_or([1.0, 1.0]);
     let r = ta.rotate.unwrap_or(0.0);
     Some(
-        transform::from_translate(t[0], t[1])
+        transform::from_translate(t[0].resolve(w), t[1].resolve(h))
             .mul(transform::from_rotate(r))
             .mul(transform::from_scale(s[0], s[1])),
     )
@@ -925,6 +980,7 @@ mod restart_tests {
                         opacity: Some(0.0),
                         ..Default::default()
                     },
+                    timing: None,
                     hook: None,
                 },
                 KeyframeStop {
@@ -933,6 +989,7 @@ mod restart_tests {
                         opacity: Some(1.0),
                         ..Default::default()
                     },
+                    timing: None,
                     hook: None,
                 },
             ],
@@ -950,6 +1007,123 @@ mod restart_tests {
         let scene = Scene::from_nodes(nodes, vec![]);
         let ids = scene.roots.clone();
         (scene, ids)
+    }
+
+    /// #77：百分比 translate 采样 → write_frame 按节点布局尺寸解析成矩阵。
+    /// from translateX(0) to translateX(-50%)，w=200：半程 = -25% = -50px。
+    #[test]
+    fn percent_translate_resolves_against_node_size_at_write() {
+        use crate::transform::LenPct;
+        let (mut scene, ids) = scene_with_animated_nodes(1);
+        let node = ids[0];
+        scene.get_mut(node).unwrap().layout_rect.w = 200.0;
+        scene.get_mut(node).unwrap().layout_rect.h = 10.0;
+        // 声明名对齐 keyframes（helper 的 spec 叫 "fade"）+ 时长 1s（半程 0.25s）。
+        let mut slide_spec = spec();
+        slide_spec.name = "slide".into();
+        slide_spec.duration = 1.0;
+        scene.get_mut(node).unwrap().style.animation = vec![slide_spec];
+        scene.keyframes.insert(
+            "slide".into(),
+            KeyframesRule {
+                name: "slide".into(),
+                stops: vec![
+                    KeyframeStop {
+                        selector: KeyframeStopSelector::From,
+                        props: AnimatableProps {
+                            transform: Some(TransformAnim {
+                                translate: Some([LenPct::ZERO, LenPct::ZERO]),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        timing: None,
+                        hook: None,
+                    },
+                    KeyframeStop {
+                        selector: KeyframeStopSelector::To,
+                        props: AnimatableProps {
+                            transform: Some(TransformAnim {
+                                translate: Some([
+                                    LenPct {
+                                        px: 0.0,
+                                        pct: -50.0,
+                                    },
+                                    LenPct::ZERO,
+                                ]),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                        timing: None,
+                        hook: None,
+                    },
+                ],
+            },
+        );
+        crate::style::dynamic::sync_animation_players(&mut scene);
+        crate::scene::animation::update_all(&mut scene, 0.25, &mut Vec::new());
+        let m = scene
+            .anim
+            .get(node)
+            .and_then(|a| a.transform)
+            .expect("transform override written");
+        assert!(
+            (m[4] - (-25.0)).abs() < 1e-4,
+            "p=0.25 → -50%×0.25 = -12.5% × w200 = -25px，got tx={}",
+            m[4]
+        );
+    }
+
+    /// per-stop timing（#9）：段起始 stop 的 animation-timing-function 作用于本段。
+    /// 0%→50% linear、50%→100% step-end：p=0.75 落第二段（step-end 保持段首值 0.5 位移）。
+    #[test]
+    fn per_stop_timing_applies_to_segment() {
+        let kf = KeyframesRule {
+            name: "mix".into(),
+            stops: vec![
+                KeyframeStop {
+                    selector: KeyframeStopSelector::From,
+                    props: AnimatableProps {
+                        opacity: Some(0.0),
+                        ..Default::default()
+                    },
+                    timing: Some(Ease::Linear),
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::Percent(50),
+                    props: AnimatableProps {
+                        opacity: Some(0.5),
+                        ..Default::default()
+                    },
+                    timing: Some(Ease::Step { start: false }),
+                    hook: None,
+                },
+                KeyframeStop {
+                    selector: KeyframeStopSelector::To,
+                    props: AnimatableProps {
+                        opacity: Some(1.0),
+                        ..Default::default()
+                    },
+                    timing: None,
+                    hook: None,
+                },
+            ],
+        };
+        // p=0.25：第一段（linear）local=0.5 → opacity 0.25。
+        let mid1 = sample(&kf, 0.25, Ease::Linear);
+        assert!((mid1.opacity.unwrap() - 0.25).abs() < 1e-5);
+        // p=0.75：第二段 step-end（local=0.5，未到段末）→ 保持段首 0.5。
+        let mid2 = sample(&kf, 0.75, Ease::Linear);
+        assert!(
+            (mid2.opacity.unwrap() - 0.5).abs() < 1e-5,
+            "step-end 段内保持段首值，got {}",
+            mid2.opacity.unwrap()
+        );
+        // p=1.0：恰在 stop 位置 → 取原始值 1.0（不经 ease）。
+        let end = sample(&kf, 1.0, Ease::Linear);
+        assert!((end.opacity.unwrap() - 1.0).abs() < 1e-5);
     }
 
     #[test]

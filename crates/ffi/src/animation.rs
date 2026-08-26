@@ -1,49 +1,79 @@
-//! 动画面：tween 注册/停止/通道清理、@keyframes player 的程序化播放与
-//! 暂停/恢复/停止/seek/状态查询/OnKey 阈值（PlayerKey 以 u64 跨 FFI）。
+//! 动画面：tween 注册（spec-struct 形态）/停止/通道清理、@keyframes player 的程序化
+//! 播放与暂停/恢复/停止/seek/状态查询/OnKey 阈值（PlayerKey 以 u64 跨 FFI）。
 
 use loomgui_core::scene::animation::{
     player_key_as_u64, player_key_from_u64, register_on_key, PlayerPlayState,
 };
 use loomgui_core::scene::NodeId;
+use loomgui_core::tween::{ease_from_ffi, prop_value_size, TweenProp, TweenSpec};
 
 use crate::{ffi_guard, StageHandle};
 
-/// 注册 tween。start/end 指向 ≥value_size 个 f32（value_size 由 prop 隐含）。
-/// null 句柄/null 指针 → no-op。越界 node / duration<=0 由 core update 处理（跳过/立即 complete）。
+/// tween 提交 spec（#9 builder 契约的 FFI 形态；旧位置参 `loomgui_stage_tween` 已删——
+/// pre-1.0 无外部消费者，C# 同 commit 切 fluent wrapper）。
+///
+/// `ease_kind`/`ease_params` 值域见 core `tween::ease_ffi`（与 pkg 手编 ease tag 同一
+/// 数值契约）。`repeat` = 额外重播次数；`yoyo` != 0 = 奇数轮反向。
+/// C# 镜像由 csbindgen 生成（LayoutKind.Sequential，44B = 本 struct 的 ABI 断言）。
+#[repr(C)]
+pub struct LoomTweenSpec {
+    pub prop: u32,
+    pub ease_kind: u32,
+    pub ease_params: [f32; 4],
+    pub duration: f32,
+    pub delay: f32,
+    pub tag: u32,
+    pub repeat: u32,
+    pub yoyo: u8,
+}
+
+/// ABI 布局锁：字段增删/重排会先炸这里（C# 镜像同尺寸断言在 headless 测试）。
+const _: () = assert!(std::mem::size_of::<LoomTweenSpec>() == 44);
+
+/// 注册 tween（spec 形态）。start/end 指向 ≥value_size 个 f32（value_size 由 prop
+/// 隐含）。null 句柄/spec/null 指针 / 越界 prop/ease → no-op。
+/// 越界 node / duration<=0 由 core update 处理（跳过/立即 complete）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_tween(
+pub extern "C" fn loomgui_stage_tween_spec(
     h: *mut StageHandle,
     node_id: u64,
-    prop: u32,
+    spec: *const LoomTweenSpec,
     start: *const f32,
     end: *const f32,
-    duration: f32,
-    ease: u32,
-    delay: f32,
-    tag: u32,
 ) {
     ffi_guard((), || {
-        if h.is_null() || start.is_null() || end.is_null() {
+        if h.is_null() || spec.is_null() || start.is_null() || end.is_null() {
             return;
         }
         let sh = unsafe { &mut *h };
-        let prop = match loomgui_core::tween::TweenProp::try_from(prop) {
-            Some(p) => p,
-            None => return,
+        let spec = unsafe { &*spec };
+        let Some(prop) = TweenProp::try_from(spec.prop) else {
+            return;
         };
-        let ease = match loomgui_core::tween::Ease::try_from(ease) {
-            Some(e) => e,
-            None => return,
+        let Some(ease) = ease_from_ffi(spec.ease_kind, spec.ease_params) else {
+            return;
         };
-        let sz = loomgui_core::tween::prop_value_size(prop) as usize;
+        let sz = prop_value_size(prop) as usize;
         let st = unsafe { std::slice::from_raw_parts(start, sz) };
         let en = unsafe { std::slice::from_raw_parts(end, sz) };
-        let mut s = [0.0f32; 5];
-        let mut e = [0.0f32; 5];
+        let mut s = [0.0f32; 8];
+        let mut e = [0.0f32; 8];
         s[..sz].copy_from_slice(st);
         e[..sz].copy_from_slice(en);
-        sh.stage
-            .tween(NodeId(node_id), prop, s, e, ease, delay, duration, tag);
+        sh.stage.tween(
+            NodeId(node_id),
+            TweenSpec {
+                prop,
+                start: s,
+                end: e,
+                ease,
+                delay: spec.delay,
+                duration: spec.duration,
+                tag: spec.tag,
+                repeat: spec.repeat,
+                yoyo: spec.yoyo != 0,
+            },
+        );
     })
 }
 

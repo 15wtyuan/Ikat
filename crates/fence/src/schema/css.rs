@@ -457,6 +457,15 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Transform,
     },
+    // `transform-origin`：`<length|%>` × 2 + 位置关键字（left/center/right/top/bottom）。
+    // 值域门走 value_check（core parse_transform_origin）；描述符存 ResolvedStyle、
+    // 世界矩阵累计期按布局尺寸延迟解析（default 50% 50% = 盒心，零回归）。
+    CssPropSpec {
+        name: "transform-origin",
+        default: "50% 50%",
+        inherited: false,
+        parser: CssValueParser::Raw,
+    },
     CssPropSpec {
         name: "filter",
         default: "none",
@@ -677,7 +686,8 @@ pub fn validate_animation_value(value: &str) -> bool {
     if v.is_empty() {
         return false;
     }
-    v.split(',')
+    loomgui_core::style::mapping::split_top_level_commas(v)
+        .into_iter()
         .all(|decl| validate_one_animation_decl(decl.trim()))
 }
 
@@ -766,7 +776,8 @@ fn is_animation_keyword(s: &str) -> bool {
         s.trim().to_ascii_lowercase().as_str(),
         // iteration-count
         | "infinite"
-        // timing-function（命名 + steps/cubic-bezier 的字面名不在此；多维函数式子交由 Raw 兜底）
+        // timing-function 标准 keyword（cubic-bezier()/steps() 函数形与超集 keyword
+        // 经 core parse_ease 兜底判定——单一解析真相源，防校验/解析两张表漂移）
         | "linear" | "ease" | "ease-in" | "ease-out" | "ease-in-out" | "step-start" | "step-end"
         // fill-mode
         | "none" | "forwards" | "backwards" | "both"
@@ -776,6 +787,9 @@ fn is_animation_keyword(s: &str) -> bool {
         | "running" | "paused"
         // iteration-count integer（任意无符号整数）
     ) || s.chars().all(|c| c.is_ascii_digit())
+        // loom 超集缓动 keyword + cubic-bezier(...) 函数形（core parse_ease 判定，
+        // 超集清单见 fence.md「缓动函数全集」节）
+        || loomgui_core::style::mapping::parse_ease(s.trim()).is_some()
 }
 
 #[cfg(test)]

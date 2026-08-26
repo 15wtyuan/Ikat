@@ -1021,3 +1021,24 @@ fn clone_subtree_ffi_round_trip() {
 
     loomgui_stage_free(h);
 }
+
+/// LoomTweenSpec ABI 布局锁（C# 镜像同断言在 headless 门）：40B 字段 + yoyo(1) + 3B
+/// 尾部 padding = 44。字段增删/重排先炸这里。
+#[test]
+fn loom_tween_spec_size_is_44() {
+    use crate::animation::LoomTweenSpec;
+    assert_eq!(std::mem::size_of::<LoomTweenSpec>(), 44);
+    // 字段偏移锁（防重排）：yoyo 是末字段（偏移 40）。
+    let spec = LoomTweenSpec {
+        prop: 0,
+        ease_kind: 0,
+        ease_params: [0.0; 4],
+        duration: 1.0,
+        delay: 0.0,
+        tag: 0,
+        repeat: 0,
+        yoyo: 1,
+    };
+    let base = &spec as *const _ as usize;
+    assert_eq!(&spec.yoyo as *const _ as usize - base, 40);
+}

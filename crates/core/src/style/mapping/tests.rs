@@ -32,14 +32,37 @@ fn inset_declares_px_percent_auto() {
 fn parse_transform_trs_decomposes_supported_functions() {
     let trs = parse_transform_trs("translate(10px,20px) scale(2,.5) rotate(90deg)")
         .expect("TRS transform");
-    assert_eq!(trs.translate, Some([10.0, 20.0]));
+    let px = |v: f32| crate::transform::LenPct { px: v, pct: 0.0 };
+    assert_eq!(trs.translate, Some([px(10.0), px(20.0)]));
     assert_eq!(trs.scale, Some([2.0, 0.5]));
     assert!((trs.rotate.unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
     assert_eq!(
         parse_transform_trs("translateY(20px)").unwrap().translate,
-        Some([0.0, 20.0])
+        Some([
+            crate::transform::LenPct::ZERO,
+            crate::transform::LenPct { px: 20.0, pct: 0.0 }
+        ])
     );
     assert_eq!(parse_transform_trs("none"), Some(Default::default()));
+}
+
+/// #77：keyframes transform 百分比形——存描述符（px/pct 分域），不再静默 None。
+#[test]
+fn parse_transform_trs_accepts_percent_translate() {
+    let pct = |v: f32| crate::transform::LenPct { px: 0.0, pct: v };
+    let trs = parse_transform_trs("translateX(-50%)").expect("百分比形不再拒");
+    assert_eq!(
+        trs.translate,
+        Some([pct(-50.0), crate::transform::LenPct::ZERO])
+    );
+    // 混合场景：x 百分比 + y px
+    let trs = parse_transform_trs("translate(50%, 10px)").unwrap();
+    assert_eq!(
+        trs.translate,
+        Some([pct(50.0), crate::transform::LenPct { px: 10.0, pct: 0.0 }])
+    );
+    // 非法形仍拒（percent 后缀双写等）
+    assert_eq!(parse_transform_trs("translate(50%%)"), None);
 }
 
 #[test]
@@ -2199,6 +2222,7 @@ fn animation_longhand_nameless_spec_skipped_by_player_sync() {
                         opacity: Some(0.0),
                         ..Default::default()
                     },
+                    timing: None,
                     hook: None,
                 },
                 crate::scene::animation::KeyframeStop {
@@ -2207,6 +2231,7 @@ fn animation_longhand_nameless_spec_skipped_by_player_sync() {
                         opacity: Some(1.0),
                         ..Default::default()
                     },
+                    timing: None,
                     hook: None,
                 },
             ],

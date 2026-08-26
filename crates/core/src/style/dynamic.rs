@@ -1020,7 +1020,12 @@ pub fn sync_animation_players(scene: &mut Scene) {
             spec.fill_mode,
             AnimationFillMode::Backwards | AnimationFillMode::Both
         ) {
-            write_frame(&mut scene.anim, node, first.props);
+            // transform translate 的 LenPct 百分比按节点布局尺寸解析（#77）。
+            let size = scene
+                .get(node)
+                .map(|n| [n.layout_rect.w, n.layout_rect.h])
+                .unwrap_or([0.0, 0.0]);
+            write_frame(&mut scene.anim, node, first.props, size);
         }
     }
 }

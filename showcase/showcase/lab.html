@@ -52,7 +52,28 @@
   [role="progressbar"] { width:200px; height:10px; background-color:rgba(26,47,69,0.85); border-radius:4px; overflow:hidden; }
   [role="progressbar"] [data-slot="fill"] { background-color:#5fb4d4; height:100%; width:100%; }
   [aria-indeterminate="true"] [data-slot="fill"] { animation:ind-slide 1.2s infinite linear; }
-  @keyframes ind-slide { from { transform:translateX(-200px); } to { transform:translateX(200px); } }
+  /* #77：百分比形（相对 fill 自身宽 = track 宽 200px，与旧 px workaround 视觉等价） */
+  @keyframes ind-slide { from { transform:translateX(-100%); } to { transform:translateX(100%); } }
+  /* 节 16：缓动全集 + transform-origin + per-stop timing（#9/#21/#77 验收） */
+  .eg-track { width:240px; height:14px; background-color:rgba(26,47,69,0.85); border-radius:4px; position:relative; overflow:hidden; }
+  .eg-dot { position:absolute; left:0; top:1px; width:12px; height:12px; border-radius:6px; background-color:#5fb4d4; animation:eg-slide 1.6s infinite both; }
+  .eg-bounce { animation-timing-function:ease-out-bounce; }
+  .eg-elastic { animation-timing-function:ease-out-elastic; }
+  .eg-back { animation-timing-function:ease-in-out-back; }
+  .eg-bezier { animation-timing-function:cubic-bezier(0.7,0,0.3,1); }
+  .eg-steps { animation-timing-function:step-end; }
+  @keyframes eg-slide { from { transform:translateX(0); } to { transform:translateX(228px); } }
+  .og-stage { width:110px; height:110px; position:relative; }
+  .og-bar { position:absolute; left:43px; top:0; width:24px; height:110px; border-radius:4px; background-color:#2a5a75; }
+  .og-bar-center { transform-origin:center center; animation:og-spin 2.4s infinite linear; background-color:#5fb4d4; }
+  .og-bar-corner { transform-origin:left top; animation:og-spin 2.4s infinite linear; background-color:#d4a44e; }
+  @keyframes og-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+  .pt-bar { width:200px; height:12px; border-radius:4px; background-color:#c2605a; animation:pt-mix 1.8s infinite both; }
+  /* per-stop timing：0%→50% 线性、50%→100% ease-out-elastic（同一动画两段异缓动） */
+  @keyframes pt-mix { 0% { transform:translateX(0); animation-timing-function:linear; } 50% { transform:translateX(120px); animation-timing-function:ease-out-elastic; } 100% { transform:translateX(0); } }
+  .eg-label { color:#9aa0b4; font-size:12px; }
+  .eg-row { display:flex; flex-direction:row; align-items:center; gap:8px; }
+  .eg-name { color:#e0e6ec; font-size:12px; width:110px; }
   .vf-rot { transform:rotate(15deg); }
   .vf-scale { transform:scale(1.2); }
   .vf-trans { transform:translate(10px,10px); }
@@ -297,6 +318,34 @@
             <span style="color:#9aa0b4;font-size:12px">不定态进度条（无 aria-valuenow）</span>
             <div role="progressbar"><div data-slot="fill"></div></div>
             <span style="color:#6c7080;font-size:12px;max-width:240px">fill 平移动画（控件让位宽度给 CSS）；determinate 对照见 character 页。</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">16 · 缓动全集 / transform-origin / per-stop timing（#9 动画终态基建）</div>
+        <div class="section-desc">验收标准逐项：① 缓动画廊六行——每行小圆点应 1.6 秒循环左→右滑动，但节奏各不同：linear 匀速；ease-out-bounce 到达右端应弹跳回落数次；ease-out-elastic 到达右端应过冲超界再弹回（会短暂越过右端界线，属预期）；ease-in-out-back 起步反向顿挫再加速；cubic-bezier(0.7,0,0.3,1) 两端急中段缓；step-end 应保持左侧静止、每循环末尾瞬移到右端再跳回（无渐移）。全部匀速滑动即失败（keyword 未生效）。② origin 对照——蓝条绕几何中心旋转（两端均扫出圆环）；金条 transform-origin:left top 绕左上角旋转（左上角钉死不动、条甩圆规式转动）。两根转轴一样即失败。③ per-stop timing——红条 0→右 用线性（匀速去程），右→0 用 ease-out-elastic（回程末端应过冲冲过左端界再弹回）；去回两段节奏明显不同即过，去回一样即失败。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span class="eg-label">缓动画廊（loom 超集 + bezier + steps）</span>
+            <div class="eg-row"><span class="eg-name">linear</span><div class="eg-track"><div class="eg-dot"></div></div></div>
+            <div class="eg-row"><span class="eg-name">ease-out-bounce</span><div class="eg-track"><div class="eg-dot eg-bounce"></div></div></div>
+            <div class="eg-row"><span class="eg-name">ease-out-elastic</span><div class="eg-track"><div class="eg-dot eg-elastic"></div></div></div>
+            <div class="eg-row"><span class="eg-name">ease-in-out-back</span><div class="eg-track"><div class="eg-dot eg-back"></div></div></div>
+            <div class="eg-row"><span class="eg-name">cubic-bezier(.7,0,.3,1)</span><div class="eg-track"><div class="eg-dot eg-bezier"></div></div></div>
+            <div class="eg-row"><span class="eg-name">step-end</span><div class="eg-track"><div class="eg-dot eg-steps"></div></div></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span class="eg-label">transform-origin：中轴 vs 左上角</span>
+            <div style="display:flex;flex-direction:row;gap:16px">
+              <div class="og-stage"><div class="og-bar og-bar-center"></div></div>
+              <div class="og-stage"><div class="og-bar og-bar-corner"></div></div>
+            </div>
+            <span class="eg-label">左=origin center（默认）·右=origin left top</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span class="eg-label">per-stop timing（去程 linear / 回程 elastic）</span>
+            <div style="width:240px;height:20px;position:relative"><div class="pt-bar"></div></div>
           </div>
         </div>
       </div>

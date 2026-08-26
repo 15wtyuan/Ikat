@@ -44,6 +44,7 @@ fn stop(
     KeyframeStop {
         selector,
         props,
+        timing: None,
         hook: hook.map(str::to_owned),
     }
 }

@@ -5,6 +5,8 @@
 //!   y' = b·x + d·y + ty
 //! 矩阵形如 [[a, c, tx], [b, d, ty], [0, 0, 1]]。
 
+use serde::{Deserialize, Serialize};
+
 /// 2D 仿射 [a,b,c,d,tx,ty]。
 pub type Affine2 = [f32; 6];
 
@@ -97,6 +99,27 @@ pub fn is_identity(m: &Affine2) -> bool {
 pub fn is_pure_translation(m: &Affine2) -> bool {
     const EPS: f32 = 1e-6;
     (m[0] - 1.0).abs() < EPS && m[1].abs() < EPS && m[2].abs() < EPS && (m[3] - 1.0).abs() < EPS
+}
+
+/// 混合长度（CSS `calc(px + %)` 语义的插值形态）：`px + pct/100 × base`。
+///
+/// keyframes transform 的 translate 分量（`translateX(-50%)` 相对自身尺寸）与
+/// `transform-origin` 声明共用：**存储描述符、采样/合成期拿节点尺寸解析**——
+/// 打包期无布局尺寸，px-only 假设会让百分比形静默丢帧（#77）。插值语义 = 两域
+/// 各自线性 lerp（CSS calc 混合插值），解析在值消费端（write_frame / world 累积）。
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct LenPct {
+    pub px: f32,
+    pub pct: f32,
+}
+
+impl LenPct {
+    pub const ZERO: LenPct = LenPct { px: 0.0, pct: 0.0 };
+
+    /// 解析为 px（base = 参照尺寸：translate x 用 w、y 用 h；origin 同）。
+    pub fn resolve(self, base: f32) -> f32 {
+        self.px + self.pct / 100.0 * base
+    }
 }
 
 /// 用户态 Transform（public-api Transform API 的 core 端存储）。

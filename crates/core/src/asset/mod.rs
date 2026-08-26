@@ -43,11 +43,12 @@ use crate::scene::animation::{
 use crate::scene::NodeKind;
 use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
+use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 42; // v42: ResolvedStyle 加 line_height_px（line-height px 形，#65）
-pub(crate) const MIN_VERSION: u32 = 42;
-pub(crate) const MAX_VERSION: u32 = 42;
+pub const PKG_FORMAT_VERSION: u32 = 43; // v43: KeyframeStop 加 timing（per-stop ease）+ transform translate f32→LenPct(px+pct, #77) + ResolvedStyle 加 transform_origin（#21 CSS 半边）。手编 keyframes 布局变，旧包拒绝。
+pub(crate) const MIN_VERSION: u32 = 43;
+pub(crate) const MAX_VERSION: u32 = 43;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
@@ -194,6 +195,7 @@ pub enum PkgError {
     Bincode(bincode::Error),
     BadKind(u8),
     BadKeyframeSelector(u8),
+    BadEaseTag(u8),
     DupComponent(String),
 }
 
@@ -214,6 +216,7 @@ impl std::fmt::Display for PkgError {
             PkgError::BadKeyframeSelector(t) => {
                 write!(f, "bad keyframe stop selector tag {t}")
             }
+            PkgError::BadEaseTag(t) => write!(f, "bad ease tag {t}"),
             PkgError::DupComponent(n) => {
                 write!(f, "duplicate component name in package: {n}")
             }
@@ -720,6 +723,56 @@ fn intern(
     i
 }
 
+/// 手动编码 Ease（v43）：tag(u8) [+载荷]。tag 与 ease_ffi kind 同值域（0..9 keyword /
+/// 10 StepEnd / 11 StepStart / 12 CubicBezier+4×f32 / 13..18 elastic/bounce）——单一
+/// 数值契约两处消费（pkg 手编 + FFI spec struct），防两套判别值漂移。
+fn encode_ease(out: &mut Vec<u8>, e: Ease) {
+    use crate::tween::ease_ffi as k;
+    let tag: u8 = match e {
+        Ease::Linear => k::LINEAR as u8,
+        Ease::QuadIn => k::QUAD_IN as u8,
+        Ease::QuadOut => k::QUAD_OUT as u8,
+        Ease::QuadInOut => k::QUAD_IN_OUT as u8,
+        Ease::CubicIn => k::CUBIC_IN as u8,
+        Ease::CubicOut => k::CUBIC_OUT as u8,
+        Ease::CubicInOut => k::CUBIC_IN_OUT as u8,
+        Ease::BackIn => k::BACK_IN as u8,
+        Ease::BackOut => k::BACK_OUT as u8,
+        Ease::BackInOut => k::BACK_IN_OUT as u8,
+        Ease::Step { start: false } => k::STEP_END as u8,
+        Ease::Step { start: true } => k::STEP_START as u8,
+        Ease::ElasticIn => k::ELASTIC_IN as u8,
+        Ease::ElasticOut => k::ELASTIC_OUT as u8,
+        Ease::ElasticInOut => k::ELASTIC_IN_OUT as u8,
+        Ease::BounceIn => k::BOUNCE_IN as u8,
+        Ease::BounceOut => k::BOUNCE_OUT as u8,
+        Ease::BounceInOut => k::BOUNCE_IN_OUT as u8,
+        Ease::CubicBezier { .. } => k::CUBIC_BEZIER as u8,
+    };
+    out.push(tag);
+    // 参数槽定长 4×f32（单形解码免按 tag 分支跳读；非 bezier 恒零）。
+    let params: [f32; 4] = match e {
+        Ease::CubicBezier { x1, y1, x2, y2 } => [x1, y1, x2, y2],
+        _ => [0.0; 4],
+    };
+    for v in params {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+}
+
+/// 手动解码 Ease（encode_ease 的逆）。未知 tag → BadEaseTag。
+fn decode_ease(r: &mut Reader<'_>) -> Result<Ease, PkgError> {
+    let tag = r.u8("ease_tag")?;
+    let params = [
+        r.f32("ease_p0")?,
+        r.f32("ease_p1")?,
+        r.f32("ease_p2")?,
+        r.f32("ease_p3")?,
+    ];
+    // 参数槽定长 4×f32（tag=12 是 bezier 控制点，其余恒零——编码/解码严格对称）。
+    ease_from_ffi(u32::from(tag), params).ok_or(PkgError::BadEaseTag(tag))
+}
+
 /// 手动编码组件 keyframes 表（v30 pkg 格式）。
 /// 布局：u16 rule_count + 逐 rule { u16 name_idx, u16 stop_count, 逐 stop }。
 /// stop 布局：selector_tag(u8: 0=From/1=To/2=Percent) [+pct(u8)] + 4 个可动画字段
@@ -759,9 +812,12 @@ fn encode_keyframes(
                     out.push(1);
                     match t.translate {
                         Some([x, y]) => {
+                            // v43：LenPct = (px, pct) 混合长度（#77 百分比形）
                             out.push(1);
-                            out.extend_from_slice(&x.to_le_bytes());
-                            out.extend_from_slice(&y.to_le_bytes());
+                            out.extend_from_slice(&x.px.to_le_bytes());
+                            out.extend_from_slice(&x.pct.to_le_bytes());
+                            out.extend_from_slice(&y.px.to_le_bytes());
+                            out.extend_from_slice(&y.pct.to_le_bytes());
                         }
                         None => out.push(0),
                     }
@@ -801,6 +857,14 @@ fn encode_keyframes(
                 }
                 None => out.push(0),
             }
+            // v43：per-stop timing（None = 单字节 0；Some = 1 + encode_ease 载荷）
+            match stop.timing {
+                None => out.push(0),
+                Some(e) => {
+                    out.push(1);
+                    encode_ease(&mut out, e);
+                }
+            }
             let hook_idx = stop
                 .hook
                 .as_ref()
@@ -836,7 +900,17 @@ fn decode_keyframes(bytes: &[u8], strings: &[String]) -> Result<Vec<KeyframesRul
             };
             let transform = if r.u8("kf_transform_flag")? != 0 {
                 let translate = if r.u8("kf_translate_flag")? != 0 {
-                    Some([r.f32("kf_translate_x")?, r.f32("kf_translate_y")?])
+                    // v43：LenPct = (px, pct) × 2（x 后 y，各自 px 前 pct 后）
+                    Some([
+                        crate::transform::LenPct {
+                            px: r.f32("kf_translate_x_px")?,
+                            pct: r.f32("kf_translate_x_pct")?,
+                        },
+                        crate::transform::LenPct {
+                            px: r.f32("kf_translate_y_px")?,
+                            pct: r.f32("kf_translate_y_pct")?,
+                        },
+                    ])
                 } else {
                     None
                 };
@@ -878,6 +952,11 @@ fn decode_keyframes(bytes: &[u8], strings: &[String]) -> Result<Vec<KeyframesRul
             } else {
                 None
             };
+            let timing = if r.u8("kf_timing_flag")? != 0 {
+                Some(decode_ease(&mut r)?)
+            } else {
+                None
+            };
             let hook_idx = r.u16("kf_hook_idx")?;
             let hook = if hook_idx == NULL_IDX {
                 None
@@ -892,6 +971,7 @@ fn decode_keyframes(bytes: &[u8], strings: &[String]) -> Result<Vec<KeyframesRul
                     bg_color,
                     text_color,
                 },
+                timing,
                 hook,
             });
         }

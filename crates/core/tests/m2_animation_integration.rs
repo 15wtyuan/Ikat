@@ -129,9 +129,12 @@ fn fade_in_from_html_writes_opacity_and_translate_y_at_fixed_times() {
 
     tick(&mut stage, 0.2);
     let middle = node_anim(&stage, root);
-    // The declaration omits an easing keyword, so CSS initial `ease` (CubicOut) applies.
-    close(middle.opacity.expect("opacity at t=.2"), 0.875);
-    close(middle.transform.expect("transform at t=.2")[5], 2.5);
+    // The declaration omits an easing keyword, so CSS initial `ease` applies — exact
+    // bezier(0.25,0.1,0.25,1) since #9 (0.8024 at midpoint; CubicOut's 0.875 was an
+    // approximation of the CSS curve).
+    close(middle.opacity.expect("opacity at t=.2"), 0.8024);
+    // ty lerps 20→0 with the same eased progress: 20 × (1 − 0.8024) ≈ 3.952.
+    close(middle.transform.expect("transform at t=.2")[5], 3.9519);
 
     tick(&mut stage, 0.2);
     let last = node_anim(&stage, root);

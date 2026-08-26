@@ -3,9 +3,10 @@ use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
     Gradient, GradientStop, OverflowMode, RadialExtent, RadialShape, ResolvedStyle, SliceInsets,
-    TextAlign, TextSecurity, ViewportLen, ViewportUnit, GRADIENT_MAX_STOPS,
+    TextAlign, TextSecurity, TransformOrigin, ViewportLen, ViewportUnit, GRADIENT_MAX_STOPS,
     MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
 };
+use crate::transform::LenPct;
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, LengthPercentage, LengthPercentageAuto};
 
@@ -481,8 +482,9 @@ pub fn parse_gradient(value: &str) -> Option<Gradient> {
     None
 }
 
-/// 按顶层逗号切分（括号内逗号不属于分隔符——rgba(95,180,212,0.1) 内含逗号）。
-fn split_top_level_commas(s: &str) -> Vec<&str> {
+/// 按顶层逗号切分（括号内逗号不属于分隔符——rgba(...) / cubic-bezier(...) 内含逗号）。
+/// animation/transition 多声明分割与 fence validate 门共用（防函数参数被切成独立声明）。
+pub fn split_top_level_commas(s: &str) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0usize;
     let mut start = 0usize;
@@ -828,11 +830,11 @@ pub fn parse_transform_trs(value: &str) -> Option<TransformAnim> {
                 if parts.len() > 2 || parts.is_empty() {
                     return None;
                 }
-                let x = parse_px(parts[0])?;
+                let x = parse_len_pct(parts[0])?;
                 let y = if let Some(y) = parts.get(1) {
-                    parse_px(y)?
+                    parse_len_pct(y)?
                 } else {
-                    0.0
+                    LenPct::ZERO
                 };
                 out.translate = Some([x, y]);
             }
@@ -840,13 +842,13 @@ pub fn parse_transform_trs(value: &str) -> Option<TransformAnim> {
                 if parts.len() != 1 {
                     return None;
                 }
-                out.translate = Some([parse_px(parts[0])?, 0.0]);
+                out.translate = Some([parse_len_pct(parts[0])?, LenPct::ZERO]);
             }
             "translateY" => {
                 if parts.len() != 1 {
                     return None;
                 }
-                out.translate = Some([0.0, parse_px(parts[0])?]);
+                out.translate = Some([LenPct::ZERO, parse_len_pct(parts[0])?]);
             }
             "scale" => {
                 if parts.len() != 1 && parts.len() != 2 {
@@ -875,6 +877,51 @@ pub fn parse_transform_trs(value: &str) -> Option<TransformAnim> {
         }
     }
     Some(out)
+}
+
+/// 解析 `<length-percentage>` 单值 → LenPct 混合长度（keyframes translate 通道，#77）。
+/// 收 `12px` / `12` / `50%` / 混合 calc 语法不收（DSL 侧单形即可表达 AI 常用写法）。
+/// 百分比存储描述符、采样写入期按节点尺寸解析（见 animation.rs compose_transform）。
+pub fn parse_len_pct(v: &str) -> Option<crate::transform::LenPct> {
+    let v = v.trim();
+    if let Some(pct) = v.strip_suffix('%') {
+        let pct = pct.trim().parse::<f32>().ok()?;
+        return Some(crate::transform::LenPct { px: 0.0, pct });
+    }
+    let px = v.trim_end_matches("px").trim().parse::<f32>().ok()?;
+    Some(crate::transform::LenPct { px, pct: 0.0 })
+}
+
+/// 解析 CSS `transform-origin` 值：1-2 个 `<length|%>|left|center|right|top|bottom>`。
+/// 单值 → y 缺省 center(50%)（CSS 语义）。全非法 → None（apply_decl 报值错）。
+/// 例：`50% 50%`（=default）/ `left top` / `10px 20px` / `center`。
+pub fn parse_transform_origin(value: &str) -> Option<TransformOrigin> {
+    let origin_kw = |t: &str| -> Option<crate::transform::LenPct> {
+        match t {
+            "left" | "top" => Some(crate::transform::LenPct { px: 0.0, pct: 0.0 }),
+            "center" => Some(crate::transform::LenPct { px: 0.0, pct: 50.0 }),
+            "right" | "bottom" => Some(crate::transform::LenPct {
+                px: 0.0,
+                pct: 100.0,
+            }),
+            _ => parse_len_pct(t),
+        }
+    };
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    match parts.len() {
+        1 => {
+            let x = origin_kw(parts[0])?;
+            Some(TransformOrigin {
+                x,
+                y: crate::transform::LenPct { px: 0.0, pct: 50.0 },
+            })
+        }
+        2 => Some(TransformOrigin {
+            x: origin_kw(parts[0])?,
+            y: origin_kw(parts[1])?,
+        }),
+        _ => None,
+    }
 }
 
 fn iter_transform_funcs(s: &str) -> Vec<(&str, &str)> {
@@ -1697,6 +1744,13 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.transform = parse_transform(value);
             true
         }
+        "transform-origin" => match parse_transform_origin(value) {
+            Some(o) => {
+                style.transform_origin = o;
+                true
+            }
+            None => false,
+        },
         "position" => {
             // absolute 围栏内（脱离流）；relative 显式；fixed/sticky 围栏外静默忽略。
             // position_declared 与 ts.position 并行——布局层识别「声明了 relative」需要
@@ -1875,8 +1929,8 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
 /// timing=ease）。非法段（空 / `none` / 非法 name / 缺 duration）静默丢弃（filter_map）。
 pub fn parse_animation(value: &str) -> Vec<crate::style::resolved::AnimationSpec> {
     use crate::style::resolved::AnimationSpec;
-    value
-        .split(',')
+    split_top_level_commas(value)
+        .into_iter()
         .filter_map(|decl| parse_one_animation(decl.trim()))
         .collect::<Vec<AnimationSpec>>()
 }
@@ -1933,7 +1987,7 @@ fn apply_animation_longhand(
                 }
                 None => ok = false,
             },
-            "animation-timing-function" => match css_ease_keyword(value) {
+            "animation-timing-function" => match parse_ease(value) {
                 Some(e) => spec.timing_function = e,
                 None => ok = false,
             },
@@ -1997,7 +2051,13 @@ fn parse_one_animation(decl: &str) -> Option<crate::style::resolved::AnimationSp
         iteration_count: Some(1), // CSS initial iteration-count = 1（None = infinite）
         direction: AnimationDirection::Normal,
         fill_mode: AnimationFillMode::None,
-        timing_function: crate::tween::Ease::CubicOut, // CSS animation 默认 ease
+        // CSS 缺省 timing = ease（精确 bezier；#9 前用 CubicOut 近似）
+        timing_function: crate::tween::Ease::CubicBezier {
+            x1: 0.25,
+            y1: 0.1,
+            x2: 0.25,
+            y2: 1.0,
+        },
         play_state: AnimationPlayState::Running,
     };
     let mut time_count = 0;
@@ -2014,7 +2074,7 @@ fn parse_one_animation(decl: &str) -> Option<crate::style::resolved::AnimationSp
             spec.iteration_count = None;
         } else if tok.chars().all(|c| c.is_ascii_digit()) {
             spec.iteration_count = tok.parse::<u32>().ok();
-        } else if let Some(e) = css_ease_keyword(tok) {
+        } else if let Some(e) = parse_ease(tok) {
             spec.timing_function = e;
         } else {
             match tok.to_ascii_lowercase().as_str() {
@@ -2070,7 +2130,10 @@ fn is_valid_animation_name(s: &str) -> bool {
 /// `pub` 供 fence css_resolve 复用（打包期 inline 与运行时 rematch 同一真相源，
 /// 防 ease 对齐表漂移）。
 pub fn parse_transition(value: &str) -> Vec<crate::style::resolved::TransitionSpec> {
-    value.split(',').filter_map(parse_one_transition).collect()
+    split_top_level_commas(value)
+        .into_iter()
+        .filter_map(parse_one_transition)
+        .collect()
 }
 
 /// 解析单个 transition spec（逗号分隔的一段）。
@@ -2087,7 +2150,13 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
     let mut prop = None;
     let mut duration = 0.0f32;
     let mut delay = 0.0f32;
-    let mut ease = Ease::CubicOut; // CSS transition 默认 timing-function = ease
+    // CSS 缺省 timing-function = ease（精确 bezier；#9 前用 CubicOut 近似）
+    let mut ease = Ease::CubicBezier {
+        x1: 0.25,
+        y1: 0.1,
+        x2: 0.25,
+        y2: 1.0,
+    };
     let mut time_count = 0;
     for t in tokens {
         match t {
@@ -2105,7 +2174,7 @@ fn parse_one_transition(part: &str) -> Option<crate::style::resolved::Transition
                         delay = secs;
                     }
                     time_count += 1;
-                } else if let Some(e) = css_ease_keyword(t) {
+                } else if let Some(e) = parse_ease(t) {
                     ease = e;
                 }
                 // 未知 token 忽略（transition 零校验宽松语义，与 fence 一致）
@@ -2134,17 +2203,70 @@ fn parse_time_seconds(tok: &str) -> Option<f32> {
 /// 打包期与运行时共用一张表，防双份白名单漂移。本表按小写精确匹配；fence animation
 /// 侧 validate 门大小写不敏感，查表前自行 lowercase（见 fence css.rs `ease_from_keyword`）。
 pub fn css_ease_keyword(kw: &str) -> Option<crate::tween::Ease> {
-    use crate::tween::Ease;
+    use crate::tween::{Ease, EASE_BEZIER, EASE_IN_BEZIER, EASE_IN_OUT_BEZIER, EASE_OUT_BEZIER};
+    let b = |p: [f32; 4]| Ease::CubicBezier {
+        x1: p[0],
+        y1: p[1],
+        x2: p[2],
+        y2: p[3],
+    };
     Some(match kw {
+        // CSS 标准关键字（精确 bezier，CSS Easing Functions L1 定义值）
         "linear" => Ease::Linear,
-        "ease" => Ease::CubicOut,
-        "ease-in" => Ease::QuadIn,
-        "ease-out" => Ease::QuadOut,
-        "ease-in-out" => Ease::QuadInOut,
+        "ease" => b(EASE_BEZIER),
+        "ease-in" => b(EASE_IN_BEZIER),
+        "ease-out" => b(EASE_OUT_BEZIER),
+        "ease-in-out" => b(EASE_IN_OUT_BEZIER),
         "step-start" => Ease::Step { start: true },
         "step-end" => Ease::Step { start: false },
+        // loom 超集 keyword（非标，游戏 UI 刚需；fence.md 登记）。命名照 CSS keyword 惯例
+        // （ease-in-back），GSAP/Unity 先验同族。
+        "ease-in-back" => Ease::BackIn,
+        "ease-out-back" => Ease::BackOut,
+        "ease-in-out-back" => Ease::BackInOut,
+        "ease-in-elastic" => Ease::ElasticIn,
+        "ease-out-elastic" => Ease::ElasticOut,
+        "ease-in-out-elastic" => Ease::ElasticInOut,
+        "ease-in-bounce" => Ease::BounceIn,
+        "ease-out-bounce" => Ease::BounceOut,
+        "ease-in-out-bounce" => Ease::BounceInOut,
+        // 幂函数族：CSS 无对应 keyword（历史内部值，transition/ScrollTo 等运行时 API 消费）
+        "quad-in" => Ease::QuadIn,
+        "quad-out" => Ease::QuadOut,
+        "quad-in-out" => Ease::QuadInOut,
+        "cubic-in" => Ease::CubicIn,
+        "cubic-out" => Ease::CubicOut,
+        "cubic-in-out" => Ease::CubicInOut,
         _ => return None,
     })
+}
+
+/// 解析 timing-function 值全形：`cubic-bezier(x1,y1,x2,y2)` 函数形 + keyword 全集
+/// （`css_ease_keyword`）。x1/x2 须 ∈[0,1]（CSS 有效性；y 不限）。非法 → None。
+/// 消费方：`animation`/`animation-timing-function` 解析 + keyframes stop 内 timing。
+pub fn parse_ease(value: &str) -> Option<crate::tween::Ease> {
+    let v = value.trim();
+    if let Some(rest) = v.strip_prefix("cubic-bezier(") {
+        let inner = rest.strip_suffix(')')?;
+        let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
+        if parts.len() != 4 {
+            return None;
+        }
+        let n: Vec<f32> = parts
+            .iter()
+            .map(|p| p.parse::<f32>().ok())
+            .collect::<Option<_>>()?;
+        if !(0.0..=1.0).contains(&n[0]) || !(0.0..=1.0).contains(&n[2]) {
+            return None;
+        }
+        return Some(crate::tween::Ease::CubicBezier {
+            x1: n[0],
+            y1: n[1],
+            x2: n[2],
+            y2: n[3],
+        });
+    }
+    css_ease_keyword(v)
 }
 
 /// 解析 CSS `text-shadow` 声明值 → FontEffect::Shadow 列表。

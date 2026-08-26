@@ -630,22 +630,25 @@ impl Stage {
         self.pending_focus_request = Some(None);
     }
 
-    /// 注册 tween。start/end 取前 value_size 个分量（prop 决定 size）。
+    /// 注册 tween（spec 形态；链式 builder 见 `tween_builder`）。
     /// duration<=0 → update 首帧即结束并产 complete。无 scene / 越界 node → update 跳过（不报错）。
-    #[allow(clippy::too_many_arguments)] // 参数与 C# FFI 签名 1:1 对齐（同 text/layout.rs 惯例）
-    pub fn tween(
+    pub fn tween(&mut self, node: NodeId, spec: crate::tween::TweenSpec) {
+        self.tweens.tween(node, spec);
+    }
+
+    /// 链式 tween builder 入口：
+    /// `stage.tween_builder(node, TweenProp::Opacity).from(&[0.]).to(&[1.]).duration(0.3).start()`
+    /// from/to 取前 `prop_value_size` 个分量（越界分量忽略，长度不足补 0）。
+    pub fn tween_builder(
         &mut self,
         node: NodeId,
         prop: crate::tween::TweenProp,
-        start: [f32; 5],
-        end: [f32; 5],
-        ease: crate::tween::Ease,
-        delay: f32,
-        duration: f32,
-        tag: u32,
-    ) {
-        self.tweens
-            .tween(node, prop, start, end, ease, delay, duration, tag);
+    ) -> TweenBuilder<'_> {
+        TweenBuilder {
+            stage: self,
+            node,
+            spec: crate::tween::TweenSpec::new(prop, [0.0; 8], [0.0; 8]),
+        }
     }
 
     /// 停该节点该 prop 的 tween（override 保留末值）。
@@ -1102,15 +1105,24 @@ impl Stage {
             std::mem::take(&mut scene.pending_transitions);
         for r in reqs {
             self.tweens.kill(r.node, r.prop);
+            let pad = |v: [f32; 5]| {
+                let mut buf = [0.0f32; 8];
+                buf[..5].copy_from_slice(&v);
+                buf
+            };
             self.tweens.tween(
                 r.node,
-                r.prop,
-                r.start,
-                r.end,
-                r.ease,
-                r.delay,
-                r.duration,
-                TRANSITION_TAG,
+                crate::tween::TweenSpec {
+                    prop: r.prop,
+                    start: pad(r.start),
+                    end: pad(r.end),
+                    ease: r.ease,
+                    delay: r.delay,
+                    duration: r.duration,
+                    tag: TRANSITION_TAG,
+                    repeat: 0,
+                    yoyo: false,
+                },
             );
         }
         // 4.6 animation 声明同步：rematch 后读 computed style.animation
@@ -1166,6 +1178,81 @@ impl Stage {
         let frame = self.tick_and_render();
         serde_json::to_string_pretty(&frame.nodes).unwrap()
     }
+}
+
+/// 链式 tween builder（`Stage::tween_builder` 的返回值形态）。
+///
+/// ```ignore
+/// stage.tween_builder(node, TweenProp::Opacity)
+///     .from(&[0.0]).to(&[1.0])
+///     .duration(0.3).delay(0.1)
+///     .ease(Ease::CubicOut)
+///     .repeat(2, true)   // 额外重播 2 次 + yoyo 往返
+///     .tag(7)            // complete 事件按 tag 路由
+///     .start();
+/// ```
+///
+/// 消费型 builder：每个方法吃 self 返 self，`start()` 提交进 TweenManager 并返 builder
+/// 链结束。from/to 拷贝前 `prop_value_size` 个分量（不足补 0，超出忽略）。
+pub struct TweenBuilder<'a> {
+    stage: &'a mut Stage,
+    node: NodeId,
+    spec: crate::tween::TweenSpec,
+}
+
+impl<'a> TweenBuilder<'a> {
+    /// 起始值（前 value_size 个分量有效）。
+    pub fn from(mut self, start: &[f32]) -> Self {
+        self.spec.start = pad_values(start);
+        self
+    }
+
+    /// 目标值（前 value_size 个分量有效）。
+    pub fn to(mut self, end: &[f32]) -> Self {
+        self.spec.end = pad_values(end);
+        self
+    }
+
+    pub fn duration(mut self, secs: f32) -> Self {
+        self.spec.duration = secs;
+        self
+    }
+
+    pub fn delay(mut self, secs: f32) -> Self {
+        self.spec.delay = secs;
+        self
+    }
+
+    pub fn ease(mut self, ease: crate::tween::Ease) -> Self {
+        self.spec.ease = ease;
+        self
+    }
+
+    /// repeat = 额外重播次数（0 = 单次）；yoyo = 奇数轮反向（alternate）。
+    pub fn repeat(mut self, extra: u32, yoyo: bool) -> Self {
+        self.spec.repeat = extra;
+        self.spec.yoyo = yoyo;
+        self
+    }
+
+    /// complete 事件载荷（FFI 事件 touch_id 槽位回传，C# OnComplete 按此路由）。
+    pub fn tag(mut self, tag: u32) -> Self {
+        self.spec.tag = tag;
+        self
+    }
+
+    /// 提交（注册进 TweenManager，本帧起生效）。
+    pub fn start(self) {
+        self.stage.tween(self.node, self.spec);
+    }
+}
+
+/// 切片 → TweenValue 8 槽缓冲（不足补 0，超出截断到 8）。
+fn pad_values(v: &[f32]) -> crate::tween::TweenValue {
+    let mut buf = [0.0f32; 8];
+    let n = v.len().min(8);
+    buf[..n].copy_from_slice(&v[..n]);
+    buf
 }
 
 /// 动态建树 API 测试（不依赖 parse feature——runtime API 可用性门）。

@@ -1,6 +1,7 @@
 //! 每帧 DFS 算每节点累计世界矩阵。
-//! pivot = box center（w/2,h/2）；local = T(rel) ∘ T(pivot) ∘ transform ∘ T(-pivot)；
-//! world = parent.world ∘ local。
+//! pivot = transform-origin（`<length|%>` 延迟解析：px + pct/100×w/h；default 50% 50%
+//! = 盒心，未声明时与既有硬编码盒心零回归）。
+//! local = T(rel) ∘ T(pivot) ∘ transform ∘ T(-pivot)；world = parent.world ∘ local。
 
 use crate::scene::node::{AnimTable, NodeId, Scene};
 use crate::transform::{self, Affine2};
@@ -23,7 +24,9 @@ pub fn compute_world_transforms(scene: &mut Scene) {
 fn rec(scene: &Scene, anim: &AnimTable, id: NodeId, parent_world: Affine2, worlds: &mut [Affine2]) {
     let node = scene.get_live(id, "transform/rec");
     let lr = node.layout_rect;
-    let pivot = (lr.w / 2.0, lr.h / 2.0);
+    // pivot = transform-origin 延迟解析（default 50% 50% = 盒心）。#21 CSS 半边。
+    let o = &node.style.transform_origin;
+    let pivot = (o.x.resolve(lr.w), o.y.resolve(lr.h));
     let rel = match node.parent {
         Some(p) => {
             let plr = scene.get(p).expect("live parent").layout_rect;
@@ -578,6 +581,60 @@ mod tests {
         assert!(
             (x - 50.0).abs() < 0.1 && (y - 150.0).abs() < 0.1,
             "css∘user：user 先平移原点→(100,0)，css rotate→(0,100)，+pivot→(50,150)，got ({x},{y})"
+        );
+    }
+
+    // transform-origin（#21 CSS 半边）：pivot 从硬编码盒心改为声明解析（default 50% 50%
+    // = 盒心，既有测试全锁零回归）；这里锁「改 origin 真改 pivot」。
+    #[test]
+    fn transform_origin_moves_rotation_pivot() {
+        // 100×100 盒 rotate(90°)：origin default（50%,50% = 盒心）→ 左上角 (0,0) 映到
+        // (100,0)；origin left top（0,0）→ 绕左上角转，(0,0) 不动。
+        let mut s = scene_with(vec![node(
+            0,
+            None,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        )]);
+        let rid = root_id(&s);
+        s.get_mut(rid).unwrap().style.transform = LocalTransform {
+            matrix: transform::from_rotate(std::f32::consts::FRAC_PI_2),
+        };
+        compute_world_transforms(&mut s);
+        let (x, y) = s.world_transforms[rid.index()].apply_point(0.0, 0.0);
+        assert!(
+            (x - 100.0).abs() < 1e-3 && y.abs() < 1e-3,
+            "default origin（盒心）rotate90：(0,0)→(100,0)，got ({x},{y})"
+        );
+
+        let mut s2 = scene_with(vec![node(
+            0,
+            None,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 100.0,
+                h: 100.0,
+            },
+        )]);
+        let rid2 = root_id(&s2);
+        s2.get_mut(rid2).unwrap().style.transform = LocalTransform {
+            matrix: transform::from_rotate(std::f32::consts::FRAC_PI_2),
+        };
+        s2.get_mut(rid2).unwrap().style.transform_origin =
+            crate::style::resolved::TransformOrigin {
+                x: crate::transform::LenPct { px: 0.0, pct: 0.0 },
+                y: crate::transform::LenPct { px: 0.0, pct: 0.0 },
+            };
+        compute_world_transforms(&mut s2);
+        let (x2, y2) = s2.world_transforms[rid2.index()].apply_point(0.0, 0.0);
+        assert!(
+            x2.abs() < 1e-3 && y2.abs() < 1e-3,
+            "origin left top：绕 (0,0) 转，角点不动，got ({x2},{y2})"
         );
     }
 }
