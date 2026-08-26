@@ -1,0 +1,19 @@
+// mail 页演示数据（AI 手写，loom preview server 按页注入；不进打包）。
+// 运行时 C# 驱动 ListView；预览侧克隆 template 填条目，人类预览不空列表。
+import { ready } from '../main.js';
+import { fillList, pageDir } from '../lib/fill.js';
+
+const ITEM_ROTATION = ['item-potion', 'item-chest', 'item-gem', 'item-scroll', 'item-staff', 'item-wand'];
+
+ready.then(() => {
+  const iconsDir = pageDir() + '../res/icons/';
+  document.querySelectorAll('[role="list"][data-fill]').forEach((list) => {
+    const count = parseInt(list.getAttribute('data-fill'), 10) || 8;
+    fillList(list, count, (i, node) => {
+      const img = node.querySelector('img');
+      if (img && /\/item-/.test(img.getAttribute('src') || '')) {
+        img.setAttribute('src', iconsDir + ITEM_ROTATION[i % ITEM_ROTATION.length] + '.png');
+      }
+    });
+  });
+});

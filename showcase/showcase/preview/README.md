@@ -1,38 +1,30 @@
 # Showcase browser preview
 
-双击 `../home.html` 浏览器预览（视觉参考，非运行时行为镜像）。
+`loom preview <workspace>`（在仓库 showcase/ 目录跑）起本地预览工作台：左侧包/页
+树、右侧按 match_mode 缩放的设计分辨率预览、设备框 + 安全区参考线。file:// 双击
+已退役——预览脚本由 server 注入，HTML 源零 `<script>` 引用。
 
-## 架构：预览 vs 打包（重要）
+## 架构：谁负责什么
 
-showcase 当前是**预览靶子**，还不能直接被 loomgui 运行时渲染。两层原因：
+| 层 | 归属 |
+|---|---|
+| 工作台外壳（树/缩放/设备框/设置） | loom.exe 内嵌，版本随 CLI |
+| 注入（main.js / pages/<页>.js，存在才注入） | `loom preview` server |
+| 组件清单数据 | server `/api/workspace.json`（与打包同一套扫描口径） |
+| 模拟脚本本体 | **本目录，AI 手写**（约定见 loomgui-preview skill） |
 
-1. **打包器（R1.1）不打包 HTML**。`crates/packer/pkg/src/build.rs` 在 R1.1 移除了 HTML→pkg.bin 路径（`packages` 恒空），只产 atlas/fonts/runtime manifest。HTML→pkg 将在 **R3 经 fence crate 重建**。
-2. **fence 只消费 inline style**。fence 的 `css_resolve` 只解析每个 element 的 `style="..."` 属性 + 标签 `DisplayDefault`（div→Block；button/span/img→inline 走 Flex Row）。`<style>` 块和 `<link rel=stylesheet>`（即 preview-base.css）**不进 IR/pkg**。
-
-结论（R3 后已兑现：fence 消费 `<style>` 与 `<link rel="stylesheet">`，class CSS 正常进 pkg）：
-- 各页 `<style>` 块的 class CSS 参与打包，也服务浏览器预览。
-- `preview-base.css` 是浏览器预览 polyfill（@font-face 字体、body 居中 letterbox、box-sizing、button reset），**走 script 通道加载**（`loom-preview.js` 注入）：fence 会校验每个 `<link rel="stylesheet">` 的围栏符合度，而 polyfill 故意全是围栏外声明；script 标签是 shell 标签、构建期被消费，打包器永远看不见它。页面 HTML 里**不要**直接 `<link>` 它——那会让 `loom build` 报错（历史上踩过：10 页静态链接导致 150 个围栏 error）。
-
-验证围栏符合度（diagnostics 应为 0）：
-```bash
-cargo run -p loomgui_fence --example dump_showcase -- showcase/showcase/<page>.html
+```
+preview/
+  main.js             ← 全页共享入口：base.css 注入、组件展开、控件/tabs/dialogs/导航、动画重播
+  pages/<页>.js       ← 按页演示数据（mail/inventory/api-infra 的 data-fill 列表）
+  lib/                ← expand（组件展开）/ controls（控件语义）/ fill（演示填充），ESM 自由组织
+  preview-base.css    ← 浏览器 polyfill（@font-face、box-sizing、button reset、重播按钮样式）
 ```
 
-## 围栏覆盖矩阵
+**不进打包**：`preview/` 不在打包扫描面（包目录只扫顶层 `*.html`）；HTML 零引用。
+`loom check` 对 `data-fill` 页缺 `pages/<页>.js` 会报 `PreviewDataFillWithoutSim`。
 
-showcase 覆盖全部围栏表面，供 R2-R7 运行时重写验收。
-
-```bash
-python showcase/scripts/coverage-check.py    # → COVERAGE OK
-```
-
-- **6 runtime 标签**：div span button img template slot（控件与列表无专属标签，用 `role` 表达）
-- **11 control/list roles**：combobox/listbox/option/slider/spinbutton/switch/radio/progressbar/textbox(+aria-multiline)/list/listitem
-- **9 CSS groups**：sizing layout position box-model border background visual text overflow
-- **custom-element**：`<item-card>`（hyphenated tag = CustomElement）+ `<slot>` 投影
-- **无 forbidden tag**（h1-h6 / meter / dialog / details / form / fieldset 等）
-
-### 页面与经典场景
+## 页面与经典场景
 | 页 | 经典场景 |
 |---|---|
 | home | 主菜单导航、卡片网格、CTA |
@@ -43,6 +35,7 @@ python showcase/scripts/coverage-check.py    # → COVERAGE OK
 | character | NativeHost 3D、装备槽网格、技能列表（role=list）、stat-bar |
 | form | 表单全控件编排、textarea、slider、div 分组（替代 fieldset） |
 | lab | CSS 全属性 specimen（flex/盒模型/边框/背景/文本特效/变换/溢出/自定义元素） |
+| m2-animation / layout-anim / api-infra | 动画端点 / 布局动画 / 运行时 API 演示 |
 
 组件：nav-bar（顶栏）、stat-bar（状态条）、item-card（自定义元素 + slot 投影）。
 
@@ -67,9 +60,7 @@ background-image/size；filter；transform；overflow:scroll；border-image-slic
 TweenManager 逐曲线 ease、虚拟列表 slot 复用/不等高补偿、NativeHost 3D/粒子、事件系统、overlay 堆叠时序。
 
 ## Maintenance
-- 改 showcase HTML：刷新浏览器。
-- 改 `components/*.html`（或增删组件）后跑 `python showcase/scripts/gen-preview-registry.py`
-  重生成 `preview/components-registry.js` 并入库——手动 file:// 预览靠它展开 Custom Element
-  （rect-diff 的 browser-rect 注入优先，不受影响）。
-- 改后跑 `coverage-check.py` + `dump_showcase` 确认围栏 diagnostics=0。
-- NAV 表在 loom-preview.js 顶部，新页加那里。
+- 改 showcase HTML / 模拟脚本：刷新浏览器（server 每请求现读源文件，无需重启）。
+- 改 `components/*.html`：无需任何再生步骤（组件清单由 server /api 实时吐）。
+- 新页导航入口：NAV 表在 `main.js` 顶部。
+- 改后跑 `coverage-check.py` + `loom check` 确认 diagnostics 干净。

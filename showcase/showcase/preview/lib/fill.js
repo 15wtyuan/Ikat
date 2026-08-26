@@ -1,0 +1,21 @@
+// 演示数据填充（AI 手写预览脚本；不进打包）。
+// 运行时 ListView 是数据驱动的（C# 设 ItemCount 填充），HTML 里只留 <template>。
+// 预览侧克隆 template 补足条目，人类预览才不空列表。
+// rect-diff 对拍时克隆会被测量脚本撤掉（core 静态 dump 无 C# 驱动）——两侧口径一致。
+
+// 克隆 list 的 <template> 子女补到 count 条（template 自身算第 0 条）。
+// decorate(i, node) 可按索引改克隆内容（轮换图标/文案等）。
+export function fillList(list, count, decorate) {
+  const tpl = list.querySelector('template');
+  if (!tpl) return;
+  for (let i = 1; i < count; i++) {
+    const node = tpl.content.cloneNode(true);
+    if (decorate) decorate(i, node);
+    list.appendChild(node);
+  }
+}
+
+// 页面 URL 所在目录（含尾斜杠）——相对资源定位用。
+export function pageDir() {
+  return location.href.substring(0, location.href.lastIndexOf('/') + 1);
+}
