@@ -5,7 +5,8 @@ description: |
   workspace. Use BEFORE writing HTML/CSS in a LoomGUI workspace (run
   `loom list` / `loom show` instead of scanning files), and AFTER edits
   to validate (`loom check`) and package (`loom build`). Also for
-  workspace configuration: init, new package, font add, atlas add.
+  workspace configuration and version sync: init, upgrade, new package,
+  font add, atlas add.
   Fence authoring rules live in the loomgui-editor skill.
 ---
 
@@ -157,7 +158,49 @@ package/CLI upgrade, run it once — `loom check` warns
 (`StaleScaffold`) when the version stamp is older than the running
 CLI. Without `--agent` it refreshes whichever agent dirs already
 exist (`.agents/skills` and/or `.claude/skills`; default `agents` for
-a first-time scaffold).
+a first-time scaffold). For the full upgrade ritual see
+[Version sync](#version-sync-workspace--unity-package).
+
+## Version sync (workspace ↔ Unity package)
+
+Two version sources must stay in lockstep; each can only see itself:
+
+- workspace side: `.loom/scaffold.version` (or `.loom/loom.exe version
+  --format json` → `cli`)
+- Unity side: `<unity_root>/Packages/packages-lock.json` →
+  `com.loomgui.unity` → `version` (for git-URL installs this is the
+  package.json version at the pinned tag)
+
+The bundled `.loom/loom.exe` reports ITS OWN version — an old exe
+never flags itself, and `StaleScaffold` only compares the stamp
+against the *running* CLI. Drift is only visible by comparing the two
+sides directly. Do that compare whenever the Unity package version
+changes and before builds that follow a Unity-side upgrade.
+
+**Workspace older than Unity** (the common drift — user bumped the
+manifest tag):
+
+1. Get the new exe: copy `<unity_root>/Library/PackageCache/
+   com.loomgui.unity*/Editor/Tools/loom(.exe)` (glob — the cache dir
+   name has a hash suffix), or download
+   `https://github.com/15wtyuan/LoomGUI/releases/download/<tag>/loom.exe`
+   (do NOT use the `/releases/latest` endpoint — 0.x releases are all
+   prerelease, that endpoint 404s; use the release list).
+2. Overwrite `.loom/loom(.exe)` with it.
+3. Run `.loom/loom(.exe) scaffold` — refreshes skills + version stamp
+   (self-copy skips, same path).
+
+Verify: `loom check` reports no `StaleScaffold`, and the three
+versions (manifest tag ↔ lock `version` ↔ `.loom/scaffold.version`)
+agree.
+
+**Workspace newer than Unity**: the exe may emit `.pkg.bin` the old
+in-package `.dll` cannot read (`format_version` only grows). Tell the
+user to bump the manifest tag to match before you build.
+
+Never "upgrade" via `loom init --force` — it resets
+`loom.workspace.json` to an empty skeleton and wipes every registered
+package.
 
 ## `loom.workspace.json` fields
 
