@@ -126,8 +126,11 @@ pub extern "C" fn loomgui_stage_tween_shadow(
                 return None; // 空列表端点 = box-shadow:none（合法端点，动画淡出）
             }
             let raw = unsafe { std::slice::from_raw_parts(ptr, n as usize * 9) };
+            // 定长 9 浮点一层：as_chunks 直接给 [[f32; 9]]，无余数语义（长度必整除）。
+            let (layers, _) = raw.as_chunks::<9>();
             Some(
-                raw.chunks_exact(9)
+                layers
+                    .iter()
                     .map(|c| BoxShadow {
                         ox: c[0],
                         oy: c[1],
