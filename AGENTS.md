@@ -48,7 +48,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 
 **基准测试**：`crates/core/benches/solve.rs`（criterion，#29 立）——增量 solve 稳态/单点变更 vs 全重建对拍，api-infra 形状 ~2400 节点。跑法 `cargo bench -p loomgui_core`；`cargo test` 不执行 bench（CI 零负担）。动 solve/layout 面后跑一次看回归。
 
-**CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
+**CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红（且**本地绿 ≠ CI 绿**：CI stable 滚动可超前本地一档 + clippy 增量缓存跳过未变更 crate，见 pitfalls §2）。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
 **发版（tag 触发 Release workflow）**：三道硬门：tag 名 == `unity/package/package.json` 的 version，且 == `crates/packer/pkg/Cargo.toml` 的 version（不齐则 `loom version` 撒谎），且 **`unity/package/CHANGELOG.md`**（仓库唯一 CHANGELOG，根目录无）有对应 `## [<ver>]` 段落——**打 tag 前先双 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内（Release workflow 只验证+出 artifact；release-check 只查 dll 存在性，字节 staleness 无法校验）。**移 tag 的两个坑**：① 远端常有 CI bot 的 CLAUDE.md 镜像 commit（[skip ci]）挡 push——rebase 后本地 tag 仍指 rebase 前的孤儿 commit，须 `git tag -f` 重打再 `--force` 推；② 多 refspec push（`push origin main tag`）在 main 被拒时 tag 可能已单独上远端，忘了重打会留脏 tag——推完 `git ls-remote` 核对。移 tag 后 CHANGELOG 里记在 Unreleased 的新批要折进版本段（移 tag = 成为版本一部分）。
 
@@ -101,6 +101,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 - **代码注释**：哲学、出处与范例见 `docs/code-comments.md`（Martin/Ousterhout 之争 → 共识公理 → 开源实践谱系 → 本仓库立场）。判据：非显而易见处写、显而易见处让代码自己说话；契约层写足，复述层零容忍。铁律：注释自包含——读者含 AI 代理，引用内部编号/暗语/文档路径即幻觉入口，确有引用必要直接把结论文本拷进来；踩坑编年史不进代码。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
 - **防文档漂移**：文档写定性不写数字；关键 claim 加可执行测试；改代码后搜 docs/ 是否引用了改动的 struct/函数/列数。
+- **面向消费侧 AI 的文档（handbook/runbook 类，如 `docs/ai-setup.md`）**：指代锚点必须是 **AI 视角可观测的事实**（如「当前会话打开的目录」），不能是决策结果（如「你希望 .loom/ 落在哪」——AI 无从判断）；命令示例不能写死版本号而不提醒替换。验收 = **新鲜 subagent 沙盘**：只给文档本身（严禁读本仓库任何其它文件，模拟消费侧只有链接），判据 = 只问该问的问题 + 全链走绿 + 挑刺清单回收修订——自己复读只算排版检查，不算验收。
 
 ## 调试技巧
 
@@ -124,7 +125,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **Unity 侧结构化诊断入口**：`LoomHost.DumpSceneJson()`（Runtime 包内 public，未 instantiate 返 `"[]"`）dump 全场景节点树；showcase 工程另有 dev-only 的 `LoomBridge`（PlayMode-only：DumpScene/DumpMirrorPool）。uloop 探针读空先想这两个入口。
 
-**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；页面预览模拟脚本（preview/main.js + pages/<页>.js，经 `loom preview` server 注入）是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。**rect 全等 ≠ 渲染全等——行断是独立维度**：文本换行变化不必然改节点 rect（定高容器内换行 rect 不动），布局/测量面改动的守卫必须含行数维度（layout 差分守卫测试已含）；怀疑 core 行为回归时最强取证 = **pre-变更 worktree 对拍**（`git worktree add` 拉变更前 commit、构建同 example、`dump_page --json` 按 id+tag+classes+domIndex 键逐节点比 rect/行断）——#29 验收期十页逐字节全等一锤排除布局回归。shell 注意 `cmd | tail; echo $?` 捕获的是 tail 退出码。
+**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；页面预览模拟脚本（preview/main.js + pages/<页>.js，经 `loom preview` server 注入）是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。**rect 全等 ≠ 渲染全等——行断是独立维度**：文本换行变化不必然改节点 rect（定高容器内换行 rect 不动），布局/测量面改动的守卫必须含行数维度（layout 差分守卫测试已含）；怀疑 core 行为回归时最强取证 = **pre-变更 worktree 对拍**（`git worktree add` 拉变更前 commit、构建同 example、`dump_page --json` 按 id+tag+classes+domIndex 键逐节点比 rect/行断）——#29 验收期十页逐字节全等一锤排除布局回归。**动画页 diff 数字先测噪声底再下结论**：同栈两次采样对拍（old-vs-old 也有 21 diff = 相位噪声实锤）；要一锤定音用「动画/过渡全禁后的终态 A/B」——四页 0 diff 即证明改动 rect-中性（preview 批方法论）。shell 注意 `cmd | tail; echo $?` 捕获的是 tail 退出码。
 
 **Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间，同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
 
@@ -135,6 +136,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 **subagent 协作（多 agent 分工的教训）**：
 - 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。
 - **同一工作树上 subagent 串行派发**：全仓库所有 crate 依赖 loomgui_core，并行 agent 的半成品编辑会互相打爆对方的 `cargo test`（整 crate 编译含他人在途改动）——机械活串行排队才是真并行省时。
+- **并行用户会话共享工作树**（非 subagent，用户自己开了多个 agent 会话）：先 `git status` 归因——不属于本批的在途改动（~千行级）别碰也别修；提交只 stage 本批文件；整包 `cargo test` 编译被挡（如 E0063）≠ 本批问题，改用窄 target（`--lib` + 测试名过滤）隔离验证。
 - task 切分别太细：强耦合重构（删共享字段类）的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 - 分支上并行有用户 commit 时，review BASE 用 task commit 的实际 parent（`git rev-parse <taskhead>^`），否则 review 范围混入用户 commit。
 - long-running 分支防 main 漂移：反向 merge（`git merge main` 进 feature 分支），合超集签名，用对方分支的测试当合并验收标准。

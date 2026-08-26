@@ -60,6 +60,12 @@
 - **core 反向调宿主服务须启动期注册函数指针对**：core 是 cdylib，不能 extern 调宿主符号（链接期不可解析 + C# 给不出 linkable C 符号）——剪贴板/原生弹窗/系统字体查询都走注册回调模式；内存契约：get 缓冲区宿主持有（活到下次 get），core 立即拷贝、不跨分配器 free。
 - **快照测试锁 glyph 度量必须钉仓库内字体**：不同 OS 默认字体（Win arial vs Linux DejaVu）度量漂移、Linux CI 无 arial——fixtures 字体入库是前提，不是优化。
 
+### 本地绿 ≠ CI 绿（clippy 双盲区）
+本地 clippy 全绿挡不住 CI 红：① CI 用 `dtolnay/rust-toolchain@stable` 滚动，可比本地 stable 新一档（1.97→1.98 实锤新 lint `chunks_exact_to_as_chunks`）；② clippy 增量缓存跳过未变更 crate——久未 push 的积压 commit 里潜伏的 lint 只在 push 后暴露。push 被 CI bot 镜像 commit 挡直推时先 `git pull --rebase`。
+
+### 预览模拟脚本的级联序（经典 script vs ESM）
+旧内联 `<script>`（解析中执行）往 head `appendChild` 的 `<link>`/`<style>` 天然落在页面 `<style>` **之前**；换成 ESM（defer 语义，解析完执行）后同样代码落在**最后**——同名规则级联胜负翻转。预览 base.css 注入必须显式 `insertBefore(head.firstChild)` 复原「polyfill 先、页面样式后」的旧序（showcase/preview/main.js 实锚）。
+
 ## 3. Unity 平台特性
 
 - **非纯平移节点的 renderer.bounds ≠ 真实视觉 AABB**：rotate/scale 走 `_ObjM` shader 矩阵、GO 只带平移分量 → Unity 剔除/拾取看到的 bounds = GO 平移 × 未旋转 mesh。任何新消费 renderer.bounds 的功能（剔除/遮挡/视口判定）都须过 `MirrorPool.CompensateMeshBoundsForLinear`（bounds 置线性矩阵 × 顶点 AABB）；否则旋转节点滚动/移动中被错误剔除（#66 实锤）。
