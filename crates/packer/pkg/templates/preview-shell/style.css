@@ -41,6 +41,9 @@ button:hover { border-color: var(--accent); }
            repeating-conic-gradient(#1b1e24 0% 25%, #17191d 0% 50%) 0 0/24px 24px; }
 #device { position: relative; background: #000; box-shadow: 0 0 0 1px var(--line), 0 8px 32px #0009;
           overflow: hidden; }
+/* 观察级缩放层：适应窗口时等比缩小整个设备框（transform 不触发 iframe reflow，
+   页内仍按设计分辨率渲染——保真语义不变）。宽度撑满 #device、内容按 1:1 摆。 */
+#device-scale { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 #frame { position: absolute; left: 0; top: 0; border: 0; background: #fff;
          transform-origin: 0 0; }
 .safe-band { position: absolute; left: 0; right: 0; display: none; pointer-events: none;

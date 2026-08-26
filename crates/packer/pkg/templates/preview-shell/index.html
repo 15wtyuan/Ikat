@@ -25,6 +25,7 @@
       <button id="custom-go">应用</button>
     </label>
     <label><input type="checkbox" id="safe-area"> 安全区参考线</label>
+    <label><input type="checkbox" id="fit-window"> 适应窗口</label>
     <button id="reload" title="重载页面（重播 CSS 动画）">↻</button>
     <button id="settings">⚙</button>
   </div>
@@ -34,9 +35,11 @@
   <nav id="tree"></nav>
   <section id="stage">
     <div id="device">
-      <div id="safe-top" class="safe-band"></div>
-      <div id="safe-bottom" class="safe-band"></div>
-      <iframe id="frame" title="page preview"></iframe>
+      <div id="device-scale">
+        <div id="safe-top" class="safe-band"></div>
+        <div id="safe-bottom" class="safe-band"></div>
+        <iframe id="frame" title="page preview"></iframe>
+      </div>
     </div>
   </section>
 </div>

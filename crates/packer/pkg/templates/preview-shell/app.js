@@ -6,6 +6,7 @@
 const LS = {
   preset: "loomPreview.preset",
   safe: "loomPreview.safeArea",
+  fit: "loomPreview.fitWindow",
   custom: "loomPreview.customResolutions",
 };
 
@@ -158,7 +159,7 @@ function applyPreset(id) {
 function layoutDevice() {
   const p = state.preset || allPresets()[0];
   const { w: dw, h: dh } = p.id === "design" ? state.design : p;
-  const frame = $("frame"), device = $("device");
+  const frame = $("frame"), device = $("device"), scaler = $("device-scale");
 
   // match_mode 缩放：letterbox=contain（min）；fit-width/fit-height 单轴贴满。
   const sx = dw / state.design.w, sy = dh / state.design.h;
@@ -166,8 +167,20 @@ function layoutDevice() {
     : state.matchMode === "fit-height" ? sy
     : Math.min(sx, sy);
 
-  device.style.width = dw + "px";
-  device.style.height = dh + "px";
+  // 观察级缩放（适应窗口）：整个设备框等比缩进 stage 视口，上限 1（不放大——
+  // 放大会糊像素）。transform 不触发 iframe reflow，页内仍按设计分辨率渲染，
+  // 保真语义不变；关闭则回 1:1（像素级检查，stage 恢复滚动）。
+  const stage = $("stage");
+  const PAD = 24; // #stage padding（style.css）
+  const fit = $("fit-window").checked
+    ? Math.min((stage.clientWidth - PAD * 2) / dw, (stage.clientHeight - PAD * 2) / dh, 1)
+    : 1;
+
+  device.style.width = Math.round(dw * fit) + "px";
+  device.style.height = Math.round(dh * fit) + "px";
+  scaler.style.width = dw + "px";
+  scaler.style.height = dh + "px";
+  scaler.style.transform = `scale(${fit})`;
   frame.style.width = state.design.w + "px";
   frame.style.height = state.design.h + "px";
   frame.style.transform = `scale(${scale})`;
@@ -208,6 +221,12 @@ function bindControls() {
   safeBox.checked = localStorage.getItem(LS.safe) === "1";
   safeBox.addEventListener("change", () => {
     localStorage.setItem(LS.safe, safeBox.checked ? "1" : "0");
+    layoutDevice();
+  });
+  const fitBox = $("fit-window");
+  fitBox.checked = localStorage.getItem(LS.fit) !== "0"; // 默认开
+  fitBox.addEventListener("change", () => {
+    localStorage.setItem(LS.fit, fitBox.checked ? "1" : "0");
     layoutDevice();
   });
   $("reload").addEventListener("click", () => {
