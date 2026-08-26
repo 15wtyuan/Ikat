@@ -146,6 +146,8 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **FFI panic 取证用站点标签 + 释放审计，别信 release 行号**：release dll 内联后 panic 行号不可靠。`Scene::get_live`（全库 21 处 live 查取带函数名站点标签，`模块/函数` 格式、勿用行号——行号随编辑漂移会把取证指向错误位置）+ `Scene::free_log`（最近 32 笔释放审计：死 id 距今几笔、走没走漏斗）已常驻——「快照后死亡」类 panic（如 rematch live node）一行日志定位。Rust 压测复现不了时先算量级差（用户几分钟 60fps churn ≈ 上万次 vs 压测几百次）。
 
+**showcase 用例两纪律**（用户两次打回后拍板）：① 运行时 C# API 不许以「HTML 表达不了」为由不设用例——HTML 摆台（目标块 + 触发按钮 + 读数 span 带 id）+ `ShowcaseRunner.WireControls` 里 `TryGet` + `Clicked` 接线（照 lab §14/§15 同款），读数翻转即事件路由证据；② 判据只认肉眼强信号（过冲/出界/瞬移/弹振/消失/读数翻转），禁需对照记忆、心算、盯梢短瞬的判据（如与缺省曲线比、半宽→整宽）——可辨性差的行删掉，不加标记补救。
+
 **uloop 取证自相矛盾（截图正常但探针读空 / 同会话数据反复打架）先查编辑器会话状态**：① `tasklist | grep Unity.exe` 数实例——launch 超时会再起一个，命令轮流命中不同实例；② PlayMode 期间触发过编译（domain reload）会把原生 stage 打裂（渲染正常但 DumpScene 全零）——重启编辑器复测再怀疑产品。规矩：**PlayMode 验收期间绝不编译**。另：`File.WriteAllText` 被 uloop 安全策略拦，大 JSON 用 execute-dynamic-code 的 `return` 值带出。
 
 **圆角/小尺寸视觉差异别信目测或视觉模型**——python 像素取样 + 数学验证（如像素中心到角圆心距离 vs 半径）；「渲染出来的圆角比预期小」先算正确视觉该是什么样再下结论。

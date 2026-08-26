@@ -667,7 +667,7 @@ c. KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/t
 
 **Animation 句柄 L3 全套**（见 [public-api.md](public-api.md) §9）：`Node.Play(name)` 返回 `Animation` 句柄，事件 `AnimationStart`/`End`/`Iteration`/`Key`/`Hook` + `TransitionEnd` 经 `borrow_events` 双路由（全局 `On<T>` + 句柄 `player_key` 私有回调）。
 
-> **M2.5(引擎终态)**:池化 Tween(`TweenManager { active, pool }` 替换单 `Vec`)+ 缓动全集(cubic-bezier/Elastic/Bounce/Custom + per-stop timing-function 结构化)+ 链式 builder API(替位置参数 `tween()`)+ player 与 Tween 插值原语统一(共享 `TweenValue{x,y,z,w,d}` + `value_size(1..6)`)。当前 TweenManager 是单 `Vec<Tween>` + flat `tween()` + Ease enum keyword 子集（Linear/Quad/Cubic/Back 族 + steps；缺 cubic-bezier/Elastic/Bounce/Custom）+ value_size max=4——够 keyframes 跑，触发判据见 milestones M2.5。
+**引擎终态（#9 已交付）**：池化 Tween（`TweenManager { active, pool }`，稳定序回收）+ 缓动全集（CSS 标准 keyword 精确 bezier + `cubic-bezier()` + loom 超集 back/elastic/bounce + steps；per-stop `animation-timing-function`）+ 链式 builder（Rust `Stage::tween_builder` / FFI `LoomTweenSpec` 单入口 / C# `Node.Tween` fluent，`OnComplete` 走 TweenComplete 事件 tag 路由）+ 插值原语统一（共享 `TweenValue` 定长缓冲 + `lerp_n`）。tween 支持 `repeat`+`yoyo` 多轮（alternate 语义）；keyframes transform 的 translate 分量收百分比形（`LenPct` px+pct 混合描述符，写入期按节点布局尺寸解析——player 保持纯时间轴）。**缺省 timing 全端 = 精确 CSS `ease` bezier(0.25,0.1,0.25,1)**（幂函数近似已废）。Ease/TweenProp 判别值末尾追加纪律（pkg bincode variant index + FFI kind 契约）。
 
 ### 13.3 Transition
 

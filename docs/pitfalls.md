@@ -83,6 +83,7 @@
 - **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `LoomGUI.Editor.EventType` 撞 `LoomGUI.EventType`），只能全限定名，alias 无用。
 
 ## 4. 动态契约
+- **CSS 多声明分割必须括号感知**：`animation`/`transition` 等逗号多声明与函数参数逗号共用语法——`split(',')` 会把 `cubic-bezier(.3,0,.7,1)` 的参数切成独立声明，静默错位成默认值（解析不报错、行为不对）。统一走 `mapping::split_top_level_commas`（渐变/rgba 同款）；新收函数形属性（带参数的 CSS 函数值）先过它再分段。
 
 - **dirty hash 的「全量」是动态契约**：每给 RenderNode/Line 加视觉字段，必同步检 payload/header hash 是否覆盖新字段——漏一个 = 静默 stale（不崩、只是不更新）。历史上反复漏过（uvs / 圆角顶点 / line-height / reuse_key / baseline）。
 - **查询缓存别缓存 miss**（除非确定源不变）——运行时资源可能后到，缓存 miss 会永久遮蔽后到的正确值。
