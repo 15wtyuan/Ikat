@@ -55,17 +55,17 @@
   /* #77：百分比形（相对 fill 自身宽 = track 宽 200px，与旧 px workaround 视觉等价） */
   @keyframes ind-slide { from { transform:translateX(-100%); } to { transform:translateX(100%); } }
   /* 节 16：缓动全集 + transform-origin + per-stop timing（#9/#21/#77 验收） */
-  .eg-track { width:240px; height:14px; background-color:rgba(26,47,69,0.85); border-radius:4px; position:relative; overflow:hidden; }
+  /* 轨道不裁剪：过冲类曲线「冲出右缘再回来」是一等判据，裁了就看不见 */
+  .eg-track { width:240px; height:14px; background-color:rgba(26,47,69,0.85); border-radius:4px; position:relative; }
   .eg-dot { position:absolute; left:0; top:1px; width:12px; height:12px; border-radius:6px; background-color:#5fb4d4; animation:eg-slide 1.6s infinite both; }
   .eg-bounce { animation-timing-function:ease-out-bounce; }
   .eg-elastic { animation-timing-function:ease-out-elastic; }
-  .eg-back { animation-timing-function:ease-in-out-back; }
-  .eg-bezier { animation-timing-function:cubic-bezier(0.7,0,0.3,1); }
+  .eg-bezier { animation-timing-function:cubic-bezier(.175,.885,.32,1.275); }
   .eg-steps { animation-timing-function:step-end; }
   @keyframes eg-slide { from { transform:translateX(0); } to { transform:translateX(228px); } }
   /* shorthand 位声明缓动（防逗号分割回归：bezier 参数逗号曾被切成多声明）+ step-start 对照 */
   .eg-shorthand { animation:eg-slide 1.6s ease-in-out-elastic infinite both; }
-  .eg-shorthand-bezier { animation:eg-slide 1.6s cubic-bezier(.7,0,.3,1) infinite both; }
+  .eg-shorthand-bezier { animation:eg-slide 1.6s cubic-bezier(.175,.885,.32,1.275) infinite both; }
   .eg-stepstart { animation-timing-function:step-start; }
   /* runtime tween 演示（C# TweenBuilder 驱动，ShowcaseRunner 接线——HTML 只摆台） */
   .tw-track { width:240px; height:34px; background-color:rgba(26,47,69,0.85); border-radius:4px; position:relative; overflow:hidden; }
@@ -73,7 +73,7 @@
   /* 混合百分比 translate（x 百分比相对自身宽 + y px 双轴，#77 混合形） */
   .mixp-track { width:240px; height:20px; background-color:rgba(26,47,69,0.85); border-radius:4px; position:relative; overflow:hidden; }
   .mixp-bar { position:absolute; left:60px; top:3px; width:120px; height:14px; border-radius:3px; background-color:#8ec5d8; animation:mixp-slide 1.8s infinite both linear; }
-  @keyframes mixp-slide { from { transform:translate(50%, 0px); } to { transform:translate(-100%, 0px); } }
+  @keyframes mixp-slide { from { transform:translate(150%, 0px); } to { transform:translate(-100%, 0px); } }
   .og-stage { width:110px; height:110px; position:relative; }
   .og-bar { position:absolute; left:43px; top:0; width:24px; height:110px; border-radius:4px; background-color:#2a5a75; }
   .og-bar-center { transform-origin:center center; animation:og-spin 2.4s infinite linear; background-color:#5fb4d4; }
@@ -335,14 +335,13 @@
 
       <div class="section">
         <div class="section-title">16 · 缓动全集 / transform-origin / per-stop timing（#9 动画终态基建）</div>
-        <div class="section-desc">验收标准逐项：① 缓动画廊九行——每行小圆点应 1.6 秒循环左→右滑动，但节奏各不同：linear 匀速；ease-out-bounce 到达右端应弹跳回落数次；ease-out-elastic 到达右端应过冲超界再弹回（会短暂越过右端界线，属预期）；ease-in-out-back 起步反向顿挫再加速；cubic-bezier(0.7,0,0.3,1) 两端急中段缓；step-end 应保持左侧静止、每循环末尾瞬移到右端再跳回（无渐移）；step-start 相反——循环起点即瞬移到右端并保持到末尾（起点若从左端渐移即失败）；shorthand·elastic 行与 shorthand·bezier 行分别用简写位声明 ease-in-out-elastic 与 cubic-bezier()（节奏应各自与长写法行同族：elastic 两端弹、bezier 两端急）——若表现为缺省 ease 曲线即失败（shorthand 位缓动声明丢失）。全部匀速滑动即失败（keyword 未生效）。② origin 对照——蓝条绕几何中心旋转（两端均扫出圆环）；金条 transform-origin:left top 绕左上角旋转（左上角钉死不动、条甩圆规式转动）。两根转轴一样即失败。③ per-stop timing——红条 0→右 用线性（匀速去程），右→0 用 ease-out-elastic（回程末端应过冲冲过左端界再弹回）；去回两段节奏明显不同即过，去回一样即失败。④ 混合百分比——浅蓝条应在轨道内从右半（translate(50%,0) = 右移自身宽一半）匀速滑到左侧溢出（translate(-100%,0) = 左移自身整宽、条尾滑出轨道左界被裁剪）；静止不动或位移量不像「半宽→整宽」即失败（百分比分量被丢）。⑤ runtime TweenBuilder——点「播放 tween」后红块应约 0.5 秒右滑到轨道右段、再约 0.5 秒原路滑回（Repeat+yoyo 两轮），全部跑满后读数变「tween 完成」（OnComplete 事件 tag 路由）；点击期间读数先显示「播放中」。块不动、只滑一趟不回、或读数停在「播放中」即失败。可重复点击重放。</div>
+        <div class="section-desc">判据只认肉眼看得见的信号：① 缓动画廊八行，圆点全部 1.6 秒循环左→右，行间差异一眼可判——linear 匀速（对照基准）；ease-out-bounce 到右端弹跳回落数次；ease-out-elastic 到右端弹簧式振几下；cubic-bezier 末段冲出轨道右缘再贴回；step-end 全程钉在左端、循环末尾瞬移右端；step-start 相反（起点即瞬移右端、保持到底）；shorthand·elastic / shorthand·bezier 两行须与各自的 elastic / bezier 行完全同步（同起同落同弹——不同步即 shorthand 位声明丢失）。② origin 对照——蓝条绕几何中心旋转（扫出圆环），金条左上角钉死不动、整条像圆规甩转。③ per-stop timing——红条去程匀速、回程末端冲过左端界再弹回（同一条动画两段节奏肉眼不同）。④ 混合百分比——浅蓝条从轨道右端外滑入、匀速横穿、滑出左端外完全消失，循环；条不动或穿得不对称（半宽量级不对）即失败。⑤ runtime TweenBuilder——点「播放 tween」：红块 0.5 秒右滑贴轨道右段、再 0.5 秒原路滑回，跑满读数变「tween 完成」；只滑一趟不回、读数停在「播放中」即失败；可重复点击重放。</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
           <div style="display:flex;flex-direction:column;gap:6px">
             <span class="eg-label">缓动画廊（loom 超集 + bezier + steps）</span>
             <div class="eg-row"><span class="eg-name">linear</span><div class="eg-track"><div class="eg-dot"></div></div></div>
             <div class="eg-row"><span class="eg-name">ease-out-bounce</span><div class="eg-track"><div class="eg-dot eg-bounce"></div></div></div>
             <div class="eg-row"><span class="eg-name">ease-out-elastic</span><div class="eg-track"><div class="eg-dot eg-elastic"></div></div></div>
-            <div class="eg-row"><span class="eg-name">ease-in-out-back</span><div class="eg-track"><div class="eg-dot eg-back"></div></div></div>
             <div class="eg-row"><span class="eg-name">cubic-bezier(.7,0,.3,1)</span><div class="eg-track"><div class="eg-dot eg-bezier"></div></div></div>
             <div class="eg-row"><span class="eg-name">step-end</span><div class="eg-track"><div class="eg-dot eg-steps"></div></div></div>
             <div class="eg-row"><span class="eg-name">step-start</span><div class="eg-track"><div class="eg-dot eg-stepstart"></div></div></div>
