@@ -30,7 +30,7 @@ Unity 集成见下节。完整工作流（GUI 打包器、FFI .dll 闭环、发�
 
 LoomGUI 以 UPM 包发布，通过 git URL 安装（Windows 打包器工具链）。
 
-**推荐**：把[本手册链接](docs/ai-setup.md)交给你的 AI 编码代理——它能全自动完成安装与工作区初始化（改 manifest → 下载 CLI → init → 示例验证 → 等你开一次 Unity），只需回答它一个问题。
+**推荐**：把[本手册链接](docs/ai-setup.md)交给你的 AI 编码代理——它能全自动完成安装与工作区初始化（改 manifest → 下载 CLI → init → 示例验证 → 等你开一次 Unity），只需回答它两个问题（UI 目录与构建产物目录）。
 
 手动安装：在目标工程的 `Packages/manifest.json` 加一行（tag 从 [Releases](https://github.com/15wtyuan/LoomGUI/releases) 取最新，替换下例的 `v0.0.12`）：
 

@@ -61,26 +61,32 @@ Invoke-WebRequest -Uri 'https://github.com/15wtyuan/LoomGUI/releases/download/v0
 兜底路（Release 不可达时）：跳过本步，等第 7 步 Unity 装完包后从
 `<Unity 工程>/Library/PackageCache/com.loomgui.unity*/Editor/Tools/loom.exe` 拷出使用。
 
-## 第 3 步：问用户一件事——UI 目录
+## 第 3 步：问用户两件事——UI 目录与产物目录
 
-**这是全流程唯一的必问项**：UI 工作区放哪。建议默认 `<仓库根>/ui`（独立于 Unity 工程源、入 git、团队共享），用户有既定布局就听用户的。
+全流程只有这两个必问项（一轮问完）：
+
+1. **UI 工作区放哪**：建议默认 `<会话根>/ui`（独立于 Unity 工程源、入 git、团队共享）；用户有既定布局就听用户的。
+2. **构建产物目录（output_dir）放哪**：Unity 工程内、相对工程根的路径，`loom build`
+   把 `.pkg.bin` / 图集 / 字体写到这里。建议默认 `Assets/Bundles`；团队已有自己的
+   资源组织习惯（如 `Assets/Res/UI`、`Assets/AssetBundles`）就用既有的。
 
 不要问其它问题：
 
-- 产物目录用默认 `Assets/Bundles`（构建产物直落 Unity 工程，Unity 侧就能加载）；
 - `.loom/`（CLI + 配置）与 skills 目录建议入 git——产品设计的本意就是团队 clone 即得配套工具链，除非用户明确不想。
 
 ## 第 4 步：初始化工作区
 
-会话根 = 你希望 `.loom/` 与 skills 落在的目录——**通常即游戏仓库根**（你的 cwd 在哪不重要，init 参数用绝对路径指定）。
+会话根 = **当前 agent 会话打开的目录**——用户在哪开的会话，`.loom/` 与 skills 就
+落在哪（通常用户就在游戏仓库根开会话，所以通常即仓库根）。init 的 `<dir>` 参数
+直接传它，不要另选目录。
 
 ```bash
-loom.exe init <会话根> --ui <UI 目录> --unity-root <Unity 工程根> --output Assets/Bundles --agent agents
+loom.exe init <会话根> --ui <UI 目录> --unity-root <Unity 工程根> --output <产物目录> --agent agents
 ```
 
 - `--ui` 相对会话根解析。
-- ⚠️ **必须带 `--output Assets/Bundles`**：CLI 的 `output_dir` 裸默认是 `dist`（落
-  Unity 工程外面，Unity 永远看不到）；`Assets/Bundles` 是 GUI 的默认值，CLI 不带参数不会用它。该路径相对 unity 工程根解析。
+- ⚠️ **必须带 `--output`（第 3 步问到的答案）**：CLI 的 `output_dir` 裸默认是 `dist`
+  （落 Unity 工程外面，Unity 永远看不到）。该路径相对 unity 工程根解析。
 - `--agent`：按你所在的宿主工具选——通用 `.agents/skills/` 传 `agents`（默认），
   Claude Code 传 `claude`（落 `.claude/skills/`），两者都要就重复传。
 - 已有 `loom.workspace.json` 时 init 会拒绝；`--force` 会把 workspace 重置回空骨架
@@ -105,8 +111,8 @@ loom.exe init <会话根> --ui <UI 目录> --unity-root <Unity 工程根> --outp
 目录约定，不是你 init 错了）：`<UI 目录>/ui/demo/main.html`。
 
 可选加深验证：`.loom/loom.exe build`，判据 = 退出码 0 且 stdout 的 `report.log` 含
-写入路径 `Assets/Bundles/loom.runtime.json` 与 `Assets/Bundles/ui/demo.pkg.bin`——
-产物落进 Unity 工程，「工作区 → Unity」链路即通。
+写入路径（默认产物目录下为 `Assets/Bundles/loom.runtime.json` 与
+`Assets/Bundles/ui/demo.pkg.bin`）——产物落进 Unity 工程，「工作区 → Unity」链路即通。
 
 ## 第 6 步：请用户打开 Unity
 
@@ -155,7 +161,7 @@ exe 覆盖 `.loom/loom.exe`（来源：PackageCache 拷出，或按新 tag 重�
 ## FAQ
 
 - **`/releases/latest` 404** — 0.x 全是 prerelease，该端点只返正式版。用 Release 列表页/列表端点。
-- **build 产物落在 `dist/` 而不是 `Assets/`** — init 时没带 `--output Assets/Bundles`，见第 4 步。
+- **build 产物落在 `dist/` 而不是 `Assets/`** — init 时没带 `--output`（第 3 步问到的产物目录），见第 4 步。
 - **Unity 工程挪位 / 仓库挪位后命令报 exit 2** — `.loom/config.json` 的指针失配。它是纯指针文件（不是
   `loom.workspace.json`，后者禁手改），直接手改 `ui_root` / `unity_root` 两个相对路径即可。
 - **PackageCache 里找不到包** — 目录名带 hash 后缀，`com.loomgui.unity*` 通配；若仍没有，说明 Unity
