@@ -445,6 +445,36 @@ fn transition_class_change_starts_real_tween_and_reaches_midpoint() {
     );
 }
 
+/// transition 提交帧必须预写起始值进 anim（drain 内 n=0 apply）：本帧 solve 读
+/// override 而非级联终点。回归：曾缺预写 → 首帧闪现端点值（layout-anim 折叠面板
+/// 展开先满高 200px 一帧再塌回 5px 起播；反向则先消失一帧）。
+#[test]
+fn transition_first_frame_holds_start_value_not_endpoint() {
+    let html = r#"<style>
+        .button { opacity:.2; transition:opacity .4s linear; width:20px; height:20px; }
+        .button.active { opacity:1; }
+    </style><div class="button"></div>"#;
+    let (mut stage, button) = stage_from_html(html);
+    tick(&mut stage, 0.0);
+    stage.add_class(button, "active").expect("add active class");
+    // 提交帧（tween 尚未推进）：anim 应持起始值 0.2，不是级联终点 1.0。
+    tick(&mut stage, 0.0);
+    close(
+        node_anim(&stage, button)
+            .opacity
+            .expect("start pre-written"),
+        0.2,
+    );
+    // 后续帧正常推进到中点（预写不影响推进语义）。
+    tick(&mut stage, 0.2);
+    close(
+        node_anim(&stage, button)
+            .opacity
+            .expect("transition midpoint"),
+        0.6,
+    );
+}
+
 #[test]
 fn transition_transform_class_change_interpolates_trs() {
     // transform 通道全链：class 翻转 transform → rematch diff → 复合 tween →

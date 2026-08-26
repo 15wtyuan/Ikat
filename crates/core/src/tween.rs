@@ -664,7 +664,9 @@ impl TweenManager {
 /// 逐分量 lerp start→end 写入 anim 对应通道（n=已算的 normalized；TweenValue 共享原语）。
 /// 经 AnimTable::ensure(node) 取可变 NodeAnim（HashMap entry，缺则插 default）。
 /// Width/Height 的域码在载荷第 2 槽（同域保证下 lerp 恒等，apply 端读回）。
-fn apply(
+/// pub(crate)：transition drain 提交 tween 时以 n=0 预写起始值（首帧 solve 读
+/// override 而非级联终点，消掉端点一帧闪现；Stage tick ⑥.5 调）。
+pub(crate) fn apply(
     anim: &mut AnimTable,
     node: NodeId,
     prop: TweenProp,

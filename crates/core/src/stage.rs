@@ -1110,12 +1110,28 @@ impl Stage {
                 buf[..5].copy_from_slice(&v);
                 buf
             };
+            let start = pad(r.start);
+            let end = pad(r.end);
+            // 提交即预写起始值（n=0）进 anim：本帧 solve 读 override 而非级联终点——
+            // 否则 transition 首帧渲染端点值一帧（展开先满高再塌回起点起播；反向则先消失
+            // 一帧）。delay 期间 tween.update 不写槽，此预写兜底 = CSS「延迟期持有旧值」。
+            // 与 4.6 sync_animation_players 的「新 player backwards 首帧立即写 NodeAnim」
+            // 同纪律：声明式动画的起始态当帧可消费。
+            crate::tween::apply(
+                &mut scene.anim,
+                r.node,
+                r.prop,
+                &start,
+                &end,
+                r.shadow.as_deref(),
+                0.0,
+            );
             self.tweens.tween(
                 r.node,
                 crate::tween::TweenSpec {
                     prop: r.prop,
-                    start: pad(r.start),
-                    end: pad(r.end),
+                    start,
+                    end,
                     ease: r.ease,
                     delay: r.delay,
                     duration: r.duration,
