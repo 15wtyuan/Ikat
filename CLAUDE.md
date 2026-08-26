@@ -50,7 +50,7 @@ cargo test -p loomgui_fence                              # ← 围栏契约门
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
-**发版（tag 触发 Release workflow）**：三道硬门：tag 名 == `unity/package/package.json` 的 version，且 == `crates/packer/pkg/Cargo.toml` 的 version（不齐则 `loom version` 撒谎），且 **`unity/package/CHANGELOG.md`**（仓库唯一 CHANGELOG，根目录无）有对应 `## [<ver>]` 段落——**打 tag 前先双 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内（Release workflow 只验证+出 artifact；release-check 只查 dll 存在性，字节 staleness 无法校验）。
+**发版（tag 触发 Release workflow）**：三道硬门：tag 名 == `unity/package/package.json` 的 version，且 == `crates/packer/pkg/Cargo.toml` 的 version（不齐则 `loom version` 撒谎），且 **`unity/package/CHANGELOG.md`**（仓库唯一 CHANGELOG，根目录无）有对应 `## [<ver>]` 段落——**打 tag 前先双 bump + 补段落 + `cargo run -p xtask -- release-check`**。git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）。**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内（Release workflow 只验证+出 artifact；release-check 只查 dll 存在性，字节 staleness 无法校验）。**移 tag 的两个坑**：① 远端常有 CI bot 的 CLAUDE.md 镜像 commit（[skip ci]）挡 push——rebase 后本地 tag 仍指 rebase 前的孤儿 commit，须 `git tag -f` 重打再 `--force` 推；② 多 refspec push（`push origin main tag`）在 main 被拒时 tag 可能已单独上远端，忘了重打会留脏 tag——推完 `git ls-remote` 核对。移 tag 后 CHANGELOG 里记在 Unreleased 的新批要折进版本段（移 tag = 成为版本一部分）。
 
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
@@ -124,7 +124,7 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 
 **Unity 侧结构化诊断入口**：`LoomHost.DumpSceneJson()`（Runtime 包内 public，未 instantiate 返 `"[]"`）dump 全场景节点树；showcase 工程另有 dev-only 的 `LoomBridge`（PlayMode-only：DumpScene/DumpMirrorPool）。uloop 探针读空先想这两个入口。
 
-**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；loom-preview.js 是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。
+**布局差分验收 = rect-diff 工具链**（`showcase/scripts/rect-diff/`）：Chrome DOM rect（browser-rect.mjs）vs core DFS rect（`dump_page --json`）按 id+tag+class 容差比对。要点：semanticTag 归一（browser 按 role 归一，否则桶永远配不上）；loom-preview.js 是 core 行为模拟器**必须保留**（全拦会制造假 diff，如空 textbox 高度）；reset.css/letterbox 系统性偏移先排查是不是假 diff；0×0 盒不进 idless 桶；退出码 0/1/2/3（3=infra 失败≠布局回归）；`--scene` 走 PlayMode 模式。**rect 全等 ≠ 渲染全等——行断是独立维度**：文本换行变化不必然改节点 rect（定高容器内换行 rect 不动），布局/测量面改动的守卫必须含行数维度（layout 差分守卫测试已含）；怀疑 core 行为回归时最强取证 = **pre-变更 worktree 对拍**（`git worktree add` 拉变更前 commit、构建同 example、`dump_page --json` 按 id+tag+classes+domIndex 键逐节点比 rect/行断）——#29 验收期十页逐字节全等一锤排除布局回归。shell 注意 `cmd | tail; echo $?` 捕获的是 tail 退出码。
 
 **Unity 渲染 vs HTML 浏览器颜色对比（Chrome headless 取证）**：颜色「发白/偏亮/偏色」问题不能盲信「渲染对得上 CSS」——CSS 半透明合成在 sRGB 编码空间，Unity Linear 项目在 linear 空间，同一 CSS 算出不同值。取证：Chrome headless 截 HTML（`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --force-color-profile=srgb --force-device-scale-factor=1 --window-size=1920,1080 --screenshot=out.png "file:///abs/path.html"`）→ PowerShell `System.Drawing.Bitmap.GetPixel(x,y)` 读像素 hex → 和 Unity uloop `screenshot --capture-mode rendering` 像素逐字节对比。**控制实验先校准**：截纯色 `#hex` HTML 确认 Chrome 截图对纯色准（暗部可能偏），坐标用 PNG top-left = design 坐标。这是定位「颜色对不上」类问题的铁证方法，比静态猜强。
 
@@ -145,6 +145,8 @@ cp target/release/loomgui_gui.exe unity/package/Editor/Tools/loomgui_gui.exe
 **uloop/CLI 驱动 PlayMode 前先 `Application.runInBackground = true`**：编辑器窗口失焦（终端拿焦点）+ Run In Background 关 = 播放器循环整个冻结——帧率 1-2、OnUpdate 时钟不走、frameCount 钉死，像极了性能崩坏/调度器坏了。先排这个再查真性能（ShowcaseRunner 已内置设置）。
 
 **FFI panic 取证用站点标签 + 释放审计，别信 release 行号**：release dll 内联后 panic 行号不可靠。`Scene::get_live`（全库 21 处 live 查取带函数名站点标签，`模块/函数` 格式、勿用行号——行号随编辑漂移会把取证指向错误位置）+ `Scene::free_log`（最近 32 笔释放审计：死 id 距今几笔、走没走漏斗）已常驻——「快照后死亡」类 panic（如 rematch live node）一行日志定位。Rust 压测复现不了时先算量级差（用户几分钟 60fps churn ≈ 上万次 vs 压测几百次）。
+
+**showcase 用例两纪律**（用户两次打回后拍板）：① 运行时 C# API 不许以「HTML 表达不了」为由不设用例——HTML 摆台（目标块 + 触发按钮 + 读数 span 带 id）+ `ShowcaseRunner.WireControls` 里 `TryGet` + `Clicked` 接线（照 lab §14/§15 同款），读数翻转即事件路由证据；② 判据只认肉眼强信号（过冲/出界/瞬移/弹振/消失/读数翻转），禁需对照记忆、心算、盯梢短瞬的判据（如与缺省曲线比、半宽→整宽）——可辨性差的行删掉，不加标记补救。
 
 **uloop 取证自相矛盾（截图正常但探针读空 / 同会话数据反复打架）先查编辑器会话状态**：① `tasklist | grep Unity.exe` 数实例——launch 超时会再起一个，命令轮流命中不同实例；② PlayMode 期间触发过编译（domain reload）会把原生 stage 打裂（渲染正常但 DumpScene 全零）——重启编辑器复测再怀疑产品。规矩：**PlayMode 验收期间绝不编译**。另：`File.WriteAllText` 被 uloop 安全策略拦，大 JSON 用 execute-dynamic-code 的 `return` 值带出。
 
