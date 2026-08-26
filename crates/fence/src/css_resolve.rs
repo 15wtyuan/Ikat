@@ -197,8 +197,9 @@ pub fn resolve_inline_styles_with_diags(
                         CssValueParser::Transition => {
                             // transition 简写解析存值（core transition 引擎读 base_style.transition）。
                             // 值结构宽松（parse 忽略未知 token），但属性域外声明要警告——
-                            // 引擎只驱动 background-color/color/opacity，其余属性浏览器会
-                            // 过渡、LoomGUI 静默 snap（预览≠运行时）。
+                            // 引擎驱动的通道全集见 value_check::TRANSITION_PROPS（与 core
+                            // TweenProp 一一对应），域外属性浏览器会过渡、LoomGUI 静默 snap
+                            // （预览≠运行时）。
                             for msg in crate::value_check::transition_warnings(value) {
                                 diagnostics.push(Diagnostic::warning(
                                     DiagnosticCode::FenceTransitionUnsupportedProp,

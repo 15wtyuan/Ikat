@@ -662,6 +662,19 @@ namespace LoomGUI
     // inline_bit 表内 prop（25 个，z-index 在 u64 位图 bit 32）；SetVar / RemoveVar 暂缓
     // （core apply_decl 未实现，throw NE + 注释）。
     /// <summary>
+    /// <summary>
+    /// UIContext.MeasureText 的输出：布局前纯文本预估（无节点、不进树）。
+    /// W/H 像素；LineCount 断行后的行数（不换行测量恒 1，空文本 0）。
+    /// </summary>
+    public readonly struct TextMetrics
+    {
+        public readonly float W, H;
+        public readonly uint LineCount;
+
+        internal TextMetrics(float w, float h, uint lines) { W = w; H = h; LineCount = lines; }
+    }
+
+    /// <summary>
     /// 只读 computed style 快照（Node.Computed 每次访问新建）。cascade 解析终值——含
     /// tag 默认 / class 规则 / inline override 全层叠后的结果；背景/边框色缺席（cascade
     /// 无该声明）时对应属性返 null。时效：rematch 后有效、本帧 tick 后反映最新 cascade
@@ -4040,6 +4053,47 @@ namespace LoomGUI
             {
                 _styleSheet ??= new StyleSheet();
                 return _styleSheet;
+            }
+        }
+
+        /// <summary>
+        /// 无节点纯文本测量：字符串 + 字体 + 字号 → 宽高 + 行数（布局前预估——tips
+        /// 预分行 / 飘字宽估 / 按钮自适应宽，消灭业务侧手数字数）。断行与 solve 内
+        /// 文本测量同一条代码，预估即所见。maxWidth <= 0 不换行；&gt; 0 按该宽断行。
+        /// family 未注册抛 UIContractException：测量必须用将渲染的同款字体，静默
+        /// fallback 到默认字体会给出误导性的宽度。
+        /// </summary>
+        public TextMetrics MeasureText(string text, string fontFamily, float sizePx, float maxWidth = 0f)
+        {
+            if (string.IsNullOrEmpty(fontFamily))
+                throw new ArgumentNullException(nameof(fontFamily));
+            text ??= "";
+            if (float.IsNaN(sizePx) || sizePx <= 0f)
+                throw new UIContractException($"MeasureText: invalid font size {sizePx}");
+            if (float.IsNaN(maxWidth))
+                throw new UIContractException($"MeasureText: invalid maxWidth {maxWidth}");
+
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            byte[] tb = Encoding.UTF8.GetBytes(text);
+            byte[] fb = Encoding.UTF8.GetBytes(fontFamily);
+            float w = 0f, ht = 0f;
+            uint lines = 0;
+            int rc;
+            fixed (byte* tp = tb)
+            fixed (byte* fp = fb)
+                rc = Native.loomgui_stage_measure_text(
+                    h, tp, (nuint)tb.Length, fp, (nuint)fb.Length, sizePx, maxWidth, &w, &ht, &lines);
+            switch (rc)
+            {
+                case 0:
+                    return new TextMetrics(w, ht, lines);
+                case -2:
+                    throw new UIContractException(
+                        $"MeasureText: family '{fontFamily}' is not registered. Register it with " +
+                        "LoomHost.RegisterFont (or the runtime manifest) first — measure must use " +
+                        "the same font that will render the text.");
+                default:
+                    throw new UIContractException("MeasureText failed (invalid arguments)");
             }
         }
 

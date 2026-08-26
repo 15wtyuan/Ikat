@@ -207,6 +207,16 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_bytes_free(byte* ptr, nuint len);
 
         /// <summary>
+        ///  dump 可读树视图（#85）：每节点一行 `tag#id.class (x,y,w,h)` + 文本
+        ///  （font/行高乘数/行数/内容摘要）与滚动（viewport/content/overlap/pos/物理）
+        ///  关键 resolved 值，ASCII 树缩进表父子——AI 代理与人都比深嵌套 JSON 好读。
+        ///  filter = UTF-8 子串（指针+len），null/len=0 = 全量；只出 id/class 命中的子树。
+        ///  返 Rust 拥有的 UTF-8 C 串 + len（StageHandle 持有，下次调用覆盖）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_dump_tree", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* loomgui_stage_dump_tree(StageHandle* h, byte* filter, nuint filter_len, nuint* out_len);
+
+        /// <summary>
         ///  注入本帧指针事件（扁平 PointerEvent 数组）。tick 前调。
         ///  null/len=0 = 本帧无输入事件（清空 pending_input，hover diff 仍跑——指针位置沿用上帧 last_pos）。
         ///
@@ -1089,6 +1099,18 @@ namespace LoomGUI.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "loomgui_stage_get_control_readonly", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int loomgui_stage_get_control_readonly(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  无节点纯文本测量（`Stage::measure_text` 公共投影）：text/family = UTF-8 字节
+        ///  （指针+len）。输出经 out 指针写 (w, h, line_count)。max_width &lt;= 0 不换行。
+        ///
+        ///  **返回码：** 0=ok；-1=null 句柄 / null out / 坏 UTF-8 / 空 family；
+        ///  -2=family 未注册（教学式：测量必须用将渲染的同款字体）。
+        ///
+        ///  **常驻（不 gate）：**布局前预估是 runtime 稳定入口（tips 预分行 / 飘字宽估）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_measure_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_measure_text(StageHandle* h, byte* text, nuint text_len, byte* family, nuint family_len, float size_px, float max_width, float* out_w, float* out_h, uint* out_lines);
 
         /// <summary>
         ///  编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。

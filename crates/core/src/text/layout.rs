@@ -303,6 +303,13 @@ impl FontTable {
         self.select(None)
     }
 
+    /// family 是否已注册。严格入口（如 `Stage::measure_text`）用它拒未知 family——
+    /// `stack_for`/`select` 对未知 family 静默 fallback 到默认字体（渲染路径合理，
+    /// 测量路径不行：拿错字体估宽没有意义）。
+    pub fn contains_family(&self, family: &str) -> bool {
+        self.fonts.contains_key(family)
+    }
+
     /// 为某主 family 构造 shaping 用的 FontStack（主字体 + 回退链 slice）。
     /// 调用方持 `fonts` 借用期间 stack 有效。
     pub fn stack_for<'a>(&'a self, family: Option<&'a str>) -> FontStack<'a> {

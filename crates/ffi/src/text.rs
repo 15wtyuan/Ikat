@@ -540,3 +540,59 @@ pub extern "C" fn loomgui_stage_get_control_readonly(
         }
     })
 }
+
+/// 无节点纯文本测量（`Stage::measure_text` 公共投影）：text/family = UTF-8 字节
+/// （指针+len）。输出经 out 指针写 (w, h, line_count)。max_width <= 0 不换行。
+///
+/// **返回码：** 0=ok；-1=null 句柄 / null out / 坏 UTF-8 / 空 family；
+/// -2=family 未注册（教学式：测量必须用将渲染的同款字体）。
+///
+/// **常驻（不 gate）：**布局前预估是 runtime 稳定入口（tips 预分行 / 飘字宽估）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_measure_text(
+    h: *mut StageHandle,
+    text: *const u8,
+    text_len: usize,
+    family: *const u8,
+    family_len: usize,
+    size_px: f32,
+    max_width: f32,
+    out_w: *mut f32,
+    out_h: *mut f32,
+    out_lines: *mut u32,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out_w.is_null() || out_h.is_null() || out_lines.is_null() {
+            return -1;
+        }
+        let text = if text.is_null() || text_len == 0 {
+            ""
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(text, text_len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            }
+        };
+        if family.is_null() || family_len == 0 {
+            return -1;
+        }
+        let family =
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(family, family_len) }) {
+                Ok(s) => s,
+                Err(_) => return -1,
+            };
+        let sh = unsafe { &*h };
+        match sh.stage.measure_text(text, family, size_px, max_width) {
+            Ok(m) => {
+                unsafe {
+                    *out_w = m.width;
+                    *out_h = m.height;
+                    *out_lines = m.line_count;
+                }
+                0
+            }
+            Err(loomgui_core::stage::MeasureTextError::UnknownFamily(_)) => -2,
+            Err(loomgui_core::stage::MeasureTextError::InvalidParams(_)) => -3,
+        }
+    })
+}

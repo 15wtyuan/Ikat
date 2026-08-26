@@ -237,3 +237,39 @@ pub extern "C" fn loomgui_bytes_free(ptr: *mut u8, len: usize) {
         }
     })
 }
+
+/// dump 可读树视图（#85）：每节点一行 `tag#id.class (x,y,w,h)` + 文本
+/// （font/行高乘数/行数/内容摘要）与滚动（viewport/content/overlap/pos/物理）
+/// 关键 resolved 值，ASCII 树缩进表父子——AI 代理与人都比深嵌套 JSON 好读。
+/// filter = UTF-8 子串（指针+len），null/len=0 = 全量；只出 id/class 命中的子树。
+/// 返 Rust 拥有的 UTF-8 C 串 + len（StageHandle 持有，下次调用覆盖）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_dump_tree(
+    h: *mut StageHandle,
+    filter: *const u8,
+    filter_len: usize,
+    out_len: *mut usize,
+) -> *const u8 {
+    ffi_guard(std::ptr::null(), || {
+        if h.is_null() || out_len.is_null() {
+            return std::ptr::null();
+        }
+        let handle = unsafe { &mut *h };
+        let filter = if filter.is_null() || filter_len == 0 {
+            None
+        } else {
+            match std::str::from_utf8(unsafe { std::slice::from_raw_parts(filter, filter_len) }) {
+                Ok(s) => Some(s),
+                Err(_) => return std::ptr::null(),
+            }
+        };
+        let tree = match &handle.stage.scene {
+            Some(scene) => loomgui_core::dump::dump_scene_tree(scene, filter),
+            None => String::from("(no scene)"),
+        };
+        handle.tree_blob = CString::new(tree).unwrap_or_else(|_| CString::new("").unwrap());
+        let bytes = handle.tree_blob.as_bytes_with_nul();
+        unsafe { *out_len = bytes.len() };
+        handle.tree_blob.as_ptr() as *const u8
+    })
+}

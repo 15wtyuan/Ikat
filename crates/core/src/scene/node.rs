@@ -723,6 +723,8 @@ pub struct Scene {
     /// 供宿主每帧 drain 到自身日志（Unity Debug.LogWarning）；无人 drain 也不无限
     /// 涨——推送方自带去重。运行时态，不进 pkg。
     pub warnings: Vec<String>,
+    /// `warn_once` 的去重键集（规则 + 节点 id）。运行时态，不进 pkg。
+    pub warned_keys: std::collections::HashSet<String>,
 }
 
 impl Scene {
@@ -928,6 +930,15 @@ impl Scene {
     /// NodeId → slotmap DefaultKey 桥接（内部用）。
     pub fn key_for(&self, id: NodeId) -> DefaultKey {
         id.to_key()
+    }
+
+    /// 推一条 warn-once 运行时警告：同 key 只发一次（会话级去重，键 =
+    /// 规则名 + 节点 id，如 `"wheel-dead-pane:42"`）。帧频触发路径（滚轮/拖拽）
+    /// 必须走本方法直接推 `warnings` 会刷屏。
+    pub fn warn_once(&mut self, key: &str, msg: String) {
+        if self.warned_keys.insert(key.to_string()) {
+            self.warnings.push(msg);
+        }
     }
 
     /// 按 NodeId 取节点（slotmap get，自带 gen 校验，悬空返 None）。

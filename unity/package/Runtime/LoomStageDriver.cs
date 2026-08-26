@@ -257,12 +257,14 @@ namespace LoomGUI
                 Debug.LogError($"[LoomStageDriver] LoomHost construct failed: {e.Message}");
                 return;
             }
-            // 缺字诊断（tofu 取证）：core 每帧报全链缺字（family + 字符 + 码位 + 修法），
-            // Console 一行点名——tofu 框是开发期故意暴露的信号，本日志把它变成可查的。
+            // 缺字诊断（tofu 取证）+ 运行时告警面（core warn-once）：Editor / Development
+            // build 才订阅（发布 build 零日志成本；core 侧 drain 照常跑、缓冲有界）。
+            // tofu 框是开发期故意暴露的信号；运行时警告（数据驱动 ListView 配置问题 /
+            // 滚轮打进无可滚余量的容器）静默错渲染不如 Console 一行点名。
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
             _host.MissingGlyphReport += msg => Debug.LogWarning($"[LoomGUI] missing glyphs (tofu):\n{msg}");
-            // 运行时警告（core warn-once）：数据驱动 ListView 配置类问题（无滚动容器退化
-            // 全量渲染 / ul 被父 flex 拉伸不能滚），静默错渲染不如 Console 一行点名。
             _host.RuntimeWarning += msg => Debug.LogWarning($"[LoomGUI] {msg}");
+#endif
 
             // 引擎根注入：MirrorPool/NativeHost 镜像 GO 挂此 root（transform）。
             // backend.SetRuntimeRoot 设 backend._renderRoot + _inputCollector；
@@ -486,14 +488,16 @@ namespace LoomGUI
             DumpDiagnostic();
         }
 
-        /// <summary>F8 诊断：dump 当前帧 blob（core 给 Unity 的）+ MirrorPool GO 状态（Unity 渲染的）。</summary>
+        /// <summary>F8 诊断：dump 当前帧 blob（core 给 Unity 的）+ MirrorPool GO 状态（Unity 渲染的）
+        /// + scene 可读树（布局归因：rect/文本行高行数/滚动几何每节点一行，#85）到 console + 文件。</summary>
         void DumpDiagnostic()
         {
             if (_backend == null) { Debug.LogWarning("[DumpF8] backend null"); return; }
             string blobDump = _backend.DumpBlobState();
             string poolDump = _backend.DumpMirrorState();
+            string sceneTree = _host != null ? _host.DumpSceneTree() : "(no host)";
             string stamp = System.DateTime.Now.ToString("HHmmss");
-            string combined = $"===== F8 DIAGNOSTIC {stamp} =====\nstage={(int)_designSize.x}x{(int)_designSize.y} screen={Screen.width}x{Screen.height}\n\n{blobDump}\n{poolDump}\n";
+            string combined = $"===== F8 DIAGNOSTIC {stamp} =====\nstage={(int)_designSize.x}x{(int)_designSize.y} screen={Screen.width}x{Screen.height}\n\n[Scene tree]\n{sceneTree}\n\n{blobDump}\n{poolDump}\n";
             Debug.Log(combined);
             try
             {

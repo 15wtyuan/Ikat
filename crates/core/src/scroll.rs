@@ -715,6 +715,10 @@ fn ancestor_chain_contains(scene: &Scene, start: NodeId, target: NodeId) -> bool
 /// content/viewport（无 state 视 0.0，effective 对 Scroll overflow 仍 true）。
 pub fn apply_wheel_to_hit(scene: &mut Scene, w: WheelEvent) {
     let mut pane = crate::hit::hit_test(scene, (w.x, w.y));
+    // R1 诊断（运行时告警面）：链上首个「声明了 overflow:auto/scroll 但该轴无可滚
+    // 余量」的容器。整条链都没吃掉这次滚轮时点破——作者以为可滚，实际 content ≤
+    // viewport（overlap=0），滚轮静默蒸发（#64 类排查半天的起点）。
+    let mut dead_pane: Option<NodeId> = None;
     while let Some(id) = pane {
         // sentinel thumb_id → decode container_id（thumb covers container edge,
         // wheel on thumb = wheel on container）
@@ -743,11 +747,26 @@ pub fn apply_wheel_to_hit(scene: &mut Scene, w: WheelEvent) {
                 }
                 return;
             }
+            let declared = capable(n.style.overflow_x) || capable(n.style.overflow_y);
+            if declared && dead_pane.is_none() {
+                dead_pane = Some(id);
+            }
         } else {
             // defensive: invalid node id (shouldn't happen after sentinel decode)
             break;
         }
         pane = scene.get_live(id, "scroll/apply_wheel_to_hit").parent;
+    }
+    if let Some(id) = dead_pane {
+        scene.warn_once(
+            &format!("wheel-dead-pane:{}", id.0),
+            format!(
+                "wheel ignored: node {} declares overflow:auto/scroll but has no overflow \
+                 to scroll (content fits the viewport, overlap=0) — either the content is \
+                 shorter than expected or the scroll container is not needed",
+                id.0
+            ),
+        );
     }
 }
 

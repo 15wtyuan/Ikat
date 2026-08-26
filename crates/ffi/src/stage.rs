@@ -20,6 +20,7 @@ pub extern "C" fn loomgui_stage_new(w: f32, h: f32) -> *mut StageHandle {
             stage,
             frame_blob: Vec::new(),
             dump_blob: CString::new("").unwrap(),
+            tree_blob: CString::new("").unwrap(),
             warnings_blob: CString::new("").unwrap(),
         }))
     })

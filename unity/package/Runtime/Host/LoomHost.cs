@@ -248,6 +248,28 @@ namespace LoomGUI
         }
 
         /// <summary>
+        /// dump 可读树视图（#85）：每节点一行 tag#id.class (rect) + 文本（font/行高/行数/
+        /// 内容摘要）与滚动（viewport/content/overlap/pos）关键 resolved 值，ASCII 树缩进。
+        /// filter = id/class 子串（null/空 = 全量），只出命中子树——大 UI 不再全量肉眼扫。
+        /// Rust 侧拥有 C 串、下次调用覆盖——立即消费。未 instantiate / 已 Dispose → "(no scene)"。
+        /// </summary>
+        public string DumpSceneTree(string filter = null)
+        {
+            if (_stage == null) return "(no scene)";
+            byte[] fb = string.IsNullOrEmpty(filter) ? null : Encoding.UTF8.GetBytes(filter);
+            nuint len = 0;
+            byte* ptr;
+            fixed (byte* fp = fb)
+                ptr = Native.loomgui_stage_dump_tree(_stage, fp, (nuint)(fb?.Length ?? 0), &len);
+            if (ptr == null || len == 0) return "(no scene)";
+            int n = (int)len;
+            var buf = new byte[n];
+            Marshal.Copy((IntPtr)ptr, buf, 0, n);
+            if (n > 0 && buf[n - 1] == 0) n--;
+            return Encoding.UTF8.GetString(buf, 0, n);
+        }
+
+        /// <summary>
         /// 释放 Stage 句柄（Rust 侧 drop Stage + 拥有的所有内存：scene/atlas/tween table）。
         /// 引擎资源（MirrorPool GO/MaterialManager 等）归 backend 自管，本方法不递归——
         /// Driver.OnDestroy 调本方法后，backend 资源由 Driver 额外清理（或 backend 自己 Dispose）。

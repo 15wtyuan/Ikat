@@ -93,6 +93,7 @@ pub struct StageHandle {
     stage: Stage,
     frame_blob: Vec<u8>,    // borrow_frame 返回 &this[..]；tick 时被覆盖。
     dump_blob: CString,     // dump_scene 缓存（Rust 拥有）
+    tree_blob: CString,     // dump_tree 缓存（Rust 拥有）
     warnings_blob: CString, // take_warnings 缓存（Rust 拥有）
 }
 

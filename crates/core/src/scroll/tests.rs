@@ -1292,3 +1292,88 @@ fn refresh_clamp_keeps_tween_when_anchoring_active() {
         "非 anchoring 越界清 tweening（原行为）"
     );
 }
+
+/// R1 运行时告警：滚轮打进「声明 overflow:auto 但 content ≤ viewport（overlap=0）」
+/// 的容器 → warn-once 一条；活容器（有 overlap）吃掉滚轮不告警。
+#[test]
+fn wheel_on_dead_scroll_container_warns_once() {
+    use crate::scene::transform::compute_world_transforms;
+
+    // overflow:auto 容器（Scroll 模式恒 effective，测死容器必须 Auto）+ 矮内容。
+    let mut style = ResolvedStyle::default();
+    style.overflow_y = OverflowMode::Auto;
+    let entries = vec![
+        (
+            None,
+            NodeKind::Container,
+            style,
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            Some(0),
+            NodeKind::Container,
+            ResolvedStyle::default(),
+            vec![],
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        ),
+    ];
+    let mut s = Scene::build(&entries);
+    let pane = s.roots[0];
+    let child = s.get(pane).unwrap().children[0];
+    s.get_mut(pane).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    s.get_mut(pane).unwrap().clip_rect = Some(Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    });
+    s.get_mut(child).unwrap().layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 40.0,
+        h: 40.0,
+    };
+    refresh_content_sizes(&mut s);
+    compute_world_transforms(&mut s);
+    assert_eq!(s.scroll.get(pane).unwrap().overlap.1, 0.0, "内容不溢出");
+
+    let wheel = WheelEvent {
+        x: 10.0,
+        y: 10.0,
+        delta_x: 0.0,
+        delta_y: 1.0,
+    };
+    apply_wheel_to_hit(&mut s, wheel);
+    assert_eq!(s.warnings.len(), 1, "死容器吃不掉滚轮 → 一条告警");
+    assert!(s.warnings[0].contains("no overflow to scroll"));
+    apply_wheel_to_hit(&mut s, wheel);
+    assert_eq!(s.warnings.len(), 1, "warn-once：第二次不再推");
+
+    // 对照：内容撑高 → overlap>0 → 滚轮被吃掉、零告警。
+    s.get_mut(child).unwrap().layout_rect.h = 250.0;
+    refresh_content_sizes(&mut s);
+    s.warnings.clear();
+    s.warned_keys.clear();
+    apply_wheel_to_hit(&mut s, wheel);
+    assert!(s.warnings.is_empty(), "活容器不告警");
+    assert!(
+        s.scroll.get(pane).unwrap().tweening_any(),
+        "滚轮实际生效（set_pos 补间）"
+    );
+}

@@ -501,6 +501,7 @@ public sealed class UIContext {
     public UIPackage LoadPackage(string name, byte[] bytes);
     public void UnloadPackage(string name);
     public T Create<T>() where T : Node;
+    public TextMetrics MeasureText(string text, string fontFamily, float sizePx, float maxWidth = 0f);
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
     public void CallAfterLayout(Action callback);  // tick 后泵（LoomHost.Step 在 stage tick 之后调）
@@ -518,7 +519,22 @@ public sealed class UITemplate {
     public string Name { get; }
     public Container Instantiate();
 }
+
+public readonly struct TextMetrics {        // MeasureText 输出：布局前纯文本预估
+    public float W { get; }                 // px
+    public float H { get; }                 // px
+    public uint LineCount { get; }          // 断行后行数（无 maxWidth 恒 1）
+}
 ```
+
+### 11.0.1 文本测量（MeasureText）
+
+无节点纯测量：字符串 + 字体 + 字号 → 宽高 + 行数（布局前预估——tips 预分行 /
+飘字宽估 / 按钮自适应宽，消灭业务侧手数字数）。与 solve 内文本测量走同一条
+`measure_text` 断行代码，预估即所见。`maxWidth > 0` 按该宽贪心断行；`<= 0`（缺省）
+单行。行高 normal、字距 0、常规字重（与缺省样式文本节点一致）。`fontFamily` 必须
+已注册——未注册抛 `UIContractException`（测量必须用将渲染的同款字体，静默
+fallback 到默认字体会给出误导性宽度）。
 
 ### 11.1 建树白名单
 

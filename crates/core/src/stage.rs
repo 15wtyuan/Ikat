@@ -18,6 +18,22 @@ use crate::text::layout::FontTable;
 /// 选 0xFFFF_FFFE 哨兵（接近 u32 上限，避开常见 driver 小整数 tag）。
 const TRANSITION_TAG: u32 = 0xFFFF_FFFE;
 
+/// `Stage::measure_text` 的输出：布局前纯文本预估（无节点、不进树）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextMetrics {
+    pub width: f32,
+    pub height: f32,
+    /// 断行后的行数（不换行测量恒 1，空文本 0）。
+    pub line_count: u32,
+}
+
+/// `Stage::measure_text` 的错误（FFI 判别码 -2/-3 的来源）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum MeasureTextError {
+    UnknownFamily(String),
+    InvalidParams(String),
+}
+
 pub struct Stage {
     pub scene: Option<Scene>,
     pub fonts: FontTable,
@@ -154,6 +170,56 @@ impl Stage {
     /// 宿主每帧 tick 后调（隔帧也不丢——pending 累积，去重集会话级持久）。
     pub fn take_missing_glyph_reports(&mut self) -> Vec<String> {
         self.fonts.take_missing_glyph_reports()
+    }
+
+    /// 无节点纯文本测量：字符串 + 字体 + 字号 → 宽高 + 行数。布局前预估用
+    /// （tips 预分行 / 飘字宽估 / 按钮自适应宽——消灭业务侧手数字数）。
+    ///
+    /// `max_width <= 0` 不换行（单行宽度）；`> 0` 按该宽断行。断行与 solve 内
+    /// 文本测量走同一条 `measure_text`，预估即所见。行高按 normal（字号 ×
+    /// NORMAL_LINE_HEIGHT）、字距 0、常规字重——与缺省样式节点一致。
+    /// family 未注册 → Err（不静默 fallback 到默认字体：拿错字体估宽没有意义）。
+    pub fn measure_text(
+        &self,
+        text: &str,
+        family: &str,
+        size_px: f32,
+        max_width: f32,
+    ) -> Result<TextMetrics, MeasureTextError> {
+        if !self.fonts.contains_family(family) {
+            return Err(MeasureTextError::UnknownFamily(format!(
+                "measure_text: family `{family}` not registered (register_font it first; \
+                 measure must use the same font that will render)"
+            )));
+        }
+        if !size_px.is_finite() || size_px <= 0.0 {
+            return Err(MeasureTextError::InvalidParams(format!(
+                "measure_text: invalid font size {size_px}"
+            )));
+        }
+        if !max_width.is_finite() {
+            return Err(MeasureTextError::InvalidParams(format!(
+                "measure_text: invalid max_width {max_width}"
+            )));
+        }
+        let stack = self.fonts.stack_for(Some(family));
+        let layout = crate::text::layout::measure_text(
+            text,
+            size_px,
+            0.0,
+            0.0,
+            crate::style::resolved::TextAlign::Left,
+            false,
+            (max_width > 0.0).then_some(max_width),
+            &stack,
+            [0.0, 0.0, 0.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
+        );
+        Ok(TextMetrics {
+            width: layout.text_width,
+            height: layout.text_height,
+            line_count: layout.lines.len() as u32,
+        })
     }
 
     /// 加载包进资源池（不碰 scene）。重复 load 同名包 = 替换。多包共存。
@@ -1299,6 +1365,57 @@ mod image_size_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 测试字体：仓库内 DejaVuSans.ttf（跨平台一致），缺则跳过（与 text 模块同款）。
+    fn test_font_bytes() -> Option<Vec<u8>> {
+        std::fs::read(format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .ok()
+    }
+
+    #[test]
+    fn measure_text_rejects_unknown_family_and_bad_params() {
+        let s = Stage::new((100.0, 100.0)).unwrap();
+        assert!(
+            s.measure_text("hi", "no-such-family", 16.0, 0.0).is_err(),
+            "未注册 family 拒绝（不静默 fallback 到默认字体）"
+        );
+        if let Some(bytes) = test_font_bytes() {
+            let mut s = Stage::new((100.0, 100.0)).unwrap();
+            s.register_font("dejavu", bytes, true).unwrap();
+            assert!(
+                s.measure_text("hi", "dejavu", 0.0, 0.0).is_err(),
+                "非正字号拒绝"
+            );
+            assert!(
+                s.measure_text("hi", "dejavu", 16.0, f32::NAN).is_err(),
+                "NaN max_width 拒绝"
+            );
+        }
+    }
+
+    #[test]
+    fn measure_text_wraps_by_max_width() {
+        let Some(bytes) = test_font_bytes() else {
+            return;
+        };
+        let mut s = Stage::new((1920.0, 1080.0)).unwrap();
+        s.register_font("dejavu", bytes, true).unwrap();
+        let m = s.measure_text("hello world", "dejavu", 16.0, 0.0).unwrap();
+        assert_eq!(m.line_count, 1, "无 max_width = 单行");
+        let single_w = m.width;
+        assert!(m.width > 0.0 && m.height > 0.0);
+
+        // 窄约束把 "hello world" 断成两行：行数 2、宽 ≤ 约束、高约两倍单行。
+        let m2 = s
+            .measure_text("hello world", "dejavu", 16.0, single_w * 0.6)
+            .unwrap();
+        assert_eq!(m2.line_count, 2, "窄 max_width 断行");
+        assert!(m2.width <= single_w * 0.6 + f32::EPSILON);
+        assert!(m2.height > m.height, "两行高于一行");
+    }
 
     /// 20B 头（magic + version + flags + comp_count + str_count）：版本检查先于 body 解析，
     /// 烂 body 也能测版本错配分支。
