@@ -1119,11 +1119,12 @@ namespace LoomGUI.Bindings
         internal static extern void loomgui_stage_get_scroll_pos(StageHandle* h, ulong node_id, float* out_x, float* out_y);
 
         /// <summary>
-        ///  注册 tween。start/end 指向 ≥value_size 个 f32（value_size 由 prop 隐含）。
-        ///  null 句柄/null 指针 → no-op。越界 node / duration&lt;=0 由 core update 处理（跳过/立即 complete）。
+        ///  注册 tween（spec 形态）。start/end 指向 ≥value_size 个 f32（value_size 由 prop
+        ///  隐含）。null 句柄/spec/null 指针 / 越界 prop/ease → no-op。
+        ///  越界 node / duration&lt;=0 由 core update 处理（跳过/立即 complete）。
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "loomgui_stage_tween", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern void loomgui_stage_tween(StageHandle* h, ulong node_id, uint prop, float* start, float* end, float duration, uint ease, float delay, uint tag);
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_tween_spec", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void loomgui_stage_tween_spec(StageHandle* h, ulong node_id, LoomTweenSpec* spec, float* start, float* end);
 
         /// <summary>
         ///  停该节点该 prop 的 tween（override 保留末值）。
@@ -1346,6 +1347,27 @@ namespace LoomGUI.Bindings
         public float y;
         public float w;
         public float h;
+    }
+
+    /// <summary>
+    ///  tween 提交 spec（#9 builder 契约的 FFI 形态；旧位置参 `loomgui_stage_tween` 已删——
+    ///  pre-1.0 无外部消费者，C# 同 commit 切 fluent wrapper）。
+    ///
+    ///  `ease_kind`/`ease_params` 值域见 core `tween::ease_ffi`（与 pkg 手编 ease tag 同一
+    ///  数值契约）。`repeat` = 额外重播次数；`yoyo` != 0 = 奇数轮反向。
+    ///  C# 镜像由 csbindgen 生成（LayoutKind.Sequential，44B = 本 struct 的 ABI 断言）。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct LoomTweenSpec
+    {
+        public uint prop;
+        public uint ease_kind;
+        public fixed float ease_params[4];
+        public float duration;
+        public float delay;
+        public uint tag;
+        public uint repeat;
+        public byte yoyo;
     }
 
 

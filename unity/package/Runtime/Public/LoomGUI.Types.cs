@@ -88,6 +88,30 @@ namespace LoomGUI
     // text-align 的 computed 读值（Style 写层无此 prop——围栏子集 text-align 走 CSS 声明）。
     public enum TextAlign { Left, Center, Right }
 
+    // —— tween builder 面（#9 契约；判别值与 core TweenProp / ease_ffi 对齐，勿重排）——
+
+    /// <summary>tween 动画通道（core TweenProp 镜像）。Transform = TRS 五元组
+    /// [tx,ty,sx,sy,rot(rad)]；Translate/Scale 二元；Opacity/Rotation 一元；颜色四元 RGBA。</summary>
+    public enum TweenChannel
+    {
+        Opacity = 0, Translate = 1, Scale = 2, Rotation = 3,
+        BgColor = 4, TextColor = 5, Transform = 6,
+    }
+
+    /// <summary>缓动 kind（core ease_ffi 镜像；与 CSS keyword 对应关系见 fence.md「缓动函数
+    /// 全集」）。CSS 标准 keyword（ease/ease-in/...）是 bezier 曲线——运行时侧想精确复刻
+    /// 用 <c>EaseBezier(0.25,0.1,0.25,1)</c> 等；keyword 形与 CSS 值的映射只在 DSL 侧。</summary>
+    public enum EaseKind
+    {
+        Linear = 0, QuadIn = 1, QuadOut = 2, QuadInOut = 3,
+        CubicIn = 4, CubicOut = 5, CubicInOut = 6,
+        BackIn = 7, BackOut = 8, BackInOut = 9,
+        StepEnd = 10, StepStart = 11,
+        CubicBezier = 12,   // 参数走 ease_params
+        ElasticIn = 13, ElasticOut = 14, ElasticInOut = 15,
+        BounceIn = 16, BounceOut = 17, BounceInOut = 18,
+    }
+
     // 指针键：对齐 web MouseEvent.button（0=左/1=中/2=右）但用枚举自解释。
     public enum PointerButton { Left, Middle, Right }
 

@@ -366,6 +366,25 @@ namespace LoomGUI
             }
         }
 
+        /// <summary>
+        /// 链式 tween builder 入口（#9 契约；CSS transition/keyframes 之外的程序化演出通道）：
+        /// <code>
+        /// node.Tween(TweenChannel.Opacity).From(0).To(1)
+        ///     .Duration(0.3f).Delay(0.1f)
+        ///     .Ease(EaseKind.CubicOut)
+        ///     .Repeat(2, yoyo: true)
+        ///     .OnComplete(n => Debug.Log("done"))
+        ///     .Start();
+        /// </code>
+        /// From/To 各通道分量数：Opacity/Rotation 1、Translate/Scale 2、Bg/TextColor 4（RGBA）、
+        /// Transform 5（[tx,ty,sx,sy,rotRad]——运行时侧恒 px/弧度，百分比形只在 CSS @keyframes）。
+        /// </summary>
+        public TweenBuilder Tween(TweenChannel channel)
+        {
+            ThrowIfDisposed();
+            return new TweenBuilder(this, channel);
+        }
+
         // 编程聚焦节点（照 fgui RequestFocus）。直转 FFI request_focus（记 pending_focus_request，
         // 下 tick 最前消费写 scene.focused_node + 产 FocusIn/FocusOut）。文本框聚焦后才能接收
         // set_key_input / set_text_input 的输入（core input 只插焦点控件）。
@@ -3488,6 +3507,150 @@ namespace LoomGUI
         }
     }
 
+    /// <summary>
+    /// 链式 tween builder（<see cref="Node.Tween"/> 的返回形态）。消费型：每方法返自身，
+    /// <see cref="Start"/> 提交（FFI spec-struct 单次调用）；OnComplete 走 TweenComplete
+    /// 事件按 tag 路由（tag 未显式给时自动分配），完成即注销（重复播放需重挂）。
+    /// 值语义与 CSS transition 相同通道互踩（replace-override：新 tween 覆写同通道）。
+    /// </summary>
+    public sealed unsafe class TweenBuilder
+    {
+        private readonly Node _node;
+        private readonly float[] _start = new float[8];
+        private readonly float[] _end = new float[8];
+        private LoomTweenSpec _spec;
+        private Action<Node> _onComplete;
+
+        internal TweenBuilder(Node node, TweenChannel channel)
+        {
+            _node = node;
+            _spec = new LoomTweenSpec
+            {
+                prop = (uint)channel,
+                // CSS 缺省 timing = ease（精确 bezier(.25,.1,.25,1)，与 CSS/fence 侧同一真值）
+                ease_kind = (uint)EaseKind.CubicBezier,
+                duration = 0.3f,
+                yoyo = 0,
+            };
+            unsafe
+            {
+                _spec.ease_params[0] = 0.25f;
+                _spec.ease_params[1] = 0.1f;
+                _spec.ease_params[2] = 0.25f;
+                _spec.ease_params[3] = 1.0f;
+            }
+        }
+
+        /// <summary>起始值（分量数按通道，见 <see cref="Node.Tween"/>）。</summary>
+        public TweenBuilder From(params float[] values)
+        {
+            CopyValues(_start, values);
+            return this;
+        }
+
+        /// <summary>目标值（分量数按通道）。</summary>
+        public TweenBuilder To(params float[] values)
+        {
+            CopyValues(_end, values);
+            return this;
+        }
+
+        public TweenBuilder Duration(float seconds)
+        {
+            _spec.duration = seconds;
+            return this;
+        }
+
+        public TweenBuilder Delay(float seconds)
+        {
+            _spec.delay = seconds;
+            return this;
+        }
+
+        /// <summary>keyword 缓动（CubicBezier kind 之外用；精确 CSS ease 曲线用
+        /// <see cref="EaseBezier"/>）。</summary>
+        public TweenBuilder Ease(EaseKind kind)
+        {
+            _spec.ease_kind = (uint)kind;
+            return this;
+        }
+
+        /// <summary>cubic-bezier(x1,y1,x2,y2)：x∈[0,1]（越界按缺省拒——Start 抛契约异常）。
+        /// CSS 标准 keyword 的精确曲线：ease=(.25,.1,.25,1) / ease-in=(.42,0,1,1) /
+        /// ease-out=(0,0,.58,1) / ease-in-out=(.42,0,.58,1)。</summary>
+        public TweenBuilder EaseBezier(float x1, float y1, float x2, float y2)
+        {
+            _spec.ease_kind = (uint)EaseKind.CubicBezier;
+            unsafe
+            {
+                _spec.ease_params[0] = x1;
+                _spec.ease_params[1] = y1;
+                _spec.ease_params[2] = x2;
+                _spec.ease_params[3] = y2;
+            }
+            return this;
+        }
+
+        /// <summary>extraRepeats = 额外重播次数（0=单次）；yoyo = 奇数轮反向（CSS alternate）。</summary>
+        public TweenBuilder Repeat(uint extraRepeats, bool yoyo)
+        {
+            _spec.repeat = extraRepeats;
+            _spec.yoyo = yoyo ? (byte)1 : (byte)0;
+            return this;
+        }
+
+        /// <summary>complete 事件载荷（OnComplete 路由键；同 tag 后注册者胜）。</summary>
+        public TweenBuilder Tag(uint tag)
+        {
+            _spec.tag = tag;
+            return this;
+        }
+
+        /// <summary>完成回调（TweenComplete 事件驱动，帧头泵触发）。tag 未显式给时自动分配。
+        /// 一次性：完成即注销——Repeat 只在全部轮次跑满后触发一次。</summary>
+        public TweenBuilder OnComplete(Action<Node> onComplete)
+        {
+            _onComplete = onComplete;
+            return this;
+        }
+
+        /// <summary>提交（经 FFI spec-struct 注册进 TweenManager，本帧起生效）。
+        /// bezier x 越界抛 <see cref="UIContractException"/>（FFI 侧静默 no-op，这里前置拦）。</summary>
+        public void Start()
+        {
+            _node.ThrowIfDisposed();
+            if (_onComplete != null)
+            {
+                if (_spec.tag == 0)
+                    _spec.tag = _node._ctx.AllocTweenTag();
+                _node._ctx.RegisterTweenComplete(_spec.tag, _onComplete);
+            }
+            if (_spec.ease_kind == (uint)EaseKind.CubicBezier)
+            {
+                float x1, x2;
+                unsafe { x1 = _spec.ease_params[0]; x2 = _spec.ease_params[2]; }
+                if (x1 < 0f || x1 > 1f || x2 < 0f || x2 > 1f)
+                    throw new UIContractException(
+                        $"EaseBezier x1/x2 must be in [0,1] (got x1={x1}, x2={x2})");
+            }
+            StageHandle* h = (StageHandle*)_node._ctx._stage.ToPointer();
+            fixed (float* sp = _start)
+            fixed (float* ep = _end)
+            {
+                LoomTweenSpec spec = _spec;
+                Native.loomgui_stage_tween_spec(h, _node._id, &spec, sp, ep);
+            }
+        }
+
+        private static void CopyValues(float[] dst, float[] src)
+        {
+            if (src == null) throw new ArgumentNullException(nameof(src));
+            int n = Math.Min(src.Length, 8);
+            for (int i = 0; i < n; i++) dst[i] = src[i];
+            for (int i = n; i < 8; i++) dst[i] = 0f;
+        }
+    }
+
     public sealed unsafe class UIContext
     {
         // headless harness / 引擎集成层建 UIContext 时持有的 Stage 句柄（raw FFI handle）。
@@ -3519,6 +3682,11 @@ namespace LoomGUI
         // tick-drain 取 pending_binds 后按 slot 的 NodeId 向上走 node_parent，命中本表即找到
         // 所属 ListView 实例、调其 BindItem。公共 API 不见本字段。
         internal readonly Dictionary<ulong, ListView> _listViews = new Dictionary<ulong, ListView>();
+
+        // #9 tween builder OnComplete 路由表：tag → 回调（TweenComplete 事件 touch_id 槽
+        // 装 tag；完成即注销——一次性语义）。tag 0 保留 = 无回调（旧 transition 路径）。
+        internal readonly Dictionary<uint, Action<Node>> _tweenCompleteCallbacks = new Dictionary<uint, Action<Node>>();
+        internal uint _nextTweenTag = 1;
 
         // PlayerKey → AnimationHandle 实例注册表（demux 句柄路由查用）。
         // 强引用：句柄生命周期 = 那次播放（END/Stop 时 AnimationHandle.Invalidate 注销）。
@@ -3687,6 +3855,20 @@ namespace LoomGUI
             _animations.TryGetValue(playerKey, out var a) ? a : null;
         /// <summary>注销 AnimationHandle（END / Stop / 惰性失效时调）。幂等。</summary>
         internal void UnregisterAnimation(ulong playerKey) => _animations.Remove(playerKey);
+
+        /// <summary>分配 tween tag（OnComplete 未显式 Tag 时自动取；单调递增，0 保留）。</summary>
+        internal uint AllocTweenTag() => _nextTweenTag++;
+        /// <summary>注册 tween 完成回调（builder OnComplete → Start 时调；同 tag 后注册者胜）。</summary>
+        internal void RegisterTweenComplete(uint tag, Action<Node> cb) => _tweenCompleteCallbacks[tag] = cb;
+        /// <summary>Demuxer TweenComplete 分支调：命中即触发并注销（一次性）。未注册 no-op。</summary>
+        internal void FireTweenComplete(uint tag, ulong nodeId)
+        {
+            if (tag != 0 && _tweenCompleteCallbacks.TryGetValue(tag, out var cb))
+            {
+                _tweenCompleteCallbacks.Remove(tag);
+                cb(_registry.GetOrCreate(nodeId));
+            }
+        }
 
         /// <summary>
         /// 排空 core pending_binds 并分发到对应 ListView 的 BindItem。集成层 Step 开头 /

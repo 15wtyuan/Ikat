@@ -171,6 +171,8 @@ namespace LoomGUI
                     // （旧路径保留；真 AnimationEnd=20 源见下段。）
                     case (byte)EventType.TweenComplete:
                         {
+                            // #9 builder OnComplete 路由（tag 未注册 = 旧 transition 路径，no-op）。
+                            _ctx.FireTweenComplete((uint)evt.touchId, nodeId);
                             DispatchTyped(nodeId,
                                 new AnimationEndEvent { _core = NewCore(nodeId) });
                             DispatchTyped(nodeId,
