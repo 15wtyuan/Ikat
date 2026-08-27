@@ -82,6 +82,11 @@ export function expandComponents(reg) {
       const imported = document.importNode(root, true);
       projectSlots(imported, assign, defaults);
       host.appendChild(imported);
+      // 初始快照先镜像一次：宿主**静态** class（HTML 里写死的 `class="sub"` 一类）
+      // 不随任何 mutation 到来——core 侧 `stat-text.sub …` 链静态即命中，漏初始
+      // 镜像会让这类规则在预览里静默死（#96 取证发现的残留缺口）。之后由
+      // MutationObserver 跟踪运行时变更。
+      mirrorHostState(host, imported);
       observeHostState(host, imported);
       // 悬空投影（打包期会报错）：重新挂回宿主，退化预览里仍可测量。
       for (const nodes of Object.values(assign)) {

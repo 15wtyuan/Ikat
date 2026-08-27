@@ -98,6 +98,17 @@ cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 - **代码注释**：哲学、出处与范例见 `docs/code-comments.md`（Martin/Ousterhout 之争 → 共识公理 → 开源实践谱系 → 本仓库立场）。判据：非显而易见处写、显而易见处让代码自己说话；契约层写足，复述层零容忍。铁律：注释自包含——读者含 AI 代理，引用内部编号/暗语/文档路径即幻觉入口，确有引用必要直接把结论文本拷进来；踩坑编年史不进代码。
 - **修根因，别贴补偿参数**：去源头修，别在下游加参数补偿。
 - **防文档漂移**：文档写定性不写数字；关键 claim 加可执行测试；改代码后搜 docs/ 是否引用了改动的 struct/函数/列数。
+- **对外文档 = `crates/packer/pkg/templates/`**（随 scaffold/init 分发给消费侧 AI 的 skill 与 references，`include_str!` 嵌进 ikat.exe）——它们住在 templates/ 下不像文档，AI 最容易漏（#93 cursor 批实锤：内部文档全写了、消费侧漏了）。**文档涟漪表**（改了左列必同步右列，名字集合由 `cargo test -p ikat_pkg --test consumer_doc_sync` 机械锁）：
+
+| 改动面 | 必同步文档 |
+|---|---|
+| fence schema（新标签/属性/值域/伪类/UA 默认行为） | `docs/design/fence.md`（内部权威）+ `templates/editor/references/fence-schema.md`、`css-reference.md`（消费侧镜像，测试锁名字） |
+| 公共 API / FFI 签名 | `docs/design/public-api.md`、`projection-layer.md` + `templates/runtime/references/api-reference.md`（镜像 C# 签名） |
+| preview 行为层（A 层/boot/注入语义） | `templates/preview/SKILL.md` + `references/recipes.md` |
+| CLI 命令面 / 工作区拓扑 / scaffold 产物 | `templates/ikat/SKILL.md`、`templates/editor/SKILL.md` + `docs/ai-setup.md` |
+| 对外可见行为/修复 | `unity/package/CHANGELOG.md` Unreleased 段（发版时折版本段） |
+
+  机械门锁名字集合（标签表/属性清单双向精确比对），**锁不住语义措辞**——行为语义变化（如「悬停文字也给手型」）仍须按本表人工同步措辞。
 - **面向消费侧 AI 的文档（handbook/runbook 类，如 `docs/ai-setup.md`）**：指代锚点必须是 **AI 视角可观测的事实**（如「当前会话打开的目录」），不能是决策结果（如「你希望 .ikat/ 落在哪」——AI 无从判断）；命令示例不能写死版本号而不提醒替换。验收 = **新鲜 subagent 沙盘**：只给文档本身（严禁读本仓库任何其它文件，模拟消费侧只有链接），判据 = 只问该问的问题 + 全链走绿 + 挑刺清单回收修订——自己复读只算排版检查，不算验收。
 
 ## 调试技巧

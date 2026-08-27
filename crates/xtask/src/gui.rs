@@ -23,12 +23,23 @@ pub fn build_gui(repo_root: &Path, target_dir: &Path) -> Result<PathBuf, String>
             src_tauri.display()
         ));
     }
+    // npm 全局装的是 tauri.cmd shim：Windows CreateProcess 对裸名只补 .exe，cmd/bat
+    // shim 必须显式点名（std 会自动包 cmd /C）。先试裸名（cargo install 的 tauri.exe），
+    // spawn 失败再回落 .cmd（npm prebuilt）。
     let out = Command::new("tauri")
         .args(["build", "--no-bundle"])
         .current_dir(&src_tauri)
         .env("CARGO_TARGET_DIR", target_dir)
         .env_remove("CARGO_TERM_COLOR")
         .output()
+        .or_else(|_| {
+            Command::new(if cfg!(windows) { "tauri.cmd" } else { "tauri" })
+                .args(["build", "--no-bundle"])
+                .current_dir(&src_tauri)
+                .env("CARGO_TARGET_DIR", target_dir)
+                .env_remove("CARGO_TERM_COLOR")
+                .output()
+        })
         .map_err(|e| {
             format!(
                 "tauri CLI not runnable: {e} — install with \

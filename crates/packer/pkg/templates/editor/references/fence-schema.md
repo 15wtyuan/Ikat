@@ -20,8 +20,22 @@ The complete list — `div`, `span`, `button`, `img`, `a`, `template`, `slot`:
 | `span` | TextElement | inline | inline run inside rich-text blocks |
 | `button` | Button | inline | content attrs: `disabled` (boolean, presence = true; maps to runtime disabled — clicks suppressed, `:disabled` pseudo matches, no hover hand); UA-defaults center its content |
 | `img` | Image | inline (void) | content attrs: `src`, `alt`, `width`, `height` |
+| `a` | Link | inline | content attr: `href` (opaque target id, must be non-empty); UA-default link color + underline (`:hover` recolors) unless overridden by author CSS; children restricted to text and non-flex `span`s — nesting links or images inside `a` is a build error |
 | `template` | Template | none | inert blueprint holder (e.g. list item blueprints) |
 | `slot` | Slot | inline | legal only inside component templates; attr `name` |
+
+## Shell tags (document skeleton, consumed at pack time — no runtime nodes)
+
+| Shell tag | Purpose |
+|---|---|
+| `html` | document root, consumed by the parser |
+| `head` | metadata container |
+| `body` | content root — its children become the template root |
+| `title` | document title |
+| `meta` | metadata |
+| `style` | inline CSS (consumed at pack time) |
+| `link` | external stylesheet reference (`rel=stylesheet`; missing file is a build error) |
+| `script` | outside the fence — build error or skipped |
 
 Any other tag is a build error (`FenceUnknownTag`). There is no `p`,
 `header`, `input`, `select`, `ul`, `label`, and no `<br>` — split

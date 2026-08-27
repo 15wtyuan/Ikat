@@ -18,6 +18,7 @@ description: >
 | **坑的可复用规则**（依赖 API 事实、跨层动态契约、平台特性） | `docs/pitfalls.md` | **只有「看代码看不出来、未来会再触发」的规则才进**；具体 bug 的症状/根因/修复过程不记（代码 + git history 是载体） |
 | **依赖 API 适配**（crate 版本签名差异、草稿与实际不符） | `docs/pitfalls.md` §1 | 具体 crate API 差异（属上一行的可复用规则） |
 | **设计契约变化/漂移**（新围栏 CSS 属性、新 Node/RenderNode 字段、blob 列结构变、FFI 签名变、架构调整；**或本轮改了契约但设计文档对应段还停在旧版本**） | `docs/design/main-design.md` | 改了契约才动；纯实现不进。**漂移也要修**：改了 blob 列/FFI/字段必 grep main-design 对应段（§13.3 FFI 契约 / §13.6 镜像生命周期 / §3 围栏 / §12 动态树等）确认同步 |
+| **对外文档同步核查**（本轮改了 fence schema / 公共 API / preview 行为 / CLI 命令面，但没按 AGENTS「文档涟漪表」动 `crates/packer/pkg/templates/`） | `crates/packer/pkg/templates/` 对应文件 | 收尾兜网：templates/ 就是对外文档（随 scaffold 分发给消费侧 AI），AI 最容易漏。名字集合漂移会被 `cargo test -p ikat_pkg --test consumer_doc_sync` 拦住，但**语义措辞漂移只有这里能兜**——按涟漪表核对措辞后，有漏的先补再结题 |
 | **高价值原则/设计哲学/调试技巧/用户偏好** | `AGENTS.md` | **必须高价值、可复用、不希望 AI 遗忘**才放——不是什么都放 |
 
 ## Process

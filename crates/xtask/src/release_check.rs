@@ -164,11 +164,19 @@ pub fn parse_crate_version(cargo_toml: &str) -> Option<String> {
 }
 
 /// staleness 判定的单文件过滤：`crates/` 下会影响 dll/exe/gui 产物字节的源变更。
-/// 排除 xtask（编排工具自身不进产物）。GUI（packer/gui）**在内**——它直链
-/// ikat_pkg/ikat_fence 编进 exe（dev fallback 进程内路径），与 dll/ikat.exe
-/// 无条件同批重出。
+/// 排除 xtask（编排工具自身不进产物）与测试/bench 代码（不参与 release 编译，
+/// 改测试不应触发产物重出——`tests/` 目录、`*_tests.rs`/`tests.rs` 模块文件按
+/// 仓库命名约定识别）。GUI（packer/gui）**在内**——它直链 ikat_pkg/ikat_fence
+/// 编进 exe（dev fallback 进程内路径），与 dll/ikat.exe 无条件同批重出。
 fn affects_artifacts(path: &str) -> bool {
-    path.starts_with("crates/") && !path.starts_with("crates/xtask/")
+    if !path.starts_with("crates/") || path.starts_with("crates/xtask/") {
+        return false;
+    }
+    let file = path.rsplit('/').next().unwrap_or(path);
+    !path.contains("/tests/")
+        && !path.contains("/benches/")
+        && !file.ends_with("_tests.rs")
+        && !file.ends_with("tests.rs")
 }
 
 /// 两组「自产物锚点提交以来的变更清单」→ 影响产物的违例清单（去重保序）。
@@ -422,10 +430,15 @@ serde = { version = "1", features = ["derive"] }
                 "crates/packer/gui/src-tauri/main.rs".to_string(),
             ]
         );
-        // 全部被排除 → 无违例（xtask 是唯一豁免路径）。
+        // 全部被排除 → 无违例：xtask、tests/ 目录、*_tests.rs / tests.rs 模块、benches。
         assert!(staleness_violations(
-            &["crates/xtask/src/git.rs".to_string()],
-            &["crates/xtask/src/gui.rs".to_string()]
+            &[
+                "crates/xtask/src/git.rs".to_string(),
+                "crates/packer/pkg/tests/consumer_doc_sync.rs".to_string(),
+                "crates/core/src/input/tests.rs".to_string(),
+                "crates/core/benches/solve.rs".to_string(),
+            ],
+            &["crates/core/src/stage/load_package_tests.rs".to_string()]
         )
         .is_empty());
     }
