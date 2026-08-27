@@ -285,7 +285,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 > **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。层数硬限：inset 最多 8 层、outer 最多 4 层（渲染层合成 id 的编码容量，超限层会撞相邻编码区错渲染）——超限整条声明打包期 `FenceBadCssValue`（inline 走 `apply_decl` 返 false、`<style>` 规则走共享值域门，单一真相源 = core 解析器）。
 
-- `cursor`（**不继承**，#93）：值集 `auto` / `default` / `none` / `pointer`。桌面端指针 affordance 入口——`auto`（缺省）= UA 默认行为：hover 到 pressable 控件（button/tab/toggle/radio/slider/dropdown/option 与 `<a>` 链接）运行时给手型，其余系统箭头（纯 runtime 决策，不经样式通道、无需作者声明）；命中细化到控件内文字/内联子后沿祖先链上溯宿主控件判定（悬停按钮文字同样手型），disabled/不可命中控件不给手型并截断。显式声明恒压 UA 行为——`pointer` 手型（标非控件可点区）、`default` 箭头（把可点控件压回箭头）、`none` 元素级隐藏指针（配合游戏自绘光标）。文本输入类（TextField 等）的 I-beam 暂不在 UA 默认内。预览侧浏览器原生支持 `cursor`，无单侧缺口。
+- `cursor`（**不继承**，#93）：值集 `auto` / `default` / `none` / `pointer`。桌面端指针 affordance 入口——`auto`（缺省）= UA 默认行为：hover 到 pressable 控件（button/tab/toggle/radio/slider/dropdown/option 与 `<a>` 链接）运行时出手型**意图**（0/1/2 数值经 `CursorIntentChanged` 交后端渲染；Unity driver 缺省渲染系统光标，手型贴图由消费侧 `SetCursorTexture` 注册——见 projection-layer.md §3.3），其余系统箭头（纯 runtime 决策，不经样式通道、无需作者声明）；命中细化到控件内文字/内联子后沿祖先链上溯宿主控件判定（悬停按钮文字同样手型），disabled/不可命中控件不给手型并截断。显式声明恒压 UA 行为——`pointer` 手型（标非控件可点区）、`default` 箭头（把可点控件压回箭头）、`none` 元素级隐藏指针（配合游戏自绘光标）。文本输入类（TextField 等）的 I-beam 暂不在 UA 默认内。预览侧浏览器原生支持 `cursor`，无单侧缺口。
 
 **文本**
 

@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **光标皮肤去内置，改消费侧注册（#93 followup）**：`IkatStageDriver` 删除内置手型
+  像素画——intent 0/1（箭头/手型）缺省均为系统光标；新增
+  `SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 按意图注册
+  消费侧贴图（null/已销毁 = 清除；作用于当前激活意图时立即重放；贴图所有权归
+  消费者，driver 只销毁自建载体）。intent 2（cursor:none）保留内置全透明载体。
+  hotspot 从纹理左上角量（Unity docs 约定）。showcase 手型像素画搬入
+  `ShowcaseRunner`（unity/showcase-unity 与 -2021）作注册示例。
+
 ### Fixed
+- **手型光标纹理上下颠倒 + 热点错位（#93 followup）**：`SetPixels32` 行序
+  bottom-up（下标 0 = 左下角像素）而几何按 y=0=顶 生成——写入按 (S-1-y) 翻行；
+  `Cursor.SetCursor` 热点从纹理左上角量（此前误按 bottom-up 换算），修正为食尖
+  (12,1)。两个坐标系约定独立，勿混用。
 - **preview 组件样式作用域根类规则失配（#95）**：组件 `<style>` 的浏览器作用域
   改写收编进 Rust 单实现（server 新路由 `/ikat-preview/comp-style/<name>.css`，
   fence 同一入口抽样式），每条规则输出「后代 + 根匹配」双分支——core 语义
@@ -19,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   归一；spinbutton 缺省 aria-valuemax/min 无界（旧版缺 max 时钳死到 0）；
   progressbar 对齐 core 的 (value/max) 口径。expand.js 的正则 CSS 前缀器删除
   （#94 前半步：CSS 语义单真相在 Rust，客户端 A 层收敛为纯 DOM 机械层）。
+  #96 同批归因为 #95 家族（组件模板根类规则失配）并顺带补上宿主**静态** class
+  的初始镜像（原 MutationObserver 只看后续变更，HTML 写死的 `class="sub"` 类
+  宿主链静态命中语义在预览里缺失）。
+- **消费侧文档漂移门 + 补漏**：新增 `consumer_doc_sync` 测试把 fence 的
+  doc↔schema 交叉校验延伸到随 scaffold 分发的模板文档（fence-schema.md 标签表
+  双向精确集 + css-reference.md 属性全量覆盖）。首跑抓到两处存量漂移并已修：
+  fence-schema.md 标签表缺 `<a>` 行（#74 加链接时只更新了导语）；壳标签
+  （html/head/body/title/meta/style/link/script）整组未进消费侧文档——已补
+  完整表格。措辞级漂移由 AGENTS 新增的「文档涟漪表」人工兜底。
 
 ## [0.0.14] - 2026-08-28
 

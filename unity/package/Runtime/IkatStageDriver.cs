@@ -601,99 +601,60 @@ namespace Ikat
             // 后残留会把箭头替换带出 UI 会话。先还原再销毁纹理——顺序反了会有一帧
             // SetCursor 指向已销毁纹理。
             UnityEngine.Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
-            if (_handCursor != null) { UnityEngine.Object.Destroy(_handCursor); _handCursor = null; }
+            // 注册贴图所有权归消费者，driver 不销毁；只清自建的 hidden 载体。
             if (_hiddenCursor != null) { UnityEngine.Object.Destroy(_hiddenCursor); _hiddenCursor = null; }
         }
 
         // ---- 桌面指针 affordance（#93）----
 
-        Texture2D _handCursor;   // 懒建：首次悬停 pressable 控件时生成
-        Texture2D _hiddenCursor; // cursor:none 用（4×4 全透明）
+        Texture2D _hiddenCursor; // cursor:none 内置默认载体（32×32 全透明，自建自管）
+        uint _currentIntent;     // 当前激活意图（0=箭头），注册/清除时判断是否立即重放
+        readonly Dictionary<uint, (Texture2D texture, Vector2 hotspot)> _cursorTextures
+            = new Dictionary<uint, (Texture2D, Vector2)>();
 
         /// <summary>
-        /// core 光标意图 → Unity 软件光标。0=箭头（SetCursor(null) 还原硬件）/ 1=手型 /
-        /// 2=隐藏。仅在意图变化帧调用（host 已去抖）。cursor:none 的完整「游戏自绘光标」
-        /// 方案需业务自供跟随纹理——本层只负责把指针从元素上藏掉。
+        /// 注册消费者光标贴图（键 = core 光标意图：0=箭头 / 1=手型 pointer / 2=隐藏）。
+        /// 未注册的意图走默认：0/1 = 系统箭头（SetCursor(null)），2 = 内置全透明载体。
+        /// texture 传 null（或已销毁）= 清除该意图注册。注册/清除时若该意图正激活则立即生效，
+        /// 无需等下一次悬停。所有权归消费者——driver 只在 Dispose 还原系统光标并销毁自建
+        /// 载体，不销毁注册贴图（激活时贴图已销毁则静默回落默认）。UI 线程调用。
         /// </summary>
-        void ApplyCursorIntent(uint intent)
+        public void SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)
         {
-            switch (intent)
-            {
-                case 1:
-                    if (_handCursor == null) _handCursor = BuildHandCursorTexture();
-                    // 热点 = 食指尖（index RRect(12,4,16,16) 的顶边中心 x=14、y=4）。
-                    UnityEngine.Cursor.SetCursor(_handCursor, new Vector2(14f, 4f), CursorMode.Auto);
-                    break;
-                case 2:
-                    if (_hiddenCursor == null) _hiddenCursor = BuildHiddenCursorTexture();
-                    UnityEngine.Cursor.SetCursor(_hiddenCursor, Vector2.zero, CursorMode.Auto);
-                    break;
-                default:
-                    UnityEngine.Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
-                    break;
-            }
+            if (texture == null) _cursorTextures.Remove(intent);
+            else _cursorTextures[intent] = (texture, hotspot);
+            if (intent == _currentIntent) ApplyCursor();
         }
 
         /// <summary>
-        /// 程序化手型光标（32×32，指向手 → 热点 (14,4) 在食指尖）：几何体素填充 + 边缘描边，
-        /// 替代二进制 PNG 入库（无 asset 导入链、像素即可读调改）。浅色主体 + 深描边在明暗
-        /// 两类背景上都可辨。filterPoint 防缩放糊边。
+        /// core 光标意图 → Unity 软件光标。仅在意图变化帧调用（host 已去抖）；消费侧注册 /
+        /// 清除当前意图时经 <see cref="SetCursorTexture"/> 重放。cursor:none 的完整「游戏
+        /// 自绘光标」方案需业务自供跟随纹理——本层只负责把指针从元素上藏掉。
         /// </summary>
-        static Texture2D BuildHandCursorTexture()
+        void ApplyCursorIntent(uint intent)
         {
-            const int S = 32;
-            var px = new Color32[S * S];
-            bool[] body = new bool[S * S];
+            _currentIntent = intent;
+            ApplyCursor();
+        }
 
-            void Disc(float cx, float cy, float r)
+        /// 注册贴图优先（存活才用），未注册回落各意图默认。
+        void ApplyCursor()
+        {
+            if (_cursorTextures.TryGetValue(_currentIntent, out var reg) && reg.texture != null)
             {
-                for (int y = 0; y < S; y++)
-                    for (int x = 0; x < S; x++)
-                        if ((x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r)
-                            body[y * S + x] = true;
+                UnityEngine.Cursor.SetCursor(reg.texture, reg.hotspot, CursorMode.Auto);
+                return;
             }
-            void RRect(int x0, int y0, int x1, int y1)
+            switch (_currentIntent)
             {
-                for (int y = y0; y <= y1; y++)
-                    for (int x = x0; x <= x1; x++)
-                        body[y * S + x] = true;
+                case 2: // cursor:none 是语义（藏指针）而非皮肤——全透明载体即默认
+                    if (_hiddenCursor == null) _hiddenCursor = BuildHiddenCursorTexture();
+                    UnityEngine.Cursor.SetCursor(_hiddenCursor, Vector2.zero, CursorMode.Auto);
+                    break;
+                default: // 0=箭头 / 1=手型：默认系统光标，手型皮肤由消费侧 SetCursorTexture 注册
+                    UnityEngine.Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+                    break;
             }
-
-            RRect(12, 4, 16, 16);      // 食指（竖圆角条）
-            Disc(18.5f, 17f, 3.4f);    // 中指屈节
-            Disc(23f, 17.5f, 3.0f);    // 无名指屈节
-            Disc(26.5f, 19f, 2.6f);    // 小指屈节
-            Disc(17.5f, 21.5f, 6.6f);  // 掌部主椭圆
-            Disc(10.5f, 21.5f, 3.2f);  // 拇指
-
-            var fill = new Color32(255, 255, 255, 255);
-            var shade = new Color32(216, 216, 222, 255);
-            var line = new Color32(28, 28, 32, 255);
-
-            for (int y = 0; y < S; y++)
-            {
-                for (int x = 0; x < S; x++)
-                {
-                    int i = y * S + x;
-                    if (body[i])
-                    {
-                        // 内侧阴影带：轮廓下方一线，给形体一点体积感
-                        px[i] = (y > 0 && !body[i - S]) ? shade : fill;
-                        continue;
-                    }
-                    bool edge =
-                        (x > 0 && body[i - 1]) || (x < S - 1 && body[i + 1]) ||
-                        (y > 0 && body[i - S]) || (y < S - 1 && body[i + S]);
-                    if (edge) px[i] = line; // outline 描在体外圈（透明侧）
-                }
-            }
-            var tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
-            tex.filterMode = FilterMode.Point;
-            tex.SetPixels32(px);
-            // Cursor.SetCursor 的纹理要求：RGBA32 / 可读 / 无 mip 链——Apply 第二参
-            // false 保持可读（makeNoLongerReadable=true 会被 SetCursor 拒收并告警）。
-            tex.Apply(false, false);
-            return tex;
         }
 
         /// <summary>cursor:none 载体：全透明纹理贴住热点位（元素级藏指针；整窗自绘光标

@@ -104,7 +104,13 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 - **点击 = 既有事件面**：`Clicked` 走 `On<ClickEvent>` 订阅翻译（backing-dict 模式同 Button），**无新事件 ABI**——Rust 侧命中细化到 a 节点即够，投影层不加聚合。
 - **无运行时建树入口**：`<a>` 仅 rich 上下文合法（围栏保证），运行时 create_node/TagToNodeKind 均不产此 kind。
 
-### 3.3 待办（按优先级）
+### 3.3 光标指针投影（#93）
+
+- **意图在核心，渲染在后端**：core 沿命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none），`IkatHost.CursorIntent` 属性 + `CursorIntentChanged` 事件暴露（host 去抖，仅变化帧 fire）。意图是引擎无关契约；怎么渲染是后端的事。
+- **Unity 后端（IkatStageDriver）不内置皮肤**：订阅意图变化驱动 `UnityEngine.Cursor.SetCursor`，intent 0/1 缺省均为系统箭头。`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供消费侧按意图注册贴图——null/已销毁 = 清除；注册/清除当前激活意图时立即重放；贴图所有权归消费者（driver 不销毁，激活时已销毁则静默回落默认）。intent 2 例外：cursor:none 是「藏指针」语义而非皮肤，内置 32×32 全透明载体即默认（4×4 非标准硬件光标尺寸，Windows 下 SetCursor 拒收）。Dispose 统一 `SetCursor(null)` 还原系统光标 + 销毁自建载体——SetCursor 贴图是进程级状态，不还原会把替换带出 UI 会话。
+- **两个独立的坐标系约定（易混，混淆实录）**：`Texture2D.SetPixels32` 数组下标 0 = **左下角**像素（行序 bottom-up，按屏幕坐标 y=0=顶 生成的像素画写入要按 `(S-1-y)` 翻行）；`Cursor.SetCursor` 热点从纹理**左上角**量（Unity docs "offset from the top left"，直接用屏幕坐标不换算）。给两者套同一约定是这里的踩坑根因。
+
+### 3.4 待办（按优先级）
 
 1. **标记优化点**：字符串 flush 若成热点换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）——§2.2。
 

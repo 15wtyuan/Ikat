@@ -71,6 +71,10 @@ public class ShowcaseRunner : MonoBehaviour
             Debug.LogError("[Showcase] IkatStageDriver not found on same GameObject — runner wired wrong");
             return;
         }
+        // 手型光标皮肤（消费侧注册示例）：包不内置任何皮肤（intent 1 缺省 = 系统箭头），
+        // 这里注册像素画手型让 pressable 悬停有 affordance。热点 = 食指尖 (12,1)，
+        // SetCursor 热点从纹理左上角量（Unity docs），与像素画屏幕坐标同系。
+        _driver.SetCursorTexture(1u, BuildPixelHandCursorTexture(), new Vector2(12f, 1f));
         // 让 driver Awake 完成（同帧 Awake 先于 Start，理论已就绪）+ 给 LateUpdate 几帧余量。
         Invoke(nameof(Boot), 0.1f);
     }
@@ -825,4 +829,79 @@ public class ShowcaseRunner : MonoBehaviour
             mailList.ItemCount = 100;
         }
     }
+    // ── 手型光标皮肤（消费侧注册示例）──
+
+    /// <summary>
+    /// 32×32 经典 link-select 手型像素画（热点 (12,1) 在食指尖）。逐格手绘字符画 +
+    /// 4 色调色板——32px 这种 1:1 小尺寸下几何体并集堆不出指缝（读作一团色块），
+    /// 像素画是系统光标同款工艺。字符画 y=0 是顶行，SetPixels32 下标 0 是左下角像素
+    /// ——写入按 (S-1-y) 翻行，否则整张纹理上下颠倒。
+    /// </summary>
+    static Texture2D BuildPixelHandCursorTexture()
+    {
+        const int S = 32;
+        var transparent = new Color32(0, 0, 0, 0);
+        var line = new Color32(28, 28, 32, 255);
+        var fill = new Color32(255, 255, 255, 255);
+        var shade = new Color32(216, 216, 222, 255);
+        var px = new Color32[S * S];
+        for (int y = 0; y < S; y++)
+        {
+            string row = HandArt[y];
+            for (int x = 0; x < S; x++)
+                px[(S - 1 - y) * S + x] = row[x] switch
+                {
+                    'o' => line,
+                    'w' => fill,
+                    's' => shade,
+                    _ => transparent,
+                };
+        }
+        var tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
+        tex.filterMode = FilterMode.Point;
+        tex.SetPixels32(px);
+        // Cursor.SetCursor 的纹理要求：RGBA32 / 可读 / 无 mip 链——Apply 第二参
+        // false 保持可读（makeNoLongerReadable=true 会被 SetCursor 拒收并告警）。
+        tex.Apply(false, false);
+        return tex;
+    }
+
+    /// <summary>手型像素画（32 行 × 32 列，y=0 顶行）：'o' 描边 / 'w' 白填充 /
+    /// 's' 阴影 / '.' 透明。食指尖 = 第 1 行 x10-13 的顶边中心（热点所在）。
+    /// 填充像素的 4 邻域必须闭合（透明侧邻居必须为 'o'）。</summary>
+    static readonly string[] HandArt =
+    {
+        "................................",
+        ".........oooooo.................",
+        ".........owwwwo.................",
+        ".........owwwwo.................",
+        ".........owwwwo.................",
+        ".........owwwwo.................",
+        ".........owwwwooooo.............",
+        ".........owwwwowwwooooo.........",
+        ".........owwwwowwwowwwooooo.....",
+        ".........owwwwowwwowwwowwwo.....",
+        ".........owwwwowwwowwwowwwo.....",
+        ".........owwwwowwwowwwowwwo.....",
+        ".........owwwwowwwowwwowwwo.....",
+        "......oooowwwwowwwowwwowwwo.....",
+        ".....owwwwwwwwwssssssssssso.....",
+        ".....owwwwwwwwwwwwwwwwwwwwo.....",
+        ".....owwwwwwwwwwwwwwwwwwwwo.....",
+        ".....owwwwwwwwwwwwwwwwwwwwo.....",
+        "......oooowwwwwwwwwwwwwwwwo.....",
+        ".........owwwwwwwwwwwwwwwwo.....",
+        ".........owwwwwwwwwwwwwwooo.....",
+        ".........ooooooooooooooo........",
+        "...........ooooooooooooo........",
+        "...........ossssssssssso........",
+        "...........owwwwwwwwwwwo........",
+        "...........owwwwwwwwwwwo........",
+        "...........owwwwwwwwwwwo........",
+        "...........owwwwwwwwwwwo........",
+        "...........ooooooooooooo........",
+        "................................",
+        "................................",
+        "................................",
+    };
 }
