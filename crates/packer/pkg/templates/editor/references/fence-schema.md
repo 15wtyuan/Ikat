@@ -18,7 +18,7 @@ The complete list — `div`, `span`, `button`, `img`, `a`, `template`, `slot`:
 |---|---|---|---|
 | `div` | Container | block | the universal box; controls and list items are divs with `role` |
 | `span` | TextElement | inline | inline run inside rich-text blocks |
-| `button` | Button | inline | content attrs: `disabled`; UA-defaults center its content |
+| `button` | Button | inline | content attrs: `disabled` (boolean, presence = true; maps to runtime disabled — clicks suppressed, `:disabled` pseudo matches, no hover hand); UA-defaults center its content |
 | `img` | Image | inline (void) | content attrs: `src`, `alt`, `width`, `height` |
 | `template` | Template | none | inert blueprint holder (e.g. list item blueprints) |
 | `slot` | Slot | inline | legal only inside component templates; attr `name` |

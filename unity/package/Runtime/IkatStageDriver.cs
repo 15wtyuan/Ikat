@@ -598,8 +598,11 @@ namespace Ikat
             _backend?.Dispose();
             _backend = null;
             // 软件光标还原系统箭头（#93）：SetCursor 的纹理是进程级状态，Play 结束/对象销毁
-            // 后残留会把箭头替换带出 UI 会话。
+            // 后残留会把箭头替换带出 UI 会话。先还原再销毁纹理——顺序反了会有一帧
+            // SetCursor 指向已销毁纹理。
             UnityEngine.Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+            if (_handCursor != null) { UnityEngine.Object.Destroy(_handCursor); _handCursor = null; }
+            if (_hiddenCursor != null) { UnityEngine.Object.Destroy(_hiddenCursor); _hiddenCursor = null; }
         }
 
         // ---- 桌面指针 affordance（#93）----
@@ -618,7 +621,8 @@ namespace Ikat
             {
                 case 1:
                     if (_handCursor == null) _handCursor = BuildHandCursorTexture();
-                    UnityEngine.Cursor.SetCursor(_handCursor, new Vector2(14f, 2f), CursorMode.Auto);
+                    // 热点 = 食指尖（index RRect(12,4,16,16) 的顶边中心 x=14、y=4）。
+                    UnityEngine.Cursor.SetCursor(_handCursor, new Vector2(14f, 4f), CursorMode.Auto);
                     break;
                 case 2:
                     if (_hiddenCursor == null) _hiddenCursor = BuildHiddenCursorTexture();
@@ -631,7 +635,7 @@ namespace Ikat
         }
 
         /// <summary>
-        /// 程序化手型光标（32×32，指向手 → 热点 (14,2) 在食指尖）：几何体素填充 + 边缘描边，
+        /// 程序化手型光标（32×32，指向手 → 热点 (14,4) 在食指尖）：几何体素填充 + 边缘描边，
         /// 替代二进制 PNG 入库（无 asset 导入链、像素即可读调改）。浅色主体 + 深描边在明暗
         /// 两类背景上都可辨。filterPoint 防缩放糊边。
         /// </summary>
@@ -686,20 +690,24 @@ namespace Ikat
             var tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
             tex.filterMode = FilterMode.Point;
             tex.SetPixels32(px);
-            tex.Apply(false, true);
+            // Cursor.SetCursor 的纹理要求：RGBA32 / 可读 / 无 mip 链——Apply 第二参
+            // false 保持可读（makeNoLongerReadable=true 会被 SetCursor 拒收并告警）。
+            tex.Apply(false, false);
             return tex;
         }
 
-        /// <summary>cursor:none 载体：全透明小纹理贴住热点位（元素级藏指针；整窗自绘光标
-        /// 是业务侧 Cursor.visible=false + 自绘 sprite 的既有方案，不经此处）。</summary>
+        /// <summary>cursor:none 载体：全透明纹理贴住热点位（元素级藏指针；整窗自绘光标
+        /// 是业务侧 Cursor.visible=false + 自绘 sprite 的既有方案，不经此处）。
+        /// 尺寸用 32×32 标准光标尺寸（4×4 非法硬件光标尺寸，Windows 下 SetCursor 拒收）。</summary>
         static Texture2D BuildHiddenCursorTexture()
         {
-            var tex = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            const int S = 32;
+            var tex = new Texture2D(S, S, TextureFormat.RGBA32, false);
             var clear = new Color32(0, 0, 0, 0);
-            var px = new Color32[16];
+            var px = new Color32[S * S];
             for (int i = 0; i < px.Length; i++) px[i] = clear;
             tex.SetPixels32(px);
-            tex.Apply(false, true);
+            tex.Apply(false, false);
             return tex;
         }
 

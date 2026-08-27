@@ -20,7 +20,9 @@ error):
 - `cursor` — `auto` / `default` / `none` / `pointer` (not inherited). `auto` = UA default:
   hovering pressable controls (button / tab / toggle / radio / slider / dropdown /
   option, and `<a>` links) shows the pointer hand at runtime; everything else stays
-  the system arrow. Explicit declarations always win over the UA default — use
+  the system arrow. Hovering a control's text/inline children counts as hovering
+  the control (browser-consistent), and disabled controls never show the hand.
+  Explicit declarations always win over the UA default — use
   `pointer` to mark clickable non-controls (map nodes etc.), `default` to force an
   arrow on a control, `none` for element-level software-cursor hiding. Browser
   preview renders `cursor` natively, so there is no preview/runtime gap here.

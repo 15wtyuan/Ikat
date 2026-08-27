@@ -1414,6 +1414,67 @@ fn cursor_disabled_or_untouchable_no_hand_link_hand() {
     );
 }
 
+/// #93 验收回归（悬停按钮文字光标变回箭头）：rich 内联命中细化到 source 节点
+/// （TextNode/span）后，cursor 判定必须沿祖先链上溯到宿主控件——悬停按钮
+/// **文字**（命中 Text 叶，非按钮本体）与悬停按钮背景同待遇；宿主按钮上的
+/// 作者 cursor 声明同样覆盖文字区命中；disabled 宿主截断。
+#[test]
+fn cursor_walks_up_from_text_hit_to_host_button() {
+    let mut s = button_with_text_child_scene();
+    let root_id = s.roots[0];
+    let btn_id = s.get(root_id).unwrap().children[0];
+    let txt_id = s.get(btn_id).unwrap().children[0];
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 50.0,
+            y: 10.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert_eq!(
+        crate::hit::hit_test(&s, (50.0, 10.0)),
+        Some(txt_id),
+        "前置：该点命中 Text 叶子而非按钮"
+    );
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Hand,
+        "命中按钮文字（Text 叶）→ 上溯宿主按钮 → 手型"
+    );
+
+    // 宿主上的作者声明对文字区命中等效（cursor 不继承，链上最近声明生效）
+    s.get_mut(btn_id).unwrap().style.cursor = CursorStyle::System;
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "宿主 cursor:default 压过文字区命中的 UA 手型"
+    );
+    s.get_mut(btn_id).unwrap().style.cursor = CursorStyle::Hidden;
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Hidden,
+        "宿主 cursor:none 覆盖文字区命中"
+    );
+
+    // disabled 宿主：箭头并截断（不向外层借 affordance）
+    s.get_mut(btn_id).unwrap().style.cursor = CursorStyle::Auto;
+    s.get_mut(btn_id)
+        .unwrap()
+        .interaction
+        .flags
+        .insert(NodeFlags::DISABLED);
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "disabled 按钮的文字区命中 → 箭头"
+    );
+}
+
 /// Down 后 add_touch_monitor → 后续 Move 产 Move@monitor。
 #[test]
 fn move_with_monitor_dispatches_to_monitor() {

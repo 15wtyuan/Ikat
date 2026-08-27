@@ -944,6 +944,12 @@ impl Stage {
             n.custom_tag = tn.custom_tag.clone();
             n.rich_text_block = tn.rich_text_block;
             n.interaction.draggable = tn.draggable;
+            // HTML disabled 属性（fence 内容属性，#93 验收发现断链：属性过围栏但运行时
+            // 无人消费）：instantiate 置 NodeFlags::DISABLED——click 抑制 / active 截断 /
+            // :disabled 伪类 / 光标 affordance 全走既有 disabled 语义。
+            if tn.disabled {
+                n.interaction.flags.insert(NodeFlags::DISABLED);
+            }
             // tabindex：显式值优先（含 -1 排除）；None 时按 HTML/ARIA 语义给可聚焦控件补
             // 默认 0（input/textarea/select/button 及 role=textbox/spinbutton/slider/switch/
             // radio/combobox 隐式可聚焦），否则 click-to-focus / Tab 链无法命中控件。

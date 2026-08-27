@@ -491,6 +491,7 @@ impl<'a> Walker<'a> {
             classes: extract_classes(el),
             id_attr: attr(el, "id"),
             draggable: false,
+            disabled: false,
             tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
             content: None,
             src: None,
@@ -620,6 +621,9 @@ impl<'a> Walker<'a> {
             classes: extract_classes(el),
             id_attr: attr(el, "id"),
             draggable: false,
+            // 组件模板内部的元素同样可带 HTML disabled（fence 内容属性按元素校验，
+            // 与页面同规则）——照 bridge 主路径同款 presence 语义提取。
+            disabled: attr(el, "disabled").is_some(),
             tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
             content: None,
             src,
@@ -658,6 +662,7 @@ impl<'a> Walker<'a> {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: Some(text),
             src: None,

@@ -73,6 +73,10 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     classes: extract_classes(el),
                     id_attr: attr(el, "id"),
                     draggable: false,
+                    // HTML 布尔属性 disabled（fence 内容属性，button）：presence = true
+                    //（与浏览器一致，disabled="false" 也算 disabled）。运行时映射
+                    // NodeFlags::DISABLED。
+                    disabled: attr(el, "disabled").is_some(),
                     tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
                     content: None,
                     src,
@@ -97,6 +101,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     classes: vec![],
                     id_attr: None,
                     draggable: false,
+                    disabled: false,
                     tabindex: None,
                     content: Some(s.clone()),
                     src: None,

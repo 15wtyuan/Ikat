@@ -13,6 +13,7 @@ fn make_test_pkg(_comp_name: &str) -> Vec<u8> {
         classes: vec![],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,

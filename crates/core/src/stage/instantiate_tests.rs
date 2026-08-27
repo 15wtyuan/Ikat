@@ -22,6 +22,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -41,6 +42,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -70,6 +72,7 @@ fn make_control_pkg(kind: NodeKind, control_init: crate::asset::ControlInit) -> 
         classes: vec![],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -132,6 +135,7 @@ fn instantiate_explicit_tabindex_minus_one_is_respected() {
         classes: vec![],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: Some(-1),
         content: None,
         src: None,
@@ -250,6 +254,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
         classes: vec![],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -288,6 +293,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -307,6 +313,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -424,6 +431,7 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         classes: vec!["root".to_string()],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -513,6 +521,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             classes: vec!["outer".to_string()],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -532,6 +541,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             classes: vec!["leaf".to_string()],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -574,6 +584,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         classes: vec!["leaf".to_string()],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -653,6 +664,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -676,6 +688,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -695,6 +708,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             // OptionItem.content 不跨 pkg 往返（asset 序列化只为 TextNode/Image 存 content/src），
             // 故生产路径把 option 文本放在子 TextNode（`<div role=option><span>A</span></div>`），
@@ -718,6 +732,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: Some("A".to_string()),
             src: None,
@@ -737,6 +752,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -756,6 +772,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: Some("B".to_string()),
             src: None,
@@ -775,6 +792,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -794,6 +812,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: Some("C".to_string()),
             src: None,
@@ -872,6 +891,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -891,6 +911,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             classes: vec![],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -990,6 +1011,7 @@ fn instantiate_copies_aria_controls_into_role_info() {
         classes: vec![],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -1032,6 +1054,7 @@ fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) 
         classes: vec![],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -1051,6 +1074,7 @@ fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) 
         classes: vec!["card-host".to_string()],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -1070,6 +1094,7 @@ fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) 
         classes: vec!["gic-body".to_string()],
         id_attr: None,
         draggable: false,
+        disabled: false,
         tabindex: None,
         content: None,
         src: None,
@@ -1398,6 +1423,7 @@ fn component_scoped_rules_style_projected_children() {
             classes: vec!["slot-cost".to_string()],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -1417,6 +1443,7 @@ fn component_scoped_rules_style_projected_children() {
             classes: vec!["slot-cost-row".to_string()],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -1437,6 +1464,7 @@ fn component_scoped_rules_style_projected_children() {
             classes: vec!["qis".to_string()],
             id_attr: None,
             draggable: false,
+            disabled: false,
             tabindex: None,
             content: None,
             src: None,
@@ -1492,4 +1520,82 @@ fn component_scoped_rules_style_projected_children() {
         (r.w - 10.0).abs() < 0.01 && (r.h - 10.0).abs() < 0.01,
         ".qis 应是 10×10 独立盒子（width/height 规则生效），got {r:?}"
     );
+}
+
+/// HTML disabled 属性链（#93 验收回归：禁用按钮悬停仍手型）：`<button disabled>`
+/// 过围栏但运行时无人消费——现在 TemplateNode.disabled（flags bit 0x08）经
+/// write→load 往返存活，instantiate 置 NodeFlags::DISABLED（click 抑制 / active
+/// 截断 / :disabled 伪类 / 光标 affordance 全走既有 disabled 语义）。
+#[test]
+fn instantiate_maps_html_disabled_to_node_flag() {
+    let mut btn_style = ResolvedStyle::default();
+    crate::scene::dynamic::apply_css(&mut btn_style, "width:100px;height:60px");
+    let nodes = [TemplateNode {
+        kind: NodeKind::Button,
+        style: btn_style,
+        parent_idx: None,
+        classes: vec![],
+        id_attr: Some("dis-btn".into()),
+        draggable: false,
+        disabled: true,
+        tabindex: None,
+        content: Some("禁用按钮".into()),
+        src: None,
+        href: None,
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+        rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
+    }];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("comp1", &nodes, &rules, &[])],
+    };
+    let pkg = crate::asset::write_package(&input);
+
+    let mut s = Stage::new_for_test();
+    let doc = s.create_root("div", "").unwrap();
+    s.load_package("p", &pkg).unwrap();
+    let btn = s.instantiate("p", "comp1").unwrap();
+    crate::scene::dynamic::append_child(s.scene.as_mut().unwrap(), doc, btn).unwrap();
+    assert!(
+        s.get_node_disabled(btn),
+        "HTML disabled 属性 → 运行时 NodeFlags::DISABLED"
+    );
+}
+
+/// disabled 位 roundtrip 对称性：不写的包读出 false（旧 v47 包位恒 0 的兼容口径）。
+#[test]
+fn pkg_disabled_bit_defaults_false() {
+    let nodes = [TemplateNode {
+        kind: NodeKind::Button,
+        style: ResolvedStyle::default(),
+        parent_idx: None,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        disabled: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        href: None,
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+        rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
+    }];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("comp1", &nodes, &rules, &[])],
+    };
+    let bytes = crate::asset::write_package(&input);
+    let pkg = crate::asset::read_package(&bytes).unwrap();
+    let tn = &pkg.components["comp1"].nodes[0];
+    assert!(!tn.disabled, "未声明的 disabled 位读出 false");
 }

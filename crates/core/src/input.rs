@@ -830,32 +830,41 @@ impl PointerState {
 
     /// 软件指针形态决策（#93）：鼠标主指槽（slots[0]）本帧命中的节点 → 光标语义。
     ///
-    /// 优先级与浏览器一致：作者显式 `cursor:*`（级联终态 `style.cursor`，含 :hover
-    /// 规则的运行时覆写）恒压 UA 行为；`Auto` 时按 kind 走 UA 默认——pressable 控件
-    /// + `<a>` 给手型（`NodeKind::ua_hover_hand`），其余箭头；disabled 或不可命中节点
-    /// 不给手型（与浏览器 disabled button 一致）。触摸槽（slots[1..]）无悬停语义，
-    /// 不参与。无命中 / 命中节点已死 → Arrow。宿主每帧调一次、自行缓存去抖。
+    /// 判定沿命中节点的祖先链叶→根单遍（与点击路由同一条链：rich 内联命中会细化
+    /// 到 source 节点——TextNode/span，但浏览器模型里「指针下的元素」是宿主控件，
+    /// 文字不是元素，悬停按钮文字必须给手型）：先遇到的作者 `cursor` 声明（围栏
+    /// 定为不继承，最近者生效）或 pressable 控件定型；同节点上作者声明恒压 UA
+    /// 行为。pressable 但 disabled/不可命中 → 箭头并截断（镜像 active 链的
+    /// disabled 截断语义：disabled 子树不向外层借 affordance）。触摸槽
+    /// （slots[1..]）无悬停语义，不参与。无命中 / 命中节点已死 → Arrow。
+    /// 宿主每帧调一次、自行缓存去抖。
     pub fn cursor_intent(&self, scene: &Scene) -> CursorIntent {
         let Some(hit) = self.slots.first().and_then(|s| s.last_hit) else {
             return CursorIntent::Arrow;
         };
-        let Some(node) = scene.get(hit) else {
-            return CursorIntent::Arrow;
-        };
-        match node.style.cursor {
-            CursorStyle::Pointer => return CursorIntent::Hand,
-            CursorStyle::System => return CursorIntent::Arrow,
-            CursorStyle::Hidden => return CursorIntent::Hidden,
-            CursorStyle::Auto => {}
+        let mut cur = Some(hit);
+        while let Some(id) = cur {
+            let Some(node) = scene.get(id) else {
+                return CursorIntent::Arrow;
+            };
+            match node.style.cursor {
+                CursorStyle::Pointer => return CursorIntent::Hand,
+                CursorStyle::System => return CursorIntent::Arrow,
+                CursorStyle::Hidden => return CursorIntent::Hidden,
+                CursorStyle::Auto => {}
+            }
+            if node.kind.ua_hover_hand() {
+                return if node.interaction.touchable
+                    && !node.interaction.flags.contains(NodeFlags::DISABLED)
+                {
+                    CursorIntent::Hand
+                } else {
+                    CursorIntent::Arrow
+                };
+            }
+            cur = node.parent;
         }
-        if node.interaction.touchable
-            && !node.interaction.flags.contains(NodeFlags::DISABLED)
-            && node.kind.ua_hover_hand()
-        {
-            CursorIntent::Hand
-        } else {
-            CursorIntent::Arrow
-        }
+        CursorIntent::Arrow
     }
 
     /// 加 touch monitor（去重）。touch_id 找槽（鼠标=-1→slot0）；找不到槽→no-op（Down 前调无效）。

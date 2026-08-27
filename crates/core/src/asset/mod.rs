@@ -49,7 +49,7 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）。两处魔数皆 LoomGUI 时代遗留：字节=格式兼容契约而非品牌，更名不改。
-pub const PKG_FORMAT_VERSION: u32 = 47; // v47: ResolvedStyle 加 cursor（#93，1 字节枚举）。bincode 布局变，旧包拒绝。
+pub const PKG_FORMAT_VERSION: u32 = 47; // v47: ResolvedStyle 加 cursor（#93，1 字节枚举，bincode 布局变，旧包拒绝）+ 同批 TemplateNode flags 字节新增 disabled 位（bit 0x08，HTML button disabled 属性载体，字节布局不变）。
 pub(crate) const MIN_VERSION: u32 = 47;
 pub(crate) const MAX_VERSION: u32 = 47;
 const NULL_IDX: u16 = 0xFFFF;
@@ -143,6 +143,11 @@ pub struct TemplateNode {
     pub classes: Vec<String>,
     pub id_attr: Option<String>,
     pub draggable: bool,
+    /// HTML `disabled` 属性（fence 内容属性，button；布尔属性 presence = true）。
+    /// instantiate 时映射 `NodeFlags::DISABLED`——点击抑制 / active 截断 /
+    /// :disabled 伪类 / 光标 affordance 全走既有 disabled 语义。
+    /// 载体是 flags 字节 bit 0x08（布局不变：打包器不写该位的旧 v47 包读出 false）。
+    pub disabled: bool,
     pub tabindex: Option<i32>,
     pub content: Option<String>,
     pub src: Option<String>,
@@ -337,7 +342,8 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
                 .unwrap_or(NULL_IDX);
             let flags: u8 = (if tn.draggable { 0x01 } else { 0x00 })
                 | (if tn.rich_text_block { 0x02 } else { 0x00 })
-                | (if tn.component_scope { 0x04 } else { 0x00 });
+                | (if tn.component_scope { 0x04 } else { 0x00 })
+                | (if tn.disabled { 0x08 } else { 0x00 });
             let tabindex = tn.tabindex.unwrap_or(i32::MIN);
             // role/data-slot：Option<String> → StringTable 索引（同 id_attr 模式，NULL_IDX 表 None）。
             let role_idx = tn
@@ -552,6 +558,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let draggable = (flags & 0x01) != 0;
         let rich_text_block = (flags & 0x02) != 0;
         let component_scope = (flags & 0x04) != 0;
+        let disabled = (flags & 0x08) != 0;
         let tab_raw = r.i32("tabindex")?;
         let tabindex = if tab_raw == i32::MIN {
             None
@@ -627,6 +634,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             classes,
             id_attr,
             draggable,
+            disabled,
             tabindex,
             control_init,
             role,
