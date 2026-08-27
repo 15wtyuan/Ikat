@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-08-27
+
+v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
+全接线）+ `loom preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
+AI 安装手册重写；发版轮收尾批（transition 首帧修复 / 预览体验三连修 /
+agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F8 dump
+归因增强 / 运行时告警面 / 动态内容范式文档 + lab §17 用例）；验收后
+文档漂移批（#90：分发文档与 check 对齐 + 双向对账测试防再犯）。
+
 ### Fixed
 - **工作区分发文档与 check 漂移批（#90，Tripawd 0.0.13 验收实证）**：
   - css-reference 的 transition 支持集从过时的 4 通道修为实际 8 项
@@ -29,14 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - 仓库内 fence.md 两处内部矛盾顺手修（诊断表「四通道」→ 全集表述、
     Dropdown value 锚「可选」→ 必需）。
   - 随 loom.exe 分发；消费侧 `loom scaffold` 刷新技能即可拿到新文档。
-
-## [0.0.13] - 2026-08-27
-
-v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
-全接线）+ `loom preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
-AI 安装手册重写；发版轮收尾批（transition 首帧修复 / 预览体验三连修 /
-agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F8 dump
-归因增强 / 运行时告警面 / 动态内容范式文档 + lab §17 用例）。
 
 ### Added
 - **文本测量公共 API（#86）**：`UIContext.MeasureText(text, family, sizePx,
