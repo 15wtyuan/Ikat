@@ -1216,6 +1216,35 @@ mod repr_tests {
         assert_eq!(NodeKind::from_u8(255), None);
     }
 
+    /// `ua_hover_hand` 值集钉住（#93）：全 kind 遍历对账——新增 pressable 控件 kind
+    /// 而忘进集合时这里红（该漏是静默的：光标不变手型、无编译错无渲染差）。
+    /// 文本输入类（TextField/TextArea/NumberField）故意缺席：UA 形态是 I-beam，
+    /// 等 cursor 体系扩展文本形态时随值集一起改。
+    #[test]
+    fn ua_hover_hand_exact_kind_set() {
+        const EXPECTED_HAND: &[NodeKind] = &[
+            NodeKind::Button,
+            NodeKind::Tab,
+            NodeKind::Toggle,
+            NodeKind::RadioButton,
+            NodeKind::Slider,
+            NodeKind::Dropdown,
+            NodeKind::OptionItem,
+            NodeKind::Link,
+        ];
+        for b in 0..=21u8 {
+            let Some(k) = NodeKind::from_u8(b) else {
+                continue;
+            };
+            let in_set = EXPECTED_HAND.contains(&k);
+            assert_eq!(
+                k.ua_hover_hand(),
+                in_set,
+                "{k:?} 的 UA 手型判定与钉住值集不符（新 pressable 控件须两处同改）"
+            );
+        }
+    }
+
     #[test]
     fn tablist_tab_kind_roundtrip_and_container() {
         // TabList=19、Tab=20 追加到 enum 末尾，判别值稳定（pkg 版本门保跨版本）。

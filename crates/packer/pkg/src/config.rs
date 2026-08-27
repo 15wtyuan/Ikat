@@ -160,7 +160,8 @@ pub fn write(root: &Path, ui: &Path, unity_root: Option<&Path>) -> Result<(), St
     let dir = root.join(".ikat");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let path = root.join(CONFIG_FILE);
-    let text = serde_json::to_string_pretty(&cfg).map_err(|e| format!("serialize: {e}"))?;
+    let mut text = serde_json::to_string_pretty(&cfg).map_err(|e| format!("serialize: {e}"))?;
+    text.push('\n'); // 尾换行：文本文件常规收尾，防重写伪 diff（同 save_workspace）
     std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
 }
 

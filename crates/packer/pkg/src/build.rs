@@ -682,8 +682,9 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
                 .map_err(|e| format!("save atlas page {}: {e}", page_path.display()))?;
         }
         let manifest_path = atlas_dir.join(format!("{name}.atlas.json"));
-        let manifest_text = serde_json::to_string_pretty(&packed.manifest)
+        let mut manifest_text = serde_json::to_string_pretty(&packed.manifest)
             .map_err(|e| format!("serialize atlas manifest {name}: {e}"))?;
+        manifest_text.push('\n'); // 尾换行：防重写伪 diff（同 save_workspace）
         std::fs::write(&manifest_path, manifest_text)
             .map_err(|e| format!("write {}: {e}", manifest_path.display()))?;
         report.atlases.push(name.clone());
@@ -746,8 +747,9 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
             .collect::<Result<Vec<_>, String>>()?,
     };
     let runtime_path = output_dir.join(RUNTIME_FILE);
-    let runtime_text = serde_json::to_string_pretty(&runtime)
+    let mut runtime_text = serde_json::to_string_pretty(&runtime)
         .map_err(|e| format!("serialize runtime manifest: {e}"))?;
+    runtime_text.push('\n'); // 尾换行：防重写伪 diff（同 save_workspace）
     std::fs::write(&runtime_path, runtime_text)
         .map_err(|e| format!("write {}: {e}", runtime_path.display()))?;
     report.log.push(format!("wrote {}", runtime_path.display()));

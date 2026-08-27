@@ -7,8 +7,10 @@
 // 演示数据（pages/<页>.js）、页面导航、页面专属交互——站在本 boot 之上。
 //
 // 工作区脚本用 `import { ready } from '/ikat-preview/lib/boot.js'` 等待 A 层
-// 就绪后再操作 DOM（填充的列表克隆会被展开 pass 看到——fill 在 ready 之后跑
-// 的组件已在树，无需再手动触发展开）。
+// 就绪后再操作 DOM。注意：初始展开 pass 在 ready 处即完成，之后落树的克隆
+// （fill.js 填充的列表条目）不会被它看见——fill.js 内部会在填充后用缓存的
+// 组件清单补一轮展开（expandComponentsNow），故 template 内含自定义组件的
+// 克隆也会被展开，B 层无需手动触发展开。
 
 import { expandComponents, fetchRegistry } from './expand.js';
 import {

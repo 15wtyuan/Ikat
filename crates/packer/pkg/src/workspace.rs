@@ -75,10 +75,13 @@ pub fn load_workspace(root: &Path) -> Result<Workspace, String> {
     serde_json::from_str(&text).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
-/// 写回工作区根下的 ikat.workspace.json（pretty，AI 好读）。
+/// 写回工作区根下的 ikat.workspace.json（pretty，AI 好读；带尾换行——手编文件
+/// 的常规收尾，缺了则每次工具重写都产「删尾换行」的伪 diff）。
 pub fn save_workspace(root: &Path, ws: &Workspace) -> Result<(), String> {
     let path = root.join(WORKSPACE_FILE);
-    let text = serde_json::to_string_pretty(ws).map_err(|e| format!("serialize workspace: {e}"))?;
+    let mut text =
+        serde_json::to_string_pretty(ws).map_err(|e| format!("serialize workspace: {e}"))?;
+    text.push('\n');
     std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
 }
 

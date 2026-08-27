@@ -545,7 +545,9 @@ pub extern "C" fn ikat_stage_get_control_readonly(
 /// （指针+len）。输出经 out 指针写 (w, h, line_count)。max_width <= 0 不换行。
 ///
 /// **返回码：** 0=ok；-1=null 句柄 / null out / 坏 UTF-8 / 空 family；
-/// -2=family 未注册（教学式：测量必须用将渲染的同款字体）。
+/// -2=family 未注册（教学式：测量必须用将渲染的同款字体）；
+/// -3=core 侧参数非法（size_px<=0/非有限、max_width 非有限——C# 投影已预校验，
+/// 此层是对直调 FFI 宿主的防御）。
 ///
 /// **常驻（不 gate）：**布局前预估是 runtime 稳定入口（tips 预分行 / 飘字宽估）。
 #[no_mangle]

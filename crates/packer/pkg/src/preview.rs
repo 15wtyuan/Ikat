@@ -213,7 +213,8 @@ fn write_info(root: &Path, info: &ServerInfo) {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    if let Ok(text) = serde_json::to_string_pretty(info) {
+    if let Ok(mut text) = serde_json::to_string_pretty(info) {
+        text.push('\n'); // 尾换行：文本文件常规收尾，防重写伪 diff（同 save_workspace）
         let _ = std::fs::write(path, text);
     }
 }
@@ -715,11 +716,12 @@ fn mime_for(path: &Path) -> String {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         // 文本类一律带 charset=utf-8（#92）：浏览器对无 charset 的 text/* 按本地
         // 传统编码解码，静态中文会乱码；ESM 因规范恒 UTF-8 不受影响——恰好证明
-        // 同一 server 两套解码真相的不一致。
+        // 同一 server 两套解码真相的不一致。application/json 例外：RFC 8259 JSON
+        // 恒 UTF-8 且未定义 charset 参数，fetch/XHR 的 .json() 不看它，带上无效果。
         "html" | "htm" => "text/html; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
-        "json" => "application/json; charset=utf-8",
+        "json" => "application/json",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -867,10 +869,8 @@ mod tests {
         );
         assert_eq!(mime_for(Path::new("a.html")), "text/html; charset=utf-8");
         assert_eq!(mime_for(Path::new("a.css")), "text/css; charset=utf-8");
-        assert_eq!(
-            mime_for(Path::new("a.json")),
-            "application/json; charset=utf-8"
-        );
+        // json 不带 charset：RFC 8259 JSON 恒 UTF-8，参数无效果（见 mime_for 注释）。
+        assert_eq!(mime_for(Path::new("a.json")), "application/json");
         assert_eq!(mime_for(Path::new("a.png")), "image/png");
         assert_eq!(mime_for(Path::new("a.unknown")), "application/octet-stream");
     }

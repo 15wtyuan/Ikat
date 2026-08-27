@@ -81,10 +81,10 @@ impl WrapControl {
 /// 中文排版通用压缩集（句读/闭括号/省略号等）；UAX#14 的 CL 类在 plain 路已天然
 /// 避开多数场景，此表服务 rich token 路（无 UAX#14）与逐字拆分（break-word）的
 /// 断点调整。
-const KINSOKU_NO_LINE_START: &str = "。，、；：？！）】〉」』”’…‥·％‰℃¢°";
+const KINSOKU_NO_LINE_START: &str = "。，、；：？！）】〉」』》”’…‥·％‰℃¢°";
 
 /// kinsoku 行尾禁则字符集：不得作为行尾（断点须右移，开括号随词下移）。
-const KINSOKU_NO_LINE_END: &str = "（【〈「『“‘《〈";
+const KINSOKU_NO_LINE_END: &str = "（【〈「『“‘《";
 
 fn is_kinsoku_no_line_start(ch: char) -> bool {
     KINSOKU_NO_LINE_START.contains(ch)
@@ -845,8 +845,14 @@ pub fn measure_text(
             seg
         };
         // 折叠模式：换行后的行首纯空白段跳过（pre-line 的换行后行首空格移除——
-        // preprocess 只折叠串内空白，段级行首悬挂交给这里）。
-        if wrap.collapse_spaces() && cur.is_empty() && seg.chars().all(is_fold_ws) {
+        // preprocess 只折叠串内空白，段级行首悬挂交给这里）。非空才跳：Mandatory 段
+        // 剥掉尾 \n 后可能是空串，空真 all() 会把它误吞、连下面的强制换行 flush 一起
+        // 跳过（pre-line 连续 \n 的空行会丢）。
+        if wrap.collapse_spaces()
+            && cur.is_empty()
+            && !seg.is_empty()
+            && seg.chars().all(is_fold_ws)
+        {
             continue;
         }
         // probe 不提交：换行时段首 kern 重置，需以无前段状态重测。
@@ -2820,6 +2826,49 @@ mod tests {
             "行内空格折叠为单空格"
         );
         assert_eq!(line_codepoints(&l, 1), vec!['c'], "换行后行首空格移除");
+    }
+
+    /// pre-line 连续 `\n`：中间空行占位不丢。回归守卫：行首空白段跳过逻辑曾把剥掉
+    /// `\n` 后的空 Mandatory 段一起吞掉（空真 `all()`），连强制换行 flush 都跳过。
+    #[test]
+    fn white_space_pre_line_consecutive_newlines_keep_blank_lines() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let pl = WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::PreLine,
+            ..Default::default()
+        };
+        let l = measure_text(
+            "a\n\nb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pl,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 3, "a/空行/b 三行");
+        assert_eq!(line_codepoints(&l, 0), vec!['a']);
+        assert!(line_codepoints(&l, 1).is_empty(), "中间空行保住");
+        assert_eq!(line_codepoints(&l, 2), vec!['b']);
+
+        // 尾随 `\n`（编辑器语义：回车后 caret 落新空行）：末空行也不丢。
+        let l2 = measure_text(
+            "a\n\n",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pl,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l2.lines.len(), 3, "a/空行/末空行三行");
     }
 
     #[test]

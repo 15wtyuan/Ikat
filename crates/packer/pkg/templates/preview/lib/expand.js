@@ -5,6 +5,9 @@
 // slot 的 fallback 子女）；纯空白文本节点丢弃；嵌套组件迭代展开至不动点（≤16 pass）。
 // 组件清单来自 server 的 /api/workspace.json（与打包同一套扫描口径）。
 
+// 组件清单缓存（fetchRegistry 灌入）：expandComponentsNow 的补展开数据源。
+let cachedReg = null;
+
 export async function fetchRegistry() {
   const api = await fetch('/api/workspace.json').then((r) => r.json());
   const entries = Object.entries(api.components || {});
@@ -16,7 +19,15 @@ export async function fetchRegistry() {
       reg[name] = await fetch('/ws/' + rel).then((r) => r.text());
     }),
   );
+  cachedReg = reg;
   return reg;
+}
+
+// 晚到 DOM 的补展开入口（fill.js 克隆后调）：用缓存的组件清单就地再跑一轮。
+// 初始 pass 看不见 <template> 内部（惰性 DocumentFragment），克隆落树后须补跑
+// 才会展开 template 里含的自定义组件；boot 未跑过（cachedReg 空）时安全 no-op。
+export function expandComponentsNow() {
+  if (cachedReg && Object.keys(cachedReg).length) expandComponents(cachedReg);
 }
 
 export function expandComponents(reg) {
@@ -116,14 +127,11 @@ function mirrorHostState(host, root) {
 
 function observeHostState(host, root) {
   if (typeof MutationObserver === 'undefined') return;
-  const attrs = ['class'].concat(
-    Array.from(host.attributes)
-      .filter((a) => /^(data|aria)-/.test(a.name))
-      .map((a) => a.name),
-  );
+  // 不设 attributeFilter：固定快照看不到 B 层事后**新增**的 data-属性（动态挂状态
+  // 会漏镜像）；镜像内容在 mirrorHostState 里筛（class/data-*/aria-*），观察面宽
+  // 只多几次幂等回调。
   new MutationObserver(() => mirrorHostState(host, root)).observe(host, {
     attributes: true,
-    attributeFilter: attrs,
   });
 }
 
@@ -137,6 +145,9 @@ function observeHostState(host, root) {
 
 function injectComponentStyle(name, css) {
   if (!css || !css.trim()) return;
+  // 同名组件只注入一份：多实例/克隆补展开都会再进这里，规则相同纯去重（防
+  // <style> 堆积；组件名围栏保证 [a-z0-9-]，可安全内插进属性选择器）。
+  if (document.querySelector(`style[data-ikat-comp-style="${name}"]`)) return;
   const out = splitKeyframes(css)
     .map(({ raw, text }) =>
       raw ? text : text.replace(/([^{}]+)\{/g, (m, sel) => prefixSelector(name, sel)),
