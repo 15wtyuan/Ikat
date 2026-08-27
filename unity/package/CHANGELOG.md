@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **CSS IFC 换行控制全集（#73）**：
+  - `white-space` 扩到五值：`normal` / `nowrap` / `pre` / `pre-wrap` /
+    `pre-line`（空白折叠 × 自动换行 × 源换行保留 三轴组合，此前仅
+    normal/nowrap）。pkg 格式 v45（旧包拒绝加载）。
+  - 新属性 `overflow-wrap`（`normal` 超长词溢出不拆 / `break-word` 词独行
+    仍超行宽才逐字拆）、`word-break`（`break-all` 任意字符可断 /
+    `keep-all` CJK 词内不断）、`text-wrap`（只收 `nowrap`；CSS Text 4 的
+    `balance`/`stable`/`pretty` 围栏拒绝——标题居中用 `text-align`）。
+  - **CJK 禁则（kinsoku，原 #51 并入）**：断行自动避头尾——行首不出句读/
+    闭括号、行尾不出开括号，违规断点自动左/右移（悬挂标点不做）。
+  - 语义对齐浏览器的连带修正：静态文本空白串折叠为单空格、源换行在
+    normal/nowrap 下折为空格（此前 plain 路径直接断行）、超长词默认不再
+    逐字拆（需显式 `overflow-wrap:break-word`）、rich-text-block 的
+    white-space 声明真正生效（此前被忽略）、换行后行首悬挂空格移除。
+  - 文本控件（TextField/TextArea/NumberField）空白语义冻结 pre 系
+    （空格/换行原样保留，光标字节映射不受折叠影响；CSS UA 同为 pre 系），
+    换行开关仍尊重声明。
+  - showcase lab §18 摆台（11 盒 × 各值 × 禁则段落，判据见页内）。
+
 ## [0.0.13] - 2026-08-27
 
 v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder

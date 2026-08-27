@@ -72,7 +72,9 @@ pub(crate) enum MeasureContext {
         line_height: f32,
         letter_spacing: f32,
         align: TextAlign,
-        nowrap: bool,
+        /// 换行控制（#73）。静态文本 = style.wrap_control()；文本控件 =
+        /// control_wrap_control（空白冻结 pre 系，保光标字节映射）。
+        wrap: crate::text::layout::WrapControl,
         /// 节点的 font_family。None 表示用 FontTable 的 default。
         family: Option<String>,
         /// 节点 style.color（plain text 整段同色；进 GlyphRun.color 供 build per-vertex）。
@@ -85,17 +87,16 @@ pub(crate) enum MeasureContext {
     },
     /// RichText 叶子（v1.7）：inline flow 封装在 measure_rich_text。
     /// runs owned（parse 期产的扁平 run 流，含 per-run 样式）。
-    /// `align` 传入 measure_rich_text（每行容器内偏移）；`nowrap` 暂未接线（rich 不支持）。
+    /// `align` 传入 measure_rich_text（每行容器内偏移）。
     RichText {
         runs: Vec<crate::text::rich::RichRun>,
         line_height: f32,
         /// CSS letter-spacing（px）。rich inline flow 的 token 宽/glyph 定位均计入。
         letter_spacing: f32,
         align: TextAlign,
-        /// 暂未接线：rich 还未支持 white-space:nowrap。先携值（来自节点 style），待 measure_rich_text
-        /// 加 nowrap 路径后此字段即被读，避免加/删字段的连带改动。
-        #[allow(dead_code)]
-        nowrap: bool,
+        /// 换行控制（#73）：white-space/word-break 等全量进 measure_rich_text
+        /// （#73 起真正接线——此前 rich 忽略 nowrap 的洞已补）。
+        wrap: crate::text::layout::WrapControl,
         /// 节点的 font_family。None 表示用 FontTable 的 default。
         family: Option<String>,
         /// 水平 padding+border 总 inset（左+右）。同 Text：文字在 content area 内换行/对齐。
@@ -276,7 +277,7 @@ pub fn solve(
                 line_height: s.effective_line_height(),
                 letter_spacing: s.letter_spacing,
                 align: s.text_align,
-                nowrap: s.white_space_nowrap,
+                wrap: s.wrap_control(),
                 family: s.font_family.clone(),
                 h_inset: lp(s.taffy_style.padding.left)
                     + lp(s.taffy_style.padding.right)
@@ -293,7 +294,7 @@ pub fn solve(
                         line_height: s.effective_line_height(),
                         letter_spacing: s.letter_spacing,
                         align: s.text_align,
-                        nowrap: s.white_space_nowrap,
+                        wrap: s.wrap_control(),
                         family: s.font_family.clone(),
                         color: s.color,
                         font_weight: s.font_weight,
@@ -348,7 +349,7 @@ pub fn solve(
                         line_height: s.effective_line_height(),
                         letter_spacing: s.letter_spacing,
                         align: s.text_align,
-                        nowrap: s.white_space_nowrap,
+                        wrap: crate::style::resolved::control_wrap_control(s),
                         family: s.font_family.clone(),
                         color: if is_placeholder {
                             crate::style::resolved::placeholder_render_color(
@@ -629,7 +630,7 @@ pub fn solve(
                         line_height,
                         letter_spacing,
                         align,
-                        nowrap,
+                        wrap,
                         family,
                         color,
                         font_weight,
@@ -654,7 +655,7 @@ pub fn solve(
                             *line_height,
                             *letter_spacing,
                             *align,
-                            *nowrap,
+                            *wrap,
                             *font_weight,
                             family.as_deref(),
                             mw,
@@ -676,7 +677,7 @@ pub fn solve(
                                     *line_height,
                                     *letter_spacing,
                                     *align,
-                                    *nowrap,
+                                    *wrap,
                                     mw,
                                     &stack,
                                     *color,
@@ -693,7 +694,7 @@ pub fn solve(
                                 *line_height,
                                 *letter_spacing,
                                 *align,
-                                *nowrap,
+                                *wrap,
                                 mw,
                                 &stack,
                                 *color,
@@ -719,6 +720,7 @@ pub fn solve(
                         line_height,
                         letter_spacing,
                         align,
+                        wrap,
                         family,
                         h_inset,
                         ..
@@ -744,6 +746,7 @@ pub fn solve(
                             *line_height,
                             *letter_spacing,
                             *align,
+                            *wrap,
                             family.as_deref(),
                             mw,
                         );
@@ -764,6 +767,7 @@ pub fn solve(
                                     *line_height,
                                     *letter_spacing,
                                     *align,
+                                    *wrap,
                                     &stack,
                                 );
                                 *slot = Some((fp, l.clone()));
@@ -777,6 +781,7 @@ pub fn solve(
                                 *line_height,
                                 *letter_spacing,
                                 *align,
+                                *wrap,
                                 &stack,
                             )
                         };

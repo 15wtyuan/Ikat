@@ -3,11 +3,56 @@ use serde::{Deserialize, Serialize};
 /// Tracks which inherited CSS properties were explicitly declared (set-ness bitmask).
 /// Each bit corresponds to one inheritable property (see INH_* constants in dynamic.rs).
 /// Baked at package time into base_style; rematch reads it as the per-frame inheritance baseline.
+/// u64 与 InlineSet 同位宽：INH_* bits 0-7 之后的新继承属性（overflow-wrap 等）落在 bits 33+
+/// （bits 8-32 被 INLINE_* 非继承属性占用，复用会撞位）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InheritedSet(pub u16);
+pub struct InheritedSet(pub u64);
 
 use taffy::style::LengthPercentage;
 use taffy::style::Style as TaffyStyle;
+
+/// CSS `white-space` 换行控制全集（#73）。三轴正交：
+/// 空白折叠（Normal/Nowrap/PreLine 折、Pre/PreWrap 留）× 自动换行（Nowrap/Pre 关）
+/// × 源换行保留（Pre/PreWrap/PreLine 留 `\n` 断行，Normal/Nowrap 折成空格）。
+/// 消费点：`crate::text::layout::WrapControl`（measure_text/measure_rich_text 断行器）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WhiteSpace {
+    #[default]
+    Normal,
+    Nowrap,
+    Pre,
+    PreWrap,
+    PreLine,
+}
+
+/// CSS `overflow-wrap`（#73）。`break-word`：词独行仍超行宽才逐字拆
+/// （`normal` 词超宽 = 溢出，不拆——CSS 语义，浏览器一致）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OverflowWrap {
+    #[default]
+    Normal,
+    BreakWord,
+}
+
+/// CSS `word-break`（#73）。`break-all`：任意字符间可断（拉丁词也逐字）；
+/// `keep-all`：CJK 词内不断（只退到空格/标点边界断）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WordBreak {
+    #[default]
+    Normal,
+    BreakAll,
+    KeepAll,
+}
+
+/// CSS `text-wrap`（CSS Text 4 子集，#73）。只收 `nowrap`（关自动换行、
+/// 保留 white-space 的空白语义）；`balance`/`stable`/`pretty` 围栏拒绝
+/// （fence schema 值集即拒绝，deferred：text-align 替代不了的标题平衡换行狗粮场景再收）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TextWrap {
+    #[default]
+    Normal,
+    Nowrap,
+}
 
 /// CSS `-webkit-text-security` 的掩码形状（password 类输入的显示变换）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -506,7 +551,14 @@ pub struct ResolvedStyle {
     /// None = 未声明长度形。两槽互斥：mapping 写其一，另一槽保持默认。
     pub line_height_px: Option<f32>,
     pub letter_spacing: f32,
-    pub white_space_nowrap: bool,
+    /// CSS `white-space`（#73 换行控制全集，继承）。
+    pub white_space: WhiteSpace,
+    /// CSS `overflow-wrap`（#73，继承）。
+    pub overflow_wrap: OverflowWrap,
+    /// CSS `word-break`（#73，继承）。
+    pub word_break: WordBreak,
+    /// CSS `text-wrap`（#73，继承，只收 nowrap）。
+    pub text_wrap: TextWrap,
     /// flex 顺序（CSS `order`）。taffy Style 无此字段，存在这里由
     /// layout 在 flex 排序前消费。默认 0 = DOM 顺序。
     pub order: i32,
@@ -647,7 +699,10 @@ impl Default for ResolvedStyle {
             line_height: 0.0,
             line_height_px: None,
             letter_spacing: 0.0,
-            white_space_nowrap: false,
+            white_space: WhiteSpace::Normal,
+            overflow_wrap: OverflowWrap::Normal,
+            word_break: WordBreak::Normal,
+            text_wrap: TextWrap::Normal,
             order: 0,
             z_index: 0,
             touchable: true,
@@ -676,6 +731,33 @@ impl ResolvedStyle {
             _ => self.line_height,
         }
     }
+
+    /// 静态文本断行控制（#73）：四个换行属性打包成断行器消费的 `WrapControl`。
+    /// 文本控件（TextField/TextArea/NumberField）不走这里——空格折叠会破坏
+    /// 光标字节↔布局 1:1 映射，控件侧用 `control_wrap_control` 冻结空白语义。
+    pub fn wrap_control(&self) -> crate::text::layout::WrapControl {
+        crate::text::layout::WrapControl {
+            white_space: self.white_space,
+            overflow_wrap: self.overflow_wrap,
+            word_break: self.word_break,
+            text_wrap: self.text_wrap,
+        }
+    }
+}
+
+/// 文本控件的断行控制：空白语义冻结为 pre 系（空格/换行原样保留——折叠会破坏
+/// 光标字节↔布局 1:1 映射，CSS UA 对 input/textarea 的 white-space 也是 pre 系），
+/// 换行开关尊重声明（white-space:nowrap / text-wrap:nowrap → 关自动换行）。
+/// word-break/overflow-wrap 照常尊重（不断不删字符，光标映射不受影响）。
+pub fn control_wrap_control(s: &ResolvedStyle) -> crate::text::layout::WrapControl {
+    let mut wc = s.wrap_control();
+    let wrap_off = matches!(s.white_space, WhiteSpace::Nowrap | WhiteSpace::Pre);
+    wc.white_space = if wrap_off {
+        WhiteSpace::Pre
+    } else {
+        WhiteSpace::PreWrap
+    };
+    wc
 }
 
 #[cfg(test)]
@@ -771,7 +853,7 @@ mod tests {
         s.text_align = TextAlign::Center;
         s.line_height = 1.5;
         s.letter_spacing = 2.0;
-        s.white_space_nowrap = true;
+        s.white_space = WhiteSpace::Nowrap;
         s.order = 5;
         s.background_image = Some("icons/home.png".to_string());
         s.background_size = BackgroundSize::Cover;

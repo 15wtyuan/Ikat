@@ -16,7 +16,7 @@ const HTML: &str = include_str!("fixtures/schema-lock.html");
 
 /// 当前布局的登记哈希。改 pkg 布局（有意 bump 版本）时同步更新此值。
 /// v44（#10 layout/box-shadow keyframes 通道，手编 keyframes blob 布局扩展）。
-const LOCKED_HASH: u64 = 0x193c_9d7b_8f26_e3f1;
+const LOCKED_HASH: u64 = 0x32d0_7807_9072_98b9;
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

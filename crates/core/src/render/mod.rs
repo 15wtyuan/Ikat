@@ -1900,6 +1900,7 @@ fn render_one_node(
                             s.effective_line_height(),
                             s.letter_spacing,
                             s.text_align,
+                            s.wrap_control(),
                             &stack,
                         )
                     });
@@ -2061,7 +2062,7 @@ fn render_one_node(
                         s.effective_line_height(),
                         s.letter_spacing,
                         s.text_align,
-                        s.white_space_nowrap,
+                        s.wrap_control(),
                         Some(content_w),
                         &stack,
                         text_color,
@@ -2178,7 +2179,7 @@ fn render_one_node(
                     s.effective_line_height(),
                     s.letter_spacing,
                     s.text_align,
-                    s.white_space_nowrap,
+                    crate::style::resolved::control_wrap_control(s),
                     Some(content_w),
                     &stack,
                     text_color,

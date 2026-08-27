@@ -512,6 +512,30 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         name: "white-space",
         default: "normal",
         inherited: true,
+        // #73 换行控制全集：五值 = 空白折叠 × 自动换行 × 源换行保留 三轴组合。
+        parser: CssValueParser::Keyword(&["normal", "nowrap", "pre", "pre-wrap", "pre-line"]),
+    },
+    CssPropSpec {
+        name: "overflow-wrap",
+        default: "normal",
+        inherited: true,
+        // break-word：词独行仍超行宽才逐字拆；normal = 超长词溢出不拆（浏览器一致）。
+        parser: CssValueParser::Keyword(&["normal", "break-word"]),
+    },
+    CssPropSpec {
+        name: "word-break",
+        default: "normal",
+        inherited: true,
+        // keep-all：CJK 词内不断；break-all：任意字符间可断（拉丁也逐字）。
+        parser: CssValueParser::Keyword(&["normal", "break-all", "keep-all"]),
+    },
+    CssPropSpec {
+        name: "text-wrap",
+        default: "normal",
+        inherited: true,
+        // CSS Text 4 子集：只收 nowrap（关自动换行，white-space 空白语义保留）。
+        // balance/stable/pretty 围栏拒绝（值集即拒绝，FenceBadCssValue 引导替代）；
+        // deferred：text-align 替代不了的标题平衡换行狗粮场景出现再收。
         parser: CssValueParser::Keyword(&["normal", "nowrap"]),
     },
     CssPropSpec {

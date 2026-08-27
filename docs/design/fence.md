@@ -280,6 +280,15 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 `color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）
 
+**换行控制**（#73，均继承）
+
+- `white-space`：`normal` / `nowrap` / `pre` / `pre-wrap` / `pre-line` 全集——空白折叠 × 自动换行 × 源换行保留 三轴组合（`normal` 折叠+换行；`nowrap` 折叠+不换行；`pre` 保留+不换行+`\n` 断行；`pre-wrap` 保留+换行+`\n` 断行；`pre-line` 折叠空格+换行+`\n` 断行）。
+- `overflow-wrap`：`normal`（超长词溢出不拆，浏览器一致）/ `break-word`（词独行仍超行宽才逐字拆）。
+- `word-break`：`normal` / `break-all`（任意字符间可断，拉丁词也逐字）/ `keep-all`（CJK 词内不断，只退到空格边界断）。
+- `text-wrap`：`normal` / `nowrap`（关自动换行，`\n` 强制断行与 white-space 空白语义保留）。CSS Text 4 的 `balance` / `stable` / `pretty` 不在围栏——写了报 `FenceBadCssValue`（标题居中场景用 `text-align`）。
+- **禁则（kinsoku）**：CJK 断行自动避头尾——行首不出句读/闭括号（`。，、；：？！）】」』…` 等），行尾不出开括号（`（【「『` 等），违规断点自动左/右移（悬挂标点不做）。
+- 文本控件（TextField/TextArea/NumberField）的空白语义冻结为 pre 系（空格/换行原样保留），换行开关仍尊重声明——空格折叠会破坏光标字节↔布局 1:1 映射（CSS UA 对 input/textarea 同为 pre 系）。
+
 **文本控件私有属性**（CSS 用伪元素表达，围栏无伪元素选择器，故平铺 prop；`None` = render 回退到缺省色）
 
 - `caret-color`（继承，`::selection` 光标色；缺省回退 `color`）

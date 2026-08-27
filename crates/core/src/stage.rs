@@ -209,7 +209,7 @@ impl Stage {
             0.0,
             0.0,
             crate::style::resolved::TextAlign::Left,
-            false,
+            crate::text::layout::WrapControl::default(),
             (max_width > 0.0).then_some(max_width),
             &stack,
             [0.0, 0.0, 0.0, 1.0],

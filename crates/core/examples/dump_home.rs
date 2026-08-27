@@ -85,7 +85,7 @@ fn issue1_text_wrap(scene: &Scene, s: &Stage) {
             st.line_height,
             st.letter_spacing,
             st.text_align,
-            st.white_space_nowrap,
+            st.wrap_control(),
             None,
             &s.fonts.stack_for(st.font_family.as_deref()),
             st.color,
@@ -267,7 +267,14 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: loomgui_core::scene::node::NodeI
     };
     println!(
         "{}{} rect=({:.0},{:.0},{:.0},{:.0}) fs={} nowrap={}",
-        indent, cls, r.x, r.y, r.w, r.h, st.font_size, st.white_space_nowrap
+        indent,
+        cls,
+        r.x,
+        r.y,
+        r.w,
+        r.h,
+        st.font_size,
+        st.white_space != loomgui_core::style::resolved::WhiteSpace::Normal
     );
     println!("{}  content={:?}", indent, content);
     if !content.is_empty() {
@@ -277,7 +284,7 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: loomgui_core::scene::node::NodeI
             st.line_height,
             st.letter_spacing,
             st.text_align,
-            st.white_space_nowrap,
+            st.wrap_control(),
             None,
             &s.fonts.stack_for(st.font_family.as_deref()),
             st.color,

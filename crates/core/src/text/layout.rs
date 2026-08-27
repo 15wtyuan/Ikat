@@ -28,6 +28,106 @@ const NORMAL_LINE_HEIGHT: f32 = 1.31;
 /// glyph 碎片，只吃掉浮点噪声。
 const WRAP_FIT_EPS: f32 = 0.05;
 
+/// 换行控制参数包（#73）：`white-space` 三轴 + `overflow-wrap`/`word-break`/`text-wrap`。
+///
+/// 构造：静态文本 `ResolvedStyle::wrap_control()`；文本控件
+/// `style::resolved::control_wrap_control`（空白语义冻结 pre 系，保光标字节映射）。
+/// 消费：`measure_text`（plain 路径，UAX#14 断行）与 `measure_rich_text`
+/// （token 贪心路）。四枚举 Copy/Hash，指纹 memo 直接哈希整包。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct WrapControl {
+    pub white_space: crate::style::resolved::WhiteSpace,
+    pub overflow_wrap: crate::style::resolved::OverflowWrap,
+    pub word_break: crate::style::resolved::WordBreak,
+    pub text_wrap: crate::style::resolved::TextWrap,
+}
+
+impl WrapControl {
+    /// 软换行（自动断行）开关：white-space 允许且 text-wrap 未关。
+    /// 强制断行（保留的 `\n` / `<br>`）不受此开关影响——CSS 里 nowrap 的 `\n`
+    /// 在折叠阶段并进空白串、pre 的 `\n` 保留，断行源由折叠决定，不由开关压制。
+    pub fn wrap_enabled(&self) -> bool {
+        matches!(
+            self.white_space,
+            crate::style::resolved::WhiteSpace::Normal
+                | crate::style::resolved::WhiteSpace::PreWrap
+                | crate::style::resolved::WhiteSpace::PreLine
+        ) && self.text_wrap == crate::style::resolved::TextWrap::Normal
+    }
+
+    /// 空白折叠（空白串 → 单空格）。PreLine 折叠空格类但保留 `\n`
+    /// （见 [`Self::preserve_newlines`]）。
+    pub fn collapse_spaces(&self) -> bool {
+        matches!(
+            self.white_space,
+            crate::style::resolved::WhiteSpace::Normal
+                | crate::style::resolved::WhiteSpace::Nowrap
+                | crate::style::resolved::WhiteSpace::PreLine
+        )
+    }
+
+    /// 源换行保留（`\n` 产生强制断行）。false = `\n` 在折叠阶段并进空白串。
+    pub fn preserve_newlines(&self) -> bool {
+        matches!(
+            self.white_space,
+            crate::style::resolved::WhiteSpace::Pre
+                | crate::style::resolved::WhiteSpace::PreWrap
+                | crate::style::resolved::WhiteSpace::PreLine
+        )
+    }
+}
+
+/// kinsoku 行首禁则字符集：不得作为行首（断点须左移，把前一字符一起挪下一行）。
+/// 中文排版通用压缩集（句读/闭括号/省略号等）；UAX#14 的 CL 类在 plain 路已天然
+/// 避开多数场景，此表服务 rich token 路（无 UAX#14）与逐字拆分（break-word）的
+/// 断点调整。
+const KINSOKU_NO_LINE_START: &str = "。，、；：？！）】〉」』”’…‥·％‰℃¢°";
+
+/// kinsoku 行尾禁则字符集：不得作为行尾（断点须右移，开括号随词下移）。
+const KINSOKU_NO_LINE_END: &str = "（【〈「『“‘《〈";
+
+fn is_kinsoku_no_line_start(ch: char) -> bool {
+    KINSOKU_NO_LINE_START.contains(ch)
+}
+
+fn is_kinsoku_no_line_end(ch: char) -> bool {
+    KINSOKU_NO_LINE_END.contains(ch)
+}
+
+/// 可折叠空白（CSS collapsible whitespace：空格/制表/CR/换页；`\n` 视模式另论）。
+fn is_fold_ws(ch: char) -> bool {
+    matches!(ch, ' ' | '\t' | '\r' | '\u{000C}')
+}
+
+/// plain 路径文本预处理（CSS text processing 子集）：
+/// - 折叠模式：空白串 → 单空格；保留 `\n` 的模式下 `\n` 不折（后续 UAX#14 出
+///   Mandatory 断点）。首尾空格裁去（CSS：行盒首尾 collapsible 空白移除）。
+/// - 保留模式：原样返回（借用，零拷贝）。
+///
+/// 返回 Cow；调用方只读。折叠删改字符——**光标字节映射会被破坏**，仅供静态文本；
+/// 文本控件经 `control_wrap_control` 恒为保留模式，字节 1:1 保持。
+fn preprocess_text<'a>(content: &'a str, wrap: &WrapControl) -> std::borrow::Cow<'a, str> {
+    if !wrap.collapse_spaces() {
+        return std::borrow::Cow::Borrowed(content);
+    }
+    let mut out = String::with_capacity(content.len());
+    let mut in_ws = false;
+    for ch in content.chars() {
+        if is_fold_ws(ch) || (ch == '\n' && !wrap.preserve_newlines()) {
+            if !in_ws {
+                out.push(' ');
+                in_ws = true;
+            }
+        } else {
+            in_ws = false;
+            out.push(ch); // PreLine 的 \n：preserve_newlines=true，不折叠、直通
+        }
+    }
+    // 首尾单空格裁去（只在折叠模式；PreLine 的 \n 不动）。
+    let trimmed = out.trim_matches(' ');
+    std::borrow::Cow::Owned(trimmed.to_string())
+}
+
 /// 单个字形。坐标为绝对坐标（pen 位 = glyph.x/y + bearing）。
 #[derive(Debug, Clone)]
 pub struct Glyph {
@@ -476,7 +576,7 @@ pub fn text_fingerprint(
     line_height: f32,
     letter_spacing: f32,
     align: crate::style::resolved::TextAlign,
-    nowrap: bool,
+    wrap: WrapControl,
     font_weight: u16,
     family: Option<&str>,
     mw: Option<f32>,
@@ -488,7 +588,7 @@ pub fn text_fingerprint(
     line_height.to_bits().hash(&mut h);
     letter_spacing.to_bits().hash(&mut h);
     align.hash(&mut h);
-    nowrap.hash(&mut h);
+    wrap.hash(&mut h);
     font_weight.hash(&mut h);
     family.hash(&mut h);
     match mw {
@@ -522,6 +622,7 @@ pub fn rich_text_fingerprint(
     line_height: f32,
     letter_spacing: f32,
     align: crate::style::resolved::TextAlign,
+    wrap: WrapControl,
     family: Option<&str>,
     mw: Option<f32>,
 ) -> u64 {
@@ -529,6 +630,8 @@ pub fn rich_text_fingerprint(
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     letter_spacing.to_bits().hash(&mut h);
+    // 换行控制进键（#73）：white-space/word-break 等改变断行结果，不进键会串缓存。
+    wrap.hash(&mut h);
     runs.len().hash(&mut h);
     for r in runs {
         // kind 判别 + payload。Text vs Image 用 0/1 区分；Image 的 f32 用 to_bits 哈希
@@ -598,7 +701,10 @@ pub fn rich_text_fingerprint(
 /// 测量并布局文本。
 ///
 /// - `line_height`：倍数，`0.0` = normal（= ascent - descent + line_gap）。
-/// - `max_width`：`None` 表示不换行；`nowrap=true` 时强制单行（white-space:nowrap）。
+/// - `wrap`：换行控制（#73，white-space 三轴 + overflow-wrap/word-break/text-wrap）。
+///   静态文本传 `ResolvedStyle::wrap_control()`，文本控件传
+///   `control_wrap_control`（空白语义冻结，保光标字节映射）。
+/// - `max_width`：`None` 表示不换行（intrinsic）；`Some` 为 content area 宽。
 ///
 /// # ttf-parser 0.20 API 适配
 /// - `glyph_advance_width(GlyphId) -> Option<i16>` 在 0.20 不存在；
@@ -615,7 +721,7 @@ pub fn measure_text(
     line_height: f32,
     letter_spacing: f32,
     align: crate::style::resolved::TextAlign,
-    nowrap: bool,
+    wrap: WrapControl,
     max_width: Option<f32>,
     stack: &FontStack<'_>,
     color: [f32; 4],
@@ -665,8 +771,9 @@ pub fn measure_text(
         pen
     };
 
-    // 断行：unicode-linebreak UAX#14 换行机会 + 贪心填行（CJK 逐字）。
-    // white-space:nowrap 强制单行。
+    // 断行（#73 换行控制全集）：预处理（折叠/保留）→ UAX#14 换行机会（word-break 调制）
+    // → 贪心填行。UAX#14 的 LB13/LB14 类规则天然覆盖普通软断行的避头尾（行首不出
+    // 闭标点）；禁则集只在逐字拆分（overflow-wrap:break-word）的断点上手工调整。
     //
     // unicode-linebreak 0.1.5 API：
     // - `linebreaks(s)` 返回 `impl Iterator<Item=(usize, BreakOpportunity)>`（非 Vec）；
@@ -674,25 +781,56 @@ pub fn measure_text(
     // - offset 语义 = "断点之后字符的字节序号"，即前段 = content[..offset]，后段 = content[offset..]。
     use unicode_linebreak::{linebreaks, BreakOpportunity};
     let max_w = max_width.unwrap_or(f32::MAX);
+    let soft_wrap = wrap.wrap_enabled();
+    // 折叠模式（normal/nowrap/pre-line）下空白串已并成单空格；保留模式原样。
+    let content = preprocess_text(content, &wrap);
 
-    // 1. 取所有 break opportunities（byte offset + 类型），收成 Vec 便于多轮迭代。
-    let opportunities: Vec<(usize, BreakOpportunity)> = linebreaks(content).collect();
-
-    // 2. 切 segments：相邻 break 之间的文本片段。unicode-linebreak 在空白后断，
-    //    segment 自含尾空白 → 行首无多余空格。
+    // 1+2. 取 break opportunities 并切 segments。
+    //    - word-break:keep-all：CJK 字间（两侧均 CJK）的 Allowed 机会撤掉——CJK 按
+    //      「词」不折行，只留空格/标点/强制边界（浏览器 keep-all 同义）。
+    //    - word-break:break-all：绕过 UAX#14，逐字符切 segment（拉丁词内也可断；
+    //      `\n` 保留 Mandatory 段）。禁则由贪心出口的断点调整兜住。
     let mut segments: Vec<(&str, BreakOpportunity)> = Vec::new();
-    let mut prev = 0usize;
-    for &(offset, btype) in &opportunities {
-        if offset > prev {
-            segments.push((&content[prev..offset], btype));
+    if wrap.word_break == crate::style::resolved::WordBreak::BreakAll {
+        for (off, ch) in content.char_indices() {
+            let btype = if ch == '\n' {
+                BreakOpportunity::Mandatory
+            } else {
+                BreakOpportunity::Allowed
+            };
+            segments.push((&content[off..off + ch.len_utf8()], btype));
         }
-        prev = offset;
-    }
-    if prev < content.len() {
-        segments.push((&content[prev..], BreakOpportunity::Allowed));
+    } else {
+        let keep_all = wrap.word_break == crate::style::resolved::WordBreak::KeepAll;
+        let opportunities: Vec<(usize, BreakOpportunity)> = linebreaks(&content)
+            .filter(|&(off, btype)| {
+                if keep_all && btype == BreakOpportunity::Allowed {
+                    let prev_cjk = content[..off].chars().next_back().is_some_and(is_cjk);
+                    let next_cjk = content[off..].chars().next().is_some_and(is_cjk);
+                    !(prev_cjk && next_cjk)
+                } else {
+                    true
+                }
+            })
+            .collect();
+        let mut prev = 0usize;
+        for &(offset, btype) in &opportunities {
+            if offset > prev {
+                segments.push((&content[prev..offset], btype));
+            }
+            prev = offset;
+        }
+        if prev < content.len() {
+            segments.push((&content[prev..], BreakOpportunity::Allowed));
+        }
     }
 
     // 3. 贪心填行。cur_prev 跟踪行内末字符（跨段 kern）；换行重置（新行段首无 kern）。
+    //    超长词（segment 无断点且宽 > 行宽）：
+    //    - overflow-wrap:break-word → 逐字填（词独行仍放不下才拆，CSS 语义），
+    //      拆点过禁则调整（行首禁则/行尾禁则，见循环内）。
+    //    - overflow-wrap:normal → 词独占一行并横向溢出（浏览器一致，不静默拆词）。
+    let overflow_break = wrap.overflow_wrap == crate::style::resolved::OverflowWrap::BreakWord;
     let mut lines: Vec<(String, f32)> = Vec::new(); // (text, width)
     let mut cur = String::new();
     let mut cur_w = 0.0f32;
@@ -706,14 +844,17 @@ pub fn measure_text(
         } else {
             seg
         };
+        // 折叠模式：换行后的行首纯空白段跳过（pre-line 的换行后行首空格移除——
+        // preprocess 只折叠串内空白，段级行首悬挂交给这里）。
+        if wrap.collapse_spaces() && cur.is_empty() && seg.chars().all(is_fold_ws) {
+            continue;
+        }
         // probe 不提交：换行时段首 kern 重置，需以无前段状态重测。
         let mut probe = cur_prev;
         let seg_w = measure_width(seg, &mut probe);
         let seg_chars = seg.chars().count();
 
-        // 超长词边界：segment 本身超 max_w 且多字符 → 逐字填。
-        // 防无 break point 的长串（如 URL）溢出。
-        if !nowrap && seg_w > max_w && seg_chars > 1 {
+        if soft_wrap && overflow_break && seg_w > max_w && seg_chars > 1 {
             if !cur.is_empty() {
                 lines.push((std::mem::take(&mut cur), cur_w));
                 cur_w = 0.0;
@@ -724,8 +865,31 @@ pub fn measure_text(
                 let mut probe = cur_prev;
                 let mut cw = measure_width(ch_s, &mut probe);
                 if !cur.is_empty() && cur_w + cw > max_w + WRAP_FIT_EPS {
+                    // 禁则断点调整：ch 将成为下一行行首——若它是行首禁则字符（句读/
+                    // 闭括号），或 cur 末字符是行尾禁则字符（开括号），则把 cur 末字符
+                    // 一并挪下一行（断点左移，挪下字符随新行重排，不丢失）。连锁
+                    //（"。。"、"（（"）由 while 吸收；cur 仅剩 1 字符时退界（防空行循环）。
+                    let mut moved: Vec<char> = Vec::new();
+                    while cur.chars().count() > 1
+                        && (is_kinsoku_no_line_start(ch)
+                            || cur.chars().next_back().is_some_and(is_kinsoku_no_line_end))
+                    {
+                        if let Some(mc) = cur.pop() {
+                            moved.insert(0, mc);
+                        }
+                        let mut fresh = None;
+                        cur_w = measure_width(&cur, &mut fresh);
+                    }
                     lines.push((std::mem::take(&mut cur), cur_w));
                     cur_w = 0.0;
+                    // 挪下字符先进新行（宽度随入行累加；禁则优先于宽度，超宽也随行）。
+                    let mut mbuf = [0u8; 4];
+                    for mc in moved {
+                        let m_s = mc.encode_utf8(&mut mbuf);
+                        let mut fresh = None;
+                        cur_w += measure_width(m_s, &mut fresh);
+                        cur.push(mc);
+                    }
                     let mut fresh = None;
                     cw = measure_width(ch_s, &mut fresh);
                     probe = fresh;
@@ -734,7 +898,7 @@ pub fn measure_text(
                 cur_w += cw;
                 cur_prev = probe;
             }
-        } else if nowrap || cur.is_empty() || cur_w + seg_w <= max_w + WRAP_FIT_EPS {
+        } else if !soft_wrap || cur.is_empty() || cur_w + seg_w <= max_w + WRAP_FIT_EPS {
             cur.push_str(seg);
             cur_w += seg_w;
             cur_prev = probe;
@@ -746,19 +910,21 @@ pub fn measure_text(
             cur_prev = fresh;
         }
 
-        // Mandatory break（\n）强制结束当前行（nowrap 下忽略）。无条件 push：连续 \n
-        // 产空行（cur 已剥 \n 可能为空），空行仍占行高（与 rich 路径 break token 一致）。
-        if !nowrap && *btype == BreakOpportunity::Mandatory {
+        // Mandatory break（保留的 \n）强制结束当前行——soft_wrap 关（pre / nowrap 组合）
+        // 也照断：断行源是字符本身，不受软换行开关压制。无条件 push：连续 \n 产空行
+        //（cur 已剥 \n 可能为空），空行仍占行高（与 rich 路径 break token 一致）。
+        if *btype == BreakOpportunity::Mandatory {
             lines.push((std::mem::take(&mut cur), cur_w));
             cur_w = 0.0;
             cur_prev = None;
         }
     }
     // 内容以 \n 结尾（"abc\n"）：mandatory flush 已结束末行，还须补一个空行承载
-    // 换行后的光标/后续输入（编辑器语义：回车后 caret 落在新空行）。nowrap 不适用。
-    // 注意 unicode-linebreak 把文本末尾也产一个 Mandatory 哨兵断点——不能拿「末段
-    // btype==Mandatory」判定（"abc" 也会命中），须看内容本身是否以 \n 结尾。
-    let ends_mandatory = !nowrap && content.ends_with('\n');
+    // 换行后的光标/后续输入（编辑器语义：回车后 caret 落在新空行）。折叠模式下 \n
+    // 已并进空白串，不会误判。注意 unicode-linebreak 把文本末尾也产一个 Mandatory
+    // 哨兵断点——不能拿「末段 btype==Mandatory」判定（"abc" 也会命中），须看内容
+    // 本身是否以 \n 结尾。
+    let ends_mandatory = content.ends_with('\n');
     if !cur.is_empty() || ends_mandatory {
         lines.push((cur, cur_w));
     }
@@ -855,8 +1021,10 @@ pub fn measure_text(
 /// 简化 inline flow measure：runs + 可选宽度 → TextLayout（per-run 样式进 GlyphRun）。
 ///
 /// 算法（搬 fgui BuildLines2 + RmlUi GetStrut/DetermineVerticalPositioning）：
-/// 1. 扁平 token 流：每 run 的 text 切成 token（CJK 逐字 / Latin 逐词），token 携 run 样式。
-/// 2. 贪心断行：token 累加超 max_width → 开新行；`\n` 强制换行。
+/// 1. 扁平 token 流：每 run 的 text 按 [`WrapControl`] 切 token（CJK 逐字 / Latin
+///    逐词，keep-all/break-all 调制；折叠/保留模式决定空白与 `\n` 的 token 形态）。
+/// 2. 贪心断行：token 累加超 max_width → 开新行（软换行开关可关）；`\n`/`<br>`
+///    强制换行；出口做 kinsoku 断点调整；break-word 超长 token 就地逐字拆。
 /// 3. 每行 baseline = 该行 max 字号的 ascent；行高 = strut（line_height 倍数或自然行高）。
 /// 4. 定位：pen x 累加 advance + kern；glyph y = 0（行内相对，build 加 baseline）。
 ///
@@ -875,8 +1043,10 @@ pub fn measure_rich_text(
     base_line_height: f32,
     letter_spacing: f32,
     align: crate::style::resolved::TextAlign,
+    wrap: WrapControl,
     stack: &FontStack<'_>,
 ) -> TextLayout {
+    use crate::style::resolved::{OverflowWrap, WordBreak};
     let font = stack.primary;
 
     // per-char 按 stack 选字体的 advance 和（token 宽度用）。回退字形 advance 用来源字体算。
@@ -896,91 +1066,216 @@ pub fn measure_rich_text(
     let mut run_rects: Vec<RichRunRect> = Vec::new();
 
     // 1. 扁平 token 流（token = 子串 + 所属 run 索引 + 宽度 + 是否强制换行）。
-    //    CJK 逐字、Latin 逐词（空白分词）。用 char_indices 取字节范围切片（非 unsafe）。
+    //    词切分（两模式共用）：Latin 逐词；含 CJK 的词逐字拆（keep-all 时整词不拆、
+    //    break-all 时 Latin 也逐字）。
+    #[derive(Clone, Copy)]
     struct Tok<'a> {
         text: &'a str,
         run_idx: usize,
         w: f32,
         is_break: bool,
+        /// 折叠模式补的空格 token：行首可丢弃（浏览器行首悬挂空格移除）。
+        /// 保留模式的空格 token false（pre-wrap 空格可见，不可丢）。
+        droppable_ws: bool,
+    }
+    let collapse = wrap.collapse_spaces();
+    let keep_all = wrap.word_break == WordBreak::KeepAll;
+    let break_all = wrap.word_break == WordBreak::BreakAll;
+    // 词 → token 序列（word = 无空白连续串）：break-all 或含 CJK（keep-all 除外）→
+    // 逐字；其余整词一 token。嵌套 fn 可见本函数体的 Tok item。
+    fn push_word_tokens<'a>(
+        tokens: &mut Vec<Tok<'a>>,
+        word: &'a str,
+        ri: usize,
+        size: f32,
+        keep_all: bool,
+        break_all: bool,
+        adv: &dyn Fn(&str, f32) -> f32,
+    ) {
+        let per_char = break_all || (word.chars().any(is_cjk) && !keep_all);
+        // 宏而非闭包：&mut Vec<Tok<'a>> 对 'a 不变（invariant），闭包参数 &str 塞进
+        // Tok<'a> 会被判逃逸。宏是文本展开，无此问题。
+        macro_rules! push {
+            ($s:expr) => {
+                tokens.push(Tok {
+                    text: $s,
+                    run_idx: ri,
+                    w: adv($s, size),
+                    is_break: false,
+                    droppable_ws: false,
+                });
+            };
+        }
+        if per_char {
+            for (off, ch) in word.char_indices() {
+                push!(&word[off..off + ch.len_utf8()]);
+            }
+        } else {
+            push!(word);
+        }
     }
     let mut tokens: Vec<Tok> = Vec::new();
     for (ri, r) in runs.iter().enumerate() {
         match &r.kind {
             crate::text::rich::RichKind::Text { text } => {
                 if text == "\n" {
+                    // `<br>` 编译产 "\n" run：任何模式下都是强制断行。
                     tokens.push(Tok {
                         text: "\n",
                         run_idx: ri,
                         w: 0.0,
                         is_break: true,
+                        droppable_ws: false,
                     });
                     continue;
                 }
-                // CSS 空白折叠（white-space:normal）：\t/\r/\n/换页与空格同属可折叠
-                // 空白。此前只按空格分词——标签间空白文本节点（"\n    "）里的换行成为
-                // 独立 word 进字形链，字体 cmap 不映射控制字符 → .notdef tofu 框（且占
-                // .notdef advance 撑宽行）。分词器把全部可折叠空白当切词边界（词内不再
-                // 残留 \n），纯空白 run 折叠成单个空格 token：浏览器把 inline 兄弟间的
-                // 源码换行渲染为一个空格。
-                fn is_fold_ws(c: char) -> bool {
-                    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{000C}')
-                }
-                if !text.is_empty() && text.chars().all(is_fold_ws) {
-                    let sp_w = stack_str_advance(" ", r.size_px as f32);
-                    tokens.push(Tok {
-                        text: " ",
-                        run_idx: ri,
-                        w: sp_w,
-                        is_break: false,
-                    });
-                    continue;
-                }
-                // 空白分词：按空格切词，词间补空格 token（占 advance；空格无轮廓不画，但占宽 +
-                // 词边界断行）。旧版 split 丢空格 → "a b" 渲染成 "ab" + 断行点错。
-                // HTML 空白折叠：连续空格 → 单空格（split 产空 part 跳过，词间补单空格）。
-                let parts: Vec<&str> = text.split(is_fold_ws).collect();
-                for (pi, word) in parts.iter().enumerate() {
-                    if word.is_empty() {
-                        continue;
-                    }
-                    if word.chars().any(is_cjk) {
-                        // CJK 拆单字：每字一 token，按 char_indices 取字节范围切片。
-                        let mut indices = word.char_indices();
-                        let mut cur = indices.next();
-                        while let Some((byte_off, _ch)) = cur {
-                            let next = indices.next();
-                            let next_byte_off = match next {
-                                Some((nbo, _)) => nbo,
-                                None => word.len(),
-                            };
-                            let slice = &word[byte_off..next_byte_off];
-                            let w = stack_str_advance(slice, r.size_px as f32);
+                let size = r.size_px as f32;
+                if collapse {
+                    // 折叠模式（normal/nowrap/pre-line）：CSS 空白折叠——\t/\r/换页/空格
+                    // 串 → 单空格 token；`\n` 依模式折叠（normal/nowrap 并进空白串）或
+                    // 产强制断行 token（pre-line）。此前 \n 一律折叠，源换行语义缺失。
+                    let mut word_start: Option<usize> = None;
+                    let mut in_ws = false;
+                    for (bo, ch) in text.char_indices() {
+                        let newline_break = ch == '\n' && wrap.preserve_newlines();
+                        let is_sep = is_fold_ws(ch) || (ch == '\n' && !wrap.preserve_newlines());
+                        if newline_break {
+                            if let Some(ws) = word_start.take() {
+                                if ws < bo {
+                                    push_word_tokens(
+                                        &mut tokens,
+                                        &text[ws..bo],
+                                        ri,
+                                        size,
+                                        keep_all,
+                                        break_all,
+                                        &stack_str_advance,
+                                    );
+                                }
+                            }
                             tokens.push(Tok {
-                                text: slice,
+                                text: "\n",
                                 run_idx: ri,
-                                w,
-                                is_break: false,
+                                w: 0.0,
+                                is_break: true,
+                                droppable_ws: false,
                             });
-                            cur = next;
+                            in_ws = false;
+                        } else if is_sep {
+                            if let Some(ws) = word_start.take() {
+                                if ws < bo {
+                                    push_word_tokens(
+                                        &mut tokens,
+                                        &text[ws..bo],
+                                        ri,
+                                        size,
+                                        keep_all,
+                                        break_all,
+                                        &stack_str_advance,
+                                    );
+                                }
+                            }
+                            in_ws = true;
+                        } else if in_ws {
+                            tokens.push(Tok {
+                                text: " ",
+                                run_idx: ri,
+                                w: stack_str_advance(" ", size),
+                                is_break: false,
+                                droppable_ws: true,
+                            });
+                            in_ws = false;
+                            word_start = Some(bo);
+                        } else if word_start.is_none() {
+                            word_start = Some(bo);
                         }
-                    } else {
-                        let w = stack_str_advance(word, r.size_px as f32);
-                        tokens.push(Tok {
-                            text: word,
-                            run_idx: ri,
-                            w,
-                            is_break: false,
-                        });
                     }
-                    // 词间补空格 token（下一 part 非空时）：占 advance，断行可在空格后。
-                    if pi < parts.len() - 1 && !parts[pi + 1].is_empty() {
-                        let sp_w = stack_str_advance(" ", r.size_px as f32);
+                    // 尾部 flush：词或折叠空格（跨 run 的词尾空格是真实内容，保留 token）。
+                    let end = text.len();
+                    if let Some(ws) = word_start {
+                        if ws < end {
+                            push_word_tokens(
+                                &mut tokens,
+                                &text[ws..end],
+                                ri,
+                                size,
+                                keep_all,
+                                break_all,
+                                &stack_str_advance,
+                            );
+                        }
+                    } else if in_ws && !text.is_empty() {
                         tokens.push(Tok {
                             text: " ",
                             run_idx: ri,
-                            w: sp_w,
+                            w: stack_str_advance(" ", size),
                             is_break: false,
+                            droppable_ws: true,
                         });
+                    }
+                } else {
+                    // 保留模式（pre/pre-wrap）：空白不折叠——每个空白字符独立 token
+                    //（占 advance、不可丢）；\n 产断行 token；词切分同折叠模式。
+                    let mut word_start: Option<usize> = None;
+                    for (bo, ch) in text.char_indices() {
+                        if ch == '\n' {
+                            if let Some(ws) = word_start.take() {
+                                if ws < bo {
+                                    push_word_tokens(
+                                        &mut tokens,
+                                        &text[ws..bo],
+                                        ri,
+                                        size,
+                                        keep_all,
+                                        break_all,
+                                        &stack_str_advance,
+                                    );
+                                }
+                            }
+                            tokens.push(Tok {
+                                text: "\n",
+                                run_idx: ri,
+                                w: 0.0,
+                                is_break: true,
+                                droppable_ws: false,
+                            });
+                        } else if is_fold_ws(ch) {
+                            if let Some(ws) = word_start.take() {
+                                if ws < bo {
+                                    push_word_tokens(
+                                        &mut tokens,
+                                        &text[ws..bo],
+                                        ri,
+                                        size,
+                                        keep_all,
+                                        break_all,
+                                        &stack_str_advance,
+                                    );
+                                }
+                            }
+                            tokens.push(Tok {
+                                text: &text[bo..bo + ch.len_utf8()],
+                                run_idx: ri,
+                                w: stack_str_advance(&text[bo..bo + ch.len_utf8()], size),
+                                is_break: false,
+                                droppable_ws: false,
+                            });
+                        } else if word_start.is_none() {
+                            word_start = Some(bo);
+                        }
+                    }
+                    if let Some(ws) = word_start {
+                        if ws < text.len() {
+                            push_word_tokens(
+                                &mut tokens,
+                                &text[ws..text.len()],
+                                ri,
+                                size,
+                                keep_all,
+                                break_all,
+                                &stack_str_advance,
+                            );
+                        }
                     }
                 }
             }
@@ -990,25 +1285,64 @@ pub fn measure_rich_text(
                     run_idx: ri,
                     w: *w,
                     is_break: false,
+                    droppable_ws: false,
                 });
             }
         }
     }
 
-    // 2. 贪心断行：token 累加超 max_width → 开新行；is_break（\n）强制换行。
-    //    首个 token 不论宽度都入行（防零宽 token 死循环）。
+    // 2. 贪心断行（#73 模式机）：token 累加超 max_width → 开新行；is_break（\n/<br>）
+    //    强制换行（不受软换行开关压制）。首个 token 不论宽度都入行（防零宽 token 死循环）。
     //    line_prev 跟踪行内末字符 (gid, font_id)：token 首字符与行内前 token 末字符的跨
     //    token kern 计入累加（glyph 定位对整行连续算 kern）——否则 max-content 宽度作
     //    约束重测时两侧差一个 kern 量，token 被提前挤到下一行（flex item 定宽场景必现）。
+    let soft_wrap = wrap.wrap_enabled();
+    let overflow_break = wrap.overflow_wrap == OverflowWrap::BreakWord;
     let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
     let mut cur_w = 0.0f32;
     let mut line_prev: Option<(ttf_parser::GlyphId, u32)> = None;
-    for (ti, tok) in tokens.iter().enumerate() {
+    let mut ti = 0usize;
+    while ti < tokens.len() {
+        let tok = tokens[ti]; // Copy：下面 break-word 分支要 splice，不能持借用
         if tok.is_break {
             lines.push(Vec::new());
             cur_w = 0.0;
             line_prev = None;
+            ti += 1;
             continue;
+        }
+        // 行首可丢弃空格（折叠模式）：content 首/换行后的行首空格直接跳过（浏览器
+        // 行首悬挂空格移除语义）。保留模式的空格 token 不可丢。
+        if tok.droppable_ws && lines.last().is_some_and(|l| l.is_empty()) {
+            ti += 1;
+            continue;
+        }
+        // overflow-wrap:break-word：token 独占一行仍超行宽 → 就地拆成逐字 token 重进
+        // 循环（拆点的禁则由下方断点调整兜住）。
+        if soft_wrap
+            && overflow_break
+            && lines.last().is_some_and(|l| l.is_empty())
+            && tok.text.chars().count() > 1
+            && max_width.is_some_and(|mw| tok.w > mw)
+        {
+            let ri = tok.run_idx;
+            let size = runs[ri].size_px as f32;
+            let text = tok.text;
+            let split: Vec<Tok> = text
+                .char_indices()
+                .map(|(off, ch)| {
+                    let s = &text[off..off + ch.len_utf8()];
+                    Tok {
+                        text: s,
+                        run_idx: ri,
+                        w: stack_str_advance(s, size),
+                        is_break: false,
+                        droppable_ws: false,
+                    }
+                })
+                .collect();
+            tokens.splice(ti..ti + 1, split);
+            continue; // 以首字符 token 重进循环
         }
         // token 首字符的跨 token kern（按 token 所属 run 字号缩放，与 glyph 定位同参）。
         let kern0 = match (line_prev, tok.text.chars().next()) {
@@ -1030,13 +1364,39 @@ pub fn measure_rich_text(
         };
         let mut eff = tok.w + kern0;
         // WRAP_FIT_EPS：见常量注释——贪心累加与 glyph pen 累加的浮点顺序差。
-        let fits = max_width
-            .is_none_or(|mw| cur_w + eff <= mw + WRAP_FIT_EPS || lines.last().unwrap().is_empty());
+        let fits = !soft_wrap
+            || max_width.is_none_or(|mw| cur_w + eff <= mw + WRAP_FIT_EPS)
+            || lines.last().is_some_and(|l| l.is_empty());
         if !fits {
             lines.push(Vec::new());
             cur_w = 0.0;
             line_prev = None;
             eff = tok.w; // 行首 token 无前段 kern。
+                         // kinsoku 断点调整：tok 将成为新行行首——若它是行首禁则字符（句读/闭
+                         // 括号），或上一行末 token 首字符是行尾禁则字符（开括号），把上一行末
+                         // token 挪下新行（断点左移）。连锁（"。。"/"（（"）由 loop 吸收；上一行
+                         // 只剩 1 个 token 时退界。挪下来的宽度累进 cur_w（后续 fits 判定用）。
+            loop {
+                let prev = lines.len() - 2;
+                if lines[prev].len() <= 1 {
+                    break;
+                }
+                let moved_ti = *lines[prev].last().unwrap();
+                let next_first = lines[lines.len() - 1]
+                    .first()
+                    .map(|&mti| tokens[mti].text.chars().next())
+                    .unwrap_or_else(|| tok.text.chars().next());
+                let prev_last = tokens[moved_ti].text.chars().next();
+                if next_first.is_some_and(is_kinsoku_no_line_start)
+                    || prev_last.is_some_and(is_kinsoku_no_line_end)
+                {
+                    lines[prev].pop();
+                    lines.last_mut().unwrap().insert(0, moved_ti);
+                    cur_w += tokens[moved_ti].w;
+                } else {
+                    break;
+                }
+            }
         }
         lines.last_mut().unwrap().push(ti);
         cur_w += eff;
@@ -1046,6 +1406,7 @@ pub fn measure_rich_text(
             let gid = f.face.glyph_index(last_ch).unwrap_or_default();
             line_prev = Some((gid, fid));
         }
+        ti += 1;
     }
 
     // 3+4. 每行 baseline/高度 + 字形定位（pen x 累加 advance + kern）。
@@ -1299,6 +1660,24 @@ mod tests {
     use super::*;
     use crate::scene::node::NodeId;
     use crate::style::resolved::TextAlign;
+    /// 测试用换行控制快捷构造：normal / nowrap。
+    fn wc_normal() -> WrapControl {
+        WrapControl::default()
+    }
+    fn wc_nowrap() -> WrapControl {
+        WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::Nowrap,
+            ..Default::default()
+        }
+    }
+    /// 文本控件语义（control_wrap_control 的折叠面）：保留空格与换行。
+    fn wc_pre_wrap() -> WrapControl {
+        WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::PreWrap,
+            ..Default::default()
+        }
+    }
+
     use crate::text::rich::{
         RichDeco, RichKind, RichRun, RichStyle, RichWeight, TextDecoLines, TextDecoStyle,
     };
@@ -1395,7 +1774,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_pre_wrap(),
             None,
             &stack,
             [1.0; 4],
@@ -1428,7 +1807,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_pre_wrap(),
             None,
             &stack,
             [1.0; 4],
@@ -1441,7 +1820,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_pre_wrap(),
             None,
             &stack,
             [1.0; 4],
@@ -1466,7 +1845,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_pre_wrap(),
             None,
             &stack,
             [1.0; 4],
@@ -1491,7 +1870,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &stack,
             [1.0; 4],
@@ -1503,7 +1882,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             Some(l.text_width),
             &stack,
             [1.0; 4],
@@ -1536,7 +1915,15 @@ mod tests {
         };
         // run 形态 = <span>a</span>\n    <span>b</span> 的编译产物。
         let runs = vec![mk("a"), mk("\n    "), mk("b")];
-        let l = measure_rich_text(&runs, None, 0.0, 0.0, TextAlign::Left, &stack);
+        let l = measure_rich_text(
+            &runs,
+            None,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        );
         let glyphs: Vec<u16> = l
             .lines
             .iter()
@@ -1561,7 +1948,15 @@ mod tests {
         );
         // 词内换行（"a\nb" 单 run）同样折叠：不分 tofu、成 a␣b。
         let runs = vec![mk("a\nb")];
-        let l = measure_rich_text(&runs, None, 0.0, 0.0, TextAlign::Left, &stack);
+        let l = measure_rich_text(
+            &runs,
+            None,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        );
         let glyphs: Vec<u16> = l
             .lines
             .iter()
@@ -1600,13 +1995,21 @@ mod tests {
             lh,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &stack,
             [1.0; 4],
             Default::default(),
         );
-        let rich = measure_rich_text(&runs, None, lh, 0.0, TextAlign::Left, &stack);
+        let rich = measure_rich_text(
+            &runs,
+            None,
+            lh,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        );
         assert_eq!(plain.lines[0].baseline, rich.lines[0].baseline);
         let ascent = f.ascent(16.0);
         assert!(
@@ -1632,8 +2035,26 @@ mod tests {
             link_id: None,
             source: NodeId(0),
         }];
-        let w0 = measure_rich_text(&runs, None, 0.0, 0.0, TextAlign::Left, &stack).text_width;
-        let w5 = measure_rich_text(&runs, None, 0.0, 5.0, TextAlign::Left, &stack).text_width;
+        let w0 = measure_rich_text(
+            &runs,
+            None,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        )
+        .text_width;
+        let w5 = measure_rich_text(
+            &runs,
+            None,
+            0.0,
+            5.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        )
+        .text_width;
         assert!(
             w5 > w0 + 14.0,
             "letter-spacing 5px x3 chars should widen by ~15: {w0} -> {w5}"
@@ -1648,7 +2069,7 @@ mod tests {
             1.5,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             400,
             None,
             None,
@@ -1659,7 +2080,7 @@ mod tests {
             1.5,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             400,
             None,
             None,
@@ -1675,7 +2096,7 @@ mod tests {
             1.5,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             400,
             None,
             None,
@@ -1686,7 +2107,7 @@ mod tests {
             1.5,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             400,
             None,
             None,
@@ -1699,10 +2120,33 @@ mod tests {
 
     #[test]
     fn fingerprint_differs_on_style() {
-        let base =
-            |fs| text_fingerprint("hi", fs, 1.5, 0.0, TextAlign::Left, false, 400, None, None);
+        let base = |fs| {
+            text_fingerprint(
+                "hi",
+                fs,
+                1.5,
+                0.0,
+                TextAlign::Left,
+                WrapControl::default(),
+                400,
+                None,
+                None,
+            )
+        };
         assert_ne!(base(16.0), base(18.0), "font_size 变 → fp 变");
-        let w = |fw| text_fingerprint("hi", 16.0, 1.5, 0.0, TextAlign::Left, false, fw, None, None);
+        let w = |fw| {
+            text_fingerprint(
+                "hi",
+                16.0,
+                1.5,
+                0.0,
+                TextAlign::Left,
+                WrapControl::default(),
+                fw,
+                None,
+                None,
+            )
+        };
         assert_ne!(w(400), w(700), "font_weight 变 → fp 变");
     }
 
@@ -1714,7 +2158,7 @@ mod tests {
             1.5,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             400,
             None,
             None,
@@ -1725,7 +2169,7 @@ mod tests {
             1.5,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             400,
             None,
             Some(200.0),
@@ -1742,7 +2186,7 @@ mod tests {
                 1.5,
                 0.0,
                 TextAlign::Left,
-                false,
+                wc_normal(),
                 400,
                 None,
                 Some(w),
@@ -1801,7 +2245,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -1833,7 +2277,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Center,
-            false,
+            wc_normal(),
             Some(200.0),
             &FontStack::single(&font, 0),
             [1.0; 4],
@@ -1852,7 +2296,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Right,
-            false,
+            wc_normal(),
             Some(200.0),
             &FontStack::single(&font, 0),
             [1.0; 4],
@@ -1885,7 +2329,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -1930,7 +2374,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -1968,7 +2412,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             Some(50.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -1996,7 +2440,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            true,
+            wc_nowrap(),
             Some(10.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2021,7 +2465,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             Some(40.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2050,7 +2494,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             Some(60.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2079,7 +2523,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_pre_wrap(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2103,7 +2547,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            true,
+            wc_nowrap(),
             Some(10.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2121,22 +2565,569 @@ mod tests {
                 return;
             }
         };
-        // 无空格长 ASCII 串（超 max_w）→ 超长词边界：逐字断。
+        // #73：overflow-wrap:break-word 才拆超长词（normal = 词独行溢出，CSS 语义）。
+        let break_word = WrapControl {
+            overflow_wrap: crate::style::resolved::OverflowWrap::BreakWord,
+            ..Default::default()
+        };
         let layout = measure_text(
             "aaaaaaaaaaaaaaaaaaaa",
             16.0,
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            break_word,
             Some(50.0),
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
             crate::text::rich::RichWeight::Normal,
         );
-        assert!(layout.lines.len() >= 2, "超长无空格串应逐字断 ≥2 行");
+        assert!(
+            layout.lines.len() >= 2,
+            "break-word 超长无空格串应逐字断 >=2 行"
+        );
+        // normal：同样串不拆——单行且宽超约束（溢出，浏览器一致）。
+        let layout = measure_text(
+            "aaaaaaaaaaaaaaaaaaaa",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            Some(50.0),
+            &FontStack::single(&font, 0),
+            [1.0, 1.0, 1.0, 1.0],
+            crate::text::rich::RichWeight::Normal,
+        );
+        assert_eq!(
+            layout.lines.len(),
+            1,
+            "overflow-wrap:normal 超长词不拆（溢出）"
+        );
+        assert!(layout.text_width > 50.0);
     }
 
+    // ===== #73 换行控制全集测试 =====
+
+    /// CJK rich run 快捷构造（wqy 全宽字符 advance ≈ size_px）。
+    fn cjk_run(text: &str) -> RichRun {
+        RichRun {
+            kind: RichKind::Text { text: text.into() },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+            source: NodeId(0),
+        }
+    }
+
+    fn line_codepoints(l: &TextLayout, i: usize) -> Vec<char> {
+        l.lines[i]
+            .runs
+            .iter()
+            .flat_map(|r| r.glyphs.iter())
+            .map(|g| char::from_u32(g.codepoint).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn white_space_normal_folds_newline_and_runs() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        // \n 折叠为空格 → 单行；连续空格折叠为单空格（宽度与 "a b" 逐位相等）。
+        let nl = measure_text(
+            "a\nb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(nl.lines.len(), 1, "normal 模式 \\n 应折叠为空格（单行）");
+        let folded = measure_text(
+            "a  b",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        let single = measure_text(
+            "a b",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(folded.text_width, single.text_width);
+        // 首尾空白裁去："  a  " 宽 == "a" 宽。
+        let edge = measure_text(
+            "  a  ",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        let bare = measure_text(
+            "a",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(edge.text_width, bare.text_width);
+    }
+
+    #[test]
+    fn white_space_pre_preserves_newlines_and_disables_wrap() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let pre = WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::Pre,
+            ..Default::default()
+        };
+        let l = measure_text(
+            "a\nb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pre,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 2, "pre 保留 \\n 强制断行");
+        let long = measure_text(
+            "aaaaaaaaaaaa",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pre,
+            Some(40.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(long.lines.len(), 1, "pre 不自动换行");
+        assert!(long.text_width > 40.0);
+    }
+
+    #[test]
+    fn white_space_pre_wrap_preserves_spaces_and_wraps() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let pw = WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::PreWrap,
+            ..Default::default()
+        };
+        // 空格不折叠："a  b" 宽 > "a b" 宽。
+        let two = measure_text(
+            "a  b",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pw,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        let one = measure_text(
+            "a b",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pw,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert!(two.text_width > one.text_width, "pre-wrap 空格保留");
+        // 自动换行开：带断点的长串拆行；\n 仍强制断（不可断长词在 pre-wrap 下
+        // 溢出不拆——overflow-wrap:normal 语义，见 break_word 测试）。
+        let l = measure_text(
+            "aaa aaa aaa\nb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pw,
+            Some(40.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert!(l.lines.len() >= 3, "pre-wrap 自动换行 + \\n 强制断");
+    }
+
+    #[test]
+    fn white_space_pre_line_collapses_spaces_keeps_newlines() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let pl = WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::PreLine,
+            ..Default::default()
+        };
+        // 空格折叠、\n 保留；换行后行首空格移除（line2 直起 'b'）。
+        let l = measure_text(
+            "a  b\n  c",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            pl,
+            None,
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 2, "pre-line 保留 \\n 断行");
+        assert_eq!(
+            line_codepoints(&l, 0),
+            vec!['a', ' ', 'b'],
+            "行内空格折叠为单空格"
+        );
+        assert_eq!(line_codepoints(&l, 1), vec!['c'], "换行后行首空格移除");
+    }
+
+    #[test]
+    fn white_space_nowrap_folds_newline_and_never_wraps() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let l = measure_text(
+            "a\nb ccc",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_nowrap(),
+            Some(30.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 1, "nowrap 折叠 \\n 且不自动换行");
+        assert!(l.text_width > 30.0);
+    }
+
+    #[test]
+    fn text_wrap_nowrap_keeps_forced_breaks_disables_soft_wrap() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        // pre-wrap + text-wrap:nowrap：空格/换行保留，\\n 断行，软换行关。
+        let tw = WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::PreWrap,
+            text_wrap: crate::style::resolved::TextWrap::Nowrap,
+            ..Default::default()
+        };
+        let l = measure_text(
+            "aaa\nbbbbbbbb",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            tw,
+            Some(30.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(l.lines.len(), 2, "\\n 仍断、软换行关");
+        assert!(l.lines[1].width > 30.0);
+    }
+
+    #[test]
+    fn word_break_keep_all_cjk_one_line() {
+        let Some(f) = test_font_cjk() else { return };
+        let stack = FontStack::single(&f, 0);
+        let keep = WrapControl {
+            word_break: crate::style::resolved::WordBreak::KeepAll,
+            ..Default::default()
+        };
+        let text = "一二三四五";
+        let ka = measure_text(
+            text,
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            keep,
+            Some(32.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(ka.lines.len(), 1, "keep-all CJK 词内不断（溢出单行）");
+        let n = measure_text(
+            text,
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            Some(32.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert!(n.lines.len() >= 3, "normal CJK 逐字断");
+    }
+
+    #[test]
+    fn word_break_break_all_latin_per_char() {
+        let Some(f) = test_font() else { return };
+        let stack = FontStack::single(&f, 0);
+        let ba = WrapControl {
+            word_break: crate::style::resolved::WordBreak::BreakAll,
+            ..Default::default()
+        };
+        let l = measure_text(
+            "aaaaaa",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            ba,
+            Some(24.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert!(l.lines.len() >= 2, "break-all 拉丁词逐字断");
+        let n = measure_text(
+            "aaaaaa",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            Some(24.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert_eq!(n.lines.len(), 1, "normal 拉丁整词不断（溢出）");
+    }
+
+    #[test]
+    fn kinsoku_plain_never_starts_line_with_full_stop() {
+        let Some(f) = test_font_cjk() else { return };
+        let stack = FontStack::single(&f, 0);
+        let l = measure_text(
+            "一二三四。五六七。八九",
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            wc_normal(),
+            Some(40.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert!(l.lines.len() >= 3);
+        for (i, _) in l.lines.iter().enumerate() {
+            let cps = line_codepoints(&l, i);
+            assert!(
+                cps.first().is_none_or(|c| !is_kinsoku_no_line_start(*c)),
+                "行 {} 以禁则字符起头：{:?}",
+                i,
+                cps
+            );
+        }
+    }
+
+    #[test]
+    fn kinsoku_break_word_moves_not_drops_chars() {
+        // break-word 逐字拆 + 禁则断点左移：挪下的字符必须随新行保留（字符守恒），
+        // 不许在调整中丢失。wqy 同时覆盖拉丁与 CJK 标点，单字体即可触发。
+        let Some(f) = test_font_cjk() else { return };
+        let stack = FontStack::single(&f, 0);
+        let bw = WrapControl {
+            overflow_wrap: crate::style::resolved::OverflowWrap::BreakWord,
+            ..Default::default()
+        };
+        let text = "aaaaaaaa。bbbb";
+        let l = measure_text(
+            text,
+            16.0,
+            0.0,
+            0.0,
+            TextAlign::Left,
+            bw,
+            Some(40.0),
+            &stack,
+            [1.0; 4],
+            Default::default(),
+        );
+        assert!(
+            l.lines.len() >= 3,
+            "应触发逐字拆 + 禁则调整：{}",
+            l.lines.len()
+        );
+        let joined: String = l
+            .lines
+            .iter()
+            .flat_map(|li| li.runs.iter())
+            .flat_map(|r| r.glyphs.iter())
+            .map(|g| char::from_u32(g.codepoint).unwrap())
+            .collect();
+        assert_eq!(joined, text, "禁则调整不得丢字");
+        for (i, _) in l.lines.iter().enumerate() {
+            let cps = line_codepoints(&l, i);
+            assert!(
+                cps.first().is_none_or(|c| !is_kinsoku_no_line_start(*c)),
+                "行 {} 以禁则字符起头：{:?}",
+                i,
+                cps
+            );
+        }
+    }
+
+    #[test]
+    fn kinsoku_rich_moves_break_point_left() {
+        let Some(f) = test_font_cjk() else { return };
+        let stack = FontStack::single(&f, 0);
+        let runs = vec![cjk_run("一二三四。五")];
+        // 宽 32 = 2 字/行。贪心原断点：一二 | 三四 | 。五（行首禁则违例）→
+        // 断点左移：一二 | 三 | 四。 | 五。
+        let l = measure_rich_text(
+            &runs,
+            Some(32.0),
+            1.2,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        );
+        assert!(
+            l.lines.len() >= 4,
+            "应有禁则调整后的 4 行：{}",
+            l.lines.len()
+        );
+        assert_eq!(
+            line_codepoints(&l, 2),
+            vec!['四', '。'],
+            "句号随前字下移（断点左移），行 3 = 四。"
+        );
+    }
+
+    #[test]
+    fn kinsoku_rich_never_ends_line_with_open_bracket() {
+        let Some(f) = test_font_cjk() else { return };
+        let stack = FontStack::single(&f, 0);
+        let runs = vec![cjk_run("一二（三")];
+        // 宽 48 恰容 3 字：贪心原断点 一二（ | 三 → 行尾禁则违例（开括号悬行尾）→
+        // 断点右移：一二 | （三。
+        let l = measure_rich_text(
+            &runs,
+            Some(48.0),
+            1.2,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        );
+        assert!(l.lines.len() >= 2);
+        let cps0 = line_codepoints(&l, 0);
+        assert!(
+            cps0.last().is_none_or(|c| !is_kinsoku_no_line_end(*c)),
+            "行 1 不得以开括号收尾：{:?}",
+            cps0
+        );
+    }
+
+    #[test]
+    fn rich_nowrap_now_respected() {
+        // #73 前 rich 路忽略 nowrap（MeasureContext 携值未消费）——现在真正接线。
+        let Some(f) = test_font_cjk() else { return };
+        let runs = vec![cjk_run("一二三四五六")];
+        let l = measure_rich_text(
+            &runs,
+            Some(32.0),
+            1.2,
+            0.0,
+            TextAlign::Left,
+            wc_nowrap(),
+            &FontStack::single(&f, 0),
+        );
+        assert_eq!(l.lines.len(), 1, "rich nowrap 单行");
+        assert!(l.text_width > 32.0);
+    }
+
+    #[test]
+    fn overflow_wrap_break_word_rich_splits_long_token() {
+        let Some(f) = test_font() else { return };
+        let bw = WrapControl {
+            overflow_wrap: crate::style::resolved::OverflowWrap::BreakWord,
+            ..Default::default()
+        };
+        let runs = vec![RichRun {
+            kind: RichKind::Text {
+                text: "aaaaaaaaaaaa".into(),
+            },
+            color: [1.0; 4],
+            font_id: 0,
+            size_px: 16,
+            weight: RichWeight::Normal,
+            style: RichStyle::Normal,
+            deco: RichDeco::default(),
+            link_id: None,
+            source: NodeId(0),
+        }];
+        let split = measure_rich_text(
+            &runs,
+            Some(40.0),
+            1.2,
+            0.0,
+            TextAlign::Left,
+            bw,
+            &FontStack::single(&f, 0),
+        );
+        assert!(split.lines.len() >= 2, "break-word 超长 token 逐字拆");
+        let n = measure_rich_text(
+            &runs,
+            Some(40.0),
+            1.2,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &FontStack::single(&f, 0),
+        );
+        assert_eq!(n.lines.len(), 1, "normal 超长 token 独行溢出");
+    }
     #[test]
     fn line_height_normal_uses_const_not_font_metrics() {
         // CSS line-height: normal 应对齐浏览器（实测 Blink ~1.31，见 NORMAL_LINE_HEIGHT），
@@ -2156,7 +3147,7 @@ mod tests {
             0.0, // normal
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2185,7 +3176,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2197,7 +3188,7 @@ mod tests {
             2.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &FontStack::single(&font, 0),
             [1.0, 1.0, 1.0, 1.0],
@@ -2308,6 +3299,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         // 一行，两个 run，各带自己的色。
@@ -2346,6 +3338,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         assert!(
@@ -2385,6 +3378,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         assert!(
@@ -2449,6 +3443,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         assert_eq!(lay.lines.len(), 2, "\\n 应强制换行成 2 行");
@@ -2488,6 +3483,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 7),
         );
         assert_eq!(lay.lines.len(), 1);
@@ -2524,9 +3520,33 @@ mod tests {
         }];
         let stack = FontStack::single(&font, 0);
         // 容器远宽于文本（1000 vs ~20px）→ center/right 应把字形推到右侧。
-        let left = measure_rich_text(&runs, Some(1000.0), 1.2, 0.0, TextAlign::Left, &stack);
-        let center = measure_rich_text(&runs, Some(1000.0), 1.2, 0.0, TextAlign::Center, &stack);
-        let right = measure_rich_text(&runs, Some(1000.0), 1.2, 0.0, TextAlign::Right, &stack);
+        let left = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            0.0,
+            TextAlign::Left,
+            WrapControl::default(),
+            &stack,
+        );
+        let center = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            0.0,
+            TextAlign::Center,
+            WrapControl::default(),
+            &stack,
+        );
+        let right = measure_rich_text(
+            &runs,
+            Some(1000.0),
+            1.2,
+            0.0,
+            TextAlign::Right,
+            WrapControl::default(),
+            &stack,
+        );
         let first_x = |lay: &TextLayout| lay.lines[0].runs[0].glyphs[0].x;
         let w = left.lines[0].width;
         assert!(first_x(&left) == 0.0, "left 首字 x=0");
@@ -2579,7 +3599,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &stack,
             [1.0; 4],
@@ -2626,6 +3646,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         assert!(
@@ -2697,6 +3718,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         assert_eq!(lay.run_rects.len(), 1, "单个 image run → 1 rect");
@@ -2747,6 +3769,7 @@ mod tests {
             1.2,
             0.0,
             TextAlign::Left,
+            WrapControl::default(),
             &FontStack::single(&font, 0),
         );
         assert_eq!(lay.lines.len(), 1, "前置：宽约束单行");
@@ -2783,7 +3806,7 @@ mod tests {
             0.0,
             0.0,
             TextAlign::Left,
-            false,
+            wc_normal(),
             None,
             &stack,
             [1.0; 4],

@@ -131,6 +131,18 @@
   .grad-alpha   { background-image:linear-gradient(to bottom,rgba(95,180,212,1),transparent); }  /* rgba→transparent（premultiplied 无灰边）*/
   .grad-under   { background-color:#3a2a1a; background-image:radial-gradient(circle at 50% 100%,rgba(212,164,78,0.9),rgba(212,164,78,0)); } /* bg-color 垫底合成 */
   .grad-txt3 { font-size:28px; font-weight:700; background-image:linear-gradient(137deg,#5fb4d4,#8ec5d8,#d4a44e); -webkit-background-clip:text; background-clip:text; color:#00000000; } /* 多 stop 任意角渐变字 */
+  /* §18 换行控制全集（#73）：固定窄盒 + 亮边框，断行/溢出/行首字符一眼可辨。 */
+  .ws-box { width:230px; background-color:#1a2f45; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:6px; }
+  .ws-label { color:#9aa0b4; font-size:12px; }
+  .ws-case { border-color:#3a5a78; border-style:solid; border-width:1px; padding:8px; font-size:14px; color:#e0e6ec; }
+  .ws-nowrap { white-space:nowrap; }
+  .ws-pre { white-space:pre; }
+  .ws-pre-wrap { white-space:pre-wrap; }
+  .ws-pre-line { white-space:pre-line; }
+  .wb-keep-all { word-break:keep-all; }
+  .wb-break-all { word-break:break-all; }
+  .ow-break-word { overflow-wrap:break-word; }
+  .tw-off { white-space:pre-wrap; text-wrap:nowrap; }
   </style>
 </head>
 <body>
@@ -386,6 +398,61 @@
             <template id="dyn-card">
               <div role="listitem" class="dyn-card"><span id="dyn-name" style="color:#e0e6ec;font-size:15px;font-weight:700">名字</span><span id="dyn-count" style="color:#8ec5d8;font-size:13px">LV.0</span></div>
             </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">18 · 换行控制全集（white-space 五值 / word-break / overflow-wrap / text-wrap / kinsoku 禁则 · #73）</div>
+        <div class="section-desc">判据（对照盒右缘边框线，一眼可辨）：① nowrap——整段单行、文字冲出盒右缘（折成多行即失败）。② pre——文本保持源码换行结构且长行不折（溢出右缘）；pre-wrap——同源文本但长行折回盒内（溢出即失败）；pre-line——换行保留、第二行行首无缩进空格（源码缩进被折叠；显示缩进即失败）。③ 禁则——「kinsoku 禁则」盒内任何一行的行首不得出现句号/逗号/闭括号（盒宽已调到朴素断行必出孤悬句读；行首见标点即失败）。④ keep-all——中文无空格串单行溢出（折行即失败，CJK 词内不断）；break-all——长英文串折成多行填满盒内（单行溢出即失败）；同串在「对照 normal」盒单行溢出。⑤ break-word——同串 normal 对照溢出、break-word 盒折行入盒。⑥ text-wrap:nowrap——双空格保留（词间空隙明显宽于单空格）、源换行仍断行、长行不折（溢出）。</div>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:16px;flex-wrap:wrap;align-items:flex-start">
+          <div class="ws-box">
+            <span class="ws-label">normal（对照：自动换行）</span>
+            <div class="ws-case">星辰坠入海面，浪花吞没了光。远处的灯塔亮起，指引归途的方向。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">nowrap（单行溢出）</span>
+            <div class="ws-case ws-nowrap">星辰坠入海面，浪花吞没了光。远处的灯塔亮起，指引归途的方向。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">pre（源换行保留 + 不折行）</span>
+            <div class="ws-case ws-pre">第一行短句。
+第二行是较长的文字用来展示不折行的溢出效果。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">pre-wrap（源换行保留 + 折行）</span>
+            <div class="ws-case ws-pre-wrap">第一行短句。
+第二行是较长的文字应被折回盒内而不溢出。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">pre-line（折叠空格 + 保留换行）</span>
+            <div class="ws-case ws-pre-line">首行文本。
+        第二行源码带缩进应折叠。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">kinsoku 禁则（行首无句读）</span>
+            <div class="ws-case">潮水漫过礁石，带走喧嚣。所有漂泊的船，终将靠岸。夜色深处，灯火次第亮起，像散落的星。风停了，浪也静了，海面如镜。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">keep-all（CJK 词内不断）</span>
+            <div class="ws-case wb-keep-all">剑气纵横三万里，一剑光寒十九洲。</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">break-all（任意字符可断）</span>
+            <div class="ws-case wb-break-all">extraordinarilylongunbreakableword</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">对照 normal（长词溢出）</span>
+            <div class="ws-case">extraordinarilylongunbreakableword</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">overflow-wrap:break-word</span>
+            <div class="ws-case ow-break-word">extraordinarilylongunbreakableword</div>
+          </div>
+          <div class="ws-box">
+            <span class="ws-label">text-wrap:nowrap + pre-wrap</span>
+            <div class="ws-case tw-off">双空格  保留。源换行仍断行，
+这一长段不会被自动折行应溢出盒外。</div>
           </div>
         </div>
       </div>

@@ -20,7 +20,10 @@ fn make_layout(text: &str, font: &Font) -> TextLayout {
         0.0,
         0.0,
         TextAlign::Left,
-        false,
+        crate::text::layout::WrapControl {
+            white_space: crate::style::resolved::WhiteSpace::PreWrap,
+            ..Default::default()
+        },
         None,
         &FontStack::single(font, 0),
         [1.0, 1.0, 1.0, 1.0],

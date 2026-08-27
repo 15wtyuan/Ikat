@@ -118,7 +118,7 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
             s.effective_line_height(),
             s.letter_spacing,
             s.text_align,
-            s.white_space_nowrap,
+            crate::style::resolved::control_wrap_control(s),
             Some(content_w),
             &stack,
             s.color,

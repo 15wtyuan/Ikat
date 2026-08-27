@@ -1580,7 +1580,7 @@ fn make_scene_with_textfield(text: &str) -> (Scene, NodeId) {
 
     // 单行语义：生产 TextField 的 nowrap 由打包期烙印，手搓场景在此补齐
     //（不补则 measure 按宽度折行，单行视口/命中测试的前提不成立）。
-    scene.get_mut(id).unwrap().style.white_space_nowrap = true;
+    scene.get_mut(id).unwrap().style.white_space = crate::style::resolved::WhiteSpace::Nowrap;
     // 手动测文本 + 缓存 TextLayout（on_text_pointer_down 需要已缓存）。
     let style = scene.get(id).unwrap().style.clone();
     let stack = fonts.stack_for(style.font_family.as_deref());
@@ -1596,7 +1596,7 @@ fn make_scene_with_textfield(text: &str) -> (Scene, NodeId) {
         style.effective_line_height(),
         style.letter_spacing,
         style.text_align,
-        style.white_space_nowrap,
+        crate::style::resolved::control_wrap_control(&style),
         Some(content_w),
         &stack,
         style.color,
@@ -1642,7 +1642,7 @@ fn make_scene_with_textarea(text: &str) -> (Scene, NodeId) {
         style.effective_line_height(),
         style.letter_spacing,
         style.text_align,
-        style.white_space_nowrap,
+        crate::style::resolved::control_wrap_control(&style),
         Some(200.0),
         &stack,
         style.color,
@@ -2132,7 +2132,7 @@ fn make_scene_with_textfield_inset(text: &str) -> (Scene, NodeId) {
         style.effective_line_height(),
         style.letter_spacing,
         style.text_align,
-        style.white_space_nowrap,
+        crate::style::resolved::control_wrap_control(&style),
         Some(content_w),
         &stack,
         style.color,
@@ -2237,7 +2237,7 @@ fn on_text_pointer_down_clamps_cursor_to_value_len_when_layout_exceeds_value() {
             style.effective_line_height(),
             style.letter_spacing,
             style.text_align,
-            style.white_space_nowrap,
+            crate::style::resolved::control_wrap_control(&style),
             Some(content_w),
             &stack,
             style.color,

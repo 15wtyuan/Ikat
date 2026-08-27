@@ -90,19 +90,24 @@ use std::collections::HashMap;
 
 use crate::style::resolved::InheritedSet;
 
-const INH_FONT_SIZE: u16 = 1 << 0;
-const INH_COLOR: u16 = 1 << 1;
-const INH_FONT_FAMILY: u16 = 1 << 2;
-const INH_FONT_WEIGHT: u16 = 1 << 3;
-const INH_TEXT_ALIGN: u16 = 1 << 4;
-const INH_LINE_HEIGHT: u16 = 1 << 5;
-const INH_LETTER_SPACING: u16 = 1 << 6;
-const INH_WHITE_SPACE_NOWRAP: u16 = 1 << 7;
+const INH_FONT_SIZE: u64 = 1 << 0;
+const INH_COLOR: u64 = 1 << 1;
+const INH_FONT_FAMILY: u64 = 1 << 2;
+const INH_FONT_WEIGHT: u64 = 1 << 3;
+const INH_TEXT_ALIGN: u64 = 1 << 4;
+const INH_LINE_HEIGHT: u64 = 1 << 5;
+const INH_LETTER_SPACING: u64 = 1 << 6;
+const INH_WHITE_SPACE: u64 = 1 << 7;
+// #73 起的新继承属性：bits 8-32 已被 INLINE_* 非继承属性占用，INH_* 扩到 bits 33+
+// （InheritedSet/InlineSet 均为 u64，同一位空间；serial 侧 InheritedSet 随 v45 拓宽）。
+const INH_OVERFLOW_WRAP: u64 = 1 << 33;
+const INH_WORD_BREAK: u64 = 1 << 34;
+const INH_TEXT_WRAP: u64 = 1 << 35;
 
 /// prop 名 → 可继承属性 bit（非可继承返 None）。单一真相源：bit 的定义（本表 INH_*）与
 /// 消费（rematch set bit + propagate copy_if_unset）都在 core。fence css_resolve 调本函数
 /// 把 inline 可继承声明 bake 进 ResolvedStyle.inherited_set，避免运行时被父值覆盖。
-pub fn inherited_bit(prop: &str) -> Option<u16> {
+pub fn inherited_bit(prop: &str) -> Option<u64> {
     match prop.trim() {
         "font-size" => Some(INH_FONT_SIZE),
         "color" => Some(INH_COLOR),
@@ -111,7 +116,10 @@ pub fn inherited_bit(prop: &str) -> Option<u16> {
         "text-align" => Some(INH_TEXT_ALIGN),
         "line-height" => Some(INH_LINE_HEIGHT),
         "letter-spacing" => Some(INH_LETTER_SPACING),
-        "white-space" => Some(INH_WHITE_SPACE_NOWRAP),
+        "white-space" => Some(INH_WHITE_SPACE),
+        "overflow-wrap" => Some(INH_OVERFLOW_WRAP),
+        "word-break" => Some(INH_WORD_BREAK),
+        "text-wrap" => Some(INH_TEXT_WRAP),
         _ => None,
     }
 }
@@ -121,30 +129,32 @@ pub fn inherited_bit(prop: &str) -> Option<u16> {
 //   - InlineSet:    运行时 transient，C# Style.X=v 写入，不进 pkg.bin
 // 继承属性 bit 复用 INH_*（同一位空间，不重新编号）；非继承属性用 INLINE_*。
 //
-// **位编号说明：** INH_* 占用 bits 0-7（8 个继承属性），bit 8 是下一个可用位。
-// 从 bit 8 起，bits 8-31 共 24 位容纳了 apply_decl
-// 处理的 24 个非继承属性（width/height/min-*/max-*/padding/margin/
-// border-width/gap/flex-*/display/overflow-x/y/position/left/top/right/bottom/
+// **位编号说明：** INH_* 占用 bits 0-7（8 个早期继承属性）+ bits 33-35（#73 的
+// overflow-wrap/word-break/text-wrap——8-32 被 INLINE_* 占用故越过）。bits 8-31 共
+// 24 位容纳了 apply_decl 处理的 24 个非继承属性（width/height/min-*/max-*/padding/
+// margin/border-width/gap/flex-*/display/overflow-x/y/position/left/top/right/bottom/
 // background-color/opacity）。u32 装满后位图升级为 u64：z-index 取 bit 32，
-// bits 33-63 仍空。
+// bits 36-63 仍空。
 
-/// inline override 的 set-ness 位图。复用 INH_* 给继承属性（bits 0-7），
+/// inline override 的 set-ness 位图。复用 INH_* 给继承属性（bits 0-7 + 33-35），
 /// 其后是 INLINE_* 非继承属性 bit。rematch 用它应用便签层；继承子集 OR 进 set_map
 /// 让 propagate 自动传播父的 inline 继承值给未自设的子。纯运行时 transient，不进 pkg.bin。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InlineSet(pub u64);
 
-/// 所有继承属性 bit 的 OR——rematch 用它把 inline 的继承部分（bits 0-7）并进 set_map，
+/// 所有继承属性 bit 的 OR——rematch 用它把 inline 的继承部分并进 set_map，
 /// 使 propagate_inherited 把父的 inline 继承值（如 inline color）传给未自设的子。
-/// INH_* 是 u16，这里 OR 成 u64 与 InlineSet 同位宽。
-pub const INH_ALL_MASK: u64 = INH_FONT_SIZE as u64
-    | INH_COLOR as u64
-    | INH_FONT_FAMILY as u64
-    | INH_FONT_WEIGHT as u64
-    | INH_TEXT_ALIGN as u64
-    | INH_LINE_HEIGHT as u64
-    | INH_LETTER_SPACING as u64
-    | INH_WHITE_SPACE_NOWRAP as u64;
+pub const INH_ALL_MASK: u64 = INH_FONT_SIZE
+    | INH_COLOR
+    | INH_FONT_FAMILY
+    | INH_FONT_WEIGHT
+    | INH_TEXT_ALIGN
+    | INH_LINE_HEIGHT
+    | INH_LETTER_SPACING
+    | INH_WHITE_SPACE
+    | INH_OVERFLOW_WRAP
+    | INH_WORD_BREAK
+    | INH_TEXT_WRAP;
 
 // 非继承属性 bit（编号接在 INH_* 之后，从 bit 8 起）。对照 apply_decl 能处理的属性清单，
 // 逐个分配 1 bit。INH_* 位（继承属性）复用 inherited_bit，不重复定义。
@@ -189,7 +199,7 @@ pub const INLINE_Z_INDEX: u64 = 1 << 32;
 /// 要么设计期声明为主（bg-image 等）。这些若后续需要 inline，再扩位图。
 pub fn inline_bit(prop: &str) -> Option<u64> {
     if let Some(b) = inherited_bit(prop) {
-        return Some(b as u64);
+        return Some(b);
     }
     match prop.trim() {
         "width" => Some(INLINE_WIDTH),
@@ -737,9 +747,9 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
                 // block 结束 n_ref 借释放，后续 set_map.insert/get_mut 不受影响）。
                 // 省 ResolvedStyle clone（含 Vec<TransitionSpec>/text_effects，每帧每 inline 节点）。
                 apply_inline_override(&mut new_style, &n_ref.inline_override, inline_set);
-                // 只把继承子集（bits 0-7）并进 set_map；非继承 bit 不影响 propagate。
-                // InheritedSet.0 是 u16，INH_* 全在 u16 范围内，安全截位。
-                inh.0 |= (inline_set.0 & INH_ALL_MASK) as u16;
+                // 只把继承子集并进 set_map；非继承 bit 不影响 propagate。
+                // InheritedSet/InlineSet 同为 u64，直接掩码无需截位。
+                inh.0 |= inline_set.0 & INH_ALL_MASK;
             }
         }
         set_map.insert(node_id, inh);
@@ -764,7 +774,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     propagate_inherited(scene, &set_map);
 }
 
-/// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 8 个继承
+/// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 11 个继承
 /// 字段（INH_*，bits 0-7）+ 25 个非继承字段（INLINE_*，bits 8-32，z-index 在 bit 32）。
 /// INLINE_DISPLAY 一对应两字段（`taffy_style.display` + `display_mode`，与 apply_decl
 /// 行为对齐），其余 INLINE_* 一对一映射到 ResolvedStyle/taffy_style 字段。
@@ -773,15 +783,14 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
 fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set: InlineSet) {
     let s = set.0;
     // 单字段拷贝：`$($f:ident).+` 支持顶层（color）+ taffy 嵌套（taffy_style.size.width）路径。
-    // `$bit as u64` 同时容纳 INH_*（u16）与 INLINE_*（u64，z-index 在 bit 32）。
     macro_rules! cpy {
         ($($f:ident).+, $bit:expr) => {
-            if s & (($bit) as u64) != 0 {
+            if s & ($bit) != 0 {
                 style.$($f).+ = inline.$($f).+.clone();
             }
         };
     }
-    // 继承属性（bits 0-7）
+    // 继承属性（bits 0-7 + 33-35）
     cpy!(font_size, INH_FONT_SIZE);
     cpy!(color, INH_COLOR);
     cpy!(font_family, INH_FONT_FAMILY);
@@ -791,7 +800,10 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     cpy!(line_height, INH_LINE_HEIGHT);
     cpy!(line_height_px, INH_LINE_HEIGHT);
     cpy!(letter_spacing, INH_LETTER_SPACING);
-    cpy!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
+    cpy!(white_space, INH_WHITE_SPACE);
+    cpy!(overflow_wrap, INH_OVERFLOW_WRAP);
+    cpy!(word_break, INH_WORD_BREAK);
+    cpy!(text_wrap, INH_TEXT_WRAP);
     // 非继承属性（bits 8-31）——taffy_style 子字段
     cpy!(taffy_style.size.width, INLINE_WIDTH);
     cpy!(taffy_style.size.height, INLINE_HEIGHT);
@@ -869,7 +881,10 @@ fn propagate_inherited_rec(
         copy_if_unset!(line_height, INH_LINE_HEIGHT);
         copy_if_unset!(line_height_px, INH_LINE_HEIGHT);
         copy_if_unset!(letter_spacing, INH_LETTER_SPACING);
-        copy_if_unset!(white_space_nowrap, INH_WHITE_SPACE_NOWRAP);
+        copy_if_unset!(white_space, INH_WHITE_SPACE);
+        copy_if_unset!(overflow_wrap, INH_OVERFLOW_WRAP);
+        copy_if_unset!(word_break, INH_WORD_BREAK);
+        copy_if_unset!(text_wrap, INH_TEXT_WRAP);
         // per-clone，节点多时换就地改 + 父快照
         let eff_for_children = new_style.clone();
         scene
@@ -2506,7 +2521,7 @@ mod tests {
         );
         // inline_set 的 color bit 应被清
         let set = scene.get(root).unwrap().inline_set.0;
-        assert_eq!(set & INH_COLOR as u64, 0, "INH_COLOR bit 清零");
+        assert_eq!(set & INH_COLOR, 0, "INH_COLOR bit 清零");
     }
 
     #[test]

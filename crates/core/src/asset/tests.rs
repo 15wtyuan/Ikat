@@ -777,8 +777,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 44,
-        "pkg format version must be 44 after v44 layout/box-shadow keyframes channels bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 45,
+        "pkg format version must be 45 after v45 wrap-control fields bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -839,8 +839,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 44,
-        "pkg format version must be 44 after v44 layout/box-shadow keyframes channels bump"
+        PKG_FORMAT_VERSION, 45,
+        "pkg format version must be 45 after v45 wrap-control fields bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -986,8 +986,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v33_roundtrip_preserves_rich_text_block() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 44,
-        "pkg format version must be 44 after v44 layout/box-shadow keyframes channels bump"
+        PKG_FORMAT_VERSION, 45,
+        "pkg format version must be 45 after v45 wrap-control fields bump"
     );
     // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
     let mut root = tn(NodeKind::Container);
@@ -1033,8 +1033,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 44,
-        "pkg format version must be 44 after v44 layout/box-shadow keyframes channels bump"
+        PKG_FORMAT_VERSION, 45,
+        "pkg format version must be 45 after v45 wrap-control fields bump"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

@@ -2,6 +2,7 @@
 //! Rust-internal（packager 写、runtime 读，C# 不解析）。
 //! 布局锁：同一 fixture 的打包字节哈希有 CI 门（packer `schema_lock.rs`）——
 //! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
+//! v45：ResolvedStyle 加 white_space/overflow_wrap/word_break/text_wrap 四字段 + InheritedSet u16→u64（#73 换行控制全集，bincode 布局变）。旧 v44 pkg 加载报 TooOld。
 //! v44：KeyframeStop 加 layout/box-shadow 通道（width/height 域+值、flex_grow、box_shadow 列表，#10 layout 动画）。手编 keyframes 布局变，旧 v43 pkg 加载报 TooOld。
 //! v42：ResolvedStyle 加 line_height_px 字段（CSS line-height px 形双槽，#65 高度爆炸修复）。
 //! v41：ResolvedStyle 加 viewport 字段（vw/vh/vmin/vmax 平行长度声明，分辨率适配重排语言，bincode 布局变）。
@@ -47,9 +48,9 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 44; // v44: KeyframeStop 加 layout/box-shadow 通道（width/height 域+值、flex_grow、box_shadow 列表，#10）。手编 keyframes 布局变，旧包拒绝。
-pub(crate) const MIN_VERSION: u32 = 44;
-pub(crate) const MAX_VERSION: u32 = 44;
+pub const PKG_FORMAT_VERSION: u32 = 45; // v45: ResolvedStyle 加 wrap 四字段 + InheritedSet u64（#73 换行控制全集）。bincode 布局变，旧包拒绝。
+pub(crate) const MIN_VERSION: u32 = 45;
+pub(crate) const MAX_VERSION: u32 = 45;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。

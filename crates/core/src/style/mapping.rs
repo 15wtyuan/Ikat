@@ -2,9 +2,9 @@ use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
-    Gradient, GradientStop, OverflowMode, RadialExtent, RadialShape, ResolvedStyle, SliceInsets,
-    TextAlign, TextSecurity, TransformOrigin, ViewportLen, ViewportUnit, GRADIENT_MAX_STOPS,
-    MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
+    Gradient, GradientStop, OverflowMode, OverflowWrap, RadialExtent, RadialShape, ResolvedStyle,
+    SliceInsets, TextAlign, TextSecurity, TextWrap, TransformOrigin, ViewportLen, ViewportUnit,
+    WhiteSpace, WordBreak, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
 };
 use crate::transform::LenPct;
 use taffy::geometry::{Rect, Size};
@@ -1691,7 +1691,42 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "white-space" => {
-            style.white_space_nowrap = value.trim() == "nowrap";
+            // #73 换行控制全集：五值映射（围栏 Keyword 值集先行校验，这里是运行时
+            // 动态规则/inline 的第二真相源）。未识别值返 false 拒收（不静默降级）。
+            style.white_space = match value.trim() {
+                "normal" => WhiteSpace::Normal,
+                "nowrap" => WhiteSpace::Nowrap,
+                "pre" => WhiteSpace::Pre,
+                "pre-wrap" => WhiteSpace::PreWrap,
+                "pre-line" => WhiteSpace::PreLine,
+                _ => return false,
+            };
+            true
+        }
+        "overflow-wrap" => {
+            style.overflow_wrap = match value.trim() {
+                "normal" => OverflowWrap::Normal,
+                "break-word" => OverflowWrap::BreakWord,
+                _ => return false,
+            };
+            true
+        }
+        "word-break" => {
+            style.word_break = match value.trim() {
+                "normal" => WordBreak::Normal,
+                "break-all" => WordBreak::BreakAll,
+                "keep-all" => WordBreak::KeepAll,
+                _ => return false,
+            };
+            true
+        }
+        "text-wrap" => {
+            // balance/stable/pretty 围栏拒绝（schema 值集）；此处同构拒收。
+            style.text_wrap = match value.trim() {
+                "normal" => TextWrap::Normal,
+                "nowrap" => TextWrap::Nowrap,
+                _ => return false,
+            };
             true
         }
         "aspect-ratio" => {
