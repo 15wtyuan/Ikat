@@ -163,31 +163,49 @@ pub fn parse_crate_version(cargo_toml: &str) -> Option<String> {
     None
 }
 
-/// staleness 判定的单文件过滤：`crates/` 下会影响 dll/exe/gui 产物字节的源变更。
-/// 排除 xtask（编排工具自身不进产物）与测试/bench 代码（不参与 release 编译，
-/// 改测试不应触发产物重出——`tests/` 目录、`*_tests.rs`/`tests.rs` 模块文件按
-/// 仓库命名约定识别）。GUI（packer/gui）**在内**——它直链 ikat_pkg/ikat_fence
-/// 编进 exe（dev fallback 进程内路径），与 dll/ikat.exe 无条件同批重出。
-fn affects_artifacts(path: &str) -> bool {
-    if !path.starts_with("crates/") || path.starts_with("crates/xtask/") {
-        return false;
-    }
+/// 测试/bench 代码不参与 release 编译，改测试不应触发产物重出——`tests/` 目录、
+/// `*_tests.rs`/`tests.rs` 模块文件按仓库命名约定识别。
+fn is_test_code(path: &str) -> bool {
     let file = path.rsplit('/').next().unwrap_or(path);
-    !path.contains("/tests/")
-        && !path.contains("/benches/")
-        && !file.ends_with("_tests.rs")
-        && !file.ends_with("tests.rs")
+    path.contains("/tests/")
+        || path.contains("/benches/")
+        || file.ends_with("_tests.rs")
+        || file.ends_with("tests.rs")
+}
+
+/// exe/gui 侧过滤器：`crates/` 下会影响 ikat.exe/ikat_gui.exe 产物字节的源变更。
+/// 排除 xtask（编排工具自身不进产物）与测试/bench 代码。GUI（packer/gui）**在内**
+/// ——它直链 ikat_pkg/ikat_fence 编进 exe（dev fallback 进程内路径），与 dll/
+/// ikat.exe 无条件同批重出。
+fn affects_artifacts(path: &str) -> bool {
+    path.starts_with("crates/") && !path.starts_with("crates/xtask/") && !is_test_code(path)
+}
+
+/// dll 侧过滤器：ikat_ffi_c.dll 只链 core 与 ffi 两个 crate——fence/pkg/gui 的
+/// 改动不进 dll 字节，重建后无 diff 可提交、锚点无法前移，粗过滤器会造出「无解
+/// 的红」（长度形态门批实证：fence 改动后 exe 已重出入库、dll 字节相同，门仍拦）。
+fn affects_dll(path: &str) -> bool {
+    (path.starts_with("crates/core/") || path.starts_with("crates/ffi/")) && !is_test_code(path)
 }
 
 /// 两组「自产物锚点提交以来的变更清单」→ 影响产物的违例清单（去重保序）。
-/// 纯函数供单测；git 侧采集见 [`collect_staleness`]。
+/// dll 侧按 [`affects_dll`]（链接进 dll 的 crate）、exe 侧按 [`affects_artifacts`]
+/// （全产物族，保守）。纯函数供单测；git 侧采集见 [`collect_staleness`]。
 pub fn staleness_violations(
     changed_since_dll: &[String],
     changed_since_exe: &[String],
 ) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for p in changed_since_dll.iter().chain(changed_since_exe.iter()) {
-        if affects_artifacts(p) && !out.contains(p) {
+    for (p, f) in changed_since_dll
+        .iter()
+        .map(|p| (p, affects_dll as fn(&str) -> bool))
+        .chain(
+            changed_since_exe
+                .iter()
+                .map(|p| (p, affects_artifacts as fn(&str) -> bool)),
+        )
+    {
+        if f(p) && !out.contains(p) {
             out.push(p.clone());
         }
     }
@@ -441,5 +459,19 @@ serde = { version = "1", features = ["derive"] }
             &["crates/core/src/stage/load_package_tests.rs".to_string()]
         )
         .is_empty());
+        // dll 锚点盲区（长度形态门批实证）：fence/pkg 改动不进 dll——exe 侧已重出
+        // 入库后，dll 侧的这类变更不再造「无 diff 可提交」的无解红；core 改动仍拦。
+        assert!(staleness_violations(
+            &[
+                "crates/fence/src/value_check.rs".to_string(),
+                "crates/packer/pkg/src/preview.rs".to_string(),
+            ],
+            &[]
+        )
+        .is_empty());
+        assert_eq!(
+            staleness_violations(&["crates/core/src/solve.rs".to_string()], &[]),
+            vec!["crates/core/src/solve.rs".to_string()]
+        );
     }
 }
