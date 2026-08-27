@@ -50,11 +50,11 @@ cargo test -p ikat_fence                              # ← 围栏契约门
 
 **CI 门禁**（`.github/workflows/rust-ci.yml`，push main / PR 触发）：fmt 严（`cargo fmt --all -- --check`）+ clippy 严（`cargo clippy --all-targets -- -D warnings`）+ Win/Ubuntu matrix test + feature-gate check（`--no-default-features --all-targets`）+ Windows `.dll` artifact（release build）。**push 前本地跑 `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`**，否则 CI 红（且**本地绿 ≠ CI 绿**：CI stable 滚动可超前本地一档 + clippy 增量缓存跳过未变更 crate，见 pitfalls §2）。clippy 各 crate root 有 `#![allow]` 放行可辩护的测试/FFI 模式 lint（`field_reassign_with_default` / `not_unsafe_ptr_arg_deref` / `too_many_arguments` 等，带理由注释），勿误清——新增可辩护模式 lint 在那里加。
 
-**发版（tag 触发 Release workflow）**：一条命令——`cargo run -p xtask -- release <ver>`（先 `--dry-run` 演练）。它编排全部机械步骤：双 bump（package.json + pkg Cargo.toml + Cargo.lock）→ CHANGELOG 折 `[<ver>]` 段 → **干净 worktree 在 bump 提交快照上重出 exe/dll/bundle**（并行会话在途代码渗不进产物；产物验证看字节与实跑输出：`ikat version` 输出 + pkg.bin 头版本号）→ pathspec 限定提交（并行会话安全）→ release-check → tag → 分步 push + `git ls-remote` 三方核对。断点可续跑（bump 提交后中断，重跑同版本号自动 resume）。前置硬门：CHANGELOG Unreleased 非空、Unity 关闭（dll 锁探测）、origin/main 无分叉、8 个发版独占路径干净。**发版决策本身（版本号/时机/内容）与移 tag 恢复流保持人工**。版本号链条背景：git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）；**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内。**产物 staleness 是 CI 硬门**（rust-ci `artifact-staleness` job 跑 release-check）：dll/exe 上次入库提交之后 `crates/` 有源变更（xtask/gui 除外）即红——「改 Rust 必重出」机器化。**移 tag 的两个坑**（例外恢复流，手动 + 按此执行）：① 远端 main 有本地没有的新 commit 挡 push——rebase 后本地 tag 仍指 rebase 前的孤儿 commit，须 `git tag -f` 重打再 `--force` 推；② 多 refspec push（`push origin main tag`）在 main 被拒时 tag 可能已单独上远端，忘了重打会留脏 tag——推完 `git ls-remote` 核对。移 tag 后 CHANGELOG 里记在 Unreleased 的新批要折进版本段（移 tag = 成为版本一部分）。
+**发版（tag 触发 Release workflow）**：一条命令——`cargo run -p xtask -- release <ver>`（先 `--dry-run` 演练）。它编排全部机械步骤：双 bump（package.json + pkg Cargo.toml + Cargo.lock）→ CHANGELOG 折 `[<ver>]` 段 → **干净 worktree 在 bump 提交快照上重出 exe/dll/gui/bundle**（并行会话在途代码渗不进产物；产物验证看字节与实跑输出：`ikat version` 输出 + pkg.bin 头版本号）→ pathspec 限定提交（并行会话安全）→ release-check → tag → 分步 push + `git ls-remote` 三方核对。断点可续跑（bump 提交后中断，重跑同版本号自动 resume）。前置硬门：CHANGELOG Unreleased 非空、Unity 关闭（dll 锁探测）、origin/main 无分叉、9 个发版独占路径干净。**发版决策本身（版本号/时机/内容）与移 tag 恢复流保持人工**。版本号链条背景：git-URL 装包的版本号解析自 tag 指向 commit 的 package.json，漏 bump = 消费者装错版本号（不止 CI 红）；**CI 不编 .dll**——git URL 分布拉的是 tag commit 快照，.dll 必须已在 tag commit 内。**产物 staleness 是 CI 硬门**（rust-ci `artifact-staleness` job 跑 release-check）：dll/exe 上次入库提交之后 `crates/` 有源变更（xtask 除外）即红——「改 Rust 必重出」机器化。**移 tag 的两个坑**（例外恢复流，手动 + 按此执行）：① 远端 main 有本地没有的新 commit 挡 push——rebase 后本地 tag 仍指 rebase 前的孤儿 commit，须 `git tag -f` 重打再 `--force` 推；② 多 refspec push（`push origin main tag`）在 main 被拒时 tag 可能已单独上远端，忘了重打会留脏 tag——推完 `git ls-remote` 核对。移 tag 后 CHANGELOG 里记在 Unreleased 的新批要折进版本段（移 tag = 成为版本一部分）。
 
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
-按记忆/工作流：**任何** Rust 改动后必须重编 + commit `.dll`，否则测不了——日常一条命令 `cargo run -p xtask -- reout`（重编 dll+exe → 拷贝 → sync-bindings → showcase bundle 无条件重打 + 字节对比幂等；只报告待提交路径不自动提交；dll 锁先探测，Unity 开着会先报错）。产物 staleness 由 release-check / CI 硬门兜底。
+按记忆/工作流：**任何** Rust 改动后必须重编 + commit `.dll`，否则测不了——日常一条命令 `cargo run -p xtask -- reout`（重编 dll + ikat.exe + ikat_gui.exe 全家桶 → 拷贝 → sync-bindings → showcase bundle 无条件重打 + 字节对比幂等；只报告待提交路径不自动提交；dll 锁先探测，Unity 开着会先报错）。产物 staleness 由 release-check / CI 硬门兜底。
 
 ```bash
 cargo build -p ikat_ffi_c --release
@@ -69,17 +69,14 @@ cp target/release/ikat_ffi_c.dll unity/package/Plugins/Ikat/ikat_ffi_c.dll
 
 GUI 是 Tauri 2 桌面 app；打包/初始化语义走 `ikat` CLI 子进程（定位链：GUI 同目录 → `<workspace>/.ikat/` → dev fallback 进程内）。产物双 exe 同放 `unity/package/Editor/Tools/`：`ikat_gui.exe`（Unity `Ikat > Open Packer` 拉起，拉起时传 `--unity-root`）+ `ikat.exe`（版本与 GUI 配套）。
 
-```bash
-cargo build -p ikat_pkg --release
-cp target/release/ikat.exe unity/package/Editor/Tools/ikat.exe
+**重出无判据——`cargo run -p xtask -- reout` 一条命令全家桶**（dll + ikat.exe + ikat_gui.exe + bindings + showcase bundle）。GUI exe 与其余产物无条件同批重出、同 commit 提交：GUI 直链 ikat_pkg/ikat_fence（dev fallback 进程内路径），任何 pkg/fence 改动都编进 exe 字节——旧的「仅 Workspace struct / GUI 自身代码变动才重出」收窄判据漏掉这条内嵌路径且本身是心智负担，已废除。GUI 变动同样计入 staleness 硬门（release-check / CI）。手工兜底（xtask 不可用时）：
 
-npm install -g @tauri-apps/cli                 # 一次性装 tauri-cli（prebuilt，比 cargo install 快得多）
-(cd crates/packer/gui/src-tauri && tauri build --no-bundle)    # 出 exe（必须 tauri CLI！--no-bundle 跳 NSIS/MSI installer）
+```bash
+npm install -g @tauri-apps/cli                 # 一次性装 tauri-cli（prebuilt，比 cargo install 快得多；xtask reout 的前置）
+(cd crates/packer/gui/src-tauri && tauri build --no-bundle)    # 出 exe（必须 tauri CLI！cargo build --release 不 embed 前端 → localhost 白屏 exe；--no-bundle 跳 NSIS/MSI installer）
 # tauri-cli 产物在 workspace 根 target/release/（不在 src-tauri/target/）。
 cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 ```
-
-**重出条件（收窄过）**：fence/pkg 的 build 语义变动、scaffold 模板/skill 内容变动**不要求**重出 GUI exe（build/init 走 ikat.exe 子进程、模板嵌在 ikat.exe 里）；仍要求重出的：`Workspace` struct（workspace JSON schema）变动、GUI 自身代码（commands/前端）变动。ikat.exe 与 GUI exe 同 commit 重出，防版本错配。
 
 - **前端手写 dist（无 npm 构建）**，靠 `app.withGlobalTauri:true` 注入 `window.__TAURI__`（tauri.conf.json）；缩略图靠 `app.security.assetProtocol` + Cargo `tauri` feature `protocol-asset`。
 

@@ -3,6 +3,7 @@
 
 mod bindings;
 mod git;
+mod gui;
 mod paths;
 mod release;
 mod release_check;

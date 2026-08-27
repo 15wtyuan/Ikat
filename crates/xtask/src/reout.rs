@@ -1,9 +1,10 @@
 //! `xtask reout` 日常产物重出：改 Rust 后「重编 dll → 拷贝 → sync-bindings → 重出
-//! ikat.exe → 重打 showcase bundle」一条命令（AGENTS 的 Rust→dll 闭环机械化）。
+//! ikat.exe + ikat_gui.exe → 重打 showcase bundle」一条命令（AGENTS 的 Rust→dll
+//! 闭环机械化）。GUI exe 与其余产物**无条件同批重出**——它直链 ikat_pkg/ikat_fence
+//!（dev fallback 进程内路径），判据省不掉遗漏风险，直接无判据。
 //!
 //! bundle 无条件重打 + 字节对比幂等——parse-time 逻辑变更与否难静态判定，难判定就
-//! 无条件做（旧坑 66：改 parse-time 只重编 dll 不够）。GUI exe（ikat_gui.exe）重出
-//! 判据不变（Workspace struct / GUI 自身代码变动才重出，人工判断），不在本命令管辖。
+//! 无条件做（旧坑 66：改 parse-time 只重编 dll 不够）。
 //!
 //! 不自动提交：日常开发批可能还要带源码一起提交，这里只重出 + 报告待提交清单，
 //! 提交时机留给操作者。
@@ -13,9 +14,10 @@ use crate::paths;
 use crate::release::{run_cargo, unity_dll_locked};
 use std::process::Command;
 
-const ARTIFACT_PATHS: [&str; 4] = [
+const ARTIFACT_PATHS: [&str; 5] = [
     "unity/package/Plugins/Ikat/ikat_ffi_c.dll",
     "unity/package/Editor/Tools/ikat.exe",
+    "unity/package/Editor/Tools/ikat_gui.exe",
     "unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin",
     "unity/showcase-unity/Assets/Bundles/ikat.runtime.json",
 ];
@@ -34,7 +36,7 @@ pub fn run_reout(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
     if dry_run {
         println!(
-            "[dry-run] dll not locked. plan: build release dll+exe -> copy -> \
+            "[dry-run] dll not locked. plan: build release dll+exe+gui -> copy -> \
                   sync-bindings -> rebuild showcase bundle -> report dirty artifact paths"
         );
         return Ok(());
@@ -61,6 +63,13 @@ pub fn run_reout(dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
         root.join("unity/package/Editor/Tools/ikat.exe"),
     )?;
     println!("[copy] ikat_ffi_c.dll + ikat.exe -> unity/package");
+
+    let gui_exe = crate::gui::build_gui(&root, &root.join("target"))?;
+    std::fs::copy(
+        &gui_exe,
+        root.join("unity/package/Editor/Tools/ikat_gui.exe"),
+    )?;
+    println!("[copy] ikat_gui.exe -> unity/package");
 
     crate::bindings::sync_bindings()?;
     println!("[bindings] synced");

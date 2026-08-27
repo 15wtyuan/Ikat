@@ -21,15 +21,16 @@ use crate::release_check;
 use std::path::Path;
 use std::process::Command;
 
-/// 本命令独占管理的路径（bump 4 + 产物 4）。前置检查要求它们全部干净（工作树 + 暂存区），
+/// 本命令独占管理的路径（bump 4 + 产物 5）。前置检查要求它们全部干净（工作树 + 暂存区），
 /// 防并行会话的在途改动被 pathspec 提交捎带。
-const OWNED_PATHS: [&str; 8] = [
+const OWNED_PATHS: [&str; 9] = [
     "unity/package/package.json",
     "crates/packer/pkg/Cargo.toml",
     "Cargo.lock",
     "unity/package/CHANGELOG.md",
     "unity/package/Plugins/Ikat/ikat_ffi_c.dll",
     "unity/package/Editor/Tools/ikat.exe",
+    "unity/package/Editor/Tools/ikat_gui.exe",
     "unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin",
     "unity/showcase-unity/Assets/Bundles/ikat.runtime.json",
 ];
@@ -122,7 +123,7 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
         println!("  1. bump package.json + pkg Cargo.toml + Cargo.lock -> {ver}");
         println!("  2. fold CHANGELOG `[Unreleased]` into `## [{ver}] - <today>`");
         println!("  3. commit bump (pathspec-limited)");
-        println!("  4. temp worktree at bump commit -> build exe/dll + showcase bundle");
+        println!("  4. temp worktree at bump commit -> build exe/dll/gui + showcase bundle");
         println!("     (CARGO_TARGET_DIR reuses main target cache)");
         println!("  5. verify artifacts (ikat version output + pkg.bin header) -> copy back");
         println!("  6. commit artifacts -> release-check -> tag {tag}");
@@ -192,6 +193,7 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
     let artifact_paths = [
         "unity/package/Plugins/Ikat/ikat_ffi_c.dll",
         "unity/package/Editor/Tools/ikat.exe",
+        "unity/package/Editor/Tools/ikat_gui.exe",
         "unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin",
         "unity/showcase-unity/Assets/Bundles/ikat.runtime.json",
     ];
@@ -205,7 +207,7 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
     } else {
         commit_paths(
             &format!(
-                "chore(release): v{ver} artifacts — exe/dll/bundle re-out from clean tag-commit worktree"
+                "chore(release): v{ver} artifacts — exe/dll/gui/bundle re-out from clean tag-commit worktree"
             ),
             &changed,
         )?;
@@ -320,7 +322,11 @@ fn build_artifacts_in(wt: &Path, root: &Path, ver: &str) -> Result<(), Box<dyn s
         }
     }
 
-    // 拷回主工作树（bundle/runtime.json 字节相同则跳过，免伪脏提交）。
+    // GUI exe 同批重出（直链 ikat_pkg/ikat_fence 的内嵌代码路径随源码走；无判据）。
+    let gui_exe = crate::gui::build_gui(wt, &root.join("target"))?;
+    println!("[build] {}", gui_exe.display());
+
+    // 拷回主工作树（字节相同则跳过，免伪脏提交）。
     let pairs = [
         (
             target_dir.join("ikat_ffi_c.dll"),
@@ -329,6 +335,10 @@ fn build_artifacts_in(wt: &Path, root: &Path, ver: &str) -> Result<(), Box<dyn s
         (
             ikat_exe.clone(),
             root.join("unity/package/Editor/Tools/ikat.exe"),
+        ),
+        (
+            gui_exe,
+            root.join("unity/package/Editor/Tools/ikat_gui.exe"),
         ),
         (
             wt_bundle.clone(),

@@ -163,13 +163,12 @@ pub fn parse_crate_version(cargo_toml: &str) -> Option<String> {
     None
 }
 
-/// staleness 判定的单文件过滤：`crates/` 下会影响 dll/exe 产物字节的源变更。
-/// 排除 xtask（编排工具自身不进产物）与 packer/gui（GUI exe 不在 dll/ikat.exe 重出面，
-/// 重出条件另有人工判据）。
+/// staleness 判定的单文件过滤：`crates/` 下会影响 dll/exe/gui 产物字节的源变更。
+/// 排除 xtask（编排工具自身不进产物）。GUI（packer/gui）**在内**——它直链
+/// ikat_pkg/ikat_fence 编进 exe（dev fallback 进程内路径），与 dll/ikat.exe
+/// 无条件同批重出。
 fn affects_artifacts(path: &str) -> bool {
-    path.starts_with("crates/")
-        && !path.starts_with("crates/xtask/")
-        && !path.starts_with("crates/packer/gui/")
+    path.starts_with("crates/") && !path.starts_with("crates/xtask/")
 }
 
 /// 两组「自产物锚点提交以来的变更清单」→ 影响产物的违例清单（去重保序）。
@@ -413,19 +412,20 @@ serde = { version = "1", features = ["derive"] }
         let exe_side = [
             "crates/core/src/lib.rs".to_string(), // 与 dll 侧重复 → 去重
             "crates/packer/pkg/src/bridge.rs".to_string(),
-            "crates/packer/gui/src-tauri/main.rs".to_string(), // GUI 不在重出面
+            "crates/packer/gui/src-tauri/main.rs".to_string(), // GUI 直链 pkg/fence，同批重出
         ];
         assert_eq!(
             staleness_violations(&dll_side, &exe_side),
             vec![
                 "crates/core/src/lib.rs".to_string(),
                 "crates/packer/pkg/src/bridge.rs".to_string(),
+                "crates/packer/gui/src-tauri/main.rs".to_string(),
             ]
         );
-        // 全部被排除 → 无违例。
+        // 全部被排除 → 无违例（xtask 是唯一豁免路径）。
         assert!(staleness_violations(
             &["crates/xtask/src/git.rs".to_string()],
-            &["crates/packer/gui/x".to_string()]
+            &["crates/xtask/src/gui.rs".to_string()]
         )
         .is_empty());
     }
