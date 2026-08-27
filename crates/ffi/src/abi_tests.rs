@@ -223,6 +223,51 @@ fn is_pointer_on_ui_true_on_hit_false_on_miss() {
     ikat_stage_free(h);
 }
 
+/// cursor_query（#93）契约：无 scene/无命中 → 0（箭头）；命中 Button → 1（手型 UA 默认）；
+/// 作者 `cursor:none` → 2。判别值即 C# 侧消费的线格式。
+#[test]
+fn cursor_query_arrow_hand_hidden_lifecycle() {
+    // 无 scene → 箭头，不 panic（StageHandle 有效但未建 root）
+    {
+        let h = stage_new_with_dejavu(100.0, 50.0);
+        assert_eq!(ikat_stage_cursor_query(h), 0, "无 scene → 0");
+        ikat_stage_free(h);
+    }
+    // hit Button：首帧空事件 tick 刷新 last_hit——需要注入 Move 才有命中
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    assert!(!h.is_null());
+    let btn = ikat_stage_create_root(
+        h,
+        b"button".as_ptr(),
+        6,
+        b"width:100px;height:50px".as_ptr(),
+        22,
+    );
+    assert_ne!(btn, u64::MAX, "create_root(button) ok");
+    ikat_stage_tick(h, 0.0); // warmup：world_transforms
+                             // 注入鼠标 Move 到 button 区中心，再 tick 让状态机消费 + 重算命中
+    use ikat_core::input::{PointerEvent, PointerKind};
+    let ev = PointerEvent {
+        kind: PointerKind::Move,
+        button: 0,
+        pad: [0; 2],
+        touch_id: -1,
+        x: 50.0,
+        y: 25.0,
+    };
+    ikat_stage_set_input(h, &ev, 1);
+    ikat_stage_tick(h, 1.0 / 60.0);
+    assert_eq!(
+        ikat_stage_cursor_query(h),
+        1,
+        "悬停 pressable 控件（UA Auto 默认）→ 手型"
+    );
+    ikat_stage_free(h);
+
+    // null 句柄安全
+    assert_eq!(ikat_stage_cursor_query(std::ptr::null()), 0, "null → 0");
+}
+
 /// EventRecord/PointerEvent sizeof 契约。
 /// PointerEvent 16B：PointerKind repr(u8) 1B + button 1B + pad 2B + touch_id@4 + x@8 + y@12。
 /// EventRecord 32B：node_id@0(8,u64) + event_type@8(1) + click_count@9(1) + pad@10(2) +

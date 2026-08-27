@@ -470,6 +470,21 @@
         </div>
       </div>
 
+      <div class="section">
+        <div class="section-title">20 · 光标 affordance（cursor · #93）</div>
+        <div class="section-desc">验收（Unity PlayMode，肉眼判据）：① 悬停「可点按钮」——软件指针变手型，移出盒外复原系统箭头（UA 默认：pressable 控件悬停给手型）。② 悬停「禁用按钮」——保持系统箭头不变形。③ 悬停「地图节点」——手型（div + cursor:pointer：作者声明把非控件可点区标为手型）。④ 悬停「压制按钮」——保持系统箭头（button + cursor:default：作者声明压过 UA 手型）。⑤ 悬停「自绘区」——指针消失（cursor:none），移出复原。预览侧浏览器原生渲染 cursor，天然正确。</div>
+        <style>
+          .cur-box { width:150px; height:64px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:14px; }
+        </style>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:16px;flex-wrap:wrap">
+          <button class="cur-box" style="background-color:#2b4a6b;color:#dfe8f2">可点按钮</button>
+          <button class="cur-box" style="background-color:#3a3f4a;color:#8a92a0" disabled>禁用按钮</button>
+          <div class="cur-box" style="background-color:#5a4a2b;color:#f2e8df;cursor:pointer">地图节点</div>
+          <button class="cur-box" style="background-color:#2b4a6b;color:#dfe8f2;cursor:default">压制按钮</button>
+          <div class="cur-box" style="background-color:#4a2b5a;color:#e8dff2;cursor:none">自绘区</div>
+        </div>
+      </div>
+
     </div>
   </div>
 </body>

@@ -13,6 +13,9 @@ use crate::style::dynamic::{rematch_pseudo_classes, sync_animation_players, Scop
 use crate::style::resolved::OverflowMode;
 use crate::text::layout::FontTable;
 
+// 宿主经 Stage 命名空间消费光标决策（FFI 返回判别值）；裸 use 已在上方供本模块用。
+pub use crate::input::CursorIntent;
+
 /// transition 自动提交 tween 的 tag（rematch 检测通道变化 → drain kill 旧 + 提交新）。
 /// 区分 driver 主动注册的 tween（caller-supplied u32 tag）——使 transition 完成事件可识别。
 /// 选 0xFFFF_FFFE 哨兵（接近 u32 上限，避开常见 driver 小整数 tag）。
@@ -345,6 +348,15 @@ impl Stage {
         match &self.scene {
             None => false,
             Some(scene) => self.pointer_state.is_pointer_on_ui(scene),
+        }
+    }
+
+    /// 软件指针形态决策（#93）。逻辑主体在 `PointerState::cursor_intent`
+    /// （与 `is_pointer_on_ui` 同款委托模式）；此处为宿主侧稳定入口。
+    pub fn cursor_intent(&self) -> CursorIntent {
+        match &self.scene {
+            None => CursorIntent::Arrow,
+            Some(scene) => self.pointer_state.cursor_intent(scene),
         }
     }
 

@@ -5,6 +5,36 @@
 use crate::hit::hit_test;
 use crate::scene::node::{ControlState, NodeFlags, NodeId, NodeKind, Scene};
 use crate::scroll::{effective, SCROLL_THRESHOLD_MOUSE, SCROLL_THRESHOLD_TOUCH};
+use crate::style::resolved::CursorStyle;
+
+/// 每帧一次的软件指针形态决策输出（#93 桌面指针 affordance）。
+/// 判别值即 FFI 线格式（`ikat_stage_cursor_query` 直接返回），宿主缓存去抖后驱动
+/// `Cursor.SetCursor`。触摸设备无悬停语义，宿主侧自行不消费即可（决策恒基于鼠标槽）。
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CursorIntent {
+    /// 系统箭头（缺省：无命中 / 非 pressable 命中 / 作者 `cursor:default`）。
+    #[default]
+    Arrow = 0,
+    /// 手型 pointer：pressable 控件悬停（UA 默认）或作者 `cursor:pointer`。
+    Hand = 1,
+    /// 元素级隐藏软件指针：作者 `cursor:none`（游戏自绘光标让位用）。
+    Hidden = 2,
+}
+
+impl CursorIntent {
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            1 => CursorIntent::Hand,
+            2 => CursorIntent::Hidden,
+            _ => CursorIntent::Arrow,
+        }
+    }
+
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -796,6 +826,36 @@ impl PointerState {
             }
         }
         false
+    }
+
+    /// 软件指针形态决策（#93）：鼠标主指槽（slots[0]）本帧命中的节点 → 光标语义。
+    ///
+    /// 优先级与浏览器一致：作者显式 `cursor:*`（级联终态 `style.cursor`，含 :hover
+    /// 规则的运行时覆写）恒压 UA 行为；`Auto` 时按 kind 走 UA 默认——pressable 控件
+    /// + `<a>` 给手型（`NodeKind::ua_hover_hand`），其余箭头；disabled 或不可命中节点
+    /// 不给手型（与浏览器 disabled button 一致）。触摸槽（slots[1..]）无悬停语义，
+    /// 不参与。无命中 / 命中节点已死 → Arrow。宿主每帧调一次、自行缓存去抖。
+    pub fn cursor_intent(&self, scene: &Scene) -> CursorIntent {
+        let Some(hit) = self.slots.first().and_then(|s| s.last_hit) else {
+            return CursorIntent::Arrow;
+        };
+        let Some(node) = scene.get(hit) else {
+            return CursorIntent::Arrow;
+        };
+        match node.style.cursor {
+            CursorStyle::Pointer => return CursorIntent::Hand,
+            CursorStyle::System => return CursorIntent::Arrow,
+            CursorStyle::Hidden => return CursorIntent::Hidden,
+            CursorStyle::Auto => {}
+        }
+        if node.interaction.touchable
+            && !node.interaction.flags.contains(NodeFlags::DISABLED)
+            && node.kind.ua_hover_hand()
+        {
+            CursorIntent::Hand
+        } else {
+            CursorIntent::Arrow
+        }
     }
 
     /// 加 touch monitor（去重）。touch_id 找槽（鼠标=-1→slot0）；找不到槽→no-op（Down 前调无效）。

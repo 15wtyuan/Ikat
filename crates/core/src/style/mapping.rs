@@ -1,10 +1,10 @@
 use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
-    Gradient, GradientStop, OverflowMode, OverflowWrap, RadialExtent, RadialShape, ResolvedStyle,
-    SliceInsets, TextAlign, TextDecoration, TextSecurity, TextWrap, TransformOrigin, ViewportLen,
-    ViewportUnit, WhiteSpace, WordBreak, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS,
+    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, CursorStyle, DisplayMode,
+    GradCoord, Gradient, GradientStop, OverflowMode, OverflowWrap, RadialExtent, RadialShape,
+    ResolvedStyle, SliceInsets, TextAlign, TextDecoration, TextSecurity, TextWrap, TransformOrigin,
+    ViewportLen, ViewportUnit, WhiteSpace, WordBreak, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS,
     MAX_OUTER_SHADOW_LAYERS,
 };
 use crate::transform::LenPct;
@@ -1558,6 +1558,18 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.text_decoration = match value.trim() {
                 "underline" => TextDecoration::Underline,
                 _ => TextDecoration::None,
+            };
+            true
+        }
+        "cursor" => {
+            // 值集 auto|default|none|pointer（#93；围栏 schema 已拒越界值）。
+            // Auto = UA 默认（pressable 控件悬停手型，runtime cursor_intent 决策）；
+            // 显式声明恒压 UA 行为。
+            style.cursor = match value.trim() {
+                "pointer" => CursorStyle::Pointer,
+                "default" => CursorStyle::System,
+                "none" => CursorStyle::Hidden,
+                _ => CursorStyle::Auto,
             };
             true
         }

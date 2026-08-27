@@ -66,6 +66,24 @@ pub enum TextDecoration {
     Underline = 1,
 }
 
+/// CSS `cursor`（#93 桌面指针 affordance）。四关键字子集，**不继承**。
+/// `Auto`（缺省）= UA 默认：runtime 光标决策按节点 kind 给手型/箭头（不经样式通道）；
+/// `Pointer` / `System`（`default` 关键字）/ `Hidden`（`none` 关键字）为作者显式覆盖，
+/// 恒压 UA 行为。消费点：`Stage::cursor_intent`（runtime 单一读者）。
+/// `Hidden` 的用途是元素级隐藏指针（配合游戏自绘光标），与全局 `Cursor.visible` 无关。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum CursorStyle {
+    #[default]
+    Auto = 0,
+    /// `cursor: pointer` —— 手型。
+    Pointer = 1,
+    /// `cursor: default` —— 系统箭头（作者用它把可点元素压回箭头）。
+    System = 2,
+    /// `cursor: none` —— 元素上隐藏软件指针。
+    Hidden = 3,
+}
+
 /// CSS `-webkit-text-security` 的掩码形状（password 类输入的显示变换）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextSecurity {
@@ -574,6 +592,9 @@ pub struct ResolvedStyle {
     /// CSS `text-decoration`（#74，**不继承**，值集 none|underline）。`<a>` UA 默认
     /// 烙 underline，作者声明覆盖；rich run 编译据此画装饰线。
     pub text_decoration: TextDecoration,
+    /// CSS `cursor`（#93，**不继承**，auto|default|none|pointer）。Auto = runtime 按
+    /// kind 给 UA 默认（pressable 控件悬停手型）；显式声明恒压 UA 行为。
+    pub cursor: CursorStyle,
     /// flex 顺序（CSS `order`）。taffy Style 无此字段，存在这里由
     /// layout 在 flex 排序前消费。默认 0 = DOM 顺序。
     pub order: i32,
@@ -719,6 +740,7 @@ impl Default for ResolvedStyle {
             word_break: WordBreak::Normal,
             text_wrap: TextWrap::Normal,
             text_decoration: TextDecoration::None,
+            cursor: CursorStyle::Auto,
             order: 0,
             z_index: 0,
             touchable: true,
@@ -1267,5 +1289,23 @@ mod tests {
         assert_eq!(back.text_decoration, TextDecoration::Underline);
         assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
         assert_eq!(std::mem::size_of::<TextDecoration>(), 1);
+    }
+
+    #[test]
+    fn cursor_default_auto_and_bincode_roundtrip() {
+        // 默认 Auto（UA 默认语义，非「无光标」）；四变体经 bincode round-trip 稳定
+        // （pkg 字段，#[repr(u8)] 保 1 字节序列化布局）。
+        assert_eq!(ResolvedStyle::default().cursor, CursorStyle::Auto);
+        let mut s = ResolvedStyle::default();
+        s.cursor = CursorStyle::Pointer;
+        let bytes = bincode::serialize(&s).expect("serialize");
+        let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+        assert_eq!(back.cursor, CursorStyle::Pointer);
+        assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
+        s.cursor = CursorStyle::Hidden;
+        let bytes = bincode::serialize(&s).expect("serialize");
+        let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+        assert_eq!(back.cursor, CursorStyle::Hidden);
+        assert_eq!(std::mem::size_of::<CursorStyle>(), 1);
     }
 }

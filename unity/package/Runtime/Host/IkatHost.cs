@@ -55,6 +55,22 @@ namespace Ikat
         public UIContext Context => _ctx;
 
         /// <summary>
+        /// 光标意图（#93 桌面指针 affordance）：每帧 tick 后查询 core 决策——
+        /// 0 = 系统箭头 / 1 = 手型 pointer（pressable 控件或 &lt;a&gt; 悬停，作者 cursor:pointer）/
+        /// 2 = 隐藏（作者 cursor:none，游戏自绘光标让位）。引擎无关层只出数值；
+        /// 引擎侧（Driver 订阅 CursorIntentChanged 或轮询本属性）驱动 SetCursor。
+        /// </summary>
+        public uint CursorIntent { get; private set; }
+
+        /// <summary>
+        /// 光标意图变化时 fire（tick 后比较去抖；首帧构造哨兵保证必 fire 一次回放当前值）。
+        /// 宿主若在 dispose 前需还原系统光标，订阅者自负责（Unity Driver OnDestroy 处理）。
+        /// </summary>
+        public event Action<uint> CursorIntentChanged;
+        uint _lastCursorIntent = uint.MaxValue; // 哨兵 ≠ 任何合法值 → 首帧 Step 必 fire
+
+
+        /// <summary>
         /// 运行时改画布尺寸（分辨率适配 / 窗口 resize）。core 下帧 solve 按新 root_size
         /// 重排（vw/vh/% 跟随）。返回 false = 拒绝（非有限/≤0，core 保持原值）。
         /// 引擎无关适配策略在 Rust（ikat_compute_adaptation）——本方法只搬运结果。
@@ -125,6 +141,16 @@ namespace Ikat
             //     Geometry 已可读——对 Instantiate 后的摆位是同帧精确值，无需自旋等待）。
             //     回调内改 Style 落 mirror dirty、下帧 flush seam 过桥 + solve 生效。
             _ctx.PumpAfterLayout();
+
+            // 3.55 桌面指针 affordance（#93）：tick 后指针状态机/hover 已刷新，查询光标
+            //     意图；与上帧不同才 fire（值不变零开销）。宿主不订阅时仅多一次 FFI 查询。
+            uint ci = Native.ikat_stage_cursor_query(_stage);
+            if (ci != _lastCursorIntent)
+            {
+                _lastCursorIntent = ci;
+                CursorIntent = ci;
+                CursorIntentChanged?.Invoke(ci);
+            }
 
             // 3.6 缺字诊断（tofu 取证）：取走本帧新记录 → 事件（引擎无关层不直接打日志）。
             nuint mgLen = 0;

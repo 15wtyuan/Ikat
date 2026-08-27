@@ -204,6 +204,25 @@ impl NodeKind {
         )
     }
 
+    /// UA 默认悬停手型判定（#93 cursor affordance 的 kind 侧半边，样式 `Auto` 时消费）。
+    /// 值集 = 点击/按下即产生语义响应的控件 + `<a>` 链接（浏览器对 button/a 同给手型）。
+    /// 文本输入类（TextField/TextArea/NumberField）暂不进值集——它们的 UA 形态是 I-beam，
+    /// 手型/箭头都不对，等 cursor 体系扩展文本形态时一起收。作者显式 `cursor:*`
+    /// 声明不经本表（级联终态直接生效，恒压 UA 行为）。
+    pub fn ua_hover_hand(self) -> bool {
+        matches!(
+            self,
+            Self::Button
+                | Self::Tab
+                | Self::Toggle
+                | Self::RadioButton
+                | Self::Slider
+                | Self::Dropdown
+                | Self::OptionItem
+                | Self::Link
+        )
+    }
+
     /// Leaf: private internal structure, no user-arrangeable children.
     pub fn is_leaf(self) -> bool {
         !self.is_container()

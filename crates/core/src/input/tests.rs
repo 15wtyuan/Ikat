@@ -1,6 +1,7 @@
 use super::*;
 use crate::scene::node::{ControlState, EditState, Node, NodeFlags, NodeKind, Rect, Scene};
 use crate::scene::transform::compute_world_transforms;
+use crate::style::resolved::CursorStyle;
 
 fn one_button_scene() -> Scene {
     // root + button(100x100 at 0,0)
@@ -1226,6 +1227,190 @@ fn is_pointer_on_ui_any_slot() {
     assert!(
         ps.is_pointer_on_ui(&s),
         "触摸命中 btn → is_pointer_on_ui=true（任一指）"
+    );
+}
+
+// ---- cursor_intent（#93）：鼠标槽命中 → 光标语义决策 ----
+
+fn cursor_style(v: CursorStyle) -> crate::style::resolved::ResolvedStyle {
+    let mut st = crate::style::resolved::ResolvedStyle::default();
+    st.cursor = v;
+    st
+}
+
+/// hover Button（Auto 样式）→ Hand；触摸槽命中不参与（恒看鼠标槽）。
+#[test]
+fn cursor_hover_button_hand_and_touch_slot_ignored() {
+    let mut s = one_button_scene(); // root + button(100x100)
+    let mut ps = PointerState::new();
+    // 触摸指在 btn 上、鼠标在 UI 外 → 决策只看 slots[0] → Arrow
+    ps.process(
+        &mut s,
+        &[
+            PointerEvent {
+                kind: PointerKind::Move,
+                x: 150.0,
+                y: 150.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: -1,
+            },
+            PointerEvent {
+                kind: PointerKind::Move,
+                x: 50.0,
+                y: 50.0,
+                button: 0,
+                pad: [0, 0],
+                touch_id: 1,
+            },
+        ],
+    );
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "触摸命中不产生悬停语义——决策恒基于鼠标槽"
+    );
+    // 鼠标移进 btn → UA 默认手型
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 50.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Hand,
+        "hover pressable 控件（Auto）→ Hand"
+    );
+    // 鼠标移出（命中 root Container）→ 回箭头
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 150.0,
+            y: 150.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "非 pressable 命中 → Arrow"
+    );
+}
+
+/// 作者显式声明恒压 UA 行为：default 把可点控件压回箭头；none 元素级隐藏；
+/// pointer 让非控件 div 也给手型。
+#[test]
+fn cursor_author_decl_overrides_ua_default() {
+    use NodeKind as K;
+    // root + 三兄弟同区域叠放测试不便，直接改 one_button_scene 的节点样式逐态断言
+    let mut s = one_button_scene();
+    let root_id = s.roots[0];
+    let btn_id = s.get(root_id).unwrap().children[0];
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 50.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    s.get_mut(btn_id).unwrap().style = cursor_style(CursorStyle::System);
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "作者 cursor:default 压过 UA 手型"
+    );
+    s.get_mut(btn_id).unwrap().style = cursor_style(CursorStyle::Hidden);
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Hidden,
+        "作者 cursor:none → 元素级隐藏"
+    );
+
+    // 非控件 div（Container）+ 作者 pointer → 手型（「地图节点是 div」场景）
+    let mut s2 = one_button_scene();
+    s2.get_mut(root_id).unwrap().kind = K::Container;
+    // root 自身不被命中测试覆盖（last_hit=leaf），此处直接验 Link/容器路径的 author 分支：
+    // 用 hit 在 root 上时作者 pointer 应生效——root 是 last_hit 当 (150,150)。
+    let mut ps2 = PointerState::new();
+    ps2.process(
+        &mut s2,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 150.0,
+            y: 150.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    s2.get_mut(s2.roots[0]).unwrap().style = cursor_style(CursorStyle::Pointer);
+    assert_eq!(
+        ps2.cursor_intent(&s2),
+        CursorIntent::Hand,
+        "非控件命中 + 作者 pointer → Hand"
+    );
+}
+
+/// disabled 控件不给 UA 手型（浏览器 disabled button 一致）；不可命中（touchable=false）
+/// 同理；Link 归 pressable 集。
+#[test]
+fn cursor_disabled_or_untouchable_no_hand_link_hand() {
+    let mut s = one_button_scene();
+    let root_id = s.roots[0];
+    let btn_id = s.get(root_id).unwrap().children[0];
+    let mut ps = PointerState::new();
+    ps.process(
+        &mut s,
+        &[PointerEvent {
+            kind: PointerKind::Move,
+            x: 50.0,
+            y: 50.0,
+            button: 0,
+            pad: [0, 0],
+            touch_id: -1,
+        }],
+    );
+    // 作者显式声明不受 disabled 影响（浏览器级联语义），所以清回 Auto 再验 disabled 门
+    let n = s.get_mut(btn_id).unwrap();
+    n.interaction.flags.insert(NodeFlags::DISABLED);
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "disabled 控件 Auto → 不给手型"
+    );
+
+    // touchable=false（pointer-events:none）不给手型
+    let n = s.get_mut(btn_id).unwrap();
+    n.interaction.flags.remove(NodeFlags::DISABLED);
+    n.interaction.touchable = false;
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Arrow,
+        "touchable=false → 无悬停手型"
+    );
+
+    // Link kind = pressable 集（<a> 与 button 同待遇）
+    let n = s.get_mut(btn_id).unwrap();
+    n.kind = NodeKind::Link;
+    n.interaction.touchable = true;
+    assert_eq!(
+        ps.cursor_intent(&s),
+        CursorIntent::Hand,
+        "<a> 链接 Auto → 手型"
     );
 }
 

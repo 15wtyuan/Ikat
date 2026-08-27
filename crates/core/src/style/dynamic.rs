@@ -187,10 +187,12 @@ pub const INLINE_Z_INDEX: u64 = 1 << 32;
 /// text-decoration（#74 `<a>` UA underline 的作者 inline 覆盖保护）。bits 33-35 归
 /// INH_*（#73 继承属性），故越过到 bit 36。
 pub const INLINE_TEXT_DECORATION: u64 = 1 << 36;
+/// cursor（#93 桌面指针 affordance 的作者 inline 覆盖）。
+pub const INLINE_CURSOR: u64 = 1 << 37;
 
 /// prop 名 → InlineSet bit。继承属性复用 `inherited_bit`（bits 0-7），非继承属性走
-/// INLINE_*（bits 8-31，z-index 在 bit 32）。返回 None = 该属性不可 inline（apply_decl
-/// 也不处理）。
+/// INLINE_*（bits 8-31，z-index 在 bit 32、text-decoration 在 bit 36、cursor 在 bit 37）。
+/// 返回 None = 该属性不可 inline（apply_decl 也不处理）。
 ///
 /// **覆盖范围：** apply_decl 处理的所有非继承属性都有 bit（对照
 /// `crates/core/src/style/mapping.rs::apply_decl`）。inset 四边（top/right/bottom/left）
@@ -236,6 +238,7 @@ pub fn inline_bit(prop: &str) -> Option<u64> {
         "opacity" => Some(INLINE_OPACITY),
         "z-index" => Some(INLINE_Z_INDEX),
         "text-decoration" => Some(INLINE_TEXT_DECORATION),
+        "cursor" => Some(INLINE_CURSOR),
         _ => None,
     }
 }
@@ -781,8 +784,8 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
 }
 
 /// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 11 个继承
-/// 字段（INH_*，bits 0-7 + 33-35）+ 非继承字段（INLINE_*，bits 8-32 及 36，z-index 在
-/// bit 32、text-decoration 在 bit 36）。
+/// 字段（INH_*，bits 0-7 + 33-35）+ 非继承字段（INLINE_*，bits 8-32 及 36/37，z-index 在
+/// bit 32、text-decoration 在 bit 36、cursor 在 bit 37）。
 /// INLINE_DISPLAY 一对应两字段（`taffy_style.display` + `display_mode`，与 apply_decl
 /// 行为对齐），其余 INLINE_* 一对一映射到 ResolvedStyle/taffy_style 字段。
 ///
@@ -842,6 +845,7 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     cpy!(opacity, INLINE_OPACITY);
     cpy!(z_index, INLINE_Z_INDEX);
     cpy!(text_decoration, INLINE_TEXT_DECORATION);
+    cpy!(cursor, INLINE_CURSOR);
     // INLINE_DISPLAY：apply_decl 同时设 taffy_style.display + display_mode，需双字段覆盖。
     if s & INLINE_DISPLAY != 0 {
         style.taffy_style.display = inline.taffy_style.display;

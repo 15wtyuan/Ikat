@@ -133,6 +133,25 @@ pub extern "C" fn ikat_stage_is_pointer_on_ui(h: *const StageHandle) -> bool {
     })
 }
 
+/// 软件指针形态查询（#93 桌面指针 affordance）：鼠标主指槽本帧命中 → 光标语义。
+///
+/// 返回判别值：0 = 箭头（缺省），1 = 手型 pointer，2 = 隐藏（cursor:none / 自绘光标
+/// 让位）。优先级与浏览器一致——作者显式 `cursor:*` 恒压 UA 行为；Auto 时 pressable
+/// 控件 + `<a>` 悬停给手型。宿主每帧 tick 后调一次、自行缓存去抖（值不变不 SetCursor）。
+/// null 句柄 → 0。
+///
+/// **常驻（不 gate）：**runtime 稳定入口。
+#[no_mangle]
+pub extern "C" fn ikat_stage_cursor_query(h: *const StageHandle) -> u32 {
+    ffi_guard(0, || {
+        if h.is_null() {
+            return 0;
+        }
+        let sh = unsafe { &*h };
+        sh.stage.cursor_intent().as_u32()
+    })
+}
+
 /// 加 touch monitor（C# CaptureTouch 后调）。核心把 node 加进 touch_id 对应槽的 touch_monitors（去重）。
 /// touch_id=-1 → 鼠标主指槽；找不到槽 → no-op。null 句柄 → no-op。
 ///

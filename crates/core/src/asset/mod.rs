@@ -49,9 +49,9 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）。两处魔数皆 LoomGUI 时代遗留：字节=格式兼容契约而非品牌，更名不改。
-pub const PKG_FORMAT_VERSION: u32 = 46; // v46: TemplateNode 加 href（#74 `<a>`）+ ResolvedStyle 加 text_decoration。bincode 布局变，旧包拒绝。
-pub(crate) const MIN_VERSION: u32 = 46;
-pub(crate) const MAX_VERSION: u32 = 46;
+pub const PKG_FORMAT_VERSION: u32 = 47; // v47: ResolvedStyle 加 cursor（#93，1 字节枚举）。bincode 布局变，旧包拒绝。
+pub(crate) const MIN_VERSION: u32 = 47;
+pub(crate) const MAX_VERSION: u32 = 47;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。

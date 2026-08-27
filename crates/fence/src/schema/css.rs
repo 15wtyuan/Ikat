@@ -444,6 +444,17 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Keyword(&["auto", "none"]),
     },
+    // cursor（#93 桌面指针 affordance）：四关键字子集。不继承。
+    // `auto`（缺省）= UA 默认行为：hover 到 pressable 控件（button/tab/toggle/radio/
+    // slider/dropdown/option/链接）core 给手型，其余系统箭头——纯 runtime 决策不经样式；
+    // `default`/`none`/`pointer` 为作者显式覆盖（作者声明恒压 UA 行为，与浏览器级联一致）。
+    // 预览侧浏览器原生支持 cursor，此属性是运行时单侧缺口补齐。
+    CssPropSpec {
+        name: "cursor",
+        default: "auto",
+        inherited: false,
+        parser: CssValueParser::Keyword(&["auto", "default", "none", "pointer"]),
+    },
     // resize: 标准浏览器禁 textarea 拖拽手柄。core 不消费（noop），fence 接受避免报 prop 名错。
     CssPropSpec {
         name: "resize",
@@ -834,12 +845,12 @@ mod tests {
         assert!(find_css_prop("width").is_some());
         assert!(find_css_prop("color").is_some());
         assert!(find_css_prop("display").is_some());
+        assert!(find_css_prop("cursor").is_some());
     }
 
     #[test]
     fn unknown_css_props() {
         assert!(find_css_prop("grid-template-columns").is_none());
-        assert!(find_css_prop("cursor").is_none());
     }
 
     #[test]
