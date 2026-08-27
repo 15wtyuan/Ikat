@@ -463,6 +463,10 @@ struct Response {
     reason: &'static str,
     content_type: String,
     body: Vec<u8>,
+    /// 工作区静态资产的 revalidate 缓存（#96）：`no-cache` + `Last-Modified`。
+    /// None = 恒 no-store（HTML 注入产物与内嵌资产：注入内容依赖外部文件存在性，
+    /// 不能按 mtime 复用）。
+    last_modified: Option<String>,
 }
 
 impl Response {
@@ -477,6 +481,7 @@ impl Response {
             reason,
             content_type: content_type.into(),
             body: body.into(),
+            last_modified: None,
         }
     }
     fn json(status: u16, reason: &'static str, value: serde_json::Value) -> Self {
@@ -488,15 +493,37 @@ impl Response {
 }
 
 fn write_response(stream: &mut TcpStream, req: &Request, resp: Response) -> std::io::Result<()> {
+    // #96：静态资产 revalidate 化——no-store 会让 25MB 级工作区字体在每次导航
+    // 全量重传，把 @font-face `font-display: block` 的隐形文字窗拉成常态（布局
+    // 占位在、字形不画、!important 救不了——非级联问题）。no-cache + Last-Modified
+    // + 304 保持「每次校验、改动即刻生效」的活文件语义，只免重传。
+    let (status, reason, extra) = if resp.status == 304 {
+        let lm = resp.last_modified.as_deref().unwrap_or_default();
+        (
+            304,
+            "Not Modified",
+            format!("Cache-Control: no-cache\r\nLast-Modified: {lm}\r\n"),
+        )
+    } else if let Some(lm) = resp.last_modified {
+        (
+            resp.status,
+            resp.reason,
+            format!("Cache-Control: no-cache\r\nLast-Modified: {lm}\r\n"),
+        )
+    } else {
+        (
+            resp.status,
+            resp.reason,
+            "Cache-Control: no-store\r\n".to_string(),
+        )
+    };
     let head = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-        resp.status,
-        resp.reason,
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
         resp.content_type,
         resp.body.len()
     );
     stream.write_all(head.as_bytes())?;
-    if req.method != "HEAD" {
+    if req.method != "HEAD" && resp.status != 304 {
         stream.write_all(&resp.body)?;
     }
     stream.flush()
@@ -574,7 +601,7 @@ fn route(req: &Request, shared: &Shared) -> Response {
             if m != "GET" && m != "HEAD" {
                 return Response::text(405, "Method Not Allowed", "GET/HEAD only");
             }
-            serve_workspace_file(&shared.ui, &p[4..])
+            serve_workspace_file(&shared.ui, &p[4..], req)
         }
         ("GET", "/favicon.ico") | ("HEAD", "/favicon.ico") => {
             Response::new(204, "No Content", "image/x-icon", [])
@@ -698,7 +725,13 @@ fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
 
 /// serve 工作区文件：路径沙箱（canonicalize 后必须仍在工作区内；拒绝点开头
 /// 路径段）+ HTML 注入两个 ESM 入口（存在才注入）。
-fn serve_workspace_file(ui: &Path, rel: &str) -> Response {
+///
+/// 缓存口径（#96）：HTML 恒 no-store（注入产物依赖外部脚本存在性，不能按 mtime
+/// 复用）；其余静态资产（字体/图/CSS/JS）revalidate——`no-cache`、`Last-Modified`、
+/// `If-Modified-Since` 命中即 304。活文件语义不变（每次导航都校验 mtime，改动
+/// 即刻 200 新字节），但免重传——工作区 25MB 级字体在 no-store 下每次导航全量
+/// 重传，把 @font-face `font-display: block` 的隐形文字窗拉成常态。
+fn serve_workspace_file(ui: &Path, rel: &str, req: &Request) -> Response {
     let Some(safe_rel) = normalize_rel(rel) else {
         return Response::text(403, "Forbidden", "path escapes workspace");
     };
@@ -718,12 +751,16 @@ fn serve_workspace_file(ui: &Path, rel: &str) -> Response {
         return Response::text(404, "Not Found", "not found");
     }
     let mime = mime_for(&canon);
-    let mut body = match std::fs::read(&canon) {
-        Ok(b) => b,
-        Err(_) => return Response::text(500, "Internal Server Error", "read failed"),
-    };
+    let mtime = std::fs::metadata(&canon)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(http_date);
     // 注入判定按前缀（text/* 已带 charset 后缀，等值比较会漏判）。
     if mime.starts_with("text/html") {
+        let mut body = match std::fs::read(&canon) {
+            Ok(b) => b,
+            Err(_) => return Response::text(500, "Internal Server Error", "read failed"),
+        };
         let dir = canon.parent().unwrap_or(Path::new("")).to_path_buf();
         let stem = canon
             .file_stem()
@@ -732,8 +769,58 @@ fn serve_workspace_file(ui: &Path, rel: &str) -> Response {
             .to_string();
         let html = String::from_utf8_lossy(&body).into_owned();
         body = inject_preview_scripts(&html, &dir, &stem).into_bytes();
+        return Response::new(200, "OK", mime, body);
     }
-    Response::new(200, "OK", mime, body)
+    // revalidate：浏览器回传的 If-Modified-Since 与我们发出的 Last-Modified 同源
+    // （浏览器原样回显），字符串等值即命中——省去 HTTP-date 解析。
+    if let (Some(lm), Some(ims)) = (&mtime, req.header("if-modified-since")) {
+        if lm == ims {
+            let mut resp = Response::new(304, "Not Modified", mime, []);
+            resp.last_modified = Some(lm.clone());
+            return resp;
+        }
+    }
+    let mut resp = match std::fs::read(&canon) {
+        Ok(b) => Response::new(200, "OK", mime, b),
+        Err(_) => return Response::text(500, "Internal Server Error", "read failed"),
+    };
+    resp.last_modified = mtime;
+    resp
+}
+
+/// SystemTime → RFC 7231 HTTP-date（`Sun, 06 Nov 1994 08:49:37 GMT`）。仅服务端
+/// 自产自销（Last-Modified 产出 + 与浏览器回显串等值比较），不解析外来日期。
+fn http_date(t: std::time::SystemTime) -> String {
+    let secs = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = (secs / 86_400) as i64;
+    let (h, m, s) = ((secs / 3600) % 24, (secs / 60) % 60, secs % 60);
+    // civil_from_days（Howard Hinnant）：天数 → (y, m, d)
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(mo <= 2);
+    const WEEKDAY: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"]; // 1970-01-01 = 周四
+    const MONTH: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    format!(
+        "{}, {:02} {} {} {:02}:{:02}:{:02} GMT",
+        WEEKDAY[days.rem_euclid(7) as usize],
+        d,
+        MONTH[(mo - 1) as usize],
+        y,
+        h,
+        m,
+        s
+    )
 }
 
 /// 相对路径规整：URL 解码后逐段校验——拒绝 `..`/反斜杠/点开头段（`.ikat`、
@@ -884,6 +971,21 @@ mod simlib {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn http_date_known_instants() {
+        // RFC 7231 样例时刻 + Unix 纪元（周四）。只产出不解析，钉格式防回归。
+        let at = |secs: u64| {
+            use std::time::{Duration, SystemTime};
+            http_date(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+        };
+        assert_eq!(at(0), "Thu, 01 Jan 1970 00:00:00 GMT");
+        assert_eq!(at(784_111_777), "Sun, 06 Nov 1994 08:49:37 GMT");
+        // 闰日 + 年界：2024-02-29 12:00:00 = 1709208000（周四）。
+        assert_eq!(at(1_709_208_000), "Thu, 29 Feb 2024 12:00:00 GMT");
+        // 2026-09-20 00:00:00 = 1789862400（周日，Python datetime 交叉验证）。
+        assert_eq!(at(1_789_862_400), "Sun, 20 Sep 2026 00:00:00 GMT");
+    }
 
     #[test]
     fn fnv1a_stable() {
@@ -1220,6 +1322,78 @@ mod tests {
             assert_eq!(st3, 404);
             let (st4, _) = get(port, "/ikat-preview/comp-style/TipPanel.css");
             assert_eq!(st4, 404);
+            let _ = std::fs::remove_dir_all(&ui);
+        }
+
+        /// #96：静态资产 revalidate——Last-Modified/304 免重传（25MB 字体在
+        /// no-store 下每次导航重传，放大 @font-face block 的隐形文字窗）。
+        #[test]
+        fn workspace_assets_revalidate_with_304() {
+            let ui = write_ws(
+                "revalidate",
+                &[
+                    ("ikat.workspace.json", WS_JSON),
+                    ("ui/home.html", "<html><head></head><body>hi</body></html>"),
+                    ("ui/font.ttf", "\u{0}\u{1}fake-ttf-bytes"),
+                ],
+            );
+            let (port, _shared) = spawn_server(&ui);
+            // raw() 只回 body；这里要响应头，就地取整段响应。
+            let fetch = |extra: &str| {
+                let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                s.write_all(
+                    format!(
+                        "GET /ws/ui/font.ttf HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                         {extra}Connection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+                let mut buf = String::new();
+                s.read_to_string(&mut buf).unwrap();
+                buf
+            };
+
+            // 首取：200 + Last-Modified + no-cache（revalidate 语义，非 no-store）。
+            let full1 = fetch("");
+            assert!(full1.starts_with("HTTP/1.1 200"));
+            assert!(full1
+                .to_ascii_lowercase()
+                .contains("cache-control: no-cache"));
+            let lm = full1
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("last-modified:"))
+                .expect("Last-Modified header")
+                .split_once(' ')
+                .unwrap()
+                .1
+                .to_string();
+            assert!(full1.ends_with("\u{0}\u{1}fake-ttf-bytes"));
+
+            // 回传同值 If-Modified-Since → 304 空体。
+            let full2 = fetch(&format!("If-Modified-Since: {lm}\r\n"));
+            assert!(full2.starts_with("HTTP/1.1 304"));
+            assert_eq!(
+                full2.split("\r\n\r\n").nth(1).unwrap_or(""),
+                "",
+                "304 must carry no body"
+            );
+
+            // HTML 恒 no-store（注入产物依赖外部脚本存在性，不按 mtime 复用）。
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(
+                format!(
+                    "GET /ws/ui/home.html HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                     Connection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+            let mut html_resp = String::new();
+            s.read_to_string(&mut html_resp).unwrap();
+            assert!(html_resp
+                .to_ascii_lowercase()
+                .contains("cache-control: no-store"));
             let _ = std::fs::remove_dir_all(&ui);
         }
     }

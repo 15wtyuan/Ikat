@@ -92,6 +92,13 @@ A-layer wiring does.
   subtrees (the browser has no style wall; the rewritten selectors carry a
   +0,1,0 specificity bump that keeps component rules winning equal-specificity
   contests — a higher-specificity page rule can still pierce).
+- **Font loading note (#96)**: the server revalidates workspace static
+  assets (`no-cache` + `304`), so after the first load fonts come from
+  cache and refresh instantly. The FIRST load of a multi-MB font still
+  transfers once: with `font-display: block` that window shows laid-out
+  but invisible text (`!important` cannot help — it is not a cascade
+  issue). Prefer `font-display: swap` for very large fonts, or keep
+  `block` and accept a one-time flash on first visit.
 - **Preview rejects like the build does (shown as CSS comments in the served
   sheet)**: non-`@keyframes` at-rules (`@media` …) and out-of-fence selectors
   inside component `<style>` — dropped, never silently applied.

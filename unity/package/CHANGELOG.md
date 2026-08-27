@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   不在围栏（core `parse_px` 不收、浏览器收的反向分歧同样拦）——showcase
   home 页 4 处 `letter-spacing` em 已按 font-size 换算 px（此前预览有字距、
   运行时无的活分歧）。
+
+- **preview 静态资产 revalidate 化（#96 二轮归因）**：`/ws/` 静态资产（字体/图/
+  CSS/JS）从无差别 `no-store` 改为 `no-cache` + `Last-Modified` + 304 再验证——
+  活文件语义不变（每次导航校验 mtime、改动即刻 200 新字节），但不再重传。
+  背景：工作区 25MB 级字体在 no-store 下每次导航全量重传，把 @font-face
+  `font-display: block` 的隐形文字窗（布局占位在、字形不画、`!important` 无效
+  ——非级联问题）拉成每次刷新必现；HTML 恒 no-store（注入产物依赖外部脚本
+  存在性）。recipes.md 补消费侧指引（超大字体首载窗建议 `swap`）。
 - **消费侧文档漂移门 + 补漏**：新增 `consumer_doc_sync` 测试把 fence 的
   doc↔schema 交叉校验延伸到随 scaffold 分发的模板文档（fence-schema.md 标签表
   双向精确集 + css-reference.md 属性全量覆盖）。首跑抓到两处存量漂移并已修：
