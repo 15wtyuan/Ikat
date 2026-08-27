@@ -493,7 +493,9 @@ bool hit = ui.IsPointerOnUI;
 
 taffy 对"尺寸取决于内容"的节点回调 `MeasureFunc(known_dimensions) -> measured_size`：给定约束宽返回 `(text_width, text_height)`。必须廉价、无副作用（auto-size/shrink 反复调用）。
 
-自绘字体地基：ttf-parser 取 outline，光栅成**单通道 SDF** 存 etagere 图集——一份固定源尺寸的 SDF 供所有目标字号共享（字号不进字形缓存键），shader 用屏幕空间导数重建边缘；文字效果（描边/多层阴影/发光/模糊）在同一 fragment pass 按 SDF 参数块合成，无需逐效果重光栅。spread 必须覆盖最大效果宽度，之外距离饱和、效果被硬切。MSDF 不引入：CJK 圆滑曲线用不上锐角修复，且不为此引 C++ 依赖。字体缺字回退：主字体按 fallback 链逐个 probe、首个含该字者补上（行度量走主字体，字形度量走提供方字体）。超长无空格串（URL/数字串）逐字断行，不溢出约束。
+自绘字体地基：ttf-parser 取 outline，光栅成**单通道 SDF** 存 etagere 图集——一份固定源尺寸的 SDF 供所有目标字号共享（字号不进字形缓存键），shader 用屏幕空间导数重建边缘；文字效果（描边/多层阴影/发光/模糊）在同一 fragment pass 按 SDF 参数块合成，无需逐效果重光栅。spread 必须覆盖最大效果宽度，之外距离饱和、效果被硬切。MSDF 不引入：CJK 圆滑曲线用不上锐角修复，且不为此引 C++ 依赖。字体缺字回退：主字体按 fallback 链逐个 probe、首个含该字者补上（行度量走主字体，字形度量走提供方字体）。
+
+换行遵 CSS 换行控制属性（`white-space` 空白折叠 × 自动换行 × 源换行保留三轴 + `word-break` / `overflow-wrap` / `text-wrap`，值域真相源在 fence.md）：超长无空格串（URL/数字串）默认**不拆**——独占一行横向溢出（浏览器 `overflow-wrap: normal` 语义），显式 `overflow-wrap: break-word` 才逐字拆行。CJK 断行自动避头尾（行首不出句读/闭括号、行尾不出开括号——断点调整式禁则，无悬挂标点）。文本控件（TextField 系）的空白语义冻结为 pre 系（空格/换行原样保留）：空格折叠会破坏光标字节↔布局 1:1 映射；换行开关仍尊重声明。
 
 ---
 

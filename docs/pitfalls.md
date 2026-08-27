@@ -45,12 +45,16 @@
 
 ### unicode-linebreak 0.1（core/src/text）
 - `linebreaks() -> impl Iterator`（非 Vec）；枚举名 `BreakOpportunity`；返回 **byte offset**（非 char index）；在空白**后**断 → 行首无多余空格。
+- UAX#14 的 LB13/LB14 类规则已天然覆盖 CJK 避头尾（闭标点前/开括号后不断）——软断行路径的行首禁则白送；只有**自造断点**的路径（`overflow-wrap: break-word` 逐字拆、rich token 贪心路）需要手工禁则调整。别在软断行上重复实现禁则。
 
 ### cargo / crates.io 网络（Windows 本机）
 - 在线 cargo 命令（fetch/test/clippy）半刷新索引时可能**把 Cargo.lock 写到新版本再下载失败**——此后 `--offline` 也挂（lock 指向缓存里没有的版本，报「failed to download X / attempting to make an HTTP request」）。恢复序：① `git diff Cargo.lock` 有漂移先 `git checkout Cargo.lock`（提交态通常全缓存）；② 仍缺的 crate 用 `cargo update -p <crate> --precise <缓存已有版本> --offline` 降回（须满足语义版本约束）；③ 无缓存同系版本的从镜像直下进 `~/.cargo/registry/cache/index.crates.io-*/`——USTC `https://mirrors.ustc.edu.cn/crates.io/crates/<name>/<name>-<ver>.crate` 实测可用，static.crates.io / rsproxy 常被掐断。诊断用 bash 对账：lock 里 name|version 逐个查 cache 目录（别用 MSYS python，glob 不展开 `~`）。
 
 ### Tauri 2（packer/gui 前端）
 - `onDragDropEvent` 的 `position` 是物理像素，须除 `devicePixelRatio` 才是 CSS 逻辑坐标；payload 字段名 `type`/`paths`/`position`。
+
+### 本机 shell（Git Bash on Windows）
+- heredoc 喂 python 会**吃掉一层反斜杠**：想在替换串里产出源码字面量 `'\n'`（python 里写 `\\n`），实际落到 python 是真换行——批量编辑含转义序列的 Rust/JS 源码必坏且难察觉（实锤：把换行器测试注释改出断行、断言匹配静默失配）。含反斜杠字面量的文本编辑用 Edit 工具；纯结构化替换（无反斜杠）才走 heredoc python。
 
 ## 2. 跨层闭环规则
 
