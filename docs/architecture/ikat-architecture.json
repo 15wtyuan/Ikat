@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ikat 跨引擎 UI 框架 · 高层架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "ikat-architecture.html",
+    "viewBox": [
+      1160,
+      560
+    ],
+    "views": [
+      {
+        "id": "pack-pipeline",
+        "label": "打包闭环",
+        "focus": [
+          "workspace",
+          "cli",
+          "fence",
+          "artifacts"
+        ],
+        "note": "HTML/CSS 源经围栏校验打成 .pkg.bin 与自绘图集"
+      },
+      {
+        "id": "runtime-frame",
+        "label": "运行时帧闭环",
+        "focus": [
+          "artifacts",
+          "unity",
+          "ffi",
+          "core"
+        ],
+        "note": "加载制品后 Step(dt) 驱动 solve，FrameData 经 FFI 回传 Unity 镜像"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "workspace",
+      "type": "external",
+      "label": "设计师工作区",
+      "sublabel": "HTML/CSS · res · workspace.json",
+      "pos": [
+        60,
+        20
+      ],
+      "size": [
+        190,
+        66
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "backend",
+      "label": "ikat CLI",
+      "sublabel": "check · build · preview · scaffold …",
+      "tag": "ikat_pkg",
+      "pos": [
+        400,
+        115
+      ],
+      "size": [
+        190,
+        72
+      ]
+    },
+    {
+      "id": "fence",
+      "type": "security",
+      "label": "ikat_fence 围栏",
+      "sublabel": "schema · pipeline · 语义校验",
+      "pos": [
+        400,
+        255
+      ],
+      "size": [
+        190,
+        68
+      ]
+    },
+    {
+      "id": "artifacts",
+      "type": "database",
+      "label": "Ikat 制品",
+      "sublabel": ".pkg.bin · atlas · fonts",
+      "pos": [
+        740,
+        115
+      ],
+      "size": [
+        180,
+        72
+      ]
+    },
+    {
+      "id": "unity",
+      "type": "frontend",
+      "label": "Unity 运行时包",
+      "sublabel": "IkatHost · MirrorPool · Projection",
+      "tag": "unity/package",
+      "pos": [
+        620,
+        385
+      ],
+      "size": [
+        200,
+        92
+      ]
+    },
+    {
+      "id": "game",
+      "type": "external",
+      "label": "游戏业务代码",
+      "sublabel": "UIContext · Node 树消费",
+      "pos": [
+        930,
+        395
+      ],
+      "size": [
+        180,
+        72
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "ikat_core",
+      "sublabel": "stage · scene · layout · render · text",
+      "tag": "引擎无关 · 16 modules",
+      "pos": [
+        40,
+        405
+      ],
+      "size": [
+        180,
+        80
+      ]
+    },
+    {
+      "id": "ffi",
+      "type": "backend",
+      "label": "ikat_ffi_c",
+      "sublabel": "extern C · SOA FrameData",
+      "tag": "csbindgen",
+      "pos": [
+        330,
+        405
+      ],
+      "size": [
+        160,
+        68
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Rust 工作区 · 打包工具链",
+      "wraps": [
+        "cli",
+        "fence"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Rust 工作区 · 引擎核心",
+      "wraps": [
+        "core",
+        "ffi"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "unity/package",
+      "wraps": [
+        "unity"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ws-to-cli",
+      "from": "workspace",
+      "to": "cli",
+      "label": "HTML/CSS 源",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "cli-to-fence",
+      "from": "cli",
+      "to": "fence",
+      "label": "打包期校验",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 26
+    },
+    {
+      "id": "cli-to-artifacts",
+      "from": "cli",
+      "to": "artifacts",
+      "label": "ikat build 产出",
+      "variant": "emphasis"
+    },
+    {
+      "id": "artifacts-to-unity",
+      "from": "artifacts",
+      "to": "unity",
+      "label": "运行时加载",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "game-api",
+      "from": "game",
+      "to": "unity",
+      "label": "类型化 API",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "fence-to-core",
+      "from": "fence",
+      "to": "core",
+      "label": "选择器类型",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "core-to-ffi",
+      "from": "core",
+      "to": "ffi",
+      "label": "FrameData SOA"
+    },
+    {
+      "id": "ffi-to-unity",
+      "from": "ffi",
+      "to": "unity",
+      "label": "P/Invoke 帧数据",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelDx": 45
+    },
+    {
+      "id": "unity-to-core",
+      "from": "unity",
+      "to": "core",
+      "label": "命令 · 输入 · Step(dt)",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "设计期 · 打包闭环",
+      "items": [
+        "ikat CLI（crates/packer/pkg）：check / build / preview / list / scaffold / design 等 12 个子命令",
+        "ikat_fence schema + pipeline 打包期拒绝围栏外语法；IrTree→TemplateNode 桥在 pkg/src/bridge.rs",
+        "打包入口仅是壳：ikat_gui（Tauri）与 Ikat > Open Packer 菜单只子进程调起 ikat.exe——打包语义全在 CLI"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "运行时 · Rust 核心",
+      "items": [
+        "ikat_core 16 模块引擎无关：Stage::instantiate 克隆模板，tick_and_render() 产出 FrameData",
+        "ikat_ffi extern \"C\" 薄包装 opaque Stage；csbindgen 生成 IkatBindings.cs，产物 Plugins/Ikat/ikat_ffi_c.dll",
+        "fence 单向依赖 core 复用选择器 / rule 类型，自身停在 IrTree"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Unity 消费侧",
+      "items": [
+        "Public/ 类型化对象树：UIPackage / UIContext / Container…Link，TweenBuilder + AnimationHandle",
+        "Host/ IkatHost.Step(dt) 每帧驱动；MirrorPool 把渲染树镜像为 GameObject + MeshRenderer",
+        "Projection/ NodeFactory · StyleMirror · EventBus 把语义事件路由回业务代码"
+      ]
+    }
+  ]
+}

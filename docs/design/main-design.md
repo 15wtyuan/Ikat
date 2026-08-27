@@ -97,7 +97,7 @@
 
 ### 3.2 围栏元素
 
-围栏 14 标签 = 8 shell + 6 runtime（真相源 = [fence.md](fence.md) §2）。控件与列表无专属标签，用 `role` 表达：
+围栏 15 标签 = 8 shell + 7 runtime（真相源 = [fence.md](fence.md) §2）。控件与列表无专属标签，用 `role` 表达：
 
 | 类别 | 元素 | 公共类型/语义 |
 |---|---|---|
@@ -106,6 +106,7 @@
 | 文本 | `span` | `TextElement` |
 | 操作 | `button` | `Button` |
 | 图片 | `img` | `Image` |
+| 链接 | `a` | `Link`（富文本内链接，仅 rich-text-block 上下文合法，#74） |
 | 控件 | `div role=...` | `Slider`/`Toggle`/`RadioButton`/`TextField`/`TextArea`/`NumberField`/`ProgressBar`/`Dropdown`（见 [fence.md](fence.md) §2.3） |
 | 列表 | `div role=list` / `div role=listitem` / `div role=option` | `ListView`/`ListItem`/`OptionItem` |
 | 复合控件 | `div role=tablist` / `div role=tab` | `TabList`/`Tab`（panel `role=tabpanel` 不分派，走 div→Container，靠 `aria-controls` 跨树关联） |
@@ -119,7 +120,7 @@
 
 完整签名表见 [fence.md](fence.md) §3.1。`resolve_semantic(tag, role, aria_multiline)`：`role` 优先于 tag，未识别的 role 回退到 tag 映射：
 
-- `<div>` → `Container`；`<span>` → `TextElement`；`<button>` → `Button`；`<img>` → `Image`
+- `<div>` → `Container`；`<span>` → `TextElement`；`<button>` → `Button`；`<img>` → `Image`；`<a>` → `Link`
 - `<div role="slider">` → `Slider`；`<div role="switch">` → `Toggle`；`<div role="radio">` → `RadioButton`
 - `<div role="textbox">` → `TextField`（默认）；`<div role="textbox" aria-multiline="true">` → `TextArea`
 - `<div role="spinbutton">` → `NumberField`；`<div role="progressbar">` → `ProgressBar`
