@@ -53,5 +53,6 @@ fn kind_str(k: NodeKind) -> &'static str {
         NodeKind::Slot => "slot",
         NodeKind::CustomElement => "custom",
         NodeKind::Template => "template",
+        NodeKind::Link => "a",
     }
 }

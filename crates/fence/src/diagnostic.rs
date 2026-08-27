@@ -109,6 +109,20 @@ pub enum DiagnosticCode {
     /// 打包期 base_style，unset 清不掉 → 激活面板永久不可见（静默坏，无运行时
     /// 症状）。非激活面板的初始隐藏由控件运行时首帧负责，作者不可（也无需）手写。
     FenceTabpanelHiddenByAuthor,
+    /// `<a>` 缺 `href` 或 href trim 后为空（error，#74）。href 是链接的身份标识
+    /// （opaque 字符串，点击事件按它路由），缺失/空串的链接是不可交互的死元素
+    /// ——不静默降级成普通 span。
+    FenceLinkHrefRequired,
+    /// `<a>` 出现在 rich-text-block 上下文之外（error，#74）。`<a>` 的折叠渲染
+    /// （子树折进父 inline flow、runs 烙 link_id）只在 rich-text-block 里成立；
+    /// flex 容器/裸 block 容器/slot/template 里的 `<a>` 会被当普通 block 子渲染，
+    /// 命中也不带链接语义。修复：把 `<a>` 放进纯 inline 子（text/span/img）的
+    /// block 容器或非 flex span 里。
+    FenceLinkOutsideRich,
+    /// `<a>` 的直接子元素不是文本/非 flex span（error，#74）。`<a>` 是纯文本级
+    /// 链接：`<a><a>`（嵌套链接）与 `<a><img>`（图链接）都不支持——命中归 a 节点
+    /// 的模型只对文本 run 定义。修复：链接文字只写文本与 `<span>`。
+    FenceLinkInvalidChild,
 }
 
 #[derive(Debug, Clone)]

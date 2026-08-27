@@ -94,7 +94,17 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 4. **`set_transform` FFI** ✅（Task 7）— 纯 f32 9-arg（tx,ty,sx,sy,rot,ox,oy），写 user_transform 不触发 solve。
 5. **攒批 flush seam** ✅（Task 9）— StyleMirror setter 标脏不立即过桥；NodeTransform.Store 标脏 + 帧末 `FlushTransform`。`LoomHost.Step()` 中 flush 位在 tick 前（`UIContext.FlushPendingWrites` 遍历 dirty 集）。
 
-### 3.2 待办（按优先级）
+### 3.2 Link 投影（#74）
+
+`<a>` 节点的投影契约（API 面见 public-api.md §7.1）：
+
+- **kind 映射**：Rust `NodeKind::Link` 判别值 21，C# `NodeKind.Link = 21` 显式对应（Template=18 跳号先例）；NodeFactory switch 加臂派发 `new Link(ctx, id)`。
+- **类型面**：`Link : Container`（含 `TextContent`）——富文本行内链接的子树是用户内容（文本/嵌 span），走容器投影。
+- **Href 读通道**：getter → FFI `loomgui_stage_get_link_href`，双调法（同 `get_node_id_attr`/`get_control_text` 家族：先探容量，-2 按所需扩容重调）。rc 语义：0 = ok；-2 = 扩容重调；-1 = 句柄/场景错误；**1 = 非 Link 节点 → 抛 `UIContractException`**（类型错配的调用方错误，区别于 -1 的内部错）。
+- **点击 = 既有事件面**：`Clicked` 走 `On<ClickEvent>` 订阅翻译（backing-dict 模式同 Button），**无新事件 ABI**——Rust 侧命中细化到 a 节点即够，投影层不加聚合。
+- **无运行时建树入口**：`<a>` 仅 rich 上下文合法（围栏保证），运行时 create_node/TagToNodeKind 均不产此 kind。
+
+### 3.3 待办（按优先级）
 
 1. **标记优化点**：字符串 flush 若成热点换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）——§2.2。
 

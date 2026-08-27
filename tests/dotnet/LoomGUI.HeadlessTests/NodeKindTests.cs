@@ -77,26 +77,29 @@ namespace LoomGUI.HeadlessTests
         [Fact]
         public void TabIsTwenty() => Assert.Equal((byte)20, (byte)NodeKind.Tab);
 
+        [Fact]
+        public void LinkIsTwentyOne() => Assert.Equal((byte)21, (byte)NodeKind.Link);
+
         // ── 结构不变量：变体数 + 紧凑 0..N-1（无空洞、无跳号）──────────
 
         /// <summary>
-        /// C# 投影当前 20 个公共变体（Rust 侧另有 Template=18 不进公共类型树）。Rust 加/删变体未同步
+        /// C# 投影当前 21 个公共变体（Rust 侧另有 Template=18 不进公共类型树）。Rust 加/删变体未同步
         /// C# → 此测红，提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
-        public void VariantCountMatchesRust() => Assert.Equal(20, Enum.GetNames<NodeKind>().Length);
+        public void VariantCountMatchesRust() => Assert.Equal(21, Enum.GetNames<NodeKind>().Length);
 
         /// <summary>
         /// 显式赋值防隐式错位。Template=18 在 Rust 存在但 C# 不暴露（display:none 蓝图，不实例化为 live
-        /// node）——故 C# 判别值集是 {0..17, 19, 20}（19/20 显式跳过 18，与 Rust #[repr(u8)] 一一对应）。
+        /// node）——故 C# 判别值集是 {0..17, 19..21}（19..21 显式跳过 18，与 Rust #[repr(u8)] 一一对应）。
         /// 本测验该集紧凑无重复、无越界 byte——捕获隐式错位、重复赋值、未同步新增变体三类漂移。
         /// </summary>
         [Fact]
         public void AllValuesMatchExpectedDiscriminants()
         {
             var values = (byte[])Enum.GetValuesAsUnderlyingType<NodeKind>();
-            // 期望判别值集：0..17 + 19 + 20（Template=18 故意跳过）。
-            var expected = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20 };
+            // 期望判别值集：0..17 + 19 + 20 + 21（Template=18 故意跳过）。
+            var expected = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21 };
             Assert.Equal(expected.Length, values.Length);
             Array.Sort(values);
             for (int i = 0; i < expected.Length; i++)

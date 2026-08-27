@@ -494,6 +494,7 @@ impl<'a> Walker<'a> {
             tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: attr(el, "role"),
             data_slot: attr(el, "data-slot"),
@@ -622,6 +623,14 @@ impl<'a> Walker<'a> {
             tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
             content: None,
             src,
+            // href：`<a>` 链接目标（同 bridge 主路径提取口径——组件模板里也有链接）。
+            href: if kind == NodeKind::Link {
+                let h = attr(el, "href").unwrap_or_default();
+                let h = h.trim().to_string();
+                (!h.is_empty()).then_some(h)
+            } else {
+                None
+            },
             control_init: extract_control_init(kind, el, ir_idx, &parsed.tree),
             role: attr(el, "role"),
             data_slot: attr(el, "data-slot"),
@@ -652,6 +661,7 @@ impl<'a> Walker<'a> {
             tabindex: None,
             content: Some(text),
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,

@@ -11,12 +11,16 @@
 //! rich-text-block 下的 TextNode → source=该 TextNode 自己；嵌套在 span（TextElement）
 //! 内的 TextNode → source=最近 span（事件命 span 而非匿名文字）；Image → source=该 Image。
 //! recurse_span 把当前 span 推为 source context，其 TextNode 子的 run 全部挂此 span。
+//!
+//! **link 上下文**（#74 `<a>`）：`<a>` 子树所有 run 的 source=该 a、link_id=Some(a)——
+//! 嵌套 span 的 run 也归 a（HTML 先验：点链接内任何文字都是点链接，span 自身事件让位）。
+//! style 仍取各 inline 节点自己的 computed（span 不声明 color 时按继承拿到 a 的 UA 链接色）。
 
 use crate::layout::ImageSizeTable;
 use crate::scene::node::{NodeId, NodeKind, Scene};
-use crate::style::resolved::ResolvedStyle;
+use crate::style::resolved::{ResolvedStyle, TextDecoration};
 use crate::text::rich::{
-    weight_from_font_weight, RichDeco, RichKind, RichRun, RichStyle, RichVAlign,
+    weight_from_font_weight, RichDeco, RichKind, RichRun, RichStyle, RichVAlign, TextDecoLines,
 };
 
 /// 编译 rich-text-block 容器的 inline 子树为扁平 run 流。
@@ -46,11 +50,17 @@ pub fn compile_rich_runs(
                 let text = scene.text_contents.get(&child).cloned().unwrap_or_default();
                 let style = &scene.get(child).expect("live child").style;
                 // 直接子 TextNode：source=自身（事件命该 TextNode）。
-                runs.push(run_from_style(style, RichKind::Text { text }, child));
+                runs.push(run_from_style(style, RichKind::Text { text }, child, None));
             }
             Some(NodeKind::TextElement) => {
                 // span：自身 style 作 context，其内 TextNode 的 source=该 span。
-                recurse_span(scene, child, image_sizes, &mut runs);
+                recurse_span(scene, child, image_sizes, &mut runs, None);
+            }
+            Some(NodeKind::Link) => {
+                // `<a>`（#74）：像 span 一样递归子树，但推 a 自己作 source/link 上下文——
+                // 子树所有 run（含嵌套 span 的）source=该 a、link_id=Some(a)。style 取各
+                // inline 节点自己的 computed（a 的 UA 烙印在其 style，直挂文本直接吃到）。
+                recurse_link(scene, child, image_sizes, &mut runs);
             }
             Some(NodeKind::Image) => {
                 let src = scene.image_srcs.get(&child).cloned().unwrap_or_default();
@@ -63,7 +73,7 @@ pub fn compile_rich_runs(
                 };
                 let style = &scene.get(child).expect("live child").style;
                 // Image 是自带语义的 inline 元素：source=该 Image 自己。
-                runs.push(run_from_style(style, run_kind, child));
+                runs.push(run_from_style(style, run_kind, child, None));
             }
             _ => {} // fence 保证不可达；防御跳过。
         }
@@ -73,11 +83,14 @@ pub fn compile_rich_runs(
 
 /// 递归 span 子树。span 的 computed style 作其 TextNode 子的 run context；
 /// 嵌套 span 推新 context 递归。Image 子按 inline 图处理，source=该 Image 自己。
+/// `link` 非 None（本 span 在某 `<a>` 子树内）时 TextNode run 的 source/link_id 覆盖为
+/// 该 a（HTML 先验：点链接内任何文字都是点链接）；嵌套 span 递归时透传。
 fn recurse_span(
     scene: &Scene,
     span: NodeId,
     image_sizes: &ImageSizeTable,
     runs: &mut Vec<RichRun>,
+    link: Option<NodeId>,
 ) {
     let children: Vec<NodeId> = scene
         .get(span)
@@ -89,12 +102,23 @@ fn recurse_span(
             Some(NodeKind::TextNode) => {
                 let text = scene.text_contents.get(&child).cloned().unwrap_or_default();
                 // source=span（事件命 span，不命其内匿名文字）；style=span 的 computed。
+                // link 上下文里 source 让位给 a（run 仍用 span 的 style——不声明 color 时
+                // 按继承拿到 a 的链接色，声明则正常覆盖）。
                 let span_style = &scene.get(span).expect("live span").style;
-                runs.push(run_from_style(span_style, RichKind::Text { text }, span));
+                let source = link.unwrap_or(span);
+                runs.push(run_from_style(
+                    span_style,
+                    RichKind::Text { text },
+                    source,
+                    link,
+                ));
             }
             Some(NodeKind::TextElement) => {
-                // 嵌套 span：推新 context 继续递归。
-                recurse_span(scene, child, image_sizes, runs);
+                // 嵌套 span：推新 context 继续递归（link 上下文透传）。
+                recurse_span(scene, child, image_sizes, runs, link);
+            }
+            Some(NodeKind::Link) => {
+                // a-in-a 围栏已拒（FenceLinkInvalidChild）；防御跳过，不折双层链接。
             }
             Some(NodeKind::Image) => {
                 let src = scene.image_srcs.get(&child).cloned().unwrap_or_default();
@@ -106,7 +130,47 @@ fn recurse_span(
                     valign: RichVAlign::Baseline,
                 };
                 let img_style = &scene.get(child).expect("live image").style;
-                runs.push(run_from_style(img_style, run_kind, child));
+                runs.push(run_from_style(img_style, run_kind, child, None));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 递归 `<a>` 子树（#74）：a 的 computed style 作其直接 TextNode 子的 run context
+/// （UA 烙印的链接色/underline 在此吃到），子 span 走 `recurse_span` 并透传 a 作
+/// link 上下文。围栏保证 a 子树只含 TextNode 与非 flex span（img-in-a 已拒）；
+/// Image 臂防御性保留（照 span 递归的口径）。
+fn recurse_link(scene: &Scene, a: NodeId, image_sizes: &ImageSizeTable, runs: &mut Vec<RichRun>) {
+    let children: Vec<NodeId> = scene.get(a).map(|n| n.children.clone()).unwrap_or_default();
+    for child in children {
+        let kind = scene.get(child).map(|n| n.kind);
+        match kind {
+            Some(NodeKind::TextNode) => {
+                let text = scene.text_contents.get(&child).cloned().unwrap_or_default();
+                // source=a + link_id=a：命中/事件归链接，不归内部匿名文字。
+                let a_style = &scene.get(a).expect("live link").style;
+                runs.push(run_from_style(a_style, RichKind::Text { text }, a, Some(a)));
+            }
+            Some(NodeKind::TextElement) => {
+                // 链接内 span：span style 作 run context（未声明 color 按继承拿链接色），
+                // source/link 归 a（recurse_span 的 link 覆盖语义）。
+                recurse_span(scene, child, image_sizes, runs, Some(a));
+            }
+            Some(NodeKind::Link) => {
+                // a-in-a 围栏已拒；防御跳过。
+            }
+            Some(NodeKind::Image) => {
+                let src = scene.image_srcs.get(&child).cloned().unwrap_or_default();
+                let (w, h) = image_run_dims(image_sizes, &src);
+                let run_kind = RichKind::Image {
+                    src,
+                    w,
+                    h,
+                    valign: RichVAlign::Baseline,
+                };
+                let img_style = &scene.get(child).expect("live image").style;
+                runs.push(run_from_style(img_style, run_kind, child, None));
             }
             _ => {}
         }
@@ -117,10 +181,22 @@ fn recurse_span(
 ///
 /// MVP 单字体：`font_id` 填 0（`measure_rich_text` 当前忽略 run.font_id，按传入 FontStack
 /// 选 face —— per-run family 变体是未来）。`color`/`size_px`/`weight` 来自本节点 style
-/// （per-span 变化已生效）。`RichStyle`(italic)/`RichDeco`(text-decoration) 当前
-/// `ResolvedStyle` 尚无对应字段（围栏未解析这两条 CSS 属性），填默认；待围栏加这两条
-/// 属性后在此接通。
-fn run_from_style(style: &ResolvedStyle, kind: RichKind, source: NodeId) -> RichRun {
+/// （per-span 变化已生效）。`deco` 接 `ResolvedStyle.text_decoration`（#74，none|underline）。
+/// `link_id`：run 所属 `<a>`（编译期由 link 上下文传入），None=非链接 run。
+/// `RichStyle`(italic) 围栏未收 font-style:italic，填默认。
+fn run_from_style(
+    style: &ResolvedStyle,
+    kind: RichKind,
+    source: NodeId,
+    link: Option<NodeId>,
+) -> RichRun {
+    let deco = match style.text_decoration {
+        TextDecoration::None => RichDeco::default(),
+        TextDecoration::Underline => RichDeco {
+            lines: TextDecoLines::UNDERLINE,
+            ..Default::default()
+        },
+    };
     RichRun {
         kind,
         color: style.color,
@@ -128,8 +204,11 @@ fn run_from_style(style: &ResolvedStyle, kind: RichKind, source: NodeId) -> Rich
         size_px: style.font_size as u16,
         weight: weight_from_font_weight(style.font_weight),
         style: RichStyle::Normal,
-        deco: RichDeco::default(),
-        link_id: None,
+        deco,
+        // link_id 是 RichRun 的 u32 槽（RichFragment 同宽）；NodeId.0 是 u64
+        // （含 generation），按 index 截断——命中侧只把 id 当回查 a 的 key，
+        // 真正的节点解析走 run.source（同代 NodeId）。
+        link_id: link.map(|id| id.0 as u32),
         source,
     }
 }
@@ -344,5 +423,104 @@ mod tests {
             }
             RichKind::Text { .. } => panic!("expected Image run"),
         }
+    }
+
+    /// #74：`<div>看<a>商店</a></div>` → a 直接文本 run 的 source=a 且 link_id=Some(a)，
+    /// deco/style 取 a 的 computed（UA 烙印 underline 在此吃到）。
+    #[test]
+    fn link_text_run_source_and_link_id_is_a() {
+        // 0:div 1:TextNode "看" 2:a(Link) 3:TextNode "商店"(in a)
+        let scene = Scene::from_nodes(
+            vec![
+                mk(NodeKind::Container),
+                mk(NodeKind::TextNode),
+                mk(NodeKind::Link),
+                mk(NodeKind::TextNode),
+            ],
+            vec![(0, 1), (0, 2), (2, 3)],
+        );
+        let div = scene.roots[0];
+        let outer_tn = scene.get(div).unwrap().children[0];
+        let a = scene.get(div).unwrap().children[1];
+        let a_tn = *scene.get(a).unwrap().children.first().unwrap();
+        let mut scene = scene;
+        scene.text_contents.insert(outer_tn, "看".into());
+        scene.text_contents.insert(a_tn, "商店".into());
+        // a 的 UA 烙印模拟（打包期产物）：链接色 + underline。
+        {
+            let an = scene.get_mut(a).unwrap();
+            an.style.color = [0.0, 0.0, 0.933_333_34, 1.0];
+            an.style.text_decoration = crate::style::resolved::TextDecoration::Underline;
+        }
+        scene.get_mut(div).unwrap().rich_text_block = true;
+
+        let sizes = ImageSizeTable::new();
+        let runs = compile_rich_runs(&scene, div, &sizes);
+        assert_eq!(runs.len(), 2);
+        // 外层文本 run 无链接归属（source=自身、link_id=None）。
+        assert_eq!(runs[0].source, outer_tn);
+        assert_eq!(runs[0].link_id, None);
+        // a 内文本 run：source=a、link_id=Some(a.0)、色/underline 取 a 的 computed。
+        assert_eq!(runs[1].source, a, "链接内文本 source=a（非内部 TextNode）");
+        assert_eq!(runs[1].link_id, Some(a.0 as u32));
+        assert_eq!(runs[1].color, [0.0, 0.0, 0.933_333_34, 1.0]);
+        assert!(runs[1].deco.lines.underline(), "a 的 UA underline 烙进 run");
+        assert!(!runs[1].deco.lines.strike());
+    }
+
+    /// #74：`<div><a><span>嵌套</span></a></div>` → 嵌套 span 的 run 也归 a
+    /// （source=a、link_id=Some(a)）；span 自身声明色照常生效（style 仍取 span）。
+    #[test]
+    fn nested_span_inside_link_resolves_to_a() {
+        // 0:div 1:a(Link) 2:span(in a) 3:TextNode "x"(in span)
+        let scene = Scene::from_nodes(
+            vec![
+                mk(NodeKind::Container),
+                mk(NodeKind::Link),
+                mk(NodeKind::TextElement),
+                mk(NodeKind::TextNode),
+            ],
+            vec![(0, 1), (1, 2), (2, 3)],
+        );
+        let div = scene.roots[0];
+        let a = scene.get(div).unwrap().children[0];
+        let span = *scene.get(a).unwrap().children.first().unwrap();
+        let tn = *scene.get(span).unwrap().children.first().unwrap();
+        let mut scene = scene;
+        scene.text_contents.insert(tn, "x".into());
+        scene.get_mut(span).unwrap().style.color = [0.0, 0.5, 0.0, 1.0];
+        scene.get_mut(div).unwrap().rich_text_block = true;
+
+        let sizes = ImageSizeTable::new();
+        let runs = compile_rich_runs(&scene, div, &sizes);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].source, a, "链接内 span 的 run source=a（让位）");
+        assert_eq!(runs[0].link_id, Some(a.0 as u32));
+        assert_eq!(runs[0].color, [0.0, 0.5, 0.0, 1.0], "色取 span 自己的声明");
+    }
+
+    /// #74 守卫：无 `<a>` 时行为不变（span run 的 link_id=None、source=span）。
+    #[test]
+    fn span_without_link_keeps_link_id_none() {
+        let scene = Scene::from_nodes(
+            vec![
+                mk(NodeKind::Container),
+                mk(NodeKind::TextElement),
+                mk(NodeKind::TextNode),
+            ],
+            vec![(0, 1), (1, 2)],
+        );
+        let div = scene.roots[0];
+        let span = scene.get(div).unwrap().children[0];
+        let tn = *scene.get(span).unwrap().children.first().unwrap();
+        let mut scene = scene;
+        scene.text_contents.insert(tn, "s".into());
+        scene.get_mut(div).unwrap().rich_text_block = true;
+
+        let sizes = ImageSizeTable::new();
+        let runs = compile_rich_runs(&scene, div, &sizes);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].source, span);
+        assert_eq!(runs[0].link_id, None, "无链接上下文 link_id=None");
     }
 }

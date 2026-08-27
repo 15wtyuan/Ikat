@@ -180,7 +180,6 @@ mod tests {
         use crate::style::resolved::ResolvedStyle;
         use crate::text::layout::FontTable;
         use std::collections::HashMap;
-
         let font_path = format!(
             "{}/tests/fixtures/DejaVuSans.ttf",
             env!("CARGO_MANIFEST_DIR")
@@ -285,6 +284,119 @@ mod tests {
             hit_test(&scene, span_center),
             Some(div),
             "无 layout 时回落容器（HTML 语义：文本段的点击目标是宿主元素）"
+        );
+    }
+
+    /// #74：rich-text-block 里的 `<a>` 文本命中细化到 a 节点（run.source=a）——
+    /// 事件路由归链接，不归内部匿名 TextNode、也不归容器。
+    #[test]
+    fn hit_test_resolves_link_run_to_a_node() {
+        use crate::layout::solve;
+        use crate::style::resolved::ResolvedStyle;
+        use crate::text::layout::FontTable;
+        use std::collections::HashMap;
+
+        let font_path = format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let Ok(bytes) = std::fs::read(&font_path) else {
+            return; // 字体 fixture 缺席的环境跳过（同上口径）
+        };
+        let mut ft = FontTable::new();
+        ft.register("default", bytes, true).unwrap();
+
+        let mut root_s = ResolvedStyle::default();
+        root_s.taffy_style.size.width = taffy::style::Dimension::length(200.0);
+        let mut div_s = ResolvedStyle::default();
+        div_s.taffy_style.size.width = taffy::style::Dimension::length(150.0);
+        div_s.font_size = 16.0;
+        // entries: 0:root 1:div(rich) 2:TextNode "看" 3:a(Link) 4:TextNode "商店"(in a)
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                root_s,
+                vec![],
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::Container,
+                div_s,
+                vec![],
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+                None,
+                Some("看 ".into()),
+                None,
+            ),
+            (
+                Some(1),
+                NodeKind::Link,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(3),
+                NodeKind::TextNode,
+                ResolvedStyle::default(),
+                vec![],
+                None,
+                false,
+                None,
+                None,
+                Some("商店".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let div = scene.get(scene.roots[0]).unwrap().children[0];
+        let a = scene.get(div).unwrap().children[1];
+        scene.get_mut(div).unwrap().rich_text_block = true;
+        solve(&mut scene, &ft, (200.0, 1000.0), &HashMap::new());
+        compute_world_transforms(&mut scene);
+
+        // 链接 run 区域中心 → 命中 a（run.source=a 的细化）。
+        let link_center = {
+            let layout = scene.text_layouts[div.index()]
+                .as_ref()
+                .expect("solve 填 text_layouts");
+            let r = layout
+                .run_rects
+                .iter()
+                .find(|r| r.source == a)
+                .expect("链接 run 的 source 应为 a");
+            (r.x + r.w / 2.0, r.y + r.h / 2.0)
+        };
+        assert_eq!(
+            hit_test(&scene, link_center),
+            Some(a),
+            "链接文本命中细化到 <a> 节点（事件归链接）"
         );
     }
 

@@ -143,6 +143,10 @@
   .wb-break-all { word-break:break-all; }
   .ow-break-word { overflow-wrap:break-word; }
   .tw-off { white-space:pre-wrap; text-wrap:nowrap; }
+  /* §19 链接（#74）：浅底 rich 面板让 UA 默认蓝（#0000EE）+ 下划线与深色正文一眼区分；
+     a:hover 演示作者 CSS 覆盖 hover 态（UA 默认可覆盖的同一条通道）。 */
+  .link-rich { background-color:#dfe4ec; color:#1a2430; font-size:15px; border-radius:6px; padding:14px 18px; max-width:520px; }
+  .link-rich a:hover { color:#ff5f5f; }
   </style>
 </head>
 <body>
@@ -454,6 +458,15 @@
             <div class="ws-case tw-off">双空格  保留。源换行仍断行，
 这一长段不会被自动折行应溢出盒外。</div>
           </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">19 · 链接（&lt;a&gt; rich 内链接 · #74）</div>
+        <div class="section-desc">验收：① 点击「商店」——读数变为 open-shop（href 原样回传）；点击「背包」——读数变为 open-bag；点击「任务日志」——读数变为 open-quest（嵌 span 内的文字同样命中链接）。② 链接文字呈蓝色下划线（UA 默认样式，浅底面板上与深色正文一眼区分）。③ 鼠标悬停任一链接——文字变红（a:hover 生效），移开复原蓝色。④ 点击链接外的普通文字——读数保持「未点击」或上次值不变（命中未落到 a 节点）。</div>
+        <div class="specimen" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
+          <div class="link-rich">查看<a id="link-shop" href="open-shop">商店</a>或<a id="link-bag" href="open-bag">背包</a>，也可翻看<a id="link-quest" href="open-quest"><span>任务日志</span></a>。这句普通文字可点击，但读数不应变化。</div>
+          <span id="link-readout" style="color:#e0e6ec;font-size:13px;min-width:220px">未点击</span>
         </div>
       </div>
 

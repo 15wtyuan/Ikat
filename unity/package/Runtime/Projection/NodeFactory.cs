@@ -4,8 +4,8 @@
 // table，不做 OOP；C# 投影层用 typed 子类（Container/Button/Slider/...）给业务程序员稳定 API 表面。
 // NodeFactory 据 loomgui_stage_get_node_kind 返的 byte，switch 到对应 C# 子类构造。
 //
-// 全 20 公共 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集已覆盖全部
-// Rust 公共 kind——OptionItem/Slot/CustomElement/TabList/Tab 五容器型变体经本 factory 派发到专用
+// 全 21 公共 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集已覆盖全部
+// Rust 公共 kind——OptionItem/Slot/CustomElement/TabList/Tab/Link 六容器型变体经本 factory 派发到专用
 // 子类（继承 Container）；Rust 侧另有 Template=18（ListView item 蓝图），属内部 pkg 构造不进
 // 公共类型树（见 NodeKindTests.VariantCountMatchesRust），若被遍历 materialize 走下方 catch-all 回退
 // Container；仅 LineBreak 在 Rust 侧尚未实装（kind_from_tag 不产）。
@@ -73,8 +73,12 @@ namespace LoomGUI
                 NodeKind.TabList        => new TabList(ctx, id),
                 NodeKind.Tab            => new Tab(ctx, id),
 
-                // Rust 侧 NodeKind #[repr(u8)] 共 21 个判别值（kind_as_u8_is_discriminant 锁：0..17 +
-                // Template=18 + TabList=19 + Tab=20）；其中 Template=18 是合法 byte（ListView 蓝图，
+                // Link = <a>（#74）：富文本内链接，href 打包期烙印（Href 只读 getter）；
+                // 点击走既有 Clicked（命中细化到 a 节点）。仅 rich 上下文合法——运行时 create_node 不产。
+                NodeKind.Link           => new Link(ctx, id),
+
+                // Rust 侧 NodeKind #[repr(u8)] 共 22 个判别值（kind_as_u8_is_discriminant 锁：0..17 +
+                // Template=18 + TabList=19 + Tab=20 + Link=21）；其中 Template=18 是合法 byte（ListView 蓝图，
                 // display:none，经 get_node_kind 可返回），但它不进公共类型树，命中本臂回退 Container
                 // （可查询、不 crash）——与越界 byte 同处理
                 // 不会造成危害（Template 节点本就不该被业务代码当 typed Node 取）。其余越界 byte 只能来自

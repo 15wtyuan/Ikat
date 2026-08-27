@@ -13,6 +13,7 @@ Node
 +-- Container (subtree = user content, arrangerble at runtime)
 |   +-- AbsolutePanel (sugar: children auto position:absolute)
 |   +-- TextElement (span)
+|   +-- Link (a, rich-text link)
 |   +-- Button (button)
 |   +-- ListView (role=list) / ListItem (role=listitem)
 |   +-- OptionItem (role=option, owned by Dropdown)
@@ -237,6 +238,7 @@ arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
 | div role=progressbar | ProgressBar : Node | Value, Max (float, 0-based), IsIndeterminate, AnimateValue |
 | div role=tablist | TabList : Container | SelectedIndex, SelectionChanged (arrow keys/click; panels linked via `aria-controls`) |
 | div role=tab | Tab : Container | (`aria-selected` synthesized from TabList.SelectedIndex) |
+| a (inside rich text) | Link : Container | Href (readonly), Clicked |
 
 - Numeric control values are `float`.
 - **ProgressBar value domain**: `Value` is raw in `[0, Max]` — NOT
@@ -257,6 +259,16 @@ arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
   code, not framework.
 - Control visual parts are addressed in CSS via `data-slot`
   (`data-slot=thumb` on a slider, `data-slot=fill` on a progressbar).
+
+**Link (`<a>`, rich-text link)**: only legal inside a rich-text-block
+(the fence rejects it elsewhere at pack time); children are text and
+nested `span`s only. `Href` is a read-only **opaque identifier** — the
+framework never parses or opens it; read it back and route yourself
+(`link.Clicked += () => OpenShop(link.Href);`). Clicking uses the
+existing `Clicked` semantic event (hit-testing resolves down to the a
+node, including text inside nested spans). UA default style is blue
+(#0000EE) + underline — override in author CSS (including `:hover`).
+Keyboard focus/Enter activation is not in this stage.
 
 Container-semantics roles (plain `Container` from the game-code side —
 their structure rules live in the `loomgui-editor` skill's fence

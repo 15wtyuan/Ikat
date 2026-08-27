@@ -146,6 +146,12 @@ pub enum NodeKind {
     /// WAI-ARIA `role="tab"` — 单个 tab。无 ControlState，aria-selected 从父 TabList.selected_index 派生。
     /// 容器型（持 label 子节点），镜像 Button。
     Tab,
+    /// `<a>` — 富文本内链接（#74）。仅 rich-text-block 上下文合法（围栏拒绝 rich 外出现），
+    /// 折叠进父 inline flow（同 TextElement）；其子树 runs 由 rich_compile 烙 `link_id` 且
+    /// source 指向本节点（命中/事件归链接而非内部匿名文字）。href 存 `Scene.link_hrefs`。
+    /// 打包期烙 UA 默认（color #0000EE + text-decoration:underline，作者声明可覆盖）。
+    /// 键盘聚焦/Enter 激活归 #13（键盘交互语义补全）。
+    Link,
 }
 
 impl NodeKind {
@@ -174,6 +180,7 @@ impl NodeKind {
             18 => Some(NodeKind::Template),
             19 => Some(NodeKind::TabList),
             20 => Some(NodeKind::Tab),
+            21 => Some(NodeKind::Link),
             _ => None,
         }
     }
@@ -193,6 +200,7 @@ impl NodeKind {
                 | Self::CustomElement
                 | Self::TabList
                 | Self::Tab
+                | Self::Link
         )
     }
 
@@ -233,7 +241,8 @@ const _: () = {
             | NodeKind::CustomElement
             | NodeKind::Template
             | NodeKind::TabList
-            | NodeKind::Tab => {}
+            | NodeKind::Tab
+            | NodeKind::Link => {}
         }
     }
 };
@@ -701,6 +710,9 @@ pub struct Scene {
     pub text_contents: std::collections::HashMap<NodeId, String>,
     /// Image src paths (only Image nodes have entries).
     pub image_srcs: std::collections::HashMap<NodeId, String>,
+    /// `<a>` href（opaque 标识符，#74）。仅 Link 节点有条目；打包期从 href 属性烘入，
+    /// C# `Link.Href` 经 FFI 读此表。围栏保证非空（缺失/空 href 打包期 error）。
+    pub link_hrefs: std::collections::HashMap<NodeId, String>,
     /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
     /// kill 旧 tween + 提交新 tween）。运行时态，不进 pkg。
     pub pending_transitions: Vec<crate::tween::TransitionRequest>,
@@ -799,6 +811,7 @@ impl Scene {
         self.lists.remove(id);
         self.text_contents.remove(&id);
         self.image_srcs.remove(&id);
+        self.link_hrefs.remove(&id);
     }
 
     /// 从扁平 entries（DFS 先序）建 Node 树。`parent_idx` 指向 entries 下标，`None` = 根。
@@ -1148,6 +1161,7 @@ mod repr_tests {
         assert_eq!(NodeKind::Template as u8, 18);
         assert_eq!(NodeKind::TabList as u8, 19);
         assert_eq!(NodeKind::Tab as u8, 20);
+        assert_eq!(NodeKind::Link as u8, 21);
     }
 
     #[test]
@@ -1174,11 +1188,12 @@ mod repr_tests {
             NodeKind::Template,
             NodeKind::TabList,
             NodeKind::Tab,
+            NodeKind::Link,
         ];
         for &k in &all {
             assert_eq!(NodeKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(NodeKind::from_u8(21), None); // 越界（Tab=20 是最后合法判别值）
+        assert_eq!(NodeKind::from_u8(22), None); // 越界（Link=21 是最后合法判别值）
         assert_eq!(NodeKind::from_u8(255), None);
     }
 

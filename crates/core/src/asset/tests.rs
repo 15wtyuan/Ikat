@@ -15,6 +15,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         tabindex: None,
         content: None,
         src: None,
+        href: None,
         control_init: None,
         role: None,
         data_slot: None,
@@ -44,6 +45,7 @@ fn write_package_panics_when_string_table_exhausted() {
             kind: NodeKind::TextNode,
             content: Some(i.to_string()),
             src: None,
+            href: None,
             style: ResolvedStyle::default(),
             parent_idx: Some(0),
             classes: vec![],
@@ -346,6 +348,7 @@ fn read_rejects_cross_component_parent() {
     //   v28 加 role_idx(2) + data_slot_idx(2) 于 control_init_blob 后，固定部分再 +4B。
     //   v29 加 aria_controls_idx(2)（TabList），固定部分再 +2B。
     //   v35 加 custom_tag_idx(2)（CustomElement 标签），固定部分再 +2B。
+    //   v46 加 href_idx(2)（`<a>` 链接目标），固定部分再 +2B。
     let style_len_0 = u32::from_le_bytes(
         bytes[nodeblock_off + 5..nodeblock_off + 9]
             .try_into()
@@ -357,7 +360,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node0_size = 22 + 2 + style_len_0 + 2 * class_count_0 + 5 + 6;
+    let node0_size = 22 + 2 + style_len_0 + 2 * class_count_0 + 5 + 6 + 2;
     let node1_off = nodeblock_off + node0_size;
     let style_len_1 =
         u32::from_le_bytes(bytes[node1_off + 5..node1_off + 9].try_into().unwrap()) as usize;
@@ -366,7 +369,7 @@ fn read_rejects_cross_component_parent() {
             .try_into()
             .unwrap(),
     ) as usize;
-    let node1_size = 22 + 2 + style_len_1 + 2 * class_count_1 + 5 + 6;
+    let node1_size = 22 + 2 + style_len_1 + 2 * class_count_1 + 5 + 6 + 2;
     let node2_off = nodeblock_off + node0_size + node1_size;
     // 篡改节点 2（comp_b root）的 parent_idx 从 -1 → 0（< base=2，跨组件）
     let mut patched = bytes.clone();
@@ -424,13 +427,13 @@ fn read_rejects_unknown_kind_tag() {
         "kind_tag offset sanity: patching to Button must read back Button"
     );
 
-    // 21 = from_u8 的首个 None 分支（Template=20 是最后合法判别值）。
+    // 22 = from_u8 的首个 None 分支（Link=21 是最后合法判别值，#74）。
     let mut patched_bad = bytes.clone();
-    patched_bad[kind_tag_off] = 21;
+    patched_bad[kind_tag_off] = 22;
     let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
     assert!(
-        matches!(err, PkgError::BadKind(21)),
-        "expected BadKind(21), got {err:?}"
+        matches!(err, PkgError::BadKind(22)),
+        "expected BadKind(22), got {err:?}"
     );
 
     // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 25 误返 Some）。
@@ -481,6 +484,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
         aria_controls: None,
         rich_text_block: false,
         custom_tag: None,
+        href: None,
         component_scope: false,
     };
     let nodes = [text, img];
@@ -539,6 +543,7 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             tabindex: None,
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,
@@ -777,8 +782,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 45,
-        "pkg format version must be 45 after v45 wrap-control fields bump (v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 46,
+        "pkg format version must be 46 after v46 href/text_decoration bump (v29 aria_controls feature persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -839,8 +844,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 45,
-        "pkg format version must be 45 after v45 wrap-control fields bump"
+        PKG_FORMAT_VERSION, 46,
+        "pkg format version must be 46 after v46 href/text_decoration bump"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -980,15 +985,57 @@ fn pkg_v32_rejects_v31() {
     );
 }
 
+/// v46: TemplateNode.href（#74 `<a>` 链接目标）经完整 pkg.bin 路径往返保真；
+/// href 走 StringTable 索引列（同 role/data_slot），None/Some 两条路径都须验证。
+/// 同时锁版本门：v46 是 href 列 + ResolvedStyle.text_decoration 的布局变更，
+/// version=45 的旧包一刀切拒载（TooOld）。
+#[test]
+fn pkg_v46_roundtrip_preserves_link_href() {
+    assert_eq!(
+        PKG_FORMAT_VERSION, 46,
+        "pkg format version must be 46 after v46 href/text_decoration bump"
+    );
+    let mut root = tn(NodeKind::Container);
+    root.rich_text_block = true;
+    let mut link = tn(NodeKind::Link);
+    link.href = Some("open-shop".into());
+    link.parent_idx = Some(0);
+    let mut plain = tn(NodeKind::Container); // 无 href 的常态节点。
+    plain.parent_idx = Some(0);
+    let nodes = [root, link, plain];
+    let rules = empty_rules();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let pkg = read_package(&write_package(&input)).expect("roundtrip read ok");
+    let ns = &pkg.components["c"].nodes;
+    assert_eq!(
+        ns[1].href.as_deref(),
+        Some("open-shop"),
+        "Link 节点 href 往返保真"
+    );
+    assert_eq!(ns[1].kind, NodeKind::Link, "kind 判别值 21 往返保真");
+    assert!(
+        ns[0].href.is_none() && ns[2].href.is_none(),
+        "非 Link 无 href"
+    );
+
+    // 旧版本拒载：v45 pkg（无 href 列布局）被 v46 reader 读会串列——一刀切 TooOld。
+    let mut bad = vec![];
+    bad.extend_from_slice(&PKG_MAGIC.to_le_bytes());
+    bad.extend_from_slice(&45u32.to_le_bytes()); // v45 < MIN_VERSION=46
+    let err = read_package(&bad);
+    assert!(
+        matches!(err, Err(PkgError::TooOld(45))),
+        "v45 pkg must be rejected as TooOld after v46 bump, got {err:?}"
+    );
+}
+
 /// v33: TemplateNode.rich_text_block 经完整 pkg.bin 路径（write_package → read_package）
 /// 往返保真。flag 打包进 NodeBlock flags 字节（与 draggable 同字节，bit 0x02），故 true
 /// 与 false 两条路径都须验证（false 是多数节点的常态）。
 #[test]
 fn pkg_v33_roundtrip_preserves_rich_text_block() {
-    assert_eq!(
-        PKG_FORMAT_VERSION, 45,
-        "pkg format version must be 45 after v45 wrap-control fields bump"
-    );
     // 根节点 rich_text_block=true（rich-text-block 容器根），子节点 flag=false（叶子）。
     let mut root = tn(NodeKind::Container);
     root.rich_text_block = true;
@@ -1033,8 +1080,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 45,
-        "pkg format version must be 45 after v45 wrap-control fields bump"
+        PKG_FORMAT_VERSION, 46,
+        "pkg format version must be 46 after v46 href/text_decoration bump"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

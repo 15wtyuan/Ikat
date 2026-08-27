@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Each bit corresponds to one inheritable property (see INH_* constants in dynamic.rs).
 /// Baked at package time into base_style; rematch reads it as the per-frame inheritance baseline.
 /// u64 与 InlineSet 同位宽：INH_* bits 0-7 之后的新继承属性（overflow-wrap 等）落在 bits 33+
-/// （bits 8-32 被 INLINE_* 非继承属性占用，复用会撞位）。
+/// （bits 8-32 及 36 被 INLINE_* 非继承属性占用，复用会撞位）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InheritedSet(pub u64);
 
@@ -52,6 +52,18 @@ pub enum TextWrap {
     #[default]
     Normal,
     Nowrap,
+}
+
+/// CSS `text-decoration`（#74）。值集收窄为 `none | underline`——`<a>` 链接的 UA 默认
+/// （underline）与作者覆盖声明共用本字段。**不继承**（CSS 语义）：run 编译按各 inline
+/// 节点自己的 computed style 取装饰线，父声明不落到子（与浏览器「装饰线视觉跨子绘制」
+/// 的差异是本子集的显式取舍）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum TextDecoration {
+    #[default]
+    None = 0,
+    Underline = 1,
 }
 
 /// CSS `-webkit-text-security` 的掩码形状（password 类输入的显示变换）。
@@ -559,6 +571,9 @@ pub struct ResolvedStyle {
     pub word_break: WordBreak,
     /// CSS `text-wrap`（#73，继承，只收 nowrap）。
     pub text_wrap: TextWrap,
+    /// CSS `text-decoration`（#74，**不继承**，值集 none|underline）。`<a>` UA 默认
+    /// 烙 underline，作者声明覆盖；rich run 编译据此画装饰线。
+    pub text_decoration: TextDecoration,
     /// flex 顺序（CSS `order`）。taffy Style 无此字段，存在这里由
     /// layout 在 flex 排序前消费。默认 0 = DOM 顺序。
     pub order: i32,
@@ -703,6 +718,7 @@ impl Default for ResolvedStyle {
             overflow_wrap: OverflowWrap::Normal,
             word_break: WordBreak::Normal,
             text_wrap: TextWrap::Normal,
+            text_decoration: TextDecoration::None,
             order: 0,
             z_index: 0,
             touchable: true,
@@ -1234,5 +1250,22 @@ mod tests {
         assert_eq!(back.selection_background, s.selection_background);
         assert_eq!(back.selection_color, s.selection_color);
         assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
+    }
+
+    #[test]
+    fn text_decoration_default_none_and_bincode_roundtrip() {
+        // 默认 None（CSS initial 值语义）；Underline 经 bincode round-trip 稳定
+        // （pkg 字段，#[repr(u8)] 保 1 字节序列化布局）。
+        assert_eq!(
+            ResolvedStyle::default().text_decoration,
+            TextDecoration::None
+        );
+        let mut s = ResolvedStyle::default();
+        s.text_decoration = TextDecoration::Underline;
+        let bytes = bincode::serialize(&s).expect("serialize");
+        let back: ResolvedStyle = bincode::deserialize(&bytes).expect("deserialize");
+        assert_eq!(back.text_decoration, TextDecoration::Underline);
+        assert_eq!(back, s, "加字段后全字段 round-trip 仍相等");
+        assert_eq!(std::mem::size_of::<TextDecoration>(), 1);
     }
 }

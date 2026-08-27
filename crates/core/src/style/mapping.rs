@@ -3,8 +3,9 @@ use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
     BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, DisplayMode, GradCoord,
     Gradient, GradientStop, OverflowMode, OverflowWrap, RadialExtent, RadialShape, ResolvedStyle,
-    SliceInsets, TextAlign, TextSecurity, TextWrap, TransformOrigin, ViewportLen, ViewportUnit,
-    WhiteSpace, WordBreak, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
+    SliceInsets, TextAlign, TextDecoration, TextSecurity, TextWrap, TransformOrigin, ViewportLen,
+    ViewportUnit, WhiteSpace, WordBreak, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS,
+    MAX_OUTER_SHADOW_LAYERS,
 };
 use crate::transform::LenPct;
 use taffy::geometry::{Rect, Size};
@@ -1548,6 +1549,15 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 "dotted" => BorderStyle::Dotted,
                 "double" => BorderStyle::Double,
                 _ => BorderStyle::None,
+            };
+            true
+        }
+        "text-decoration" => {
+            // 值集 none|underline（围栏 schema 已拒 line-through 等越界值，此处按
+            // border-style 同款兜底映射：未知值落 None，不报错——打包期门负责报错）。
+            style.text_decoration = match value.trim() {
+                "underline" => TextDecoration::Underline,
+                _ => TextDecoration::None,
             };
             true
         }

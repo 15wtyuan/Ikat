@@ -17,6 +17,7 @@ fn make_test_pkg_bytes(component: &str) -> Vec<u8> {
         tabindex: None,
         content: None,
         src: None,
+        href: None,
         control_init: None,
         role: None,
         data_slot: None,
@@ -321,6 +322,7 @@ fn find_node_by_id_round_trip() {
         tabindex: None,
         content: None,
         src: None,
+        href: None,
         control_init: None,
         role: None,
         data_slot: None,
@@ -360,6 +362,94 @@ fn find_node_by_id_round_trip() {
         loomgui_stage_find_node_by_id(h, id.as_ptr() as *const u8, id.as_bytes().len())
     };
     assert_eq!(miss, u64::MAX, "无匹配 → sentinel");
+    loomgui_stage_free(h);
+}
+
+/// get_link_href 双调法 round-trip（#74）：手搓包（Container 根 + Link 子带 href）→
+/// load_package → instantiate → 读 Link 节点 href（rc=0，字节精确）；buf_cap 不足 →
+/// rc=-2 + 所需长度；非 Link 节点 → rc=1；死节点 → rc=-1。
+#[test]
+fn link_href_round_trip() {
+    use loomgui_core::asset::{PackageInput, TemplateNode};
+    use loomgui_core::scene::NodeKind;
+    use loomgui_core::style::resolved::ResolvedStyle;
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    assert!(!h.is_null());
+    let mk = |kind, href: Option<&str>, parent: Option<usize>| TemplateNode {
+        kind,
+        style: ResolvedStyle::default(),
+        parent_idx: parent,
+        classes: vec![],
+        id_attr: None,
+        draggable: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        href: href.map(str::to_string),
+        control_init: None,
+        role: None,
+        data_slot: None,
+        aria_controls: None,
+        rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
+    };
+    let nodes = [
+        mk(NodeKind::Container, None, None),
+        mk(NodeKind::Link, Some("open-shop"), Some(0)),
+    ];
+    let rules = loomgui_core::style::dynamic::DynamicRuleTable::default();
+    let pkg = loomgui_core::asset::write_package(&PackageInput {
+        components: vec![("comp1", nodes.as_slice(), &rules, &[])],
+    });
+    assert_eq!(
+        loomgui_stage_load_package(h, b"bag".as_ptr(), 3, pkg.as_ptr(), pkg.len()),
+        0
+    );
+    let empty_css = b"";
+    let root = loomgui_stage_create_root(h, b"div".as_ptr(), 3, empty_css.as_ptr(), 0);
+    assert_ne!(root, u64::MAX, "create_root ok");
+    let comp = loomgui_stage_instantiate(h, b"bag".as_ptr(), 3, b"comp1".as_ptr(), 5);
+    assert_ne!(comp, u64::MAX, "instantiate ok");
+    let link = {
+        // instantiate 后 Link 是 comp 根的唯一子。
+        assert_eq!(loomgui_stage_get_child_count(h, comp), 1, "comp 根下 1 子");
+        let mut kids = [0u64; 1];
+        let got = loomgui_stage_get_children(h, comp, kids.as_mut_ptr(), 1);
+        assert_eq!(got, 1);
+        kids[0]
+    };
+
+    // 双调法第一步：0 容量探大小。
+    let mut needed = 0usize;
+    let rc = loomgui_stage_get_link_href(h, link, std::ptr::null_mut(), 0, &mut needed);
+    assert_eq!(rc, -2, "cap=0 探大小 → rc=-2");
+    assert_eq!(needed, "open-shop".len());
+    // 第二步：取串。
+    let mut buf = [0u8; 64];
+    let mut len = 0usize;
+    let rc = loomgui_stage_get_link_href(h, link, buf.as_mut_ptr(), buf.len(), &mut len);
+    assert_eq!(rc, 0, "足够 cap → rc=0");
+    assert_eq!(
+        &buf[..len],
+        b"open-shop",
+        "href 字节精确（ptr+len，不靠 NUL）"
+    );
+
+    // 非 Link 节点（root div）→ rc=1（「不是链接」≠句柄错误）。
+    let mut len = 0usize;
+    assert_eq!(
+        loomgui_stage_get_link_href(h, root, buf.as_mut_ptr(), buf.len(), &mut len),
+        1,
+        "非 Link 节点 → rc=1"
+    );
+    // 死节点 → rc=-1。
+    let mut len = 0usize;
+    assert_eq!(
+        loomgui_stage_get_link_href(h, u64::MAX - 1, buf.as_mut_ptr(), buf.len(), &mut len),
+        -1,
+        "死节点 → rc=-1"
+    );
     loomgui_stage_free(h);
 }
 
@@ -891,6 +981,7 @@ fn a6_get_children_capacity_contract() {
             tabindex: None,
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,
@@ -909,6 +1000,7 @@ fn a6_get_children_capacity_contract() {
             tabindex: None,
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,
@@ -927,6 +1019,7 @@ fn a6_get_children_capacity_contract() {
             tabindex: None,
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,

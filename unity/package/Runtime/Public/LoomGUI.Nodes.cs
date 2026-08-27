@@ -561,6 +561,9 @@ namespace LoomGUI
         /// input 无 type 默认 TextField；type=range/checkbox/... 派生 kind 在 parse 期已固化，selector
         /// 用 "input" 只匹配 TextField（不匹配派生——简化取舍，type-aware selector 推后续）。
         /// template 不在映射表——parse 期消费、不进 runtime 树，selector "template" 永远空集。
+        /// a 不在映射表——Link 仅 rich-text-block 上下文合法（围栏保证），运行时 create_node 不产
+        /// 该 kind，selector "a" 空集（pkg-loaded 的 a 节点经 NodeFactory 正常投影为 Link，
+        /// 业务用 Get&lt;Link&gt;/Id 定位）。
         ///
         /// 已知 core 不一致（span）：本表对齐 parse/pkg 路径（resolve_semantic("span") → TextElement，
         /// 覆盖 pkg 加载的绝大多数 span）。但 core 的动态建树 API 走另一张表——
@@ -1666,6 +1669,63 @@ namespace LoomGUI
     {
         internal TextElement(UIContext ctx, ulong id) : base(ctx, id) { }
     }    // span
+
+    /// <summary>
+    /// <a>（富文本内链接，#74）。仅 rich-text-block 上下文合法（围栏打包期拦截非法用法），
+    /// 子只许文本/嵌 span。href 是 opaque 标识符：框架不解析、不 OpenURL，原样回传给游戏
+    /// 自行解释。点击走 <see cref="Clicked"/>（指针命中细化到 a 节点，含嵌套 span 内文字）；
+    /// UA 默认蓝 #0000EE + 下划线（作者 CSS 可覆盖）；键盘聚焦/Enter 激活属键盘导航项
+    /// （deferred）。Href 只读——打包期从 href 属性烙印，运行时不可改。
+    /// </summary>
+    public unsafe class Link : Container
+    {
+        internal Link(UIContext ctx, ulong id) : base(ctx, id) { }
+
+        /// <summary>
+        /// 链接目标（opaque 标识符；游戏侧自解释，框架不解析）。只读：打包期烙印。
+        /// 双调法读 get_link_href（同 <see cref="Node.Id"/> getter 通道）；rc=1 = 非 Link 节点
+        /// （类型错配的调用方错误）→ 抛 UIContractException。
+        /// </summary>
+        public string Href
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                string v = TextControlFFI.ReadTextOrNull(h, _id,
+                    (hp, buf, cap, len) => Native.loomgui_stage_get_link_href(hp, _id, buf, cap, len));
+                if (v == null)
+                    throw new UIContractException(
+                        $"Href 仅 Link 节点可读（node {_id} 非 Link 或无 href 条目）");
+                return v;
+            }
+        }
+
+        // 语义 sugar：与 Button.Clicked 同款 backing-dict 模式（On<ClickEvent> 订阅翻译成 Action）。
+        // Link 的命中细化到 a 节点本身（含嵌套 span 内文字），点击即冒泡至此。
+        [NonSerialized] Dictionary<Action, EventRegistration> _clickedBacking;
+        public event Action Clicked
+        {
+            add
+            {
+                if (value == null) return;
+                if (_clickedBacking == null)
+                    _clickedBacking = new Dictionary<Action, EventRegistration>();
+                if (_clickedBacking.ContainsKey(value)) return;
+                var reg = On<ClickEvent>(e => value(), useCapture: false);
+                _clickedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_clickedBacking != null && _clickedBacking.TryGetValue(value, out var reg))
+                {
+                    _clickedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+    }
+
     public class ListItem : Container
     {
         internal ListItem(UIContext ctx, ulong id) : base(ctx, id) { }

@@ -215,6 +215,13 @@ pub fn check_inline_context(
             continue;
         }
 
+        // `<a>`（#74）豁免：其上下文错误归 check_links（FenceLinkOutsideRich）——
+        // 那里的修复建议（放进纯 inline 子的 block 容器）才是对的；本检查的
+        // 「加 display:flex / display:block」建议对链接是误导。
+        if el.semantic == Some(SemanticKind::Link) {
+            continue;
+        }
+
         // 元素自己显式 display:block（inline style 或 class 规则）→ 作者有意当块级
         // （撑满），浏览器也撑满，两边一致 → 放行。class 规则路径与 flex 判定同源
         // （css_resolve 只烘 inline style，class 规则的 display 要查 dynamic_rules）。

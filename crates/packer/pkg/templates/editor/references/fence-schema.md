@@ -12,7 +12,7 @@ consumed without effect.
 
 ## Runtime tags
 
-The complete list — `div`, `span`, `button`, `img`, `template`, `slot`:
+The complete list — `div`, `span`, `button`, `img`, `a`, `template`, `slot`:
 
 | Tag | Type | Default display | Notes |
 |---|---|---|---|

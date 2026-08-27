@@ -23,6 +23,7 @@ error):
 - `overflow-wrap` — `normal` (overlong word overflows, browser-consistent) / `break-word` (split only when the word alone exceeds the line)
 - `word-break` — `normal` / `break-all` (break between any characters) / `keep-all` (no breaks inside CJK words)
 - `text-wrap` — `normal` / `nowrap` (disables soft wrap; `balance` / `stable` / `pretty` are rejected — use `text-align` for centered headings)
+- `text-decoration` — `none` / `underline` only (not inherited; `<a>` UA default is `underline`, author declarations override)
 - `-webkit-text-stroke` / `font-effect` — LoomGUI text extensions
 - `caret-color` / `selection-background` / `selection-color` / `placeholder-color` / `-webkit-text-security` — text-control theming
 - `animation` and longhands: `animation-name` / `animation-duration` / `animation-timing-function` / `animation-delay` / `animation-iteration-count` / `animation-direction` / `animation-fill-mode` / `animation-play-state`
@@ -114,7 +115,6 @@ Properties that do NOT exist in the fence (using any of these is a
 
 - `box-sizing` — there is no border-box switch; padding adds to the set width/height
 - `cursor`
-- `text-decoration`
 - `font-style` — no italic via CSS (and no `em` / `i` tags either)
 - `text-transform`
 - `user-select` — use `pointer-events` for interaction gating

@@ -44,7 +44,7 @@ trust the build message.
 2. Everything outside the fence is a **build-time error, never a silent
    ignore**. Diagnostics are collect-all (every error in every file, with
    file/line/column) — fix them ALL in one pass, then re-check.
-3. The complete runtime tag set is `div`, `span`, `button`, `img`, `template`, `slot`
+3. The complete runtime tag set is `div`, `span`, `button`, `img`, `a`, `template`, `slot`
    (+ hyphenated custom elements). There is no `p`,
    `header`, `input`, `select`, `ul`, `label`, and **no `<br>`** — every
    line break is structure: split multi-line copy into separate block

@@ -53,6 +53,14 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                 } else {
                     None
                 };
+                // href：`<a>` 链接目标（opaque id，fence 保证非空）。仅 Link 节点提取。
+                let href = if kind == NodeKind::Link {
+                    let h = attr(el, "href").unwrap_or_default();
+                    let h = h.trim().to_string();
+                    (!h.is_empty()).then_some(h)
+                } else {
+                    None
+                };
                 let control_init = extract_control_init(kind, el, ir_idx, &parsed.tree);
                 // role/data-slot：从 HTML 属性提取，进 pkg 供 runtime RoleTable 查表。
                 // role 驱动语义分派（combobox/slider/...），data-slot 标识控件视觉部件（fill/thumb）。
@@ -70,6 +78,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
                     content: None,
                     src,
+                    href,
                     control_init,
                     role,
                     data_slot,
@@ -93,6 +102,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     tabindex: None,
                     content: Some(s.clone()),
                     src: None,
+                    href: None,
                     control_init: None,
                     role: None,
                     data_slot: None,
@@ -257,6 +267,7 @@ pub(crate) fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
         Some(SemanticKind::ListItem) => Ok(NodeKind::ListItem),
         Some(SemanticKind::TabList) => Ok(NodeKind::TabList),
         Some(SemanticKind::Tab) => Ok(NodeKind::Tab),
+        Some(SemanticKind::Link) => Ok(NodeKind::Link),
         Some(SemanticKind::Slot) => Ok(NodeKind::Slot),
         Some(SemanticKind::CustomElement) => Ok(NodeKind::CustomElement),
         Some(SemanticKind::Template) => Ok(NodeKind::Template),

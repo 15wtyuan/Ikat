@@ -48,6 +48,7 @@ Node
 +-- Container（子树 = 用户内容，运行时可编排）
 |   +-- AbsolutePanel（语法糖，子节点自动 absolute）
 |   +-- TextElement（span）
+|   +-- Link（a，富文本内链接）
 |   +-- Button（button）
 |   +-- ListView（role=list）/ ListItem（role=listitem）
 |   +-- OptionItem（role=option，从属 Dropdown）
@@ -323,6 +324,7 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 | div role=option | OptionItem : Container | Value, Selected（只读）, Disabled, Index（只读，父 Dropdown 内序号） |
 | div role=tablist | TabList : Container | SelectedIndex, SelectionChanged（方向键/click 切换；方向轴按 tablist 的 `flex-direction` 选轴、`*-reverse` 翻转方向、clamp 不 wrap；panel 靠 `aria-controls` 关联） |
 | div role=tab | Tab : Container | （`aria-selected` 由父 TabList.SelectedIndex 跨节点合成，非字面存储） |
+| a（富文本内） | Link : Container | Href（只读）, Clicked（复用既有语义事件） |
 
 **不变量**：
 - 控件数值（Slider/NumberField/ProgressBar 的 Value/Min/Max/Step）用 `float`，与几何/引擎统一。大数精度需求归业务层。
@@ -330,6 +332,16 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 - 通用事件类型：`ValueChangedEvent<T>`, `SelectionChangedEvent`, `TextSelection`。
 
 控件与列表的类型由 `role` 分派（见 [fence.md](fence.md) §2.3、§3.1）；控件视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。WAI-ARIA 复合控件沿用同一 `role` 机制：**TabList/Tab 已落地**（见上表）；Tree 等按需单独立项。
+
+### 7.1 Link（`<a>`，富文本内链接）
+
+`<a>` 是 rich-text-block 上下文里的行内链接，投影为 `Link : Container`（含 `TextContent`，子只许文本/嵌 span）。契约：
+
+- **仅富文本上下文**：`<a>` 只在 rich-text-block 内合法，围栏在打包期拦截非法用法（错误码见 [fence.md](fence.md)）。
+- **href 是 opaque 标识符**：框架不解析、不 OpenURL，`Href` getter 原样回传，由游戏自解释（路由到界面/商店/任务等）。`Href` 只读——打包期从 href 属性烙印，运行时不可改。
+- **点击 = 既有 `Clicked`**：指针命中细化到 a 节点（含嵌套 span 内文字），订阅走与 Button 同款的语义事件；无独立 OnLinkClicked 聚合。
+- **UA 默认样式**：蓝（#0000EE）+ 下划线，作者 CSS 可覆盖（含 hover 等伪类）。
+- **键盘激活 deferred**：键盘聚焦/Enter 激活归键盘导航项，本阶段不做。
 
 ---
 

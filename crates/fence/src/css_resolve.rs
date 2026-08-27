@@ -6,7 +6,7 @@ use crate::schema::css::{
 };
 use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
 use loomgui_core::style::mapping::apply_decl;
-use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign};
+use loomgui_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign, TextDecoration};
 
 /// 围栏外但常见的 CSS 属性 → 引导文案（说明 LoomGUI 行为 + 建议怎么改）。
 ///
@@ -20,7 +20,7 @@ pub(crate) fn unsupported_hint(prop: &str) -> Option<&'static str> {
     Some(match prop {
         "box-sizing" => "LoomGUI always uses the border-box model (width already includes padding and border — the engine default). This declaration has no effect — remove it.",
         "visibility" => "LoomGUI has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
-        "cursor" | "outline" | "user-select" | "text-decoration" | "object-fit" => {
+        "cursor" | "outline" | "user-select" | "object-fit" => {
             "not supported by fence — remove this declaration."
         }
         _ => return None,
@@ -112,6 +112,19 @@ pub fn resolve_inline_styles_with_diags(
                 // 运行时 rematch 从 base_style 重起，UA 默认每帧稳定。
                 styles[idx].taffy_style.justify_content = Some(taffy::JustifyContent::CENTER);
                 styles[idx].taffy_style.align_items = Some(taffy::AlignItems::CENTER);
+            }
+            // UA 样式表等价（#74）：`<a>` 默认链接色 #0000EE + text-decoration:underline
+            //（浏览器 UA 行为）。顺序即级联：tag 默认先烙，作者 inline style 声明在下方
+            // style_attr 循环后应用即赢（CSS 作者 > UA）；class 规则走运行时 rematch 从
+            // base_style 起应用，同样赢。color 是继承属性——同 button text-align 先例烙
+            // INH_COLOR bit，防运行时 propagate_inherited 拿父值覆盖链接色；
+            // text-decoration 不继承，无需 bit。
+            if spec.is_some_and(|s| s.semantic == SemanticKind::Link) {
+                styles[idx].color = [0.0, 0.0, 238.0 / 255.0, 1.0];
+                if let Some(bit) = loomgui_core::style::dynamic::inherited_bit("color") {
+                    styles[idx].inherited_set.0 |= bit;
+                }
+                styles[idx].text_decoration = TextDecoration::Underline;
             }
         }
 
@@ -582,6 +595,76 @@ mod tests {
                     && d.message.contains("wrap-reverse")),
             "wrap-reverse should error: {:?}",
             r.diagnostics
+        );
+    }
+
+    /// #74 `<a>` UA 烙印：打包期 default 色 #0000EE + text-decoration:underline，
+    /// 且烙 INH_COLOR bit（color 继承属性，防运行时 propagate 拿父值覆盖链接色）。
+    #[test]
+    fn link_ua_defaults_blue_and_underline() {
+        let (tree, _) = parse_html_to_ir(r#"<div>看<a href="x">商店</a></div>"#);
+        let styles = resolve_for_test(&tree);
+        let a_idx = tree
+            .nodes
+            .iter()
+            .position(|n| matches!(&n.kind, IrNodeKind::Element(e) if e.tag == "a"))
+            .expect("a element");
+        assert_eq!(styles[a_idx].color, [0.0, 0.0, 238.0 / 255.0, 1.0]);
+        assert_eq!(styles[a_idx].text_decoration, TextDecoration::Underline);
+        let color_bit = loomgui_core::style::dynamic::inherited_bit("color").unwrap();
+        assert_eq!(
+            styles[a_idx].inherited_set.0 & color_bit,
+            color_bit,
+            "UA 链接色须烙 INH_COLOR bit 防 propagate 覆盖"
+        );
+    }
+
+    /// #74：作者 inline 声明覆盖 UA 烙印（tag 默认先应用、作者后应用即赢）。
+    #[test]
+    fn author_overrides_link_ua() {
+        let r = crate::parse_template(
+            r#"<div>看<a href="x" style="color:#ff0000; text-decoration:none">商店</a></div>"#,
+            "t.html",
+        );
+        assert!(r.diagnostics.is_empty(), "{:?}", r.diagnostics);
+        let a_idx = r
+            .tree
+            .nodes
+            .iter()
+            .position(|n| matches!(&n.kind, IrNodeKind::Element(e) if e.tag == "a"))
+            .expect("a element");
+        assert_eq!(
+            r.styles[a_idx].color,
+            [1.0, 0.0, 0.0, 1.0],
+            "作者色覆盖 UA 蓝"
+        );
+        assert_eq!(
+            r.styles[a_idx].text_decoration,
+            TextDecoration::None,
+            "作者 text-decoration:none 覆盖 UA underline"
+        );
+    }
+
+    /// #74 text-decoration 值集：underline/none 过、line-through 拒（既有
+    /// FenceBadCssValue 格式）。
+    #[test]
+    fn text_decoration_value_domain() {
+        let ok = crate::parse_template(
+            r#"<div>看<a href="x" style="text-decoration:underline">商店</a> <span style="text-decoration:none">普通</span></div>"#,
+            "t.html",
+        );
+        assert!(ok.diagnostics.is_empty(), "{:?}", ok.diagnostics);
+        let bad = crate::parse_template(
+            r#"<div><span style="text-decoration:line-through">划线</span></div>"#,
+            "t.html",
+        );
+        assert!(
+            bad.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceBadCssValue
+                    && d.message.contains("line-through")),
+            "line-through 应按值域外报错: {:?}",
+            bad.diagnostics
         );
     }
 }

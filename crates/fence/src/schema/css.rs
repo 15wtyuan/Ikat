@@ -538,6 +538,14 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         // deferred：text-align 替代不了的标题平衡换行狗粮场景出现再收。
         parser: CssValueParser::Keyword(&["normal", "nowrap"]),
     },
+    // text-decoration（#74）：值集收窄 none|underline（line-through/overline 拒绝），
+    // CSS 语义不继承。`<a>` 打包期烙 UA 默认 underline，作者声明覆盖。
+    CssPropSpec {
+        name: "text-decoration",
+        default: "none",
+        inherited: false,
+        parser: CssValueParser::Keyword(&["none", "underline"]),
+    },
     CssPropSpec {
         name: "text-shadow",
         default: "none",

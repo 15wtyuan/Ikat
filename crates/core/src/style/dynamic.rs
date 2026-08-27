@@ -134,7 +134,7 @@ pub fn inherited_bit(prop: &str) -> Option<u64> {
 // 24 位容纳了 apply_decl 处理的 24 个非继承属性（width/height/min-*/max-*/padding/
 // margin/border-width/gap/flex-*/display/overflow-x/y/position/left/top/right/bottom/
 // background-color/opacity）。u32 装满后位图升级为 u64：z-index 取 bit 32，
-// bits 36-63 仍空。
+// text-decoration 取 bit 36（#74 非继承属性；33-35 归 INH_*），bits 37-63 仍空。
 
 /// inline override 的 set-ness 位图。复用 INH_* 给继承属性（bits 0-7 + 33-35），
 /// 其后是 INLINE_* 非继承属性 bit。rematch 用它应用便签层；继承子集 OR 进 set_map
@@ -184,6 +184,9 @@ pub const INLINE_BACKGROUND_COLOR: u64 = 1 << 30;
 pub const INLINE_OPACITY: u64 = 1 << 31;
 /// z-index（层叠序）。u32 位图装满后升级 u64 的首个扩展位。
 pub const INLINE_Z_INDEX: u64 = 1 << 32;
+/// text-decoration（#74 `<a>` UA underline 的作者 inline 覆盖保护）。bits 33-35 归
+/// INH_*（#73 继承属性），故越过到 bit 36。
+pub const INLINE_TEXT_DECORATION: u64 = 1 << 36;
 
 /// prop 名 → InlineSet bit。继承属性复用 `inherited_bit`（bits 0-7），非继承属性走
 /// INLINE_*（bits 8-31，z-index 在 bit 32）。返回 None = 该属性不可 inline（apply_decl
@@ -232,6 +235,7 @@ pub fn inline_bit(prop: &str) -> Option<u64> {
         "background-color" => Some(INLINE_BACKGROUND_COLOR),
         "opacity" => Some(INLINE_OPACITY),
         "z-index" => Some(INLINE_Z_INDEX),
+        "text-decoration" => Some(INLINE_TEXT_DECORATION),
         _ => None,
     }
 }
@@ -302,6 +306,8 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
                 // 作者几乎不靠 tag 选择器选 tab，role/class 选择器不受影响。
                 NodeKind::TabList => "div",
                 NodeKind::Tab => "button",
+                // `<a>` 链接：tag 选择器 `a { ... }` / `a:hover { ... }` 命中 Link 节点。
+                NodeKind::Link => "a",
                 // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
                 NodeKind::TextField
                 | NodeKind::NumberField
@@ -775,7 +781,8 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
 }
 
 /// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 11 个继承
-/// 字段（INH_*，bits 0-7）+ 25 个非继承字段（INLINE_*，bits 8-32，z-index 在 bit 32）。
+/// 字段（INH_*，bits 0-7 + 33-35）+ 非继承字段（INLINE_*，bits 8-32 及 36，z-index 在
+/// bit 32、text-decoration 在 bit 36）。
 /// INLINE_DISPLAY 一对应两字段（`taffy_style.display` + `display_mode`，与 apply_decl
 /// 行为对齐），其余 INLINE_* 一对一映射到 ResolvedStyle/taffy_style 字段。
 ///
@@ -834,6 +841,7 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     cpy!(background_color, INLINE_BACKGROUND_COLOR);
     cpy!(opacity, INLINE_OPACITY);
     cpy!(z_index, INLINE_Z_INDEX);
+    cpy!(text_decoration, INLINE_TEXT_DECORATION);
     // INLINE_DISPLAY：apply_decl 同时设 taffy_style.display + display_mode，需双字段覆盖。
     if s & INLINE_DISPLAY != 0 {
         style.taffy_style.display = inline.taffy_style.display;
@@ -1478,6 +1486,84 @@ mod tests {
             Some([0.0, 0.0, 1.0, 1.0]),
             "hover → 蓝"
         );
+    }
+
+    /// #74 `<a>` hover 全链：a 节点（UA 烙印 base_style：链接色 #0000EE + INH_COLOR
+    /// bit + text_decoration underline）→ `a:hover { color }` 规则命中（tag 选择器
+    /// "a" 映射 Link）→ rematch 覆盖 UA 色（作者 > UA）→ rich run 重编译吃到 hover 色。
+    /// 同时守卫：hover 色不得被 propagate_inherited 拿父值洗掉（INH_COLOR bit 在），
+    /// 非 hover 态保持 UA 蓝。
+    #[test]
+    fn link_hover_rematch_recolors_rich_run() {
+        use crate::text::rich_compile::compile_rich_runs;
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 200.0,
+        };
+        let mut div = Node::default();
+        div.rich_text_block = true;
+        div.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 150.0,
+            h: 40.0,
+        };
+        // a 的 base_style 模拟打包期 UA 烙印：#0000EE + INH_COLOR bit + underline。
+        let mut a = Node::default();
+        a.kind = NodeKind::Link;
+        a.base_style.color = [0.0, 0.0, 238.0 / 255.0, 1.0];
+        a.base_style.text_decoration = crate::style::resolved::TextDecoration::Underline;
+        let color_bit = inherited_bit("color").unwrap();
+        a.base_style.inherited_set.0 |= color_bit;
+        let mut tn = Node::default();
+        tn.kind = NodeKind::TextNode;
+        let mut s = Scene::from_nodes(vec![root, div, a, tn], vec![(0, 1), (1, 2), (2, 3)]);
+        let div_id = s.get(s.roots[0]).unwrap().children[0];
+        let a_id = s.get(div_id).unwrap().children[0];
+        s.text_contents.insert(
+            *s.get(a_id).unwrap().children.first().unwrap(),
+            "商店".into(),
+        );
+        s.link_hrefs.insert(a_id, "open-shop".into());
+
+        push_global(&mut s, rule("a:hover", "color", "#ff0000"));
+        let sizes = std::collections::HashMap::new();
+
+        // 非 hover 态：rematch 从 base_style 起，无规则命中 → UA 蓝保真。
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(a_id).unwrap().style.color,
+            [0.0, 0.0, 238.0 / 255.0, 1.0]
+        );
+        let runs = compile_rich_runs(&s, div_id, &sizes);
+        let link_run = runs.iter().find(|r| r.source == a_id).expect("链接 run");
+        assert_eq!(
+            link_run.color,
+            [0.0, 0.0, 238.0 / 255.0, 1.0],
+            "UA 蓝进 run"
+        );
+        assert_eq!(link_run.link_id, Some(a_id.0 as u32));
+        assert!(link_run.deco.lines.underline(), "UA underline 进 run");
+
+        // hover 态：`a:hover` 覆盖 UA 色 → run 重编译吃到 hover 红。
+        s.get_mut(a_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::HOVERED);
+        rematch_pseudo_classes(&mut s);
+        assert_eq!(
+            s.get(a_id).unwrap().style.color,
+            [1.0, 0.0, 0.0, 1.0],
+            "hover 规则色覆盖 UA 蓝（作者 > UA）"
+        );
+        let runs = compile_rich_runs(&s, div_id, &sizes);
+        let link_run = runs.iter().find(|r| r.source == a_id).expect("链接 run");
+        assert_eq!(link_run.color, [1.0, 0.0, 0.0, 1.0], "hover 红进重编译 run");
+        assert_eq!(link_run.link_id, Some(a_id.0 as u32), "link_id 不变");
     }
 
     #[test]

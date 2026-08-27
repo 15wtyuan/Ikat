@@ -21,6 +21,7 @@ fn make_pkg_with_image(src: &str) -> Vec<u8> {
             tabindex: None,
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,
@@ -45,6 +46,7 @@ fn make_pkg_with_image(src: &str) -> Vec<u8> {
             aria_controls: None,
             rich_text_block: false,
             custom_tag: None,
+            href: None,
             component_scope: false,
         },
     ];
@@ -144,6 +146,7 @@ fn css_length_overrides_real_image_size() {
             tabindex: None,
             content: None,
             src: None,
+            href: None,
             control_init: None,
             role: None,
             data_slot: None,
@@ -168,6 +171,7 @@ fn css_length_overrides_real_image_size() {
             aria_controls: None,
             rich_text_block: false,
             custom_tag: None,
+            href: None,
             component_scope: false,
         },
     ];

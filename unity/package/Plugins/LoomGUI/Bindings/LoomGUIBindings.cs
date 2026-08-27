@@ -483,6 +483,17 @@ namespace LoomGUI.Bindings
         internal static extern int loomgui_stage_get_node_id_attr(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
 
         /// <summary>
+        ///  读 `&lt;a&gt;` 节点的 href（#74 链接目标，opaque 字符串；C# Link 事件处理按它路由）。
+        ///  双调法同 [`loomgui_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；
+        ///  不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene / 死节点 → rc=-1
+        /// （*out_len 置 0）。非 Link 节点或 link_hrefs 无条目 → rc=1（区别于 -1 的句柄错误：
+        ///  调用方拿 1 判「不是链接」，拿 -1 判「参数/场景错误」）。href 由 instantiate 从
+        ///  pkg TemplateNode 灌入 `Scene.link_hrefs`（围栏保证非空）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "loomgui_stage_get_link_href", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int loomgui_stage_get_link_href(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
         ///  读节点 computed opacity（rematch 后 style.opacity，与渲染/命中同源）。
         ///  调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
         ///  rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。

@@ -66,6 +66,10 @@ pub enum SemanticKind {
     /// WAI-ARIA `role="tab"` — 单个 tab（→ NodeKind::Tab）。无状态，选中态从
     /// 父 TabList.selected_index 派生（aria-selected 是只读 synth，见 ControlState）。
     Tab,
+    /// `<a>` 富文本链接（#74 → NodeKind::Link）。inline 元素，仅 rich-text-block
+    /// 上下文合法（rich 外出现围栏报 FenceLinkOutsideRich）；子内容只许文本与
+    /// 非 flex span。href 是 opaque 标识符（无 URI 解析语义）。
+    Link,
     Template,
     Slot,
     /// Custom element -- tag name contains a hyphen (e.g. `<my-widget>`).
@@ -115,7 +119,7 @@ pub const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
 ///
 /// `role` takes precedence over the tag: `<div role="slider">` is a Slider
 /// regardless of the `div` tag. Without a role the base tags (`div`/`span`/
-/// `button`/`img`/`template`/`slot`) map to their default kind. Controls and
+/// `button`/`img`/`a`/`template`/`slot`) map to their default kind. Controls and
 /// lists have no dedicated tag -- authors express them with `role` on a `div`
 /// (e.g. `<div role="slider">`, `<div role="list">`).
 pub fn resolve_semantic(
@@ -144,6 +148,7 @@ pub fn resolve_semantic(
         "span" => Some(SemanticKind::TextElement),
         "button" => Some(SemanticKind::Button),
         "img" => Some(SemanticKind::Image),
+        "a" => Some(SemanticKind::Link),
         "template" => Some(SemanticKind::Template),
         "slot" => Some(SemanticKind::Slot),
         _ if tag.contains('-') => Some(SemanticKind::CustomElement),
@@ -233,6 +238,19 @@ pub static TAGS: &[TagSpec] = &[
         void: true,
         structural_attrs: &[],
         content_attrs: &["src", "alt", "width", "height"],
+    },
+    TagSpec {
+        name: "a",
+        semantic: SemanticKind::Link,
+        display: DisplayDefault::Inline,
+        category: Category::Phrasing,
+        // 子内容收窄为 Phrasing，但 Link 专属检查（check_links）进一步只放行
+        // 文本与非 flex span——a-in-a / img-in-a 在那拒绝（值域比表更紧）。
+        content: ContentModel::Phrasing,
+        void: false,
+        structural_attrs: &[],
+        // href：opaque 链接目标（缺失/trim 空由 check_links 报 FenceLinkHrefRequired）。
+        content_attrs: &["href"],
     },
     TagSpec {
         name: "template",
@@ -360,10 +378,10 @@ mod tests {
 
     #[test]
     fn all_runtime_tags_present() {
-        let expected = ["div", "span", "button", "img", "template", "slot"];
+        let expected = ["div", "span", "button", "img", "a", "template", "slot"];
         // 被移除的标签现在应 not found：旧 block 文本标签 + 旧控件/列表标签。
         for removed in [
-            "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a", "input",
+            "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "input",
             "textarea", "select", "option", "progress", "ul", "li",
         ] {
             assert!(find_tag(removed).is_none(), "<{removed}> 应已从围栏移除");

@@ -957,6 +957,10 @@ impl Stage {
             if let Some(src) = &tn.src {
                 scene.image_srcs.insert(node_id, src.clone());
             }
+            // href（#74）：Link 节点的链接目标灌 side table（C# Link.Href 经 FFI 读）。
+            if let Some(href) = &tn.href {
+                scene.link_hrefs.insert(node_id, href.clone());
+            }
             // role/data-slot：从 TemplateNode 填 RoleTable（role-driven controls 地基）。
             // role 驱动语义分派，data-slot 标识控件视觉部件；运行时 find_child_by_role/slot 查表。
             // RoleTable::insert 自带空 info 过滤——无 role 且无 data-slot 的节点不入表，保持稀疏。

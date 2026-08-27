@@ -2,6 +2,7 @@
 //! Rust-internal（packager 写、runtime 读，C# 不解析）。
 //! 布局锁：同一 fixture 的打包字节哈希有 CI 门（packer `schema_lock.rs`）——
 //! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
+//! v46：TemplateNode 加 href 列（`<a>` 链接目标，#74）+ ResolvedStyle 加 text_decoration 字段。布局变，旧 v45 pkg 加载报 TooOld。
 //! v45：ResolvedStyle 加 white_space/overflow_wrap/word_break/text_wrap 四字段 + InheritedSet u16→u64（#73 换行控制全集，bincode 布局变）。旧 v44 pkg 加载报 TooOld。
 //! v44：KeyframeStop 加 layout/box-shadow 通道（width/height 域+值、flex_grow、box_shadow 列表，#10 layout 动画）。手编 keyframes 布局变，旧 v43 pkg 加载报 TooOld。
 //! v42：ResolvedStyle 加 line_height_px 字段（CSS line-height px 形双槽，#65 高度爆炸修复）。
@@ -48,9 +49,9 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
-pub const PKG_FORMAT_VERSION: u32 = 45; // v45: ResolvedStyle 加 wrap 四字段 + InheritedSet u64（#73 换行控制全集）。bincode 布局变，旧包拒绝。
-pub(crate) const MIN_VERSION: u32 = 45;
-pub(crate) const MAX_VERSION: u32 = 45;
+pub const PKG_FORMAT_VERSION: u32 = 46; // v46: TemplateNode 加 href（#74 `<a>`）+ ResolvedStyle 加 text_decoration。bincode 布局变，旧包拒绝。
+pub(crate) const MIN_VERSION: u32 = 46;
+pub(crate) const MAX_VERSION: u32 = 46;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
@@ -145,6 +146,9 @@ pub struct TemplateNode {
     pub tabindex: Option<i32>,
     pub content: Option<String>,
     pub src: Option<String>,
+    /// `<a>` 链接目标（#74，opaque 标识符，无 URI 语义）。仅 Link 节点有值；
+    /// fence 保证非空。instantiate 时灌进 `Scene.link_hrefs`。
+    pub href: Option<String>,
     /// 控件初始值（按 kind 分派；None = 非控件节点）。打包期 bridge 从 HTML 属性提取。
     pub control_init: Option<ControlInit>,
     /// WAI-ARIA role（"combobox"/"slider"/...）。None = 普通容器/叶子。role 驱动语义分派。
@@ -260,7 +264,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>, Vec<u8>)> =
         Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx, custom_tag_idx)
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx, custom_tag_idx, href_idx)
     let mut node_records: Vec<(
         i32,
         u8,
@@ -272,6 +276,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
         u8,
         i32,
         Vec<u8>,
+        u16,
         u16,
         u16,
         u16,
@@ -357,6 +362,12 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
                 .as_ref()
                 .map(|s| intern(s, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
+            // href（#74）：`<a>` 链接目标（同 role/data_slot 模式，NULL_IDX 表 None）。
+            let href_idx = tn
+                .href
+                .as_ref()
+                .map(|s| intern(s, &mut strings, &mut idx_of))
+                .unwrap_or(NULL_IDX);
             node_records.push((
                 parent_global,
                 kind_tag,
@@ -372,6 +383,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
                 data_slot_idx,
                 aria_controls_idx,
                 custom_tag_idx,
+                href_idx,
             ));
         }
         let node_count = nodes.len() as u32;
@@ -412,7 +424,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
     //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), control_init_len(u32)+control_init_blob,
-    //   role_idx(u16), data_slot_idx(u16), aria_controls_idx(u16), custom_tag_idx(u16)}
+    //   role_idx(u16), data_slot_idx(u16), aria_controls_idx(u16), custom_tag_idx(u16), href_idx(u16)}
     for (
         parent_idx,
         kind_tag,
@@ -428,6 +440,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
         data_slot_idx,
         aria_controls_idx,
         custom_tag_idx,
+        href_idx,
     ) in &node_records
     {
         out.extend_from_slice(&parent_idx.to_le_bytes());
@@ -449,6 +462,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
         out.extend_from_slice(&data_slot_idx.to_le_bytes());
         out.extend_from_slice(&aria_controls_idx.to_le_bytes());
         out.extend_from_slice(&custom_tag_idx.to_le_bytes());
+        out.extend_from_slice(&href_idx.to_le_bytes());
     }
     // PerComponentDynamicRules：每组件 dynamic_blob（同 ComponentTable 顺序）。read 按同序逐组件读。
     for (_, _, _, dynamic_blob, _) in &comp_records {
@@ -552,6 +566,8 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let data_slot_idx = r.u16("data_slot_idx")?;
         let aria_controls_idx = r.u16("aria_controls_idx")?;
         let custom_tag_idx = r.u16("custom_tag_idx")?;
+        // href（#74）：`<a>` 链接目标（同 role 模式，NULL_IDX 表 None）。
+        let href_idx = r.u16("href_idx")?;
         let role = if role_idx == NULL_IDX {
             None
         } else {
@@ -571,6 +587,11 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             None
         } else {
             Some(string_at(&strings, custom_tag_idx)?)
+        };
+        let href = if href_idx == NULL_IDX {
+            None
+        } else {
+            Some(string_at(&strings, href_idx)?)
         };
         // 存盘 parent_idx 是 NodeBlock 全局位置（-1=组件根）；先存全局，待切分组件时减 base 转局部
         let parent_global = if pidx < 0 { None } else { Some(pidx as usize) };
@@ -601,6 +622,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             style,
             content,
             src,
+            href,
             parent_idx: parent_global, // 临时存全局，下方切分时减 base
             classes,
             id_attr,

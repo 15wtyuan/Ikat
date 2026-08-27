@@ -839,6 +839,18 @@ public class ShowcaseRunner : MonoBehaviour
                         + " computed bg=" + bgHex;
                 };
             }
+            // lab #19 链接（#74）：Get<Link> + Clicked 把 href 写进读数 span——href 原样
+            // 回传（opaque 标识符，游戏自解释路由），点击命中细化到 a 节点（含嵌 span 文字）；
+            // 点击链接外普通文字不触发（读数不变即判据）。三个链接共用一个读数。
+            if (page.TryGet<Link>("link-shop", out var linkShop)
+                && page.TryGet<Link>("link-bag", out var linkBag)
+                && page.TryGet<Link>("link-quest", out var linkQuest)
+                && page.TryGet<TextElement>("link-readout", out var linkRead))
+            {
+                linkShop.Clicked += () => { linkRead.TextContent = linkShop.Href; Debug.Log("[Showcase] link -> " + linkShop.Href); };
+                linkBag.Clicked += () => { linkRead.TextContent = linkBag.Href; };
+                linkQuest.Clicked += () => { linkRead.TextContent = linkQuest.Href; };
+            }
         }
         if (pageName == "settings")
         {

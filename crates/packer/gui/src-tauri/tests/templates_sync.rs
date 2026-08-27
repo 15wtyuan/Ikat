@@ -52,7 +52,7 @@ fn runtime_and_shell_tag_lists_match_schema() {
         .join(", ");
     assert_eq!(
         runtime,
-        "`div`, `span`, `button`, `img`, `template`, `slot`"
+        "`div`, `span`, `button`, `img`, `a`, `template`, `slot`"
     );
     for (name, md) in [
         ("editor SKILL.md", EDITOR_SKILL_MD),

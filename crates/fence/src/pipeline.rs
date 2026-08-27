@@ -110,6 +110,15 @@ pub fn parse_template_with_css(
     let (rich_text_blocks, rich_diags) =
         classify_rich_text(&tree, &styles, &dynamic_rules, file, &line_map);
     diagnostics.extend(rich_diags);
+    // #74 `<a>` 专项检查（href 必填 / rich 上下文 / 子内容白名单）。须在 6.4 之后
+    //（消费 rich_text_blocks 产物判定合法上下文）。
+    diagnostics.extend(crate::rich_text_classify::check_links(
+        &tree,
+        &rich_text_blocks,
+        &dynamic_rules,
+        file,
+        &line_map,
+    ));
     // W4：rich 子树内行内元素的死尺寸声明（width/height 恒无效）。
     crate::rich_text_classify::warn_inline_sizing(
         &tree,

@@ -75,6 +75,16 @@ fn classify_child(
                     ChildRole::Inline
                 }
             }
+            // `<a>`（#74）：inline 级 run 候选（同 span 口径，含 flex 门控——声明
+            // display:flex 的 a 外层块级，算 Block 子）。
+            Some(SemanticKind::Link) => {
+                if span_declares_flex(el, single_compound_flex_rules, has_multi_compound_flex_rule)
+                {
+                    ChildRole::Block
+                } else {
+                    ChildRole::Inline
+                }
+            }
             _ => ChildRole::Block,
         },
         IrNodeKind::Comment(_) | IrNodeKind::Doctype { .. } => ChildRole::Neutral,
@@ -256,6 +266,128 @@ pub fn classify_rich_text(
     (rich, diagnostics)
 }
 
+/// #74 `<a>` 链接专项检查：href 必填、rich-text-block 上下文、子内容白名单。
+///
+/// `<a>` 的折叠渲染模型（子树折进父 inline flow，runs 烙 link_id/source=a）只在
+/// rich-text-block 上下文成立，故三项都在打包期显式拒绝（不静默降级成普通 span）：
+///
+/// 1. **href**：缺失或 trim 后为空 → `FenceLinkHrefRequired`。href 是链接的身份
+///    标识（opaque 字符串，无 URI 解析语义），空链接是不可交互的死元素。
+/// 2. **上下文**：直接父必须是「非 flex 的 TextElement（span 自身就是 rich 候选）」
+///    或 `rich_text_blocks` 集合内的容器（a 是其 inline 子）。其余（flex 容器 /
+///    裸 block 容器 / slot / template / 链接内链接）→ `FenceLinkOutsideRich`。
+///    只查直接父即足够：合法上下文经 rich 容器或 span 逐层嵌套，合法性必然在
+///    直接父 manifested；a-in-a 的诊断归 3（外层报 `FenceLinkInvalidChild`），
+///    内层 a 跳过上下文报错避免双报。
+/// 3. **子内容**：直接子元素只许非 flex TextElement（span）；`<a>`/`<img>`/其它
+///    元素 → `FenceLinkInvalidChild`（文案点名 a-in-a 与 img-in-a 两种写法）。
+///
+/// 须在 `classify_rich_text` 之后跑（消费其 `rich_text_blocks` 产物）。
+pub(crate) fn check_links(
+    tree: &IrTree,
+    rich_text_blocks: &[usize],
+    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
+    file: &str,
+    line_map: &LineMap,
+) -> Vec<Diagnostic> {
+    let (single_compound_flex_rules, has_multi_compound_flex_rule) =
+        collect_flex_class_rules(dynamic_rules);
+    let mut diagnostics = Vec::new();
+    for node in tree.nodes.iter() {
+        let IrNodeKind::Element(el) = &node.kind else {
+            continue;
+        };
+        if el.semantic != Some(SemanticKind::Link) {
+            continue;
+        }
+
+        // 1. href 必填且非空白（opaque 标识符；trim 后空等同缺失）。
+        let href_ok = el
+            .attributes
+            .iter()
+            .find(|a| a.name == "href")
+            .is_some_and(|a| !a.value.trim().is_empty());
+        if !href_ok {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceLinkHrefRequired,
+                "<a> requires a non-empty href attribute (opaque link id; no URI \
+                 semantics). An <a> without href is a dead element that can never \
+                 raise a link event — write the target id, e.g. <a href=\"open-shop\">"
+                    .to_string(),
+                line_map.source_location(node.span.start, file.to_string()),
+            ));
+        }
+
+        // 2. 上下文：直接父 = 非 flex TextElement 或 rich_text_blocks 容器。
+        //    a-in-a 跳过（外层已报 FenceLinkInvalidChild，避免双报）；根级 a
+        //    （无父，不在任何 rich 上下文）照报。
+        let outside = match node.parent {
+            None => true,
+            Some(parent_id) => {
+                let parent = &tree.nodes[parent_id.0];
+                let parent_legal = match &parent.kind {
+                    IrNodeKind::Element(pel) => {
+                        (matches!(pel.semantic, Some(SemanticKind::TextElement))
+                            && !span_declares_flex(
+                                pel,
+                                &single_compound_flex_rules,
+                                has_multi_compound_flex_rule,
+                            ))
+                            || rich_text_blocks.contains(&parent_id.0)
+                    }
+                    _ => false,
+                };
+                // a-in-a：内层 a 的父是 Link → 上下文错误跳过（外层的子检查已报）。
+                !parent_legal
+                    && !matches!(
+                        &parent.kind,
+                        IrNodeKind::Element(p) if p.semantic == Some(SemanticKind::Link)
+                    )
+            }
+        };
+        if outside {
+            diagnostics.push(Diagnostic::error(
+                DiagnosticCode::FenceLinkOutsideRich,
+                "<a> is only valid inside a rich-text-block context (a block \
+                 container whose direct children are all inline: text/span/img, or a \
+                 non-flex <span>). LoomGUI folds the <a> subtree into the parent's \
+                 inline flow there; anywhere else it renders as a plain block child \
+                 and raises no link semantics. Fix: move the <a> into a block \
+                 container holding only inline children"
+                    .to_string(),
+                line_map.source_location(node.span.start, file.to_string()),
+            ));
+        }
+
+        // 3. 子内容白名单：直接子元素只许非 flex span；TextNode 天然合法。
+        for child in &node.children {
+            let IrNodeKind::Element(cel) = &tree.nodes[child.0].kind else {
+                continue; // TextNode 合法（链接文字）。
+            };
+            let legal_span = matches!(cel.semantic, Some(SemanticKind::TextElement))
+                && !span_declares_flex(
+                    cel,
+                    &single_compound_flex_rules,
+                    has_multi_compound_flex_rule,
+                );
+            if !legal_span {
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceLinkInvalidChild,
+                    format!(
+                        "<{}> is not allowed inside <a> — links are text-level: nest only \
+                         text and non-flex <span>. Nested links (<a><a>) and image links \
+                         (<a><img>) are both rejected; the hit model resolves link runs to \
+                         the <a> node and only defines text runs",
+                        cel.tag
+                    ),
+                    line_map.source_location(tree.nodes[child.0].span.start, file.to_string()),
+                ));
+            }
+        }
+    }
+    diagnostics
+}
+
 /// 尺寸声明族（W4 死尺寸判定）。
 const SIZING_PROPS: &[&str] = &[
     "width",
@@ -265,7 +397,6 @@ const SIZING_PROPS: &[&str] = &[
     "max-width",
     "max-height",
 ];
-
 /// 单 compound class 规则中声明了尺寸的集合（W4 用，模式同 collect_flex_class_rules）。
 fn collect_sizing_class_rules(
     dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
@@ -512,5 +643,116 @@ mod tests {
             "div 包 slot 合法: {:?}",
             div_ok.diagnostics
         );
+    }
+
+    /// #74 合法路径：`<div>看<a href="open-shop">商店</a></div>` 无 error，
+    /// 且父 div 分类进 rich_text_blocks（a 是 inline 子）。
+    #[test]
+    fn link_in_rich_block_is_legal() {
+        let out = parse_template(r#"<div>看<a href="open-shop">商店</a></div>"#, "t.html");
+        assert!(
+            out.diagnostics.is_empty(),
+            "合法链接不应报错: {:?}",
+            out.diagnostics
+        );
+        let root = out.tree.roots[0].0;
+        assert!(
+            out.rich_text_blocks.contains(&root),
+            "含 a 的全 inline 容器应分类进 rich_text_blocks"
+        );
+        // 链接内嵌 span（非 flex）同样合法。
+        let nested = parse_template(
+            r#"<div>看<a href="x">商<span>店</span></a></div>"#,
+            "t.html",
+        );
+        assert!(
+            nested.diagnostics.is_empty(),
+            "a 内嵌非 flex span 合法: {:?}",
+            nested.diagnostics
+        );
+    }
+
+    /// #74：href 缺失 / trim 空 → FenceLinkHrefRequired。
+    #[test]
+    fn link_missing_or_blank_href_errors() {
+        for html in [
+            r#"<div>看<a>商店</a></div>"#,
+            r#"<div>看<a href="">商店</a></div>"#,
+            r#"<div>看<a href="   ">商店</a></div>"#,
+        ] {
+            let out = parse_template(html, "t.html");
+            assert!(
+                out.diagnostics
+                    .iter()
+                    .any(|d| d.code == DiagnosticCode::FenceLinkHrefRequired),
+                "缺/空 href 应报 FenceLinkHrefRequired（{html}）: {:?}",
+                out.diagnostics
+            );
+        }
+    }
+
+    /// #74：rich 上下文之外（flex 容器 / 裸 block 容器内与 block 子混排）→
+    /// FenceLinkOutsideRich。
+    #[test]
+    fn link_outside_rich_errors() {
+        // flex 容器：子是 flex item，不折叠 inline flow。
+        let flex = parse_template(
+            r#"<div style="display:flex"><a href="x">商店</a></div>"#,
+            "t.html",
+        );
+        assert!(
+            flex.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceLinkOutsideRich),
+            "flex 容器里的 a 应报 FenceLinkOutsideRich: {:?}",
+            flex.diagnostics
+        );
+        // mixed 容器（a + div 子）：父不进 rich_text_blocks → a 无合法上下文。
+        let mixed = parse_template(r#"<div><a href="x">商店</a><div>块</div></div>"#, "t.html");
+        assert!(
+            mixed
+                .diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceLinkOutsideRich),
+            "mixed 容器里的 a 应报 FenceLinkOutsideRich: {:?}",
+            mixed.diagnostics
+        );
+        // 文档根级 a（无父）。
+        let root = parse_template(r#"<a href="x">孤立链接</a>"#, "t.html");
+        assert!(
+            root.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::FenceLinkOutsideRich),
+            "根级 a 应报 FenceLinkOutsideRich: {:?}",
+            root.diagnostics
+        );
+    }
+
+    /// #74：子内容白名单——a-in-a / img-in-a / 其它元素子 → FenceLinkInvalidChild
+    ///（文案点名两种写法）。
+    #[test]
+    fn link_invalid_children_error() {
+        for html in [
+            r#"<div>看<a href="a"><a href="b">双层</a></a></div>"#,
+            r#"<div>看<a href="x"><img src="i.png"></a></div>"#,
+            r#"<div>看<a href="x"><button>按钮</button></a></div>"#,
+        ] {
+            let out = parse_template(html, "t.html");
+            let d = out
+                .diagnostics
+                .iter()
+                .find(|d| d.code == DiagnosticCode::FenceLinkInvalidChild)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "非法子应报 FenceLinkInvalidChild（{html}）: {:?}",
+                        out.diagnostics
+                    )
+                });
+            assert!(
+                d.message.contains("<a><a>") && d.message.contains("<a><img>"),
+                "报错文案须点名 a-in-a 与 img-in-a 写法: {}",
+                d.message
+            );
+        }
     }
 }

@@ -36,5 +36,6 @@ namespace LoomGUI
         // 显式跳号（而非隐式连号）保 C# 判别值与 Rust #[repr(u8)] 一一对应，防后续插变体错位。
         TabList = 19,
         Tab     = 20,
+        Link    = 21,
     }
 }

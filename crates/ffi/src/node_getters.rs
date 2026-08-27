@@ -494,6 +494,58 @@ pub extern "C" fn loomgui_stage_get_node_id_attr(
     })
 }
 
+/// 读 `<a>` 节点的 href（#74 链接目标，opaque 字符串；C# Link 事件处理按它路由）。
+/// 双调法同 [`loomgui_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；
+/// 不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene / 死节点 → rc=-1
+///（*out_len 置 0）。非 Link 节点或 link_hrefs 无条目 → rc=1（区别于 -1 的句柄错误：
+/// 调用方拿 1 判「不是链接」，拿 -1 判「参数/场景错误」）。href 由 instantiate 从
+/// pkg TemplateNode 灌入 `Scene.link_hrefs`（围栏保证非空）。
+#[no_mangle]
+pub extern "C" fn loomgui_stage_get_link_href(
+    h: *const StageHandle,
+    node_id: u64,
+    out: *mut u8,
+    buf_cap: usize,
+    out_len: *mut usize,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out_len.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            unsafe { *out_len = 0 };
+            return -1;
+        };
+        // 先判节点存在（-1）再判是否 Link/有条目（1）——错误码分层见函数文档。
+        let Some(node) = scene.get(NodeId(node_id)) else {
+            unsafe { *out_len = 0 };
+            return -1;
+        };
+        if node.kind != loomgui_core::scene::NodeKind::Link {
+            unsafe { *out_len = 0 };
+            return 1;
+        }
+        let Some(href) = scene.link_hrefs.get(&NodeId(node_id)) else {
+            unsafe { *out_len = 0 };
+            return 1;
+        };
+        let value = href.as_bytes();
+        let needed = value.len();
+        unsafe { *out_len = needed };
+        if needed > buf_cap {
+            return -2;
+        }
+        if needed > 0 {
+            if out.is_null() {
+                return -2;
+            }
+            unsafe { std::ptr::copy_nonoverlapping(value.as_ptr(), out, needed) };
+        }
+        0
+    })
+}
+
 /// 读节点 computed opacity（rematch 后 style.opacity，与渲染/命中同源）。
 /// 调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
 /// rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。

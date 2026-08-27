@@ -46,6 +46,7 @@ pub fn kind_to_html_tag(k: NodeKind) -> &'static str {
         NodeKind::Template => "template",
         NodeKind::TabList => "div",
         NodeKind::Tab => "button",
+        NodeKind::Link => "a",
     }
 }
 
@@ -82,6 +83,7 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::Template => ("template", "Template".into()),
             NodeKind::TabList => ("div", "TabList".into()),
             NodeKind::Tab => ("button", "Tab".into()),
+            NodeKind::Link => ("a", "Link".into()),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n
@@ -333,6 +335,7 @@ fn kind_tag(k: NodeKind) -> &'static str {
         NodeKind::CustomElement => "div",
         NodeKind::Template => "template",
         NodeKind::TabList => "div",
+        NodeKind::Link => "a",
     }
 }
 

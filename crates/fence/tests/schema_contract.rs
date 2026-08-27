@@ -2,15 +2,15 @@ use loomgui_fence::schema::attr::is_global_attr;
 use loomgui_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
 use loomgui_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
 
-/// The 6 runtime fence tags (div/span/button/img/template/slot). Controls and
+/// The 7 runtime fence tags (div/span/button/img/a/template/slot). Controls and
 /// lists have no dedicated tag -- authors express them with `role` on a `div`.
 #[test]
-fn all_6_runtime_tags_have_specs() {
-    let tags = ["div", "span", "button", "img", "template", "slot"];
+fn all_runtime_tags_have_specs() {
+    let tags = ["div", "span", "button", "img", "a", "template", "slot"];
     for t in tags {
         assert!(find_tag(t).is_some(), "<{t}> must be in TAGS");
     }
-    assert_eq!(tags.len(), 6);
+    assert_eq!(tags.len(), 7);
 }
 
 /// The 8 document-shell tags (html/head/body/title/meta/style/link/script).
@@ -37,7 +37,7 @@ fn shell_tags_are_eight() {
 fn removed_tags_rejected() {
     for removed in [
         // old block/text tags (retired earlier)
-        "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label", "a",
+        "p", "header", "nav", "ol", "canvas", "strong", "em", "br", "label",
         // control/list tags retired in favour of `role`
         "input", "textarea", "select", "option", "progress", "ul", "li",
     ] {

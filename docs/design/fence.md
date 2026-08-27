@@ -60,7 +60,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `<link rel="stylesheet">` 的 href | 相对所在 HTML 文件 |
 | CSS 内 `url()`（如 background-image） | 内联 `<style>` 相对所在 HTML 文件；外部 CSS 相对**该 CSS 文件**（打包期改写成等价的 HTML 相对路径后统一归一） |
 
-### 2.2 运行时标签（6 个）
+### 2.2 运行时标签（7 个）
 
 下表是完整的运行时标签注册表。控件与列表没有专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（spec §2.2），如 `<div role="slider">`、`<div role="list">`。列含义：
 
@@ -75,6 +75,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `span` | TextElement | Inline | Phrasing | Phrasing | |
 | `button` | Button | Inline | Phrasing | Flow | |
 | `img` | Image | Inline | Void | None | ✓ |
+| `a` | Link | Inline | Phrasing | Phrasing | |
 | `template` | Template | None | Phrasing | Flow | |
 | `slot` | Slot | Inline | Transparent | Transparent | |
 
@@ -82,6 +83,14 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 - **`<slot>` 在模板结构校验里按块级对待**（阶段 6.4 的混排检查）：slot 不与文本/`span` 混排在同一块容器的直接子里。slot 的 fallback 文本放进投影内容（使用处给子），或让 slot 与文本分属不同容器；`<span>` 只包 slot 不夹文本是合法包装。根因是 rich-text inline flow 标志在打包期烘焙，模板期无法预知投影进来的内容是行内还是块级，保守判定防止标志烘错。
 - **没有 `<br>`**：多行文案拆多个块级容器。围栏刻意不做文本内换行标签——一切换行都是结构。
+
+**`<a>`（Link，#74）三条围栏规则**——富文本内链接，折叠渲染模型（子树折进父 rich inline flow）只在 rich 上下文成立，故全部打包期拦截（不静默降级成普通 span）：
+
+1. **仅 rich-text-block 上下文合法**：直接父须是非 flex 的 `span`（span 自身是 rich 候选）或 rich-text-block 容器；flex 容器 / 裸 block 容器 / `slot` / `template` 里出现 → `FenceLinkOutsideRich`。
+2. **`href` 必填非空**：缺失或 trim 后为空 → `FenceLinkHrefRequired`。href 是 opaque 标识符（无 URI 解析语义，框架不解析不 OpenURL，原样回传给游戏），空链接是不可交互的死元素。
+3. **子内容只许文本与嵌 `<span>`**：`img-in-a`、`a-in-a` 及其它元素子 → `FenceLinkInvalidChild`。
+
+`<a>` 打包期烙 UA 默认样式：蓝（#0000EE）+ 下划线，作者 CSS 可覆盖（含 `:hover` 等伪类）。键盘聚焦/Enter 激活 deferred 至键盘导航项。运行时点击走既有 `Clicked` 语义事件、`Href` 只读回传（公共 API 见 public-api.md §7.1）。
 
 ### 2.3 控件与列表：role 驱动
 
@@ -279,6 +288,8 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 **文本**
 
 `color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）
+
+- `text-decoration`（**不继承**，#74）：值集 `none` / `underline`（`line-through`/`overline` 围栏拒绝）。作用于 rich inline 流的 run——`span`/`a` 声明均可；`<a>` 打包期烙 UA 默认 `underline`，作者声明覆盖。
 
 **换行控制**（#73，均继承）
 
@@ -530,6 +541,9 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `FenceInlineElementInBlockContext` | inline 布局 box（button/img）裸放在 block 容器里（非 flex）；LoomGUI 无 flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
 | `FenceMixedInlineBlock` | `display:block` 容器（非 flex）的直接子既有 inline 级（text/span/img）又有 block 级（div/控件/template）；rich-text inline flow 要求全 inline，混合不可定义。详见阶段 6.4 |
 | `FenceSlotInInlineContext` | `<slot>` 位于无显式 `display:flex` 的 span 内。投影进 slot 的 light 子落在 inline 上下文，块级子被折进 rich inline 流（挤成一行/隐身）或按 flex-row hack 横排，无法按自身 display 参与宿主布局；slot 须放在 div 或显式 flex 的 span 里。详见阶段 6.4 |
+| `FenceLinkHrefRequired` | `<a>` 缺 `href` 或值为空白（#74）。href 是链接身份标识（opaque，无 URI 解析语义），空链接是不可交互的死元素。详见 §2.2 `<a>` 规则 |
+| `FenceLinkOutsideRich` | `<a>` 出现在 rich-text-block 上下文之外（flex 容器 / 裸 block 容器 / `slot` / `template`）（#74）。a 的折叠渲染模型只在 rich inline flow 成立。详见 §2.2 `<a>` 规则 |
+| `FenceLinkInvalidChild` | `<a>` 的子元素不是文本/嵌 `span`（`img-in-a`、`a-in-a` 等）（#74）。详见 §2.2 `<a>` 规则 |
 | `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
 | `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
@@ -574,7 +588,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 围栏的所有规则以 `crates/fence/src/schema/` 下的 Rust const 表为唯一真相源：
 
-- `tag.rs` → `TAGS`（6 运行时标签注册表）+ `SHELL_TAGS`（8 壳标签）
+- `tag.rs` → `TAGS`（7 运行时标签注册表）+ `SHELL_TAGS`（8 壳标签）
 - `attr.rs` → 全局属性、结构属性、内容属性定义
 - `css.rs` → `CSS_PROPS`（属性白名单）+ `CSS_SHORTHANDS`（简写展开）
 
