@@ -77,6 +77,14 @@ Shorthands (expand to the properties above):
   `%` are build errors). A bare unitless number is a **multiplier**, not
   pixels — `line-height: 26` at `font-size: 16` gives a 416px line; write
   `26px` for pixel line height.
+- `white-space` (whitespace folding pitfall): under `normal` / `nowrap`
+  / `pre-line`, runs of spaces and **source-code newlines** in static
+  text collapse to a single space (browser semantics) — a multi-line
+  HTML text block renders as one flowed paragraph, not line breaks.
+  To preserve formatting use `pre-wrap` (keep spaces + newlines, wrap)
+  or `pre-line` (collapse spaces, keep newlines); `pre` also disables
+  wrapping. CJK text line-breaks with kinsoku (no line-start
+  punctuation / line-end opening brackets) automatically.
 - `position`: `absolute` / `relative` / `static` — `fixed` and `sticky` are build
   errors.
 - `z-index`: integer only, no `auto`.

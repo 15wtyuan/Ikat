@@ -527,12 +527,18 @@ public readonly struct TextMetrics {
 - **`MeasureText` is node-free pre-layout measurement** (tips line
   breaking, floating-text width, auto-width buttons — no hand-counted
   "N chars per line" constants). It runs the same wrapping code the
-  solver uses, so the prediction is what renders: `maxWidth > 0` wraps
-  greedily at that width; `maxWidth <= 0` (default) measures one line.
-  Line height = `normal`, letter-spacing 0, regular weight (matches
-  default-styled text nodes). `fontFamily` must be a registered family
-  (`LoomHost.RegisterFont` / runtime manifest) — unknown family throws
-  `UIContractException` instead of silently falling back to the default
+  solver uses (default wrap mode = `white-space: normal`), so the
+  prediction is what renders: `maxWidth > 0` wraps greedily at that
+  width; `maxWidth <= 0` (default) measures one line. An unbreakable
+  word wider than `maxWidth` does **not** split — it returns one line
+  with `W > maxWidth` (browser `overflow-wrap: normal` semantics); a
+  page that must split such words declares `overflow-wrap:
+  break-word` in CSS, and the node then wraps wider than this
+  default-mode prediction. Line height = `normal`, letter-spacing 0,
+  regular weight (matches default-styled text nodes). `fontFamily`
+  must be a registered family (`LoomHost.RegisterFont` / runtime
+  manifest) — unknown family throws `UIContractException` instead of
+  silently falling back to the default
   font (measuring with the wrong font is worse than not measuring).
 - `LoadPackage`/`Instantiate` are synchronous (fetch bytes async
   yourself). Duplicate `LoadPackage` with the same name throws
