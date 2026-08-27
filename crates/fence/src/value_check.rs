@@ -9,7 +9,7 @@
 //! 函数白名单与 core `style::mapping` 同步（parse_filter / func_to_matrix）；漂移由
 //! fence 测试（doc_schema_sync 同目录）锁：改 core 白名单必须同步本表。
 
-use crate::schema::css::{find_css_prop, CssValueParser};
+use crate::schema::css::{find_css_prop, find_shorthand, CssValueParser, ShorthandKind};
 
 /// `filter` 运行时实现的函数集（core mapping::parse_filter）。
 const FILTER_FNS: &[&str] = &[
@@ -37,7 +37,14 @@ const TRANSFORM_FNS: &[&str] = &[
 /// prop 未注册返回 None（unknown-prop 门由调用方负责）。覆盖宽松吞值通道
 /// （Color/Overflow/Filter/Transform）+ BoxShadow 层数硬限（超过合成 node_id
 /// 编码容量的层静默错渲染，委托 core parser 拒收）；Keyword 域走 [`keyword_error`]。
+/// 长度域（Length/LengthPercent/LengthPercentAuto/BorderRadius）与 Box 型
+/// shorthand（padding/margin）见 [`length_family_error`]——core 对裸数字当 px
+/// 宽容、浏览器整条丢弃，属「运行时合法、浏览器无效」的 preview↔运行时分歧，
+/// 同门拦截（#95 skill-slot 实证：`padding: 14px 6 16px 6` 曾零警告过检）。
 pub fn value_error(prop: &str, value: &str) -> Option<String> {
+    if let Some(msg) = length_family_error(prop, value) {
+        return Some(msg);
+    }
     // shorthand 域映射：overflow 简写（Replicate 到 -x/-y）值域与 longhand 同集。
     let parser = find_css_prop(prop).map(|s| &s.parser).or(match prop {
         "overflow" => Some(&CssValueParser::Overflow),
@@ -170,6 +177,133 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
     }
 }
 
+/// 长度域 token 的浏览器口径判定：非零长度必须带单位（CSS 仅 `0` 可裸写），
+/// 单位集按域开放（见 [`length_domain`]）。core 的 parse_lp/parse_four/
+/// parse_radius_group 对裸数字一律当 px（运行时生效）——浏览器则整条丢弃，
+/// 预览与运行时就此分叉，此处按浏览器口径拦。后缀大小写敏感（对齐 core 解析：
+/// `8PX` core 也丢，放行会制造反向分歧）。
+fn bad_length_token(token: &str, units: &[&str], allow_auto: bool) -> bool {
+    let t = token.trim();
+    if t == "0" {
+        return false;
+    }
+    if allow_auto && t == "auto" {
+        return false;
+    }
+    for u in units {
+        if let Some(num) = t.strip_suffix(u) {
+            return num.trim().parse::<f32>().is_err();
+        }
+    }
+    true
+}
+
+/// 各长度 parser 的合法单位 + auto 开放度（与 core 通道一一对应：视口单位只接
+/// 尺寸族/inset/margin——恰好就是 LengthPercentAuto 的全部属性；padding/gap/
+/// font-size/letter-spacing 是 px-only；border-radius 收 px/%）。
+fn length_domain(parser: &CssValueParser) -> Option<(&'static [&'static str], bool)> {
+    const PX: &[&str] = &["px"];
+    const PX_PCT: &[&str] = &["px", "%"];
+    const SIZE_UNITS: &[&str] = &["px", "%", "vw", "vh", "vmin", "vmax"];
+    match parser {
+        CssValueParser::Length => Some((PX, false)),
+        CssValueParser::LengthPercent => Some((PX_PCT, false)),
+        CssValueParser::LengthPercentAuto => Some((SIZE_UNITS, true)),
+        _ => None,
+    }
+}
+
+fn length_form_hint(units: &[&str], allow_auto: bool) -> String {
+    let mut s = String::from("write <n>");
+    s.push_str(&units.join("/"));
+    s.push_str(" — only 0 may be unitless");
+    if allow_auto {
+        s.push_str(", auto allowed");
+    }
+    s.push_str(
+        "; browsers drop unitless declarations while the runtime reads bare \
+         numbers as px, so preview and runtime diverge",
+    );
+    s
+}
+
+/// 长度族值域门：Length/LengthPercent/LengthPercentAuto longhand（单 token）+
+/// BorderRadius（`/` 分组 × 1-4 token）+ Box 型 shorthand（padding/margin，
+/// 1-4 token，域取首个 longhand）。返回 None = 非本族或合法。
+fn length_family_error(prop: &str, value: &str) -> Option<String> {
+    let value = value.trim();
+    if let Some(spec) = find_css_prop(prop) {
+        let (units, allow_auto, multi) = match &spec.parser {
+            CssValueParser::BorderRadius => (&["px", "%"] as &[&str], false, true),
+            p => {
+                let (units, allow_auto) = length_domain(p)?;
+                (units, allow_auto, false)
+            }
+        };
+        if multi {
+            // border-radius：`<len>{1,4} [ / <len>{1,4} ]?`——core parse_radius_group
+            // 同形（auto/inherit 拒、px/% 收、裸数字收）。
+            for group in value.split('/') {
+                let toks: Vec<&str> = group.split_whitespace().collect();
+                if toks.is_empty() || toks.len() > 4 {
+                    return Some(format!(
+                        "value \"{value}\" is not valid for CSS property \"{prop}\" \
+                         (1-4 lengths per side group, e.g. 8px or 8px 16px / 4px)"
+                    ));
+                }
+                if let Some(t) = toks.iter().find(|t| bad_length_token(t, units, allow_auto)) {
+                    return Some(format!(
+                        "value \"{value}\" is not valid for CSS property \"{prop}\" — \
+                         component \"{t}\" ({})",
+                        length_form_hint(units, allow_auto)
+                    ));
+                }
+            }
+            return None;
+        }
+        // longhand 单 token：多 token 是浏览器无效声明，而 core 的 parse_four 只取
+        // 首值（`padding-top: 4px 8px` 运行时当 4px）——同样拦。
+        if value.split_whitespace().nth(1).is_some() {
+            return Some(format!(
+                "value \"{value}\" is not valid for CSS property \"{prop}\" \
+                 (single value expected — got multiple tokens)"
+            ));
+        }
+        let tok = value;
+        if bad_length_token(tok, units, allow_auto) {
+            return Some(format!(
+                "value \"{value}\" is not valid for CSS property \"{prop}\" — {}",
+                length_form_hint(units, allow_auto)
+            ));
+        }
+        return None;
+    }
+    // Box 型 shorthand：域取首个 longhand 的 parser（border-width 的 expands_to 为
+    // 空、混合域 shorthand（border/background 等）不在此门——多域逐项门另立）。
+    let spec = find_shorthand(prop)?;
+    if !matches!(spec.kind, ShorthandKind::Box) {
+        return None;
+    }
+    let first = spec.expands_to.first()?;
+    let (units, allow_auto) = length_domain(&find_css_prop(first)?.parser)?;
+    let toks: Vec<&str> = value.split_whitespace().collect();
+    if toks.is_empty() || toks.len() > 4 {
+        return Some(format!(
+            "value \"{value}\" is not valid for CSS shorthand \"{prop}\" \
+             (1-4 space-separated sides)"
+        ));
+    }
+    toks.iter()
+        .find(|t| bad_length_token(t, units, allow_auto))
+        .map(|t| {
+            format!(
+                "value \"{value}\" is not valid for CSS shorthand \"{prop}\" — \
+                 component \"{t}\" ({})",
+                length_form_hint(units, allow_auto)
+            )
+        })
+}
+
 /// Keyword 值域（`<style>` 规则路径此前不校验）。`display: inline` 豁免硬错——
 /// 它是围栏有意收进的关键字（运行时按 flex 处理），由 [`display_inline_warning`]
 /// 出语义警告，不拦打包。
@@ -292,6 +426,43 @@ mod tests {
         assert!(value_error("color", "transparent").is_none());
         assert!(value_error("background-color", "#ff0000").is_none());
         assert!(value_error("background-color", "rgba(160, 58, 42, 0.25)").is_none());
+    }
+
+    #[test]
+    fn length_family_unitless_rejected() {
+        // #95 skill-slot 实证：core 对裸数字当 px、浏览器整条丢弃——预览与运行时
+        // 分叉，统一 FenceBadCssValue。shorthand 与 longhand 同门。
+        assert!(value_error("padding", "14px 6 16px 6").is_some());
+        assert!(value_error("padding", "6").is_some());
+        assert!(value_error("padding-top", "6").is_some());
+        assert!(value_error("margin", "4 8").is_some());
+        // 合法面：带单位 / 裸 0 / auto / 视口单位（尺寸族·inset·margin 通道）/ %。
+        assert!(value_error("padding", "4px 8px").is_none());
+        assert!(value_error("padding-top", "0").is_none());
+        assert!(value_error("margin", "0 auto").is_none());
+        assert!(value_error("width", "80vw").is_none());
+        assert!(value_error("height", "100vh").is_none());
+        assert!(value_error("top", "2vmin").is_none());
+        assert!(value_error("width", "50%").is_none());
+        assert!(value_error("width", "auto").is_none());
+        // 域外单位：padding/gap 是 px-only（core parse_four 非 px 即拒）。
+        assert!(value_error("padding", "4%").is_some());
+        assert!(value_error("gap", "8vw").is_some());
+        assert!(value_error("font-size", "1.2em").is_some());
+        // longhand 多 token：浏览器无效、core 只取首值——拦。
+        assert!(value_error("padding-top", "4px 8px").is_some());
+        // 5 边 box 形态非法。
+        assert!(value_error("padding", "1px 2px 3px 4px 5px").is_some());
+    }
+
+    #[test]
+    fn border_radius_forms() {
+        assert!(value_error("border-radius", "8px").is_none());
+        assert!(value_error("border-radius", "8px 16px / 4px").is_none());
+        assert!(value_error("border-radius", "50%").is_none());
+        assert!(value_error("border-radius", "8").is_some());
+        assert!(value_error("border-radius", "8px 16px 4px 2px 1px").is_some());
+        assert!(value_error("border-radius", "8px / ").is_some());
     }
 
     #[test]

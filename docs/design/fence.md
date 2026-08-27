@@ -357,6 +357,8 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 关键字值校验在 `css_resolve` 阶段进行。非关键字值由 `apply_decl` 的值解析逻辑处理，解析失败也产生 `FenceBadCssValue` diagnostic。
 
+**长度形态门（单位强制）**：长度族声明（`Length`/`LengthPercent`/`LengthPercentAuto`/`BorderRadius` 属性 + `padding`/`margin` Box 简写）打包期逐 token 校验单位——**非零长度必须带单位，仅 `0` 可裸写**（`FenceBadCssValue`）。理由：core 的 `parse_four`/`parse_lp` 对裸数字一律当 px（运行时生效），浏览器则整条丢弃——`padding: 14px 6 16px 6` 这类声明预览与运行时静默分叉（#95 skill-slot 实证）。单位集按域开放（与 core 通道一致，见上表 Viewport 行）：px-only 通道收 `px`；尺寸族/inset/margin 收 `px`/`%`/视口单位/`auto`；border-radius 收 `px`/`%`。longhand 只收单值（多 token 浏览器无效、core 只取首值）。**注意**：`em` 全域不在围栏（core `parse_px` 不收）——浏览器生效、运行时丢弃的反向分歧同样拦（showcase 曾用 `letter-spacing:-0.02em` 实证，已换算 px）。
+
 **缓动函数全集**（真相源 = core 的 `parse_ease`/`css_ease_keyword`，fence/core 共用同一解析器防漂移）。
 
 - **CSS 标准**：`linear` / `ease` / `ease-in` / `ease-out` / `ease-in-out`（映射到 CSS Easing Functions L1 的**精确 bezier 等价**——早期 Quad/Cubic 幂函数近似已废除，缺省 timing = `ease`）；`cubic-bezier(x1,y1,x2,y2)`（x∈[0,1] 约束，y 可越界表 overshoot）；`step-start` / `step-end`（单步 steps；`steps(n,…)` 多步形不收）。

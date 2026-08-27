@@ -35,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   #96 同批归因为 #95 家族（组件模板根类规则失配）并顺带补上宿主**静态** class
   的初始镜像（原 MutationObserver 只看后续变更，HTML 写死的 `class="sub"` 类
   宿主链静态命中语义在预览里缺失）。
+- **check 长度形态门（#95 评论区请求）**：长度族声明（`Length`/
+  `LengthPercent`/`LengthPercentAuto`/`BorderRadius` 属性 + `padding`/`margin`
+  简写）打包期逐 token 校验单位——非零长度必须带单位，仅 `0` 可裸写。此前
+  `padding: 14px 6 16px 6` 一类声明零警告过检：core 对裸数字当 px（运行时
+  生效）、浏览器整条丢弃，预览与运行时静默分叉。单位集按域开放（px-only
+  通道收 px；尺寸族/inset/margin 收 px/%/视口单位/auto；border-radius 收
+  px/%）；longhand 只收单值（多 token 浏览器无效、core 只取首值）。`em` 全域
+  不在围栏（core `parse_px` 不收、浏览器收的反向分歧同样拦）——showcase
+  home 页 4 处 `letter-spacing` em 已按 font-size 换算 px（此前预览有字距、
+  运行时无的活分歧）。
 - **消费侧文档漂移门 + 补漏**：新增 `consumer_doc_sync` 测试把 fence 的
   doc↔schema 交叉校验延伸到随 scaffold 分发的模板文档（fence-schema.md 标签表
   双向精确集 + css-reference.md 属性全量覆盖）。首跑抓到两处存量漂移并已修：
