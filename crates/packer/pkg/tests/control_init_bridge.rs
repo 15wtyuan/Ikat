@@ -5,9 +5,9 @@
 //! pkg.bin 存活到运行时 instantiate。控件一律 role 驱动，初始值放在
 //! ARIA（aria-valuenow/aria-checked/...）或 data-*（data-step/data-name）属性里。
 
-use loomgui_core::asset::{ControlInit, TemplateNode};
-use loomgui_core::scene::NodeKind;
-use loomgui_pkg::bridge::bridge;
+use ikat_core::asset::{ControlInit, TemplateNode};
+use ikat_core::scene::NodeKind;
+use ikat_pkg::bridge::bridge;
 
 /// fence parse → bridge → 节点列表。单根契约下 [0] 即根元素。
 /// 断言 diagnostics 为空（parse 干净），否则 bridge 行为无意义。
@@ -19,7 +19,7 @@ fn run_bridge(html: &str) -> Vec<TemplateNode> {
     let wrapped = format!(
         r#"<style>[role="progressbar"],[role="slider"],[role="spinbutton"],[role="switch"],[role="radio"],[role="textbox"],[role="combobox"]{{background:#ddd;position:relative}} [role="slider"] [data-slot="thumb"],[role="progressbar"] [data-slot="fill"],[role="combobox"] [data-slot="value"],[role="option"],[role="listitem"],[role="tab"]{{background:#444}} [role="combobox"] [role="listbox"]{{display:none;position:absolute}}</style>{html}"#
     );
-    let parsed = loomgui_fence::parse_template(&wrapped, "test.html");
+    let parsed = ikat_fence::parse_template(&wrapped, "test.html");
     assert!(
         parsed.diagnostics.is_empty(),
         "parse diags (bridge 行为无意义): {:?}",

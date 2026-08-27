@@ -29,7 +29,7 @@ fn shader_gradient_scale_matches_spread_plus_one() {
         .join("../..")
         .join("unity/package")
         .join("Shaders")
-        .join("LoomGUI-Unlit.shader");
+        .join("Ikat-Unlit.shader");
 
     let src = std::fs::read_to_string(&shader_path)
         .unwrap_or_else(|e| panic!("无法读取 shader {:?}: {}", shader_path, e));
@@ -37,12 +37,12 @@ fn shader_gradient_scale_matches_spread_plus_one() {
     let gradient_scale =
         parse_gradient_scale_default(&src).expect("shader 里找不到 _GradientScale Property 声明");
 
-    let spread = loomgui_core::text::atlas::SPREAD as i64;
+    let spread = ikat_core::text::atlas::SPREAD as i64;
     assert_eq!(
         gradient_scale,
         spread + 1,
         "shader _GradientScale 默认值 ({}) != SPREAD ({}) + 1。\
-         改 SPREAD 必须同步改 LoomGUI-Unlit.shader 的 _GradientScale 默认值，\
+         改 SPREAD 必须同步改 Ikat-Unlit.shader 的 _GradientScale 默认值，\
          否则 SDF AA 过渡带算错（字形过锐/锯齿，零报错难定位）。",
         gradient_scale,
         spread,

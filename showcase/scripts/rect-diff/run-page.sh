@@ -7,7 +7,7 @@
 #                 driver-driven lists, animation mid-frames) against the browser
 #                 baseline instead of the coding-machine dump_page snapshot.
 #                 Produced on the Unity machine via
-#                                 LoomBridge.DumpScene() → File.WriteAllText.
+#                                 IkatBridge.DumpScene() → File.WriteAllText.
 # Artifacts: out/<page>/browser-<page>.json + core-<page>.json (gitignored)
 #   (--scene mode also writes out/<page>/scene-normalized.json)
 # Exit: 0/1/2 = diff.mjs passthrough (2 also usage here); 3 = infra failure
@@ -65,7 +65,7 @@ if [ -n "$SCENE_FILE" ]; then
 fi
 
 echo "==> 2/3 core dump ($PAGE)"
-(cd "$REPO_ROOT" && cargo run -q -p loomgui_core --example dump_page -- "$PAGE" --json "$OUT_DIR/core-$PAGE.json") || {
+(cd "$REPO_ROOT" && cargo run -q -p ikat_core --example dump_page -- "$PAGE" --json "$OUT_DIR/core-$PAGE.json") || {
   echo "error: core dump step failed" >&2
   exit 3
 }

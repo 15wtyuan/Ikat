@@ -4,9 +4,9 @@
 //! 看：primary verts bbox + color（底色对不对）、shadow synth verts bbox（偏移多少）、
 //! sort_key（shadow 是否在 primary 后=behind）、shadow_params（σ/inset）、program。
 
-use loomgui_core::render::node::{NodePayload, RenderNode};
-use loomgui_core::scene::dynamic::append_child;
-use loomgui_core::stage::Stage;
+use ikat_core::render::node::{NodePayload, RenderNode};
+use ikat_core::scene::dynamic::append_child;
+use ikat_core::stage::Stage;
 
 fn bbox(verts: &[[f32; 2]]) -> (f32, f32, f32, f32) {
     if verts.is_empty() {

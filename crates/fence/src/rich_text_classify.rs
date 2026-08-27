@@ -1,7 +1,7 @@
 //! Stage 6.4：rich-text-block 分类 + mixed inline/block 报错。必须在 Stage 6.5
 //! （`inline_context_check`）之前跑——6.5 读本阶段的 `rich_text_blocks` 集合豁免 img。
 //!
-//! LoomGUI 运行时只在一种上下文里实现浏览器式 inline flow：**rich-text-block**——
+//! Ikat 运行时只在一种上下文里实现浏览器式 inline flow：**rich-text-block**——
 //! `display:block` 容器且其直接子**全是 inline 级**（text / span(TextElement) / img(Image)）。
 //! 此分类记进 `ParsedTemplate.rich_text_blocks`，packer bridge 据此烘 flag，runtime 把这些
 //! inline 子拍平成 `RichRun` 走 `measure_rich_text`。
@@ -19,7 +19,7 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::inline_context_check::{collect_flex_class_rules, is_flex_context};
 use crate::ir::{IrNodeKind, IrTree};
 use crate::schema::tag::SemanticKind;
-use loomgui_core::style::resolved::ResolvedStyle;
+use ikat_core::style::resolved::ResolvedStyle;
 
 /// span（TextElement）子是否声明了显式 `display:flex`（inline style 或静态可判定的
 /// 单 compound class 规则；多 compound 规则保守视为 flex）。
@@ -30,7 +30,7 @@ use loomgui_core::style::resolved::ResolvedStyle;
 /// 会被整棵折成一行（或被防御性跳过而隐身）。
 fn span_declares_flex(
     el: &crate::ir::IrElement,
-    single_compound_flex_rules: &[&loomgui_core::style::dynamic::Compound],
+    single_compound_flex_rules: &[&ikat_core::style::dynamic::Compound],
     has_multi_compound_flex_rule: bool,
 ) -> bool {
     has_explicit_display_flex(el)
@@ -54,7 +54,7 @@ enum ChildRole {
 
 fn classify_child(
     kind: &IrNodeKind,
-    single_compound_flex_rules: &[&loomgui_core::style::dynamic::Compound],
+    single_compound_flex_rules: &[&ikat_core::style::dynamic::Compound],
     has_multi_compound_flex_rule: bool,
 ) -> ChildRole {
     match kind {
@@ -95,14 +95,14 @@ fn classify_child(
 ///
 /// - div 等：须 `display:block` 且未被 class 规则改成 flex（复用 6.5 的 flex 判定）。
 /// - span（TextElement）：inline 级文本容器，默认走 rich_text inline flow（text+padding
-///   整体测量）。LoomGUI 的 inline→flex 是 taffy 兼容 hack，但「flex 容器 + padding +
+///   整体测量）。Ikat 的 inline→flex 是 taffy 兼容 hack，但「flex 容器 + padding +
 ///   被测文字子」会丢子节点测量（span+padding+文字 变形 bug），故 span 默认归
 ///   rich_text_block。仅当作者显式 `display:flex` 才保留 flex（作者要 flex 排版）。
 fn is_block_container(
     idx: usize,
     tree: &IrTree,
     styles: &[ResolvedStyle],
-    single_compound_flex_rules: &[&loomgui_core::style::dynamic::Compound],
+    single_compound_flex_rules: &[&ikat_core::style::dynamic::Compound],
     has_multi_compound_flex_rule: bool,
 ) -> bool {
     let IrNodeKind::Element(el) = &tree.nodes[idx].kind else {
@@ -167,7 +167,7 @@ fn has_explicit_display_flex(el: &crate::ir::IrElement) -> bool {
 pub fn classify_rich_text(
     tree: &IrTree,
     styles: &[ResolvedStyle],
-    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
+    dynamic_rules: &[ikat_core::style::dynamic::DynamicRule],
     file: &str,
     line_map: &LineMap,
 ) -> (Vec<usize>, Vec<Diagnostic>) {
@@ -247,7 +247,7 @@ pub fn classify_rich_text(
                 DiagnosticCode::FenceMixedInlineBlock,
                 format!(
                     "<{tag}> mixes inline children (text/span/img) with block children \
-                     (div/controls/template/slot). LoomGUI rich-text inline flow requires the \
+                     (div/controls/template/slot). Ikat rich-text inline flow requires the \
                      direct children to be ALL inline; a mix is undefined (some want horizontal \
                      flow, some want to fill width and stack). Fix (pick one): \
                      (1) wrap the inline children inside a single child <div> so this container's \
@@ -286,7 +286,7 @@ pub fn classify_rich_text(
 pub(crate) fn check_links(
     tree: &IrTree,
     rich_text_blocks: &[usize],
-    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
+    dynamic_rules: &[ikat_core::style::dynamic::DynamicRule],
     file: &str,
     line_map: &LineMap,
 ) -> Vec<Diagnostic> {
@@ -350,7 +350,7 @@ pub(crate) fn check_links(
                 DiagnosticCode::FenceLinkOutsideRich,
                 "<a> is only valid inside a rich-text-block context (a block \
                  container whose direct children are all inline: text/span/img, or a \
-                 non-flex <span>). LoomGUI folds the <a> subtree into the parent's \
+                 non-flex <span>). Ikat folds the <a> subtree into the parent's \
                  inline flow there; anywhere else it renders as a plain block child \
                  and raises no link semantics. Fix: move the <a> into a block \
                  container holding only inline children"
@@ -399,8 +399,8 @@ const SIZING_PROPS: &[&str] = &[
 ];
 /// 单 compound class 规则中声明了尺寸的集合（W4 用，模式同 collect_flex_class_rules）。
 fn collect_sizing_class_rules(
-    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
-) -> Vec<&loomgui_core::style::dynamic::Compound> {
+    dynamic_rules: &[ikat_core::style::dynamic::DynamicRule],
+) -> Vec<&ikat_core::style::dynamic::Compound> {
     dynamic_rules
         .iter()
         .filter(|r| {
@@ -416,7 +416,7 @@ fn collect_sizing_class_rules(
 /// 元素是否声明了尺寸（inline style 或被无条件命中的单 compound class 规则）。
 fn el_declares_sizing(
     el: &crate::ir::IrElement,
-    sizing_rules: &[&loomgui_core::style::dynamic::Compound],
+    sizing_rules: &[&ikat_core::style::dynamic::Compound],
 ) -> bool {
     if let Some(style) = el.attributes.iter().find(|a| a.name == "style") {
         if style.value.split(';').any(|d| {
@@ -455,7 +455,7 @@ fn under_custom_host(mut idx: usize, tree: &IrTree) -> bool {
 pub(crate) fn warn_inline_sizing(
     tree: &IrTree,
     rich: &[usize],
-    dynamic_rules: &[loomgui_core::style::dynamic::DynamicRule],
+    dynamic_rules: &[ikat_core::style::dynamic::DynamicRule],
     file: &str,
     line_map: &LineMap,
     diagnostics: &mut Vec<Diagnostic>,

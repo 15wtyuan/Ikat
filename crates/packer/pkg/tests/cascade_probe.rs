@@ -6,10 +6,10 @@
 //! rect/visible (geometry + display pruning), `get_node_computed_style`
 //! (inheritance, specificity, class matching), and `get_node_kind` (control
 //! kinds do not collapse to Container).
-use loomgui_core::scene::node::NodeKind;
-use loomgui_core::scene::NodeId;
-use loomgui_core::stage::Stage;
-use loomgui_pkg::build::{pack_components, Component, PackResult};
+use ikat_core::scene::node::NodeKind;
+use ikat_core::scene::NodeId;
+use ikat_core::stage::Stage;
+use ikat_pkg::build::{pack_components, Component, PackResult};
 
 const HTML: &str = include_str!("fixtures/cascade-probe.html");
 

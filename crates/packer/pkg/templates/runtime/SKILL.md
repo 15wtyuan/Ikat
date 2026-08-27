@@ -1,56 +1,56 @@
 ---
-name: loomgui-runtime
+name: ikat-runtime
 description: |
-  Integrate LoomGUI UI into Unity game code — mount the stage driver,
+  Integrate Ikat UI into Unity game code — mount the stage driver,
   load build artifacts, instantiate pages, look up typed nodes by id,
   wire control events, drive UI from gameplay, gate 3D input on the UI,
   and embed 3D content in UI. Use for ANY C#/Unity task that touches
-  LoomStageDriver, pages, nodes, or UI events; also when adding or
+  IkatStageDriver, pages, nodes, or UI events; also when adding or
   renaming element ids in HTML (ids are the C# API surface).
 ---
 
-# LoomGUI Runtime Integration (Unity)
+# Ikat Runtime Integration (Unity)
 
 Wire the built UI into the game: mount, instantiate, program, interop
 with 3D. The design side (HTML/CSS fence authoring) is the
-`loomgui-editor` skill; workspace/build operations are the `loom` skill.
+`ikat-editor` skill; workspace/build operations are the `ikat` skill.
 
 ## Prerequisites
 
-- The LoomGUI Unity package is installed, version-matched to the `loom`
+- The Ikat Unity package is installed, version-matched to the `ikat`
   CLI that built the artifacts (both come from the same release).
-- Build artifacts exist and are current: read `.loom/config.json` at the
+- Build artifacts exist and are current: read `.ikat/config.json` at the
   session root — `ui_root` locates the workspace, `unity_root` (if
-  present) is where `loom build` delivered `Assets/Bundles` (package
-  picker: `loom.runtime.json`, `ui/*.pkg.bin`, `atlas/*`, `fonts/*`).
+  present) is where `ikat build` delivered `Assets/Bundles` (package
+  picker: `ikat.runtime.json`, `ui/*.pkg.bin`, `atlas/*`, `fonts/*`).
   Sources changed → rebuild before debugging C#.
 - A default font was registered in the workspace, or all text renders
   blank.
 
 ## Mental model
 
-- LoomGUI UI is its own fullscreen camera-space layer: a dedicated
+- Ikat UI is its own fullscreen camera-space layer: a dedicated
   orthographic UI camera composites with your 3D camera by depth. No uGUI
   Canvas, no URP overlay stack, no EventSystem.
 - The UI scene is a typed C# object tree (`Container`, `Button`,
   `Slider`, `ListView`, ...). Game code reads and drives that tree; it
   never touches meshes or materials.
-- One MonoBehaviour (`LoomStageDriver`) owns the frame pipeline — input →
+- One MonoBehaviour (`IkatStageDriver`) owns the frame pipeline — input →
   UI logic → layout/render → mesh mirror → events. You never call a
   per-frame update yourself.
 
 ## Required workflow
 
-1. **Mount.** Create a GameObject with `LoomStageDriver` +
-   `LoomInputCollector`. Design resolution and adaptation mode come from
-   `loom.runtime.json` (`design` + `match_mode`, set in the workspace via
-   `loom design`); the Inspector Design Size / Adapt Mode fields are only
+1. **Mount.** Create a GameObject with `IkatStageDriver` +
+   `IkatInputCollector`. Design resolution and adaptation mode come from
+   `ikat.runtime.json` (`design` + `match_mode`, set in the workspace via
+   `ikat design`); the Inspector Design Size / Adapt Mode fields are only
    the fallback when the manifest omits them. UI Camera empty (driver
-   creates `LoomUICamera`) or your own; Safe Area for notch-safe
+   creates `IkatUICamera`) or your own; Safe Area for notch-safe
    letterboxing. Your main 3D camera renders first; the UI camera after
    (higher depth, clear flags = Depth only). Layer 6 is reserved by
-   LoomGUI.
-2. **Verify loading.** On startup the driver reads `loom.runtime.json`
+   Ikat.
+2. **Verify loading.** On startup the driver reads `ikat.runtime.json`
    from the product root and loads everything it lists; missing pieces
    log Console warnings naming the file. Product root: Inspector value →
    in Editor `Assets/Bundles` → in players `Application.streamingAssetsPath`
@@ -59,14 +59,14 @@ with 3D. The design side (HTML/CSS fence authoring) is the
    `driver.Instantiate("<package>", "<page-stem>")` — page stem = HTML
    filename without `.html` (`"game", "main"` ← `ui/game/main.html`).
    Returns the page root `Container`; `null` + console error = package
-   not in `loom.runtime.json` or wrong stem.
+   not in `ikat.runtime.json` or wrong stem.
 4. **Look up nodes by id and wire events.**
 5. **Drive UI from gameplay** where the game state leads.
 6. **Gate 3D input on the UI** (`IsPointerOnUI`); embed 3D in UI via
    `BindNativeHost` where needed.
 7. **Verify in Play Mode** (unity-cli-loop skills: screenshot, simulated
    input). F8 during Play dumps core + mirror state to the Console and a
-   `loom-dump-*.txt` next to `Assets/` — the first evidence when a page
+   `ikat-dump-*.txt` next to `Assets/` — the first evidence when a page
    looks wrong (it separates "core computed wrong layout" from "Unity
    rendered it wrong").
 
@@ -75,18 +75,18 @@ The driver is `[ExecuteAlways]` — pages also render in Edit Mode.
 ## Programming the tree
 
 ```csharp
-using LoomGUI;
+using Ikat;
 
 public class GameUI : MonoBehaviour
 {
-    LoomStageDriver _driver;
+    IkatStageDriver _driver;
     Container _page;
 
     void Start()
     {
-        _driver = GetComponent<LoomStageDriver>();
+        _driver = GetComponent<IkatStageDriver>();
         _page = _driver.Instantiate("game", "main");
-        if (_page == null) { Debug.LogError("page failed to mount (package not in loom.runtime.json? wrong stem?)"); return; }
+        if (_page == null) { Debug.LogError("page failed to mount (package not in ikat.runtime.json? wrong stem?)"); return; }
 
         _page.Get<Button>("btn-start").Clicked += OnStart;
     }
@@ -98,7 +98,7 @@ public class GameUI : MonoBehaviour
 
 - **The id contract.** `id` attributes in the workspace HTML are the API
   surface game code programs against — adding/renaming an id is a
-  cross-side change (tell the `loomgui-editor` side). `Get<T>(id)` throws
+  cross-side change (tell the `ikat-editor` side). `Get<T>(id)` throws
   `UIContractException` on miss; `TryGet<T>(id, out var n)` for optional
   elements. Lookup is scoped to the current component instance — it does
   not cross nested custom-component or list-item boundaries; reach into
@@ -190,8 +190,8 @@ line.
 ## Resolution adaptation
 
 Design resolution and adaptation mode are workspace-level config
-(`loom design 1920x1080 --match fit-width` in the UI workspace; `loom
-build` bakes both into `loom.runtime.json`, the driver reads them at
+(`ikat design 1920x1080 --match fit-width` in the UI workspace; `ikat
+build` bakes both into `ikat.runtime.json`, the driver reads them at
 startup). Three modes:
 
 - `letterbox` (default) — contain: the canvas stays at the design
@@ -208,12 +208,12 @@ startup). Three modes:
 
 Runtime resolution/rotation changes are handled automatically (the
 driver recomputes on screen or safe-area change and calls
-`LoomHost.SetRootSize`). Safe area: fit modes size the canvas from the
+`IkatHost.SetRootSize`). Safe area: fit modes size the canvas from the
 safe rect (content never flows into a notch); letterbox fits inside it.
 
 ## UI ↔ 3D interop
 
-- **Input gating.** LoomGUI never consumes or blocks input — your 3D
+- **Input gating.** Ikat never consumes or blocks input — your 3D
   picking must gate itself:
 
   ```csharp
@@ -238,12 +238,12 @@ safe rect (content never flows into a notch); letterbox fits inside it.
 
 ## Serving artifacts from AssetBundles / Addressables
 
-Subclass `LoomStageDriver` and override the virtual loading hooks
+Subclass `IkatStageDriver` and override the virtual loading hooks
 (defaults read plain files under the product root):
 
 | Hook | Loads | Example argument |
 |---|---|---|
-| `LoadTextFile(relPath)` | manifests (text) | `loom.runtime.json`, `atlas/ui.atlas.json` |
+| `LoadTextFile(relPath)` | manifests (text) | `ikat.runtime.json`, `atlas/ui.atlas.json` |
 | `LoadBytes(relPath)` | raw bytes | `ui/game.pkg.bin` |
 | `LoadPackageBytes(name)` | a package (default: `LoadBytes("ui/{name}.pkg.bin")`) | `game` |
 | `LoadTexture(relPath)` | atlas page PNG | `atlas/ui.png` |
@@ -266,22 +266,22 @@ Subclass `LoomStageDriver` and override the virtual loading hooks
 
 | Symptom | Cause → fix |
 |---|---|
-| `Instantiate` returns null | package not listed in `loom.runtime.json` or wrong stem → rebuild workspace; check package name |
-| Page blank | artifacts stale or font missing → `loom build`; register a default font |
+| `Instantiate` returns null | package not listed in `ikat.runtime.json` or wrong stem → rebuild workspace; check package name |
+| Page blank | artifacts stale or font missing → `ikat build`; register a default font |
 | `Get<T>` throws `UIContractException` | id missing/renamed in HTML, or lookup crossing a component boundary → fix the contract (both sides), or go through the host node |
 | Text renders but looks wrong | font fallback missing glyphs → register a `--fallback` font |
-| Tofu boxes (□) in text | the Console logs every missing glyph as `[LoomGUI] missing glyphs (tofu): font-family "X" has no glyph for 'c' (U+....)` — fix by registering a font containing it with `--fallback`, or change the text |
-| Clicks pass through UI to 3D | expected — LoomGUI never blocks input → gate your raycasts on `IsPointerOnUI` |
-| Page looks wrong at runtime | press F8, read the `[Scene tree]` section first (one line per node with rect, text `font/lh/lines`, scroll `viewport/content/overlap`) → `lh=NN.00x` with a big NN means a unitless line-height multiplier; `ov 0x0` on a scroll container means it has nothing to scroll. If core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue. `LoomHost.DumpSceneTree("id-or-class")` prints just the matching subtrees |
-| `[LoomGUI] wheel ignored: node N ... no overflow to scroll` | the wheel landed on a container whose content does not overflow (`overlap=0`) — fix content sizing or remove `overflow:auto` (editor/development builds only) |
+| Tofu boxes (□) in text | the Console logs every missing glyph as `[Ikat] missing glyphs (tofu): font-family "X" has no glyph for 'c' (U+....)` — fix by registering a font containing it with `--fallback`, or change the text |
+| Clicks pass through UI to 3D | expected — Ikat never blocks input → gate your raycasts on `IsPointerOnUI` |
+| Page looks wrong at runtime | press F8, read the `[Scene tree]` section first (one line per node with rect, text `font/lh/lines`, scroll `viewport/content/overlap`) → `lh=NN.00x` with a big NN means a unitless line-height multiplier; `ov 0x0` on a scroll container means it has nothing to scroll. If core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue. `IkatHost.DumpSceneTree("id-or-class")` prints just the matching subtrees |
+| `[Ikat] wheel ignored: node N ... no overflow to scroll` | the wheel landed on a container whose content does not overflow (`overlap=0`) — fix content sizing or remove `overflow:auto` (editor/development builds only) |
 
 ## Reference consumer
 
 - **Full API contract** (every node/control/event/list/animation
   signature and invariant): read `references/api-reference.md` next to
   this file — it mirrors the shipped C# signatures, so you never need
-  the LoomGUI repository.
-- **Complete working example**: `unity/showcase-unity/` in the LoomGUI
+  the Ikat repository.
+- **Complete working example**: `unity/showcase-unity/` in the Ikat
   repository (driver mounted, nine pages wired from
   `ShowcaseRunner.cs`). Optional copy-paste source, not required
   reading.

@@ -1,4 +1,4 @@
-use loomgui_core::style::resolved::{AnimationSpec, TransitionSpec};
+use ikat_core::style::resolved::{AnimationSpec, TransitionSpec};
 
 /// Compile-time schema entry for one CSS property.
 ///
@@ -165,7 +165,7 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         name: "flex-wrap",
         default: "nowrap",
         inherited: false,
-        // wrap-reverse 删值：LoomGUI 不真支持，apply_decl 不映射。写它会报
+        // wrap-reverse 删值：Ikat 不真支持，apply_decl 不映射。写它会报
         // FenceBadCssValue（schema 拒绝）引导改用 wrap——不静默降级成 nowrap。
         parser: CssValueParser::Keyword(&["nowrap", "wrap"]),
     },
@@ -399,7 +399,7 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: true,
         parser: CssValueParser::Color,
     },
-    // LoomGUI 私有属性：选区背景色（CSS 用 ::selection { background }，围栏无伪元素选择器，
+    // Ikat 私有属性：选区背景色（CSS 用 ::selection { background }，围栏无伪元素选择器，
     // 故平铺 prop）。None = render 回退蓝半透。
     CssPropSpec {
         name: "selection-background",
@@ -407,7 +407,7 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Color,
     },
-    // LoomGUI 私有属性：选区文字色（::selection { color }）。None = render 回退白。
+    // Ikat 私有属性：选区文字色（::selection { color }）。None = render 回退白。
     // default transparent（= 未显式声明 → None），与 selection-background 对称。
     CssPropSpec {
         name: "selection-color",
@@ -415,7 +415,7 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         inherited: false,
         parser: CssValueParser::Color,
     },
-    // LoomGUI 私有属性：占位符色（::placeholder { color }）。None = render/layout 回退
+    // Ikat 私有属性：占位符色（::placeholder { color }）。None = render/layout 回退
     // 到 color 折半（浏览器 ::placeholder UA 默认 ~opacity 0.5）。inherited：跟 color 一致，
     // 文本框未显式声明时从父继承的 color 折半作占位色。
     CssPropSpec {
@@ -718,7 +718,7 @@ pub fn validate_animation_value(value: &str) -> bool {
     if v.is_empty() {
         return false;
     }
-    loomgui_core::style::mapping::split_top_level_commas(v)
+    ikat_core::style::mapping::split_top_level_commas(v)
         .into_iter()
         .all(|decl| validate_one_animation_decl(decl.trim()))
 }
@@ -758,7 +758,7 @@ fn validate_one_animation_decl(decl: &str) -> bool {
 /// 已同模式委托 `parse_transition_value`）。越界输入由 `validate_animation_value` 门拦截，
 /// 此处防御性返回空。
 pub fn parse_animation_value(value: &str) -> Vec<AnimationSpec> {
-    loomgui_core::style::mapping::parse_animation(value)
+    ikat_core::style::mapping::parse_animation(value)
 }
 
 /// 解析 `transition` 简写值 → TransitionSpec 列表（逗号分隔多 spec）。
@@ -768,7 +768,7 @@ pub fn parse_animation_value(value: &str) -> Vec<AnimationSpec> {
 /// 语义：prop 映射 opacity→Opacity / color→TextColor / background-color→BgColor /
 /// all+缺省→None；首 time=duration、次 time=delay；ease 缺省 = CSS initial ease→CubicOut。
 pub fn parse_transition_value(value: &str) -> Vec<TransitionSpec> {
-    loomgui_core::style::mapping::parse_transition(value)
+    ikat_core::style::mapping::parse_transition(value)
 }
 
 /// animation-name 接受 CSS 自定义标识符（字母/-/_/数字，非数字开头；不允许 `--` 前缀）。
@@ -819,9 +819,9 @@ fn is_animation_keyword(s: &str) -> bool {
         | "running" | "paused"
         // iteration-count integer（任意无符号整数）
     ) || s.chars().all(|c| c.is_ascii_digit())
-        // loom 超集缓动 keyword + cubic-bezier(...) 函数形（core parse_ease 判定，
+        // ikat 超集缓动 keyword + cubic-bezier(...) 函数形（core parse_ease 判定，
         // 超集清单见 fence.md「缓动函数全集」节）
-        || loomgui_core::style::mapping::parse_ease(s.trim()).is_some()
+        || ikat_core::style::mapping::parse_ease(s.trim()).is_some()
 }
 
 #[cfg(test)]
@@ -924,7 +924,7 @@ mod tests {
 
     #[test]
     fn caret_selection_props_registered() {
-        // caret-color 是 CSS 标准属性（inherited）；selection-background/-color 是 LoomGUI
+        // caret-color 是 CSS 标准属性（inherited）；selection-background/-color 是 Ikat
         // 私有属性（::selection 伪元素平铺化）。都走 Color 解析器。
         let caret = find_css_prop("caret-color").expect("caret-color must be in fence");
         assert!(caret.inherited, "caret-color is CSS inherited");

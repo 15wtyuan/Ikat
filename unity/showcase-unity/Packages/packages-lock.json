@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.loomgui.unity": {
+    "com.ikat.unity": {
       "version": "file:../../package",
       "depth": 0,
       "source": "local",

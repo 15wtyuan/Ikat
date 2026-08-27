@@ -1,8 +1,8 @@
 //! 文本控件与 IME 面：value 文本/选区/placeholder/readonly/max_length 读写、
 //! codepoint 输入注入、composition 回灌/提交、光标世界矩形（IME 候选窗定位）。
 
-use loomgui_core::scene::node::ControlState;
-use loomgui_core::scene::NodeId;
+use ikat_core::scene::node::ControlState;
+use ikat_core::scene::NodeId;
 
 use crate::{ffi_guard, StageHandle};
 
@@ -16,7 +16,7 @@ use crate::{ffi_guard, StageHandle};
 ///
 /// **常驻（不 gate）：**输入是 runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_text_input(
+pub extern "C" fn ikat_stage_set_text_input(
     h: *mut StageHandle,
     codepoints: *const u32,
     len: usize,
@@ -43,7 +43,7 @@ pub extern "C" fn loomgui_stage_set_text_input(
 ///
 /// **常驻（不 gate）：**IME 是 runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_composition(
+pub extern "C" fn ikat_stage_set_composition(
     h: *mut StageHandle,
     node: u64,
     text: *const u8,
@@ -75,7 +75,7 @@ pub extern "C" fn loomgui_stage_set_composition(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u64) -> i32 {
+pub extern "C" fn ikat_stage_commit_composition(h: *mut StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -93,7 +93,7 @@ pub extern "C" fn loomgui_stage_commit_composition(h: *mut StageHandle, node: u6
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_cursor_rect(
+pub extern "C" fn ikat_stage_get_cursor_rect(
     h: *const StageHandle,
     node: u64,
     out: *mut CursorRectRepr,
@@ -141,7 +141,7 @@ pub struct CursorRectRepr {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_text(
+pub extern "C" fn ikat_stage_set_control_text(
     h: *mut StageHandle,
     node_id: u64,
     text: *const u8,
@@ -191,7 +191,7 @@ pub extern "C" fn loomgui_stage_set_control_text(
         // ValueChanged 须在 get_mut 借用结束后产：if-let 块出来后 scene 借用（借 sh.stage.scene）
         // 由 NLL 释放，方可另借 sh.stage.pending_events（不同字段）。
         if changed {
-            loomgui_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
+            ikat_core::scene::control::emit_value_changed(&mut sh.stage.pending_events, id);
         }
         0
     })
@@ -203,7 +203,7 @@ pub extern "C" fn loomgui_stage_set_control_text(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_text(
+pub extern "C" fn ikat_stage_get_control_text(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -248,7 +248,7 @@ pub extern "C" fn loomgui_stage_get_control_text(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_selection(
+pub extern "C" fn ikat_stage_set_selection(
     h: *mut StageHandle,
     node_id: u64,
     anchor: usize,
@@ -285,7 +285,7 @@ pub extern "C" fn loomgui_stage_set_selection(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_selection(
+pub extern "C" fn ikat_stage_get_selection(
     h: *const StageHandle,
     node_id: u64,
     start: *mut usize,
@@ -317,7 +317,7 @@ pub extern "C" fn loomgui_stage_get_selection(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_placeholder(
+pub extern "C" fn ikat_stage_set_control_placeholder(
     h: *mut StageHandle,
     node_id: u64,
     text: *const u8,
@@ -359,7 +359,7 @@ pub extern "C" fn loomgui_stage_set_control_placeholder(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_placeholder(
+pub extern "C" fn ikat_stage_get_control_placeholder(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -402,7 +402,7 @@ pub extern "C" fn loomgui_stage_get_control_placeholder(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_readonly(
+pub extern "C" fn ikat_stage_set_control_readonly(
     h: *mut StageHandle,
     node_id: u64,
     readonly: bool,
@@ -438,7 +438,7 @@ pub extern "C" fn loomgui_stage_set_control_readonly(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_maxlength(
+pub extern "C" fn ikat_stage_set_control_maxlength(
     h: *mut StageHandle,
     node_id: u64,
     max_length: usize,
@@ -470,7 +470,7 @@ pub extern "C" fn loomgui_stage_set_control_maxlength(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_maxlength(
+pub extern "C" fn ikat_stage_get_control_maxlength(
     h: *const StageHandle,
     node_id: u64,
     out: *mut usize,
@@ -514,7 +514,7 @@ fn clamp_char_boundary(s: &str, idx: usize) -> usize {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_readonly(
+pub extern "C" fn ikat_stage_get_control_readonly(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -549,7 +549,7 @@ pub extern "C" fn loomgui_stage_get_control_readonly(
 ///
 /// **常驻（不 gate）：**布局前预估是 runtime 稳定入口（tips 预分行 / 飘字宽估）。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_measure_text(
+pub extern "C" fn ikat_stage_measure_text(
     h: *mut StageHandle,
     text: *const u8,
     text_len: usize,
@@ -591,8 +591,8 @@ pub extern "C" fn loomgui_stage_measure_text(
                 }
                 0
             }
-            Err(loomgui_core::stage::MeasureTextError::UnknownFamily(_)) => -2,
-            Err(loomgui_core::stage::MeasureTextError::InvalidParams(_)) => -3,
+            Err(ikat_core::stage::MeasureTextError::UnknownFamily(_)) => -2,
+            Err(ikat_core::stage::MeasureTextError::InvalidParams(_)) => -3,
         }
     })
 }

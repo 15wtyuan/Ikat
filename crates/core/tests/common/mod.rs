@@ -1,10 +1,10 @@
 //! Shared test helpers for integration tests. Each tests/*.rs uses `mod common; use common::*;`.
 #![allow(dead_code)]
-pub use loomgui_core::parse::css::parse_css;
-pub use loomgui_core::parse::dom::parse_html;
-pub use loomgui_core::scene::node::build_scene;
-pub use loomgui_core::stage::Stage;
-pub use loomgui_core::style::cascade::resolve_styles;
+pub use ikat_core::parse::css::parse_css;
+pub use ikat_core::parse::dom::parse_html;
+pub use ikat_core::scene::node::build_scene;
+pub use ikat_core::stage::Stage;
+pub use ikat_core::style::cascade::resolve_styles;
 
 /// Test font path: repo-internal DejaVuSans.ttf, cross-platform consistent.
 pub fn font_path() -> String {

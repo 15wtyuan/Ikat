@@ -15,7 +15,7 @@ pub struct Summary {
     pub warnings: usize,
 }
 
-/// `loom version [--format json]` 的输出。cli == unity（crate 版本与 Unity 包同轨，
+/// `ikat version [--format json]` 的输出。cli == unity（crate 版本与 Unity 包同轨，
 /// 由 release-check 断言）；pkg_format 引 core 的 `PKG_FORMAT_VERSION` 常量。
 #[derive(Debug, Clone, Serialize)]
 pub struct VersionInfo {
@@ -30,14 +30,14 @@ impl VersionInfo {
         Self {
             cli: env!("CARGO_PKG_VERSION"),
             unity: env!("CARGO_PKG_VERSION"),
-            pkg_format: loomgui_core::asset::PKG_FORMAT_VERSION,
+            pkg_format: ikat_core::asset::PKG_FORMAT_VERSION,
             format_version: FORMAT_VERSION,
         }
     }
 
     pub fn render_human(&self) -> String {
         format!(
-            "loom {} (unity {}, pkg_format {})",
+            "ikat {} (unity {}, pkg_format {})",
             self.cli, self.unity, self.pkg_format
         )
     }

@@ -1,11 +1,11 @@
-/* LoomGUI browser preview base (preview-only — packer consumes body only, head not in pkg.bin).
-   polyfill to align LoomGUI rendering conventions. */
+/* Ikat browser preview base (preview-only — packer consumes body only, head not in pkg.bin).
+   polyfill to align Ikat rendering conventions. */
 @font-face {
   font-family: 'LXGW WenKai';
   src: url('../../res/fonts/LXGWWenKai.ttf') format('truetype');
   font-display: block;
 }
-/* Workspace font families pages reference by name (loom.workspace.json fonts):
+/* Workspace font families pages reference by name (ikat.workspace.json fonts):
    without these the browser preview silently falls back to system fonts,
    and rect-diff baselines diverge from core's real-font measurements. */
 @font-face {
@@ -50,12 +50,12 @@ input::placeholder, textarea::placeholder { color: #6c7080; opacity: 1; }
 [role="textbox"][data-empty]::before { content: attr(aria-placeholder); color: #6c7080; opacity: 1; }
 select option { color: #e0e6ec; background-color: #152433; }
 
-/* 「重播动画」按钮（loom-preview.js 注入，preview-only） */
-#loom-anim-replay {
+/* 「重播动画」按钮（ikat-preview.js 注入，preview-only） */
+#ikat-anim-replay {
   position: fixed; right: 18px; bottom: 16px; z-index: 9999;
   padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;
   background: rgba(21, 36, 51, 0.85); color: #8ec5d8;
   font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
   box-shadow: inset 0 0 0 1px rgba(95, 180, 212, 0.22);
 }
-#loom-anim-replay:hover { background: rgba(26, 47, 69, 0.95); color: #cfe8f2; }
+#ikat-anim-replay:hover { background: rgba(26, 47, 69, 0.95); color: #cfe8f2; }

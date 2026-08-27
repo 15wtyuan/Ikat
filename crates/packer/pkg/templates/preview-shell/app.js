@@ -1,13 +1,13 @@
-// loom preview shell 逻辑（ESM，无构建）。
+// ikat preview shell 逻辑（ESM，无构建）。
 // 保真语义（grilling 定案）：iframe 永远按工作区设计分辨率渲染，外壳只按
 // match_mode 缩放——切设备框不触发 reflow，预览必须预测运行时。
 "use strict";
 
 const LS = {
-  preset: "loomPreview.preset",
-  safe: "loomPreview.safeArea",
-  fit: "loomPreview.fitWindow",
-  custom: "loomPreview.customResolutions",
+  preset: "ikatPreview.preset",
+  safe: "ikatPreview.safeArea",
+  fit: "ikatPreview.fitWindow",
+  custom: "ikatPreview.customResolutions",
 };
 
 // 内置设备清单：W/H + 安全区参考线（top/bottom，px；0 = 无）。

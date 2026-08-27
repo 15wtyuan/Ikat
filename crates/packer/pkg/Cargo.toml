@@ -1,17 +1,17 @@
 [package]
-name = "loomgui_pkg"
-# 与 unity/package/package.json 同轨（release-check 断言）；`loom version` 的 cli/unity
+name = "ikat_pkg"
+# 与 unity/package/package.json 同轨（release-check 断言）；`ikat version` 的 cli/unity
 # 字段都取本值。发版 tag 前必须先 bump 两者 + 补 CHANGELOG。
 version = "0.0.13"
 edition = "2021"
 
 [[bin]]
-name = "loom"
+name = "ikat"
 path = "src/main.rs"
 
 [dependencies]
-loomgui_core = { path = "../../core" }
-loomgui_fence = { path = "../../fence" }
+ikat_core = { path = "../../core" }
+ikat_fence = { path = "../../fence" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }

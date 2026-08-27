@@ -1,10 +1,10 @@
 //! Stage 6.7：控件必须被 CSS 命中校验。
 //!
-//! LoomGUI 控件（ProgressBar / Slider / Toggle / RadioButton / Dropdown /
+//! Ikat 控件（ProgressBar / Slider / Toggle / RadioButton / Dropdown /
 //! TextField / TextArea / NumberField）**不带 UA 默认样式**——
 //! core 刻意保持纯净，不开「框架自带样式源」先例。代价：写了控件标签却没匹配的 CSS
 //! 规则 = 运行时渲染空白，作者无法察觉（HTML 在浏览器预览里浏览器会套自己的 UA 表，
-//! 看着正常，打包进 LoomGUI 却空）。
+//! 看着正常，打包进 Ikat 却空）。
 //!
 //! 本 pass 在打包期（cascade resolve 之后）拦下这种写法：对每个控件节点，检查是否有
 //! 任意 `<style>` 规则的选择器命中它本身（tag / class / id / 后代链落地在该节点）。
@@ -18,14 +18,14 @@
 //!
 //! 控件一律由 `role` 驱动：`<div role="...">`。教学文案按
 //! **role/slot** 表述（`data-slot="fill"`、`role="listbox"`、`[aria-checked]` 属性
-//! 选择器），不引用任何框架注入的 `.loom-*` 子节点。
+//! 选择器），不引用任何框架注入的 `.ikat-*` 子节点。
 //!
 //! 选择器匹配消费 fence 的 IrTree（解析期产物），不依赖运行时 Node——复用 css_rules
 //! 解析出的 `DynamicRule` 表，按 tag/class/id/attr 字面对照 IrElement 判定。
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrElement, IrNodeKind, IrTree};
-use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector};
+use ikat_core::style::dynamic::{AttrOp, Compound, DynamicRule, ParsedSelector};
 
 /// 触发本校验的控件 role。带这些 role 的元素必被检查；`textbox` 同时覆盖
 /// TextField 与 TextArea（后者加 `aria-multiline="true"`）。
@@ -261,7 +261,7 @@ pub fn check_control_structure_css(
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceControlStructureCss,
                 format!(
-                    "LoomGUI {role} control is missing `{}`:{} — the popup anchor. \
+                    "Ikat {role} control is missing `{}`:{} — the popup anchor. \
                      Without it the popup positions against an outer containing block and \
                      the viewport-flip placement breaks. Canonical form:\n{}",
                     contract.control_decl.0, contract.control_decl.1, contract.canonical
@@ -282,7 +282,7 @@ pub fn check_control_structure_css(
                 diagnostics.push(Diagnostic::error(
                     DiagnosticCode::FenceControlStructureCss,
                     format!(
-                        "LoomGUI {role} popup (`role=\"{}\"`) is missing `{}:{}` — \
+                        "Ikat {role} popup (`role=\"{}\"`) is missing `{}:{}` — \
                          without it the popup stays in flow and expands its container \
                          when opened. Canonical form:\n{}",
                         contract.popup_role,
@@ -404,7 +404,7 @@ fn fix_hint_for(el: &IrElement) -> String {
         Some("combobox") => format!(
             "Provide CSS for <{tag}> (background/border so the box is visible), for its \
              `role=\"listbox\"` child (the popup list container), and for `role=\"option\"` \
-             children (each list row). LoomGUI dropdowns have NO built-in arrow indicator — \
+             children (each list row). Ikat dropdowns have NO built-in arrow indicator — \
              if you want one, draw it yourself via CSS (e.g. a background-image on the box, \
              or an extra child element)."
         ),
@@ -456,10 +456,10 @@ pub fn check_control_css(
         diagnostics.push(Diagnostic::error(
             DiagnosticCode::FenceControlWithoutCss,
             format!(
-                "LoomGUI {kind_name} element <{tag}> has no matching CSS rule. \
+                "Ikat {kind_name} element <{tag}> has no matching CSS rule. \
                  Controls have NO built-in default style — without CSS they render blank. \
                  {fix_hint} Canonical control CSS: `patterns.md` in the scaffolded \
-                 loomgui-editor skill."
+                 ikat-editor skill."
             ),
             line_map.source_location(node.span.start, file.to_string()),
         ));
@@ -526,13 +526,13 @@ fn check_required_child_css(
                 diagnostics.push(Diagnostic::error(
                     DiagnosticCode::FenceControlChildWithoutCss,
                     format!(
-                        "LoomGUI <{parent_tag} role=\"{role}\"> has a required \
+                        "Ikat <{parent_tag} role=\"{role}\"> has a required \
                          <{child_tag} {label}> child with no matching CSS rule. \
                          Control children have NO built-in default style — without CSS \
                          they render invisible (e.g. a thumb without background is a \
                          draggable-but-invisible handle). Provide CSS for every \
                          {label} child. Canonical control CSS: `patterns.md` in the \
-                         scaffolded loomgui-editor skill."
+                         scaffolded ikat-editor skill."
                     ),
                     line_map.source_location(child.span.start, file.to_string()),
                 ));
@@ -713,15 +713,15 @@ mod tests {
     fn role_progressbar_without_css_errors() {
         let diags = check(r#"<div role="progressbar"></div>"#);
         assert_eq!(diags.len(), 1);
-        // 文案应引导 data-slot="fill"（不再引用已删除的 .loom-fill）
+        // 文案应引导 data-slot="fill"（不再引用已删除的 .ikat-fill）
         assert!(
             diags[0].message.contains("data-slot=\"fill\""),
             "{}",
             diags[0].message
         );
         assert!(
-            !diags[0].message.contains(".loom-"),
-            "不应再引用 .loom-*: {}",
+            !diags[0].message.contains(".ikat-"),
+            "不应再引用 .ikat-*: {}",
             diags[0].message
         );
     }
@@ -735,7 +735,7 @@ mod tests {
             "{}",
             diags[0].message
         );
-        assert!(!diags[0].message.contains(".loom-"), "{}", diags[0].message);
+        assert!(!diags[0].message.contains(".ikat-"), "{}", diags[0].message);
     }
 
     #[test]
@@ -757,7 +757,7 @@ mod tests {
             "{}",
             diags[0].message
         );
-        assert!(!diags[0].message.contains(".loom-"), "{}", diags[0].message);
+        assert!(!diags[0].message.contains(".ikat-"), "{}", diags[0].message);
         assert_eq!(diags[1].code, DiagnosticCode::FenceControlChildWithoutCss);
         assert_eq!(diags[2].code, DiagnosticCode::FenceControlChildWithoutCss);
     }

@@ -1,8 +1,8 @@
 //! 节点写面：树构建（create/append/insert/remove）、text/src/inline override 写、
 //! class 增删查、交互标志（disabled/touchable/focusable）、user transform、子树克隆。
 
-use loomgui_core::scene::{dynamic, NodeId};
-use loomgui_core::transform::NodeTransform;
+use ikat_core::scene::{dynamic, NodeId};
+use ikat_core::transform::NodeTransform;
 
 use crate::{ffi_guard, StageHandle};
 
@@ -11,11 +11,7 @@ use crate::{ffi_guard, StageHandle};
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_node_disabled(
-    h: *mut StageHandle,
-    node_id: u64,
-    disabled: bool,
-) {
+pub extern "C" fn ikat_stage_set_node_disabled(h: *mut StageHandle, node_id: u64, disabled: bool) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -31,7 +27,7 @@ pub extern "C" fn loomgui_stage_set_node_disabled(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_node_touchable(
+pub extern "C" fn ikat_stage_set_node_touchable(
     h: *mut StageHandle,
     node_id: u64,
     touchable: bool,
@@ -51,7 +47,7 @@ pub extern "C" fn loomgui_stage_set_node_touchable(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_node_focusable(
+pub extern "C" fn ikat_stage_set_node_focusable(
     h: *mut StageHandle,
     node_id: u64,
     focusable: bool,
@@ -67,7 +63,7 @@ pub extern "C" fn loomgui_stage_set_node_focusable(
 
 /// 设渲染复用键（虚拟列表 slot）。null 句柄/无效 node → no-op。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u64, key: u32) {
+pub extern "C" fn ikat_stage_set_reuse_key(h: *mut StageHandle, node_id: u64, key: u32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -79,7 +75,7 @@ pub extern "C" fn loomgui_stage_set_reuse_key(h: *mut StageHandle, node_id: u64,
 
 /// 克隆场景内子树（游离根，不挂树）。返回新 node_id；u64::MAX = err / null 句柄 / 无效 src。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u64) -> u64 {
+pub extern "C" fn ikat_stage_clone_subtree(h: *mut StageHandle, src: u64) -> u64 {
     ffi_guard(u64::MAX, || {
         const ERR: u64 = u64::MAX;
         if h.is_null() {
@@ -102,7 +98,7 @@ pub extern "C" fn loomgui_stage_clone_subtree(h: *mut StageHandle, src: u64) -> 
 ///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_create_root(
+pub extern "C" fn ikat_stage_create_root(
     h: *mut StageHandle,
     kind: *const u8,
     kind_len: usize,
@@ -145,7 +141,7 @@ pub extern "C" fn loomgui_stage_create_root(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_create_node(
+pub extern "C" fn ikat_stage_create_node(
     h: *mut StageHandle,
     kind: *const u8,
     kind_len: usize,
@@ -185,7 +181,7 @@ pub extern "C" fn loomgui_stage_create_node(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_append_child(h: *mut StageHandle, parent: u64, child: u64) -> i32 {
+pub extern "C" fn ikat_stage_append_child(h: *mut StageHandle, parent: u64, child: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -203,7 +199,7 @@ pub extern "C" fn loomgui_stage_append_child(h: *mut StageHandle, parent: u64, c
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_insert_before(
+pub extern "C" fn ikat_stage_insert_before(
     h: *mut StageHandle,
     parent: u64,
     child: u64,
@@ -226,7 +222,7 @@ pub extern "C" fn loomgui_stage_insert_before(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u64, child: u64) -> i32 {
+pub extern "C" fn ikat_stage_remove_child(h: *mut StageHandle, parent: u64, child: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -245,7 +241,7 @@ pub extern "C" fn loomgui_stage_remove_child(h: *mut StageHandle, parent: u64, c
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u64) -> i32 {
+pub extern "C" fn ikat_stage_remove_node(h: *mut StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return 0;
@@ -263,7 +259,7 @@ pub extern "C" fn loomgui_stage_remove_node(h: *mut StageHandle, node: u64) -> i
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_text(
+pub extern "C" fn ikat_stage_set_text(
     h: *mut StageHandle,
     node: u64,
     text: *const u8,
@@ -295,7 +291,7 @@ pub extern "C" fn loomgui_stage_set_text(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn ikat_stage_restart_animations(h: *mut StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -315,7 +311,7 @@ pub extern "C" fn loomgui_stage_restart_animations(h: *mut StageHandle, node_id:
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_src(
+pub extern "C" fn ikat_stage_set_src(
     h: *mut StageHandle,
     node: u64,
     src: *const u8,
@@ -345,7 +341,7 @@ pub extern "C" fn loomgui_stage_set_src(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_inline_override(
+pub extern "C" fn ikat_stage_set_inline_override(
     h: *mut StageHandle,
     node: u64,
     css: *const u8,
@@ -378,7 +374,7 @@ pub extern "C" fn loomgui_stage_set_inline_override(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_unset_inline_override(
+pub extern "C" fn ikat_stage_unset_inline_override(
     h: *mut StageHandle,
     node: u64,
     prop: *const u8,
@@ -409,7 +405,7 @@ pub extern "C" fn loomgui_stage_unset_inline_override(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_add_class(
+pub extern "C" fn ikat_stage_add_class(
     h: *mut StageHandle,
     node: u64,
     name: *const u8,
@@ -435,7 +431,7 @@ pub extern "C" fn loomgui_stage_add_class(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_class(
+pub extern "C" fn ikat_stage_remove_class(
     h: *mut StageHandle,
     node: u64,
     name: *const u8,
@@ -462,7 +458,7 @@ pub extern "C" fn loomgui_stage_remove_class(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_has_class(
+pub extern "C" fn ikat_stage_has_class(
     h: *const StageHandle,
     node: u64,
     name: *const u8,
@@ -493,7 +489,7 @@ pub extern "C" fn loomgui_stage_has_class(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_transform(
+pub extern "C" fn ikat_stage_set_transform(
     h: *mut StageHandle,
     node_id: u64,
     tx: f32,

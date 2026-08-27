@@ -2,20 +2,20 @@
 //!
 //! 形状：N 节点各挂 1 tween + 1 keyframes player（opacity 0→1 循环），逐帧 update 推进。
 //! 关注点：池化后 spawn/recycle 稳态零分配（tween churn 场景）+ 每 tick 推进的
-//! 每节点成本。跑法：`cargo bench -p loomgui_core`；`cargo test` 不执行 bench（CI 零负担）。
+//! 每节点成本。跑法：`cargo bench -p ikat_core`；`cargo test` 不执行 bench（CI 零负担）。
 
 // bench 是独立 crate，不吃 lib root 的 allow——此处同款放行（Node 字段多、default
 // 起步只改两字段，struct literal 全字段列反而藏噪声）。
 #![allow(clippy::field_reassign_with_default)]
 use criterion::{criterion_group, criterion_main, Criterion};
-use loomgui_core::scene::animation::{
+use ikat_core::scene::animation::{
     update_all, AnimatableProps, KeyframePlayer, KeyframeStop, KeyframeStopSelector, KeyframesRule,
 };
-use loomgui_core::scene::node::{Node, NodeKind, Rect, Scene};
-use loomgui_core::style::resolved::{
+use ikat_core::scene::node::{Node, NodeKind, Rect, Scene};
+use ikat_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
-use loomgui_core::tween::{Ease, TweenProp, TweenSpec};
+use ikat_core::tween::{Ease, TweenProp, TweenSpec};
 
 fn spec() -> AnimationSpec {
     AnimationSpec {
@@ -97,7 +97,7 @@ fn bench_update_all(c: &mut Criterion) {
 fn bench_tween_update(c: &mut Criterion) {
     for n in [100usize, 1000] {
         let mut scene = scene_with_players(n); // 节点复用（tween 写同批节点）
-        let mut mgr = loomgui_core::tween::TweenManager::new();
+        let mut mgr = ikat_core::tween::TweenManager::new();
         for id in scene.roots.clone() {
             mgr.tween(
                 id,
@@ -142,7 +142,7 @@ fn bench_tween_churn(c: &mut Criterion) {
         (scene, id)
     };
     let id = scene.roots[0];
-    let mut mgr = loomgui_core::tween::TweenManager::new();
+    let mut mgr = ikat_core::tween::TweenManager::new();
     let mut group = c.benchmark_group("anim/tween_churn");
     group.bench_function("spawn_complete_recycle", |b| {
         b.iter(|| {

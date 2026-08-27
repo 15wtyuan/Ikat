@@ -1,12 +1,12 @@
 //! #29 solve 基准：增量 solve（稳态帧 / 单点变更帧）vs 每帧全重建（坑 186 基线）。
 //! 场景形状 ≈ api-infra 微缩窗 demo（8 窗 × 75 文本行，~2400 节点、文本叶子为主）。
-//! 跑法：`cargo bench -p loomgui_core`；`cargo test` 不执行 bench（CI 零负担）。
+//! 跑法：`cargo bench -p ikat_core`；`cargo test` 不执行 bench（CI 零负担）。
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use loomgui_core::layout::{solve, solve_rebuild, ImageSizeTable};
-use loomgui_core::scene::node::{NodeKind, Scene};
-use loomgui_core::style::resolved::ResolvedStyle;
-use loomgui_core::text::layout::FontTable;
+use ikat_core::layout::{solve, solve_rebuild, ImageSizeTable};
+use ikat_core::scene::node::{NodeKind, Scene};
+use ikat_core::style::resolved::ResolvedStyle;
+use ikat_core::text::layout::FontTable;
 use taffy::prelude::*;
 
 fn font_table() -> FontTable {

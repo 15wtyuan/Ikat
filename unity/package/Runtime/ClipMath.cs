@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// _ClipBox 推导。
     ///
@@ -10,7 +10,7 @@ namespace LoomGUI
     /// 半宽/高为 0（嵌套 disjoint→空集）→ safe-blank (-2,-2,0,0)：clipPos 恒 (-2,-2)，
     /// max(abs)=2>1 → step(2,1)=0 → 全 discard（防除零）。
     ///
-    /// shader 端（LoomGUI-Unlit.shader CLIPPED variant）：
+    /// shader 端（Ikat-Unlit.shader CLIPPED variant）：
     ///   clipPos = TransformObjectToWorld(pos).xy * _ClipBox.zw + _ClipBox.xy
     ///   col.a *= step(max(abs(clipPos)), 1)
     /// 代入：clipPos = (worldPos.x/hw - cx/hw, worldPos.y/hh - cy/hh) = (worldPos - center)/half。

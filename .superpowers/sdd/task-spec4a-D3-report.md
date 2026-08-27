@@ -9,10 +9,10 @@
 Created `EventDemuxer` internal class that translates raw `borrow_events` buffer (Rust `EventRecord[]` → C# `RawEventRecord`) to typed event structs and dispatches through `EventBus.Dispatch<T>`.
 
 **Key design decisions:**
-- **RawEventRecord struct**: Self-contained 20-byte `[StructLayout(LayoutKind.Sequential)]` mirror of Rust `EventRecord`. Defined inside `EventDemuxer.cs` to avoid dependency on `LoomEventHandler.cs`'s `LoomEvent` struct (not in headless test compilation chain).
-- **Reuse, not rewrite**: Old `LoomEventHandler.DispatchPending` continues to run in parallel (backward compat for old `AddListener`-based subscribers). New `EventDemuxer.Pump` runs on the same buffer — independent subscriber pools, no double-fire.
+- **RawEventRecord struct**: Self-contained 20-byte `[StructLayout(LayoutKind.Sequential)]` mirror of Rust `EventRecord`. Defined inside `EventDemuxer.cs` to avoid dependency on `IkatEventHandler.cs`'s `IkatEvent` struct (not in headless test compilation chain).
+- **Reuse, not rewrite**: Old `IkatEventHandler.DispatchPending` continues to run in parallel (backward compat for old `AddListener`-based subscribers). New `EventDemuxer.Pump` runs on the same buffer — independent subscriber pools, no double-fire.
 - **Translation**: `_core.Target = _ctx._registry.GetOrCreate(nodeId)` — NodeFactory FFI ensures typed Node wrapper exists.
-- **Event type mapping** (LoomEvent type byte → typed event struct):
+- **Event type mapping** (IkatEvent type byte → typed event struct):
 
 | byte | EventType | Typed struct |
 |------|-----------|-------------|
@@ -31,11 +31,11 @@ Created `EventDemuxer` internal class that translates raw `borrow_events` buffer
 | 15 | FocusOut | BlurEvent |
 | 16 | TweenComplete | AnimationEndEvent + TransitionEndEvent (both) |
 
-### 2. UIContext + LoomStage wiring
+### 2. UIContext + IkatStage wiring
 
 - Added `internal readonly EventDemuxer _eventDemuxer` to `UIContext` (constructed with `EventDemuxer(this)`).
-- Added `internal void SetEventDemuxer(EventDemuxer)` to `LoomStage`.
-- `LoomStage.Tick` now calls `_eventDemuxer?.Pump(...)` alongside existing `_eventHandler.DispatchPending(...)` — null-safe: headless tests without SetEventDemuxer still work.
+- Added `internal void SetEventDemuxer(EventDemuxer)` to `IkatStage`.
+- `IkatStage.Tick` now calls `_eventDemuxer?.Pump(...)` alongside existing `_eventHandler.DispatchPending(...)` — null-safe: headless tests without SetEventDemuxer still work.
 
 ### 3. Semantic sugar (Button.Clicked + Link.Activated)
 
@@ -90,19 +90,19 @@ Total test count: **260 passed** (D2 249 + D3 11), 1 pre-existing skip.
 | File | Change |
 |------|--------|
 | `unity/package/Runtime/Projection/EventDemuxer.cs` | **Created** — `EventDemuxer` class + `RawEventRecord` struct |
-| `unity/package/Runtime/Public/LoomGUI.Nodes.cs` | `UIContext._eventDemuxer` field + ctor init; `Button.Clicked` event add/remove body; `Link.Activated` event add/remove body; `Container.Scrolled` deferral comment |
-| `unity/package/Runtime/LoomStage.cs` | `_eventDemuxer` field + `SetEventDemuxer()` + Tick calls `_eventDemuxer?.Pump()` |
-| `tests/dotnet/LoomGUI.HeadlessTests/EventDemuxerTests.cs` | **Created** — 11 tests + `NativeEventBuffer` helper |
+| `unity/package/Runtime/Public/Ikat.Nodes.cs` | `UIContext._eventDemuxer` field + ctor init; `Button.Clicked` event add/remove body; `Link.Activated` event add/remove body; `Container.Scrolled` deferral comment |
+| `unity/package/Runtime/IkatStage.cs` | `_eventDemuxer` field + `SetEventDemuxer()` + Tick calls `_eventDemuxer?.Pump()` |
+| `tests/dotnet/Ikat.HeadlessTests/EventDemuxerTests.cs` | **Created** — 11 tests + `NativeEventBuffer` helper |
 
 ## PublicApi build
 
-`dotnet build tests/dotnet/LoomGUI.PublicApi` — **passes** (0 errors, 0 warnings). Event signatures (`Button.Clicked`, `Link.Activated`, `Container.Scrolled`) unchanged — only add/remove bodies changed.
+`dotnet build tests/dotnet/Ikat.PublicApi` — **passes** (0 errors, 0 warnings). Event signatures (`Button.Clicked`, `Link.Activated`, `Container.Scrolled`) unchanged — only add/remove bodies changed.
 
 ## Self-Review
 
 **Completeness**: Demux wired for all 13 core EventRecord types (0-16) → typed struct dispatch. TweenComplete splits to AnimationEnd + TransitionEnd. 3 source-less types deferred with clear rationale.
 
-**Quality**: `RawEventRecord` self-contained avoids headless test compilation dependency on `LoomEventHandler.cs`. Demux uses same buffer as old LoomEventHandler (no double borrow). `Dictionary<Action, EventRegistration>` backing for semantic sugar remove — clean event add/remove semantics matching C# convention.
+**Quality**: `RawEventRecord` self-contained avoids headless test compilation dependency on `IkatEventHandler.cs`. Demux uses same buffer as old IkatEventHandler (no double borrow). `Dictionary<Action, EventRegistration>` backing for semantic sugar remove — clean event add/remove semantics matching C# convention.
 
 **Discipline**: No new branch; working on `spec4a-projection-layer`. Frozen signatures intact (PublicApi build green). Comments on deferred items are self-contained with WHY.
 
@@ -126,9 +126,9 @@ Total test count: **260 passed** (D2 249 + D3 11), 1 pre-existing skip.
 ### Finding 2 (Important): business fields not filled from available raw data
 
 **Fix**:
-- `LoomGUI.Events.cs`: All 18 typed event structs now have `internal` backing fields beside `_core` for every business property (`_position`, `_button`, `_clickCount`, `_touchId`, `_key`, `_modifiers`, etc.). Property getters changed from `throw NE()` to read the backing field.
+- `Ikat.Events.cs`: All 18 typed event structs now have `internal` backing fields beside `_core` for every business property (`_position`, `_button`, `_clickCount`, `_touchId`, `_key`, `_modifiers`, etc.). Property getters changed from `throw NE()` to read the backing field.
 - `EventDemuxer.cs` Pump: Each event dispatch fills `_position` (from x,y), `_touchId` (from touchId), `_clickCount` (from clickCount), `_key` (from touchId cast to KeyCode), `_modifiers` (from pad[0] cast to KeyModifiers). Fields without raw-source data (Button, DeltaX/Y, StartPosition, Repeat, PreviousFocused/NewFocused, Scroll*, AnimationName/PropertyName/IterationCount) stay at default — filled later when source arrives.
-- `LoomGUI.Types.cs` KeyCode enum: Values changed from sequential (0..N) to Unity KeyCode values (Enter=13, A=97, LeftArrow=276, etc.) so the direct `(KeyCode)evt.touchId` cast works. Same member names kept — only underlying values changed to match the Unity KeyCode that core passes through.
+- `Ikat.Types.cs` KeyCode enum: Values changed from sequential (0..N) to Unity KeyCode values (Enter=13, A=97, LeftArrow=276, etc.) so the direct `(KeyCode)evt.touchId` cast works. Same member names kept — only underlying values changed to match the Unity KeyCode that core passes through.
 
 **Tests**: Added 4 regression tests:
 - `PointerDownPositionIsFilled` — verifies Position.X/Y and TouchId read after Pump (not NE)
@@ -142,8 +142,8 @@ Total test count: **260 passed** (D2 249 + D3 11), 1 pre-existing skip.
 
 ### Finding 4 (Minor): parallel dispatch paths no deprecation comment
 
-**Fix**: Added deprecation comment above `_eventHandler.DispatchPending` / `_eventDemuxer?.Pump` in `LoomStage.Tick`: "DEPRECATION: 待所有 callers 从 AddListener 迁移到 On<T> 后移除 _eventHandler.DispatchPending（后续 cleanup）".
+**Fix**: Added deprecation comment above `_eventHandler.DispatchPending` / `_eventDemuxer?.Pump` in `IkatStage.Tick`: "DEPRECATION: 待所有 callers 从 AddListener 迁移到 On<T> 后移除 _eventHandler.DispatchPending（后续 cleanup）".
 
 ### Test summary
 
-D3 original 11 tests + 5 new regression tests = 16 EventDemuxer tests. Full suite: **265 passed, 0 failed, 1 skipped** (pre-existing). `dotnet build tests/dotnet/LoomGUI.PublicApi` clean.
+D3 original 11 tests + 5 new regression tests = 16 EventDemuxer tests. Full suite: **265 passed, 0 failed, 1 skipped** (pre-existing). `dotnet build tests/dotnet/Ikat.PublicApi` clean.

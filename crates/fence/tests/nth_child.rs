@@ -3,8 +3,8 @@
 //! 覆盖：An+B 系数/常数提取、odd/even 简写、纯整数 N、空格容错、specificity
 //! （伪类 = class 级 1 档）、越界形态拒绝、与其他简单选择器组合。
 
-use loomgui_core::style::dynamic::{NthChildExpr, Specificity};
-use loomgui_fence::css_rules::parse_selector;
+use ikat_core::style::dynamic::{NthChildExpr, Specificity};
+use ikat_fence::css_rules::parse_selector;
 
 /// 解析单 compound selector，取 `:nth-child` 表达式。selector 必须合法且带 nth-child。
 fn nth(raw: &str) -> NthChildExpr {

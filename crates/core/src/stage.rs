@@ -42,7 +42,7 @@ pub struct Stage {
     /// load_package 不建 scene，只填本字典。
     pub packages: std::collections::HashMap<String, crate::asset::Package>,
     /// 最近一次 load_package 版本错配时 pkg 声明的格式版本（0=无记录/非版本错）。
-    /// FFI 层写给宿主做「Unity 包与 loom.exe 同版本重打」的专属报错。
+    /// FFI 层写给宿主做「Unity 包与 ikat.exe 同版本重打」的专属报错。
     pub last_pkg_load_version: u32,
     /// 图尺寸表：归一化 path → (w, h) 像素。
     /// 运行时由 `set_image_sizes` 灌入（来自 atlas.json，含真实图尺寸）。
@@ -88,7 +88,7 @@ pub struct Stage {
     pub next_list_ordinal: u32,
 }
 
-/// 加载包失败的结构化错误。版本错配单列——宿主须给「Unity 包与 loom.exe 同版本
+/// 加载包失败的结构化错误。版本错配单列——宿主须给「Unity 包与 ikat.exe 同版本
 /// 重打」的专属指引，不能与普通损坏混在一条文案里。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadPkgError {
@@ -384,7 +384,7 @@ impl Stage {
 
     /// 设文本控件的 IME composition（后端读 Input.compositionString 回灌）。pos 是 composition
     /// 在 value 中的字节偏移。非文本控件 / 越界 node → no-op（不 panic）。下一帧 measure/render
-    /// 会把 composition 拼进显示文本（[`loomgui_core::scene::control::display_value`]）。
+    /// 会把 composition 拼进显示文本（[`ikat_core::scene::control::display_value`]）。
     ///
     /// NumberField 也接受 composition（预编辑期**不**过滤——composition 是 provisional，
     /// 用户可能还在组字；过滤发生在 [`commit_composition`] 落定时）。
@@ -531,7 +531,7 @@ impl Stage {
     ///
     /// 几何与 render arm 画光标同源：layout 空间 caret = `{rect.x + off_left + cx,
     /// rect.y + line.y, 1.0, line.height}`，再经节点 world transform 投到世界。display 取
-    /// [`loomgui_core::scene::control::display_value`]（含 composition 拼接），与 measure 缓存的
+    /// [`ikat_core::scene::control::display_value`]（含 composition 拼接），与 measure 缓存的
     /// TextLayout 同源；无缓存（首帧/空 value）→ None（后端 fallback 到节点 layout_rect）。
     ///
     /// 有 composition 时候选窗锁在 composition 的 display 起点（IME 候选窗锁在 composition，

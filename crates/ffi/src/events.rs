@@ -1,8 +1,8 @@
 //! 输入与事件面：指针/键盘/滚轮/文本注入、事件 SOA 拉取、touch monitor、点击取消、
 //! 剪贴板回调注册、命中测试（含 rich-text 细化）、焦点控制。
 
-use loomgui_core::input::{EventRecord, KeyEvent, PointerEvent};
-use loomgui_core::scene::NodeId;
+use ikat_core::input::{EventRecord, KeyEvent, PointerEvent};
+use ikat_core::scene::NodeId;
 
 use crate::{ffi_guard, StageHandle};
 
@@ -11,7 +11,7 @@ use crate::{ffi_guard, StageHandle};
 ///
 /// **常驻（不 gate）：**输入是 runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_input(
+pub extern "C" fn ikat_stage_set_input(
     h: *mut StageHandle,
     events: *const PointerEvent,
     len: usize,
@@ -36,7 +36,7 @@ pub extern "C" fn loomgui_stage_set_input(
 /// **常驻（不 gate）：**事件是 runtime 稳定入口。EventRecord 是 `#[repr(C)]` POD，
 /// C 侧按 `len * sizeof(EventRecord)` 切片读。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_borrow_events(
+pub extern "C" fn ikat_stage_borrow_events(
     h: *const StageHandle,
     out_len: *mut usize,
 ) -> *const u8 {
@@ -72,7 +72,7 @@ pub extern "C" fn loomgui_stage_borrow_events(
 ///
 /// **常驻（不 gate）：**事件是 runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_event_string(
+pub extern "C" fn ikat_stage_get_event_string(
     h: *const StageHandle,
     idx: u32,
     out: *mut u8,
@@ -123,7 +123,7 @@ pub extern "C" fn loomgui_stage_get_event_string(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_is_pointer_on_ui(h: *const StageHandle) -> bool {
+pub extern "C" fn ikat_stage_is_pointer_on_ui(h: *const StageHandle) -> bool {
     ffi_guard(false, || {
         if h.is_null() {
             return false;
@@ -138,11 +138,7 @@ pub extern "C" fn loomgui_stage_is_pointer_on_ui(h: *const StageHandle) -> bool 
 ///
 /// **常驻（不 gate）：**runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_add_touch_monitor(
-    h: *mut StageHandle,
-    touch_id: i32,
-    node_id: u64,
-) {
+pub extern "C" fn ikat_stage_add_touch_monitor(h: *mut StageHandle, touch_id: i32, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -156,7 +152,7 @@ pub extern "C" fn loomgui_stage_add_touch_monitor(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_remove_touch_monitor(h: *mut StageHandle, node_id: u64) {
+pub extern "C" fn ikat_stage_remove_touch_monitor(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -169,7 +165,7 @@ pub extern "C" fn loomgui_stage_remove_touch_monitor(h: *mut StageHandle, node_i
 /// 外部取消待 click（照 fgui Stage.CancelClick(touchId)）。置对应槽 click_cancelled。
 /// null 句柄 → no-op。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_cancel_click(h: *mut StageHandle, touch_id: i32) {
+pub extern "C" fn ikat_stage_cancel_click(h: *mut StageHandle, touch_id: i32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -183,11 +179,7 @@ pub extern "C" fn loomgui_stage_cancel_click(h: *mut StageHandle, touch_id: i32)
 ///
 /// **常驻（不 gate）：**输入是 runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_key_input(
-    h: *mut StageHandle,
-    keys: *const KeyEvent,
-    len: usize,
-) {
+pub extern "C" fn ikat_stage_set_key_input(h: *mut StageHandle, keys: *const KeyEvent, len: usize) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -211,12 +203,12 @@ pub extern "C" fn loomgui_stage_set_key_input(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_register_clipboard(
+pub extern "C" fn ikat_register_clipboard(
     set_fn: Option<unsafe extern "C" fn(*const u8, usize) -> i32>,
     get_fn: Option<unsafe extern "C" fn(*mut *mut u8, *mut usize) -> i32>,
 ) {
     ffi_guard((), || {
-        loomgui_core::scene::control::register_clipboard(set_fn, get_fn);
+        ikat_core::scene::control::register_clipboard(set_fn, get_fn);
     })
 }
 
@@ -225,9 +217,9 @@ pub extern "C" fn loomgui_register_clipboard(
 ///
 /// **常驻（不 gate）：**输入是 runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_wheel_input(
+pub extern "C" fn ikat_stage_set_wheel_input(
     h: *mut StageHandle,
-    events: *const loomgui_core::scroll::WheelEvent,
+    events: *const ikat_core::scroll::WheelEvent,
     len: usize,
 ) {
     ffi_guard((), || {
@@ -248,7 +240,7 @@ pub extern "C" fn loomgui_stage_set_wheel_input(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u64) {
+pub extern "C" fn ikat_stage_request_focus(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -262,7 +254,7 @@ pub extern "C" fn loomgui_stage_request_focus(h: *mut StageHandle, node_id: u64)
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u64 {
+pub extern "C" fn ikat_stage_focused_node(h: *const StageHandle) -> u64 {
     ffi_guard(u64::MAX, || {
         const NONE: u64 = u64::MAX;
         if h.is_null() {
@@ -281,7 +273,7 @@ pub extern "C" fn loomgui_stage_focused_node(h: *const StageHandle) -> u64 {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_blur(h: *mut StageHandle) -> i32 {
+pub extern "C" fn ikat_stage_blur(h: *mut StageHandle) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -301,7 +293,7 @@ pub extern "C" fn loomgui_stage_blur(h: *mut StageHandle) -> i32 {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_hit_test(
+pub extern "C" fn ikat_stage_hit_test(
     h: *const StageHandle,
     x: f32,
     y: f32,
@@ -315,7 +307,7 @@ pub extern "C" fn loomgui_stage_hit_test(
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match loomgui_core::hit::hit_test(scene, (x, y)) {
+        match ikat_core::hit::hit_test(scene, (x, y)) {
             Some(id) => {
                 // thumb 合成 tag（bits[63:56] = 16/17）strip，还原容器 primary id
                 // （低 56 位）——见 scroll.rs V/H_THUMB_FLAG。hit_test 只产 thumb tag，
@@ -330,7 +322,7 @@ pub extern "C" fn loomgui_stage_hit_test(
 
 /// Rich-text-block 子节点命中细化（spec §10）。
 ///
-/// 在 [`crate::loomgui_stage_get_node_layout_rect`] / [`loomgui_stage_is_pointer_on_ui`] 已定出命中
+/// 在 [`crate::ikat_stage_get_node_layout_rect`] / [`ikat_stage_is_pointer_on_ui`] 已定出命中
 /// 目标是 rich-text-block 容器之后，用本函数把容器内的点细化到源 inline 节点
 /// （span / TextNode / Image），供后端 firing span 级点击事件。
 ///
@@ -343,7 +335,7 @@ pub extern "C" fn loomgui_stage_hit_test(
 /// 返 `true` = 命中（`*out_source` 已写）；`false` = 未命中 / null 句柄 / 无 scene /
 /// `node_id` 非 rich-text-block / 无 layout（`*out_source` 未动）。
 #[no_mangle]
-pub extern "C" fn loomgui_hit_test_rich(
+pub extern "C" fn ikat_hit_test_rich(
     h: *const StageHandle,
     node_id: u64,
     x: f32,
@@ -358,7 +350,7 @@ pub extern "C" fn loomgui_hit_test_rich(
         let Some(scene) = sh.stage.scene.as_ref() else {
             return false;
         };
-        match loomgui_core::text::hit_test::hit_test_rich(scene, NodeId(node_id), (x, y)) {
+        match ikat_core::text::hit_test::hit_test_rich(scene, NodeId(node_id), (x, y)) {
             Some(src) => {
                 if !out_source.is_null() {
                     unsafe {

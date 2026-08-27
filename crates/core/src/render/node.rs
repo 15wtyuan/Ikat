@@ -38,7 +38,7 @@ pub enum ChangeLevel {
 ///
 /// - `Mesh`：quad 几何（背景色块 / 图片 / 文本字形）。`image_path`=None 表示纯色（无贴图），
 ///   `Some(path)` 为 Image 节点 / bg-image 容器的归一化图片 path，或文本的合成 atlas path
-///   `loomgui://font-atlas/p<n>`（核心不知图集，path 推给 Unity 查 Sprite/atlas；
+///   `ikat://font-atlas/p<n>`（核心不知图集，path 推给 Unity 查 Sprite/atlas；
 ///   atlas 是 Stage 级共享实例，path 只以 page 为键，不含 font_id）。
 ///   UV 对于 Image/bg 始终 (0,0)-(1,1)（Unity Sprite 自带真实 UV；核心无子区）；
 ///   对于 text 为 atlas 内的字形子区 UV。`program`=0 = 纯色/无图 Image shader，
@@ -71,7 +71,7 @@ pub struct UnderlaySlot {
 /// underlay.color.a>0 / glow_color.a>0 / blur_width>0）。Default 全 0 = 无 effect。
 ///
 /// 槽位对标 TextMeshPro（_Outline*/_Underlay*/_Glow*）；多重 shadow 扩展为 underlay[3]
-/// （TMP underlay 单槽）。blur 是 LoomGUI 私有近似（TMP 无整字高斯 blur）。
+/// （TMP underlay 单槽）。blur 是 Ikat 私有近似（TMP 无整字高斯 blur）。
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EffectBlock {
     pub outline_width: f32,

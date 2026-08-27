@@ -1,4 +1,4 @@
-// 组件展开模拟（AI 手写预览脚本，loom preview server 注入；不进打包）。
+// 组件展开模拟（AI 手写预览脚本，ikat preview server 注入；不进打包）。
 // 镜像打包期 Custom Element 展开：宿主保留位置/属性；模板根 append 到宿主下；
 // <slot name=x> 在拼接位被宿主 light children（slot="x"）替换（无投射内容时保留
 // slot 的 fallback 子女）；纯空白文本节点丢弃；嵌套组件迭代展开至不动点（≤16 pass）。
@@ -23,11 +23,11 @@ export function expandComponents(reg) {
   while (passes++ < 16) {
     const hosts = Array.from(document.querySelectorAll('*')).filter((el) => {
       const name = el.tagName.toLowerCase();
-      return name.indexOf('-') >= 0 && reg[name] && !el.hasAttribute('data-loom-expanded');
+      return name.indexOf('-') >= 0 && reg[name] && !el.hasAttribute('data-ikat-expanded');
     });
     if (!hosts.length) return;
     for (const host of hosts) {
-      host.setAttribute('data-loom-expanded', '');
+      host.setAttribute('data-ikat-expanded', '');
       const name = host.tagName.toLowerCase();
       const doc = new DOMParser().parseFromString(reg[name], 'text/html');
       for (const st of Array.from(doc.querySelectorAll('style'))) {
@@ -43,7 +43,7 @@ export function expandComponents(reg) {
       }
       const root = doc.body.firstElementChild;
       if (!root) continue;
-      root.setAttribute('data-loom-comp', name);
+      root.setAttribute('data-ikat-comp', name);
       // Slot 分配自宿主 light children（slot 属性；纯空白文本丢弃）。投射是节点
       // 移动（insertBefore）——监听器/状态保留。
       const assign = {};
@@ -88,7 +88,7 @@ function projectSlots(root, assign, defaults) {
   }
 }
 
-// 组件 <style> 加 per-component 选择器前缀（[data-loom-comp="name"]）——预览侧
+// 组件 <style> 加 per-component 选择器前缀（[data-ikat-comp="name"]）——预览侧
 // 作用域模拟（core 按展开实例作用域规则）。@-rule 原样放行（无元素选择器可前缀）。
 function injectComponentStyle(name, css) {
   if (!css || !css.trim()) return;
@@ -97,12 +97,12 @@ function injectComponentStyle(name, css) {
     if (trimmed.charAt(0) === '@') return m;
     const prefixed = trimmed
       .split(',')
-      .map((part) => `[data-loom-comp="${name}"] ${part.trim()}`)
+      .map((part) => `[data-ikat-comp="${name}"] ${part.trim()}`)
       .join(', ');
     return prefixed + ' {';
   });
   const st = document.createElement('style');
-  st.setAttribute('data-loom-comp-style', name);
+  st.setAttribute('data-ikat-comp-style', name);
   st.textContent = out;
   document.head.appendChild(st);
 }

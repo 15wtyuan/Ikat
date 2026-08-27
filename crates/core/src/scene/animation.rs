@@ -48,7 +48,7 @@ pub struct KeyframeStop {
     /// 该 stop 的 `animation-timing-function`（CSS per-keyframe timing：作用于本 stop
     /// 到下一 stop 的区段）。None = 用 spec 级 timing。
     pub timing: Option<Ease>,
-    /// `/* @loom-hook name */` 锚点：player 播放到该 stop 时发事件。None = 无锚点。
+    /// `/* @ikat-hook name */` 锚点：player 播放到该 stop 时发事件。None = 无锚点。
     pub hook: Option<String>,
 }
 

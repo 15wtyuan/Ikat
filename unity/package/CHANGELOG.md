@@ -1,11 +1,19 @@
 # Changelog
 
-All notable changes to `com.loomgui.unity` will be documented here.
+All notable changes to `com.ikat.unity` will be documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+### Changed
+- **品牌更名 LoomGUI → Ikat（#91）**：crate 前缀 `loomgui_*`→`ikat_*`、CLI `loom`→`ikat`、
+  C# namespace/类型 `LoomGUI.*`/`Loom*`→`Ikat`（一步到位不留过渡 alias）、
+  dll `loomgui_ffi_c.dll`→`ikat_ffi_c.dll`、UPM 包名 `com.ikat.unity`、
+  工作区协议 `.loom/`→`.ikat/`（`ikat.workspace.json` / `ikat.runtime.json`）、
+  CSS 注释锦点 `@loom-hook`→`@ikat-hook`、preview 关停协议 `X-Ikat-Token` / `/_ikat/shutdown`。
+  **pkg/frame 魔数字节不变**（既有 `.pkg.bin` 兼容）；FFI 导出符号改名并与 C# 绑定同批再生，两端一致。
 
 ### Added
 - **CSS IFC 换行控制全集（#73）**：
@@ -30,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.0.13] - 2026-08-27
 
 v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
-全接线）+ `loom preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
+全接线）+ `ikat preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
 AI 安装手册重写；发版轮收尾批（transition 首帧修复 / 预览体验三连修 /
 agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F8 dump
 归因增强 / 运行时告警面 / 动态内容范式文档 + lab §17 用例）；验收后
@@ -57,7 +65,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
     `Instantiate("stem")` 拿普通 Container」等式补全。
   - 仓库内 fence.md 两处内部矛盾顺手修（诊断表「四通道」→ 全集表述、
     Dropdown value 锚「可选」→ 必需）。
-  - 随 loom.exe 分发；消费侧 `loom scaffold` 刷新技能即可拿到新文档。
+  - 随 ikat.exe 分发；消费侧 `ikat scaffold` 刷新技能即可拿到新文档。
 
 ### Added
 - **文本测量公共 API（#86）**：`UIContext.MeasureText(text, family, sizePx,
@@ -69,7 +77,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
 - **F8 dump 布局归因增强（#85）**：scene JSON 文本节点附 resolved 块
   （font-size / 行高乘数——`line-height:26` 被当 26 倍乘数类问题从反推变直读 /
   行数 / 每行宽），滚动容器附几何块（viewport/content/overlap/pos/物理）；
-  新增可读树视图 `LoomHost.DumpSceneTree(filter)`（每节点一行
+  新增可读树视图 `IkatHost.DumpSceneTree(filter)`（每节点一行
   `tag#id.class rect` + 文本/滚动关键值，ASCII 树缩进；filter = id/class
   子串只出命中子树），F8 诊断输出接入 `[Scene tree]` 段。
 - **运行时告警面（#87）**：滚轮打进「声明 overflow:auto/scroll 但内容未溢出
@@ -93,7 +101,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
 - **layout & box-shadow 动画通道（#10）**：同域端点插值，box-shadow
   渐变动画；C# `TweenBuilder` layout/box-shadow 接线 + showcase
   layout-anim 页（pkg v44）。
-- **`loom preview` 预览工作台**：CLI 新子命令——起本地 server 供人工
+- **`ikat preview` 预览工作台**：CLI 新子命令——起本地 server 供人工
   浏览器预览设计工作区；showcase 预览栈迁移其上（ESM 入口改写）。
 - **AI 安装手册**：`docs/ai-setup.md` 重写安装链路（两问流程——输出目录
   也询问）；README install 章节同步改版。
@@ -113,7 +121,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
   transform，不触发 iframe reflow，页内仍按设计分辨率渲染——保真语义
   不变），默认开启、上限 100% 不放大；顶栏「适应窗口」可切回 1:1 像素
   检查（此时恢复滚动）。修「窗口小于 1920×1080 就必须滚动」的预览体验
-  问题。随 loom.exe 发布。
+  问题。随 ikat.exe 发布。
 - **preview：去掉 preview-base.css 的 body 卡片包装**（旧 file:// 直开
   时代的 `padding:24px`+居中美化）：iframe 视口即设计视口，包装会把
   1080 高页面顶成 1128 出 iframe 内滚动条，且 .root@(24,24) 与运行时
@@ -126,7 +134,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
   另补 `preview/pages/layout-anim.js`：预览里四个验收按钮可驱动。
 - **agent 文档补齐（#84）**：runtime api-reference 的动画章节不再声称
   「没有命令式补间」，补 `TweenBuilder`/`TweenChannel`/`EaseKind`/
-  `TweenShadow` 完整签名与语义（随 skill 模板经 loom.exe 分发）。
+  `TweenShadow` 完整签名与语义（随 skill 模板经 ikat.exe 分发）。
 
 ## [0.0.12] - 2026-08-25
 
@@ -146,7 +154,7 @@ v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补�
   setPointerCapture 对等，Up 自动释放）、`StopImmediatePropagation` 复活
   （EventBus 重写时丢）、`Node.CancelClick`（配 LongPress 的长按取消）。
 - **border/背景共存打包 warning（#58）**：彩色边框与 background-image/gradient
-  共存时互斥不画（render 层既有限制）——`loom check`/build 现在当场点破
+  共存时互斥不画（render 层既有限制）——`ikat check`/build 现在当场点破
   （`BorderBgExclusive`），不再让作者猜。
 - **tabpanel 打包期门（review 批）**：`role="tabpanel"` 手写内联 `display:none` →
   `FenceTabpanelHiddenByAuthor` error。显隐所有权归 TabList 运行时（激活面板靠 unset
@@ -154,7 +162,7 @@ v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补�
   面板永久隐身的静默坏，存量写法打包期点破。另 fence.md 补「运行时合成属性不参与
   打包期 CSS 命中」：只写 `[aria-indeterminate="true"] [data-slot=fill]` 一类态规则
   会吃 `FenceControlChildWithoutCss` 假错误，子部件须另有命中打包期 HTML 的基础规则。
-- **solve 基准**：首个 criterion bench（`cargo bench -p loomgui_core`，
+- **solve 基准**：首个 criterion bench（`cargo bench -p ikat_core`，
   api-infra 形状 ~2400 节点三组对拍）。
 
 ### Changed
@@ -209,7 +217,7 @@ v0.0.10 后三波累积：#48/#45/#43/#44/#46/#42 修复批、M2 分辨率适配
 
 ### Added
 - **分辨率适配（#5）**：Letterbox/FitWidth/FitHeight 三模式 + `vw/vh/vmin/vmax`
-  视口单位（重排语言，随屏幕/适配模式重排）；`loom design` 命令 + GUI
+  视口单位（重排语言，随屏幕/适配模式重排）；`ikat design` 命令 + GUI
   design/match 配置面。
 - **Drag 事件载荷接线（#63）**：`DragMoveEvent.DeltaX/Y` 逐 Move 增量（core 权威，
   EventRecord 28B）、`DragStartEvent.StartPosition`、`Pointer{Down,Up}Event.Button`
@@ -221,7 +229,7 @@ v0.0.10 后三波累积：#48/#45/#43/#44/#46/#42 修复批、M2 分辨率适配
 
 ### Fixed
 - **line-height px 形被当 27 倍 → 文本高度爆炸（#65）**：`line-height: 27px` 此前
-  剥掉单位塞进倍数槽——17px 字号单行 459px、卡片溢出屏幕，且 `loom check` 不拦
+  剥掉单位塞进倍数槽——17px 字号单行 459px、卡片溢出屏幕，且 `ikat check` 不拦
   （Number 域不校验）。修后映射双槽 + `effective_line_height()` 换算 + 围栏值域
   门（em/% 打包期报错）。pkg 格式 v41→v42（旧 pkg 加载报 TooOld，需重打包）。
 - **min-height:0 弹性滚动视口被内容撑爆（#64）**：overflow 容器（含装饰性
@@ -284,8 +292,8 @@ Issue #46/#42 批：box-shadow 层数围栏拦截、无滚动容器列表静默�
 
 ### Added
 - **运行时警告通道**：core `Scene::warnings` 缓冲（推送方 warn-once 去重）
-  + FFI `loomgui_stage_take_warnings`（drain 语义，多条 `\n` 连接）+
-  `LoomHost.RuntimeWarning` 事件（引擎无关层不直接打日志）——Unity Driver
+  + FFI `ikat_stage_take_warnings`（drain 语义，多条 `\n` 连接）+
+  `IkatHost.RuntimeWarning` 事件（引擎无关层不直接打日志）——Unity Driver
   订阅转 `Debug.LogWarning`，配错一眼可见（此前此类问题零诊断）。
 
 ## [0.0.10] - 2026-08-24
@@ -295,7 +303,7 @@ Issue #1/#2/#4 批：打包失败静默弃包、slot 投影行不参与宿主布
 ### Fixed
 - **bridge 错误不再静默吞掉（#1）**：悬空 slot 投影（页面投影 `slot="X"` 而组件
   模板无此槽）或展开域 id 撞车（投影 light 子 id 与组件模板 id 同名）此前让
-  `loom build` 打印 OK、exit 0，**pkg.bin 悄悄不落盘**（旧文件先被清掉）——CI
+  `ikat build` 打印 OK、exit 0，**pkg.bin 悄悄不落盘**（旧文件先被清掉）——CI
   绿灯之下产物消失。根因：analyze 只消费诊断列表、丢弃只有 message 的 bridge
   失败。现在错误以 `PackError` Error 级诊断可见（build/check 都 exit 1 并指明
   出错页面）；失败但无 Error 诊断的路径由 analyze 兜底合成，此类吞错永不复发。
@@ -315,9 +323,9 @@ Issue #1/#2/#4 批：打包失败静默弃包、slot 投影行不参与宿主布
   Pick，顶层命中变化时 Console 打印命中节点到根的祖先链（每层 HTML id /
   class / C# 类型 / opacity / touchable / world rect）。「看不见但接鼠标」
   的演出层偷命中时链顶即凶手（opacity=0 且 touchable=True）。本体
-  `LoomDebugProbe.DescribePickChain(ctx, x, y)` 常驻可用（正式构建自定义
+  `IkatDebugProbe.DescribePickChain(ctx, x, y)` 常驻可用（正式构建自定义
   热键绑定）。配套：`Node.Id` 从数值占位换成真 HTML id 读取（新增
-  `loomgui_stage_get_node_id_attr` / `loomgui_stage_get_node_classes` FFI）。
+  `ikat_stage_get_node_id_attr` / `ikat_stage_get_node_classes` FFI）。
 
 ## [0.0.9] - 2026-08-23
 
@@ -351,20 +359,20 @@ Tripawd Field Notes 三批（地图交互/演出打磨）回应：absolute 包�
 - **缺字诊断日志（N25 取证）**：shaping 全链（主字体+回退）缺某字时，
   Console 点名 `font-family "X" has no glyph for 'c' (U+....)` + 修法
   （tofu 框本体不变——开发期故意暴露）。会话级去重（同字体族+字符只报
-  一次），`LoomHost.MissingGlyphReport` 事件暴露给引擎层。
+  一次），`IkatHost.MissingGlyphReport` 事件暴露给引擎层。
 - **`CallAfterLayout(cb)`（N26）**：tick 后 fire 的一次性回调——刚
   `Instantiate` 的子树在本回调里读 `Geometry` 已是实测值（`CallNextFrame`
   帧头 fire 先于 solve，新子树首读必全零）。业务免逐帧自旋等待。
 - **`Play(name, durationSeconds)` 重载（N27）**：无 `animation:` 声明绑定的
   keyframes 无声明层时长，`Play(name)` 固定按 1s 播（无 delay/单次/normal/
   fill both/cubic-out，已随包文档写明）；重载让程序化演出节奏由调用方给。
-- **pkg 版本错配专属报错**：Unity 包与 loom.exe 只升一侧时，
+- **pkg 版本错配专属报错**：Unity 包与 ikat.exe 只升一侧时，
   `load_package` 报 `pkg format v38 is older than this runtime's v39 …
-  re-run loom build with the matching loom.exe`——不再淹没在通用 malformed
+  re-run ikat build with the matching ikat.exe`——不再淹没在通用 malformed
   文案里（此前报错完全不提版本，只能靠经验定位）。
 
 ### Changed
-- **`NodeStyle.TextColor`（N29）**：文字色内联通道此前叫 `LoomColor`（类型名
+- **`NodeStyle.TextColor`（N29）**：文字色内联通道此前叫 `IkatColor`（类型名
   误入属性名，几乎不可发现），补 `TextColor`（与 `BackgroundColor` 对称），
   旧名保留为 Obsolete 别名（同一 "color" 通道，零 core 改动）。
 
@@ -429,7 +437,7 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
   mouseleave 语义，本不冒泡）——「后代退链」的 Leave 被误投给祖先订阅，与
   enter/leave 驱动的抬升动画叠加成自激振荡。修复：Enter/Leave 只派发给事件
   目标节点自身，其余事件维持冒泡。
-- **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`LoomStageDriver.Update`
+- **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`IkatStageDriver.Update`
   的 F8 轮询按 `ENABLE_INPUT_SYSTEM` / `ENABLE_LEGACY_INPUT_MANAGER` 分流。
 - `background-size: stretch`（schema 广告的默认值）此前被 core 静默拒（仅认
   `100%`）；`resize` noop 声明此前误报 `FenceBadCssValue`。
@@ -446,37 +454,37 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - **浏览器先验警告族（warning）**：`display: inline` 语义偏差（按 flex 处理）；
   `transition` 属性域外（含 `all`）；rich-text inline flow 内 span 的死
   width/height；页面侧只可能命中投影内容的类规则（样式墙下恒死代码）。
-- **工作区生成物刷新通道**：`loom scaffold` 现为生成物全刷新（三 skill +
-  `.loom/` CLI 自拷贝 + `.loom/scaffold.version` 版本戳；config/workspace.json/
-  源文件不碰，无 `--agent` 时按在场 agent 目录自动探测）；`loom check` 发现
+- **工作区生成物刷新通道**：`ikat scaffold` 现为生成物全刷新（三 skill +
+  `.ikat/` CLI 自拷贝 + `.ikat/scaffold.version` 版本戳；config/workspace.json/
+  源文件不碰，无 `--agent` 时按在场 agent 目录自动探测）；`ikat check` 发现
   版本戳落后出 `StaleScaffold` 警告；GUI 打开工作区时探测并亮「更新工作区」
-  按钮（一键 = loom scaffold 子进程）。消费端更新流：UPM 更新包（新双 exe 随
+  按钮（一键 = ikat scaffold 子进程）。消费端更新流：UPM 更新包（新双 exe 随
   包落地）→ 跑一次 scaffold 刷新。
-- runtime API reference 补齐：值类型工厂（`Length.Px/Pct`）、`LoomColor` 4 参
+- runtime API reference 补齐：值类型工厂（`Length.Px/Pct`）、`IkatColor` 4 参
   构造、transition 支持矩阵、ProgressBar 值域（`[0, Max]`，Max 默认
   aria-valuemax=100）与 AnimateValue、`Image.Src` key 格式与验证手段、
-  LoomStageDriver 序列化字段速查（`_designSize` 默认 1080×1920 竖屏警示）。
+  IkatStageDriver 序列化字段速查（`_designSize` 默认 1080×1920 竖屏警示）。
 
 ### Changed
 - **公共类型改名（breaking，消 CS0104 歧义）**：`Animation` → `AnimationHandle`、
-  `Color` → `LoomColor`、`Vector2` → `LoomVector2`、`Rect` → `LoomRect`、
-  `KeyCode` → `LoomKeyCode`（接线层同时 `using LoomGUI; using UnityEngine;` 时
+  `Color` → `IkatColor`、`Vector2` → `IkatVector2`、`Rect` → `IkatRect`、
+  `KeyCode` → `IkatKeyCode`（接线层同时 `using Ikat; using UnityEngine;` 时
   每文件必撞歧义，N10）。C# 侧机械替换；FFI ABI 不变。
 - `box-sizing` 错误引导文案修正为 content-box 事实（此前误称 border-box）；
   Keyword 值错误消息列出合法值域。
 
 ## [0.0.5] - 2026-08-19
 ### Added
-- **runtime skill 自足**：新增 `loomgui-runtime` 的 `references/api-reference.md`（随 init 落工作区会话根，完整公共 API 查找表——对象层级、控件 role 全表、事件、ListView、动画、样式、异常）。此前 skill 把「完整 API 契约」指回 LoomGUI 源码仓库的 `docs/design/public-api.md`，逼消费者 agent clone 源码翻文档；现以随包 C# 签名为准镜像成离线参考，skill 不再指路仓库。防漂移门加对账（role 宇宙 ↔ fence schema、skill 必须指名 references、禁止回指 repo 文档）。
-- **loom CLI**（打包器 CLI 升格，二进制 loom.exe，随 Release 分发 + Editor/Tools 双 exe）：check（零写入校验，--format json 机读诊断）、build（结构化输出）、init（脚手架 + CLI 自拷贝到 .loom/ + 反向配置）、new / list / show / font add / atlas add（workspace 编排——AI 的主编辑路径）、version。
+- **runtime skill 自足**：新增 `ikat-runtime` 的 `references/api-reference.md`（随 init 落工作区会话根，完整公共 API 查找表——对象层级、控件 role 全表、事件、ListView、动画、样式、异常）。此前 skill 把「完整 API 契约」指回 Ikat 源码仓库的 `docs/design/public-api.md`，逼消费者 agent clone 源码翻文档；现以随包 C# 签名为准镜像成离线参考，skill 不再指路仓库。防漂移门加对账（role 宇宙 ↔ fence schema、skill 必须指名 references、禁止回指 repo 文档）。
+- **ikat CLI**（打包器 CLI 升格，二进制 ikat.exe，随 Release 分发 + Editor/Tools 双 exe）：check（零写入校验，--format json 机读诊断）、build（结构化输出）、init（脚手架 + CLI 自拷贝到 .ikat/ + 反向配置）、new / list / show / font add / atlas add（workspace 编排——AI 的主编辑路径）、version。
 - 诊断 collect-all 修复：跨组件/跨包/注册表/资源（字体缺失、图集溢出、覆盖缺失与冲突）全量收集后统一报告，一次给全（修前首个含 Error 的组件即中断）；失败时 warning 一并携带。
 - 退出码契约：0 干净 · 1 Error 级诊断/写命令冲突 · 2 用法/配置/io 错。
-- 反向配置 `.loom/config.json`（ui_root + unity_root 双指针，基座）：output_dir 相对 Unity 工程根解析，AI 在会话根一步 loom build 直落 Assets/Bundles。
-- 版本同轨：loomgui_pkg crate 版本 == Unity 包版本（release-check 断言），loom version 单一来源。
-- **工作区拓扑重构（Tripawd 反馈：skill 困在 ui 目录、AI 会话管不到 Unity）**：会话根 ≠ ui 目录分离形态——skills 与 `.loom/`（loom.exe + config.json，整个入库，团队 clone 即得配套 CLI）落会话根，`loom.workspace.json` 留 ui 目录；`loom init <root> --ui <dir>`（省略 `--ui` = 单目录老形态），config 发现规则统一（会话根 / ui 本体 / ui 直接子目录都可作参数或 cwd）。不再生成 AGENTS.md / CLAUDE.md（入侵性），`--agent` 只决定 skills 目录（.claude/skills / .agents/skills）。
-- **agent skills 三件全部重写**（对齐成熟 skill 范式：Figma figma-use / OpenAI figma-implement-design / unity-cli-loop）：`loomgui-editor`（操作手册——Critical Rules 集中开篇、增量工作流含浏览器预览自验步、❌/✅ 反模式、错误表带修法、收尾清单；完整查找表渐进披露到 references/ 三件）；`loomgui-runtime`（**新增**——场景挂载、加载管线钩子、`Get<T>`/事件、`IsPointerOnUI` 门控 3D、NativeHost 内嵌 3D、id 契约双面互指，补上「UI↔3D 桥」）；`loom`（uloop 范式命令手册 + workspace.json/config.json 字段表）。随包 `Editor/Resources/LoomGUI/skill/` 副本删除（新拓扑下 root skills 全覆盖，消除三份漂移面）。
+- 反向配置 `.ikat/config.json`（ui_root + unity_root 双指针，基座）：output_dir 相对 Unity 工程根解析，AI 在会话根一步 ikat build 直落 Assets/Bundles。
+- 版本同轨：ikat_pkg crate 版本 == Unity 包版本（release-check 断言），ikat version 单一来源。
+- **工作区拓扑重构（Tripawd 反馈：skill 困在 ui 目录、AI 会话管不到 Unity）**：会话根 ≠ ui 目录分离形态——skills 与 `.ikat/`（ikat.exe + config.json，整个入库，团队 clone 即得配套 CLI）落会话根，`ikat.workspace.json` 留 ui 目录；`ikat init <root> --ui <dir>`（省略 `--ui` = 单目录老形态），config 发现规则统一（会话根 / ui 本体 / ui 直接子目录都可作参数或 cwd）。不再生成 AGENTS.md / CLAUDE.md（入侵性），`--agent` 只决定 skills 目录（.claude/skills / .agents/skills）。
+- **agent skills 三件全部重写**（对齐成熟 skill 范式：Figma figma-use / OpenAI figma-implement-design / unity-cli-loop）：`ikat-editor`（操作手册——Critical Rules 集中开篇、增量工作流含浏览器预览自验步、❌/✅ 反模式、错误表带修法、收尾清单；完整查找表渐进披露到 references/ 三件）；`ikat-runtime`（**新增**——场景挂载、加载管线钩子、`Get<T>`/事件、`IsPointerOnUI` 门控 3D、NativeHost 内嵌 3D、id 契约双面互指，补上「UI↔3D 桥」）；`ikat`（uloop 范式命令手册 + workspace.json/config.json 字段表）。随包 `Editor/Resources/Ikat/skill/` 副本删除（新拓扑下 root skills 全覆盖，消除三份漂移面）。
 - **GUI 打包器向导双目录**：新建工作区选会话根 + UI 目录（默认 `ui`，允许 `.` 单目录形态）；「打开工作区」接受会话根或 ui 目录（config 发现解析），recent 列表存原始路径。
-- `loom font add`：字体已在 `fonts/` 目录时跳过自拷贝直接注册（此前同源同目标拷贝在 Windows 报共享冲突，形似文件被锁）。
+- `ikat font add`：字体已在 `fonts/` 目录时跳过自拷贝直接注册（此前同源同目标拷贝在 Windows 报共享冲突，形似文件被锁）。
 - **`<link rel="stylesheet">` 外部 CSS 支持**（Tripawd 反馈）：href 相对所在 HTML 文件（页面与组件同规则）、CSS 内 `url()` 相对 CSS 文件；规则/`@keyframes`/诊断与内联 `<style>` 同待遇，缺文件报 `FenceStylesheetNotFound`（此前静默丢弃）。
 - 检查器修复（Tripawd 反馈）：class 规则声明的 `display:block` 此前不被 inline 上下文检查认（报错文案给的修法 (2) 失效），现与 inline style 同待遇；`FenceMixedInlineBlock` 文案不再误称 span 为 block container；组件 `@keyframes` 同名同内容多实例展开静默去重（此前每实例一条告警刷屏）；自定义元素嵌 `<span>` 的报错补教学（slot 属性写在直接子上）。
 - 结构检查选择器覆盖对齐（Tripawd 反馈 12–14 批）：display 判定现认静态可判定的单 compound 选择器——class / id / 属性选择器（`[role="tablist"]`、`[data-slot="fill"]`），与控件 CSS 命中检查同覆盖；运行时可变状态属性（aria-checked 等）仍保守不放行。文档：装饰框（背景图 + 前景内容）canonical pattern 写进 skill 与 `FenceMixedInlineBlock` 文案；`switch`/`radio` 无框架槽位（knob 位移用 `[aria-checked]` 状态选择器）写进 skill 与 fence.md。
@@ -486,7 +494,7 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - Runtime API：`z-index` 层叠、动画 longhand 属性、dropdown 视口定位（pkg 格式 v38）；调度器三件套、`UnloadPackage`、选项 getter、`GetTemplate`（pkg 格式 v37）。
 - FFI 全导出统一 panic 边界（catch_unwind guard）；`get_live` 站点标签（函数名格式）+ 释放审计日志常驻，release dll 内「快照后死亡」类 panic 可一行定位。
 - 围栏：控件结构 CSS 契约（combobox anchor + popup absolute 定位）；`-webkit-text-security`（disc/circle/square/none）。
-- 打包器 GUI：per-project 最近列表 + 移除按钮；窗口标题改短为 "LoomGUI"。
+- 打包器 GUI：per-project 最近列表 + 移除按钮；窗口标题改短为 "Ikat"。
 ### Fixed
 - `TextContent` 每帧重建泄漏 + NodeId 12-bit generation 回卷守卫；`TextContent` 清子后子 wrapper 正确标 disposed（调用方句柄读数抛 `ObjectDisposedException` 而非静默 no-op）。
 - 世界空间控件几何 + 自滚动列表虚拟化；文本管线正确性、嵌套滚动命中、dropdown/滚轮手感（浏览器校准基线 + notch 单位直传）。
@@ -504,7 +512,7 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - 声明式动画：`@keyframes` / `animation`、`Container.Play` 句柄（Pause/Resume/Stop/Seek）、`Container.RestartAnimations` 原位重启。
 - 视觉补全：CSS 渐变背景（linear / radial / ellipse + GRADIENT shader 变体）、box-shadow。
 - 虚拟列表 slot 模型（parked-but-attached，slot 永驻子树、离场仅标记）。
-- 打包器 GUI（Tauri）exe 闭环，Unity 菜单 `LoomGUI > Open Packer` 拉起。
+- 打包器 GUI（Tauri）exe 闭环，Unity 菜单 `Ikat > Open Packer` 拉起。
 - runtime API 接线：`Node.Touchable`、`Container.ScrollPos`、NumberField 边界 / `Radio.Name` / Slider `IsIndeterminate`。
 ### Fixed
 - 圆角裁切 SDF 像素空间化（rounded overflow clip 视觉扁平）；radial circle 关键字 extents、ellipse 角点 √2 贯穿。

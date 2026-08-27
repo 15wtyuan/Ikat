@@ -1,4 +1,4 @@
-# LoomGUI 踩坑记录
+# Ikat 踩坑记录
 
 > 只收**可复用规则**：依赖/平台不讲理的事实、跨层动态契约——看代码看不出来的才配进这里。
 > 新坑按主题归位、不编号；bug 编年史不记（代码 + git history 是载体）。
@@ -37,7 +37,7 @@
 - C# `fixed (T* p = &localVar)` 非法（CS0213 already fixed）——`fixed` 只 pin 托管对象（数组/string），局部变量直接取址。
 - **FFI enum 出口用 return-code + out-param，勿用 0 当「不存在」哨兵**——首变体判别值 = 0（如 NodeKind::Container），会与合法值相撞、无法区分。
 
-### Unity Input System 1.19（LoomInputCollector.cs）
+### Unity Input System 1.19（IkatInputCollector.cs）
 - 双路径 `#if ENABLE_INPUT_SYSTEM`（`Mouse.current...` 新 API）/ else 旧 `UnityEngine.Input`；asmdef 引用名是 `Unity.InputSystem`（非 `UnityEngine.InputSystemModule`）。
 
 ### image 0.25（packer）
@@ -55,11 +55,13 @@
 
 ### 本机 shell（Git Bash on Windows）
 - heredoc 喂 python 会**吃掉一层反斜杠**：想在替换串里产出源码字面量 `'\n'`（python 里写 `\\n`），实际落到 python 是真换行——批量编辑含转义序列的 Rust/JS 源码必坏且难察觉（实锤：把换行器测试注释改出断行、断言匹配静默失配）。含反斜杠字面量的文本编辑用 Edit 工具；纯结构化替换（无反斜杠）才走 heredoc python。
+- **全仓批量替换的文件集必须把字体族纳入二进制黑名单**：`.bin/.png/.dll/.exe` 之外还有 `.ttf/.ttf.bytes/.ttc/.otf`——字体被当文本替换后字节错位，症状是测试大面积 `NoHeadTable` / `need font` panic，且只炸加载该字体的那部分用例（DejaVu 全绿仍有 wqy-microhei.ttc 在烂）。提交前 `git checkout -- <file>` 可零损失回滚，验收 = 全量 cargo test 归零才算二进制无害（更名批 #91 实锤：14 个 ttf + ttc 受损靠测试才现形）。另：`xargs` 默认按空白拆路径，带空格路径会伪报 can't read——统一 `tr '\n' '\0' | xargs -0`。
+- 另外 GNU sed 在部分 `-E` 场景对 `\1/\2` 反向引用替换静默失效（不报错、输出原样）：带捕获组引用的替换跑完必须 grep 抽验命中率，不确定就用字面量枚举替换单条验证。
 
 ## 2. 跨层闭环规则
 
 ### pkg 格式 bump 代价链
-改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `LOOMGUI_UPDATE_GOLDEN=1 cargo test -p loomgui_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。
+改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `IKATGUI_UPDATE_GOLDEN=1 cargo test -p ikat_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。
 
 ### 机制设计/删除前置检查
 - **设计渲染合成机制前先读对端 shader 能力**：曾设计整套合成 RenderNode 机制，被一次 shader 阅读推翻——对端早已做 source-over 合成。core program 编号 ↔ Unity shader 能力是跨层闭环，先核对两端现状再设计。
@@ -94,7 +96,7 @@
 - **Material 缓存键不含 shader keyword**——新 keyword 组合必须有独立 key 来源（新 program 号或新 key flag 维度），蹭已有 program/键会命中同一 Material 实例 → keyword 冲突静默错渲染。
 - **fgui 的 mesh 合并实靠 Unity Dynamic Batching**（隐式、与 SRP Batcher 互斥——URP 下不可控）；SRP Batcher 只降 CPU 不降 draw call。要真 N→1 必须自己合并 mesh。
 - **csproj `<Link>` 引用带 UnityEngine/native 依赖的生产源进纯 net10.0 headless 项目编译失败**——`<Link>` 只拷文件不带依赖链；headless 测试用物理拷贝源文件。
-- **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `LoomGUI.Editor.EventType` 撞 `LoomGUI.EventType`），只能全限定名，alias 无用。
+- **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `Ikat.Editor.EventType` 撞 `Ikat.EventType`），只能全限定名，alias 无用。
 
 ## 4. 动态契约
 - **CSS 多声明分割必须括号感知**：`animation`/`transition` 等逗号多声明与函数参数逗号共用语法——`split(',')` 会把 `cubic-bezier(.3,0,.7,1)` 的参数切成独立声明，静默错位成默认值（解析不报错、行为不对）。统一走 `mapping::split_top_level_commas`（渐变/rgba 同款）；新收函数形属性（带参数的 CSS 函数值）先过它再分段。
@@ -106,4 +108,4 @@
 - **跨树 id 解析必须作用域化**：每新增一种作用域形态（组件实例/List item），全局 `find_by_id_attr` 首匹配就会串实例（组件多实例全部命中第一个）——解析须向上找最近 LOOKUP_SCOPE 根在其子树内做（`find_node_by_id_in_own_scope`）。
 - **`remove_node` 联动清理是动态契约**：删节点须同步清全部持久附属表（anim/scroll/controls/roles/lists/text_contents/image_srcs…）——新增持久附属表必须同步加清理，漏一个 = 悬空引用/残留状态。
 - **@keyframes 的 transform 只收 px（TRS 像素模型）——百分比静默不动**：`translateX(-100%)` 等百分比形 parse_transform_trs 走 parse_px 直接 None，fence 不校验 keyframe 值域 → 打包零报错、player 照常 Playing 但每帧 props 全 None，视觉静止。写动画用 px（自身尺寸百分比语义需 layout 参与，框架级支持另立票）。
-- **ABI 位型/字段宽度变更的静默错解码**：位掩码/移位常量（`& 0x6000_0000`、`>> 24`、`0xFFFFFFFF` 哨兵）在位型拓宽后**编译全过但语义死掉**——必须 grep 全部位常量逐个对新位型表重审，不能只跟编译器走；C# 侧同理，csbindgen 对**函数签名引用到**的 repr(C) struct 会生成含字段布局的 C# stub（v43 LoomTweenSpec 实测），但签名外独立序列化的结构（事件 SOA 偏移、`NativeEventBuffer` 手写偏移）仍无生成物——手写镜像的宽度/布局无编译期保护，字段变宽必须人工重排，且每 struct 配 Rust 侧 `size_of` 常量断言 + C# `Marshal.SizeOf` 对照。另防装箱断言陷阱：`Assert.Equal(42u, ulong值)` 经 object 装箱恒 false 但编译过。
+- **ABI 位型/字段宽度变更的静默错解码**：位掩码/移位常量（`& 0x6000_0000`、`>> 24`、`0xFFFFFFFF` 哨兵）在位型拓宽后**编译全过但语义死掉**——必须 grep 全部位常量逐个对新位型表重审，不能只跟编译器走；C# 侧同理，csbindgen 对**函数签名引用到**的 repr(C) struct 会生成含字段布局的 C# stub（v43 IkatTweenSpec 实测），但签名外独立序列化的结构（事件 SOA 偏移、`NativeEventBuffer` 手写偏移）仍无生成物——手写镜像的宽度/布局无编译期保护，字段变宽必须人工重排，且每 struct 配 Rust 侧 `size_of` 常量断言 + C# `Marshal.SizeOf` 对照。另防装箱断言陷阱：`Assert.Equal(42u, ulong值)` 经 object 装箱恒 false 但编译过。

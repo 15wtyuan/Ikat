@@ -1,4 +1,4 @@
-/* loom preview shell —— 深色中性、克制；无构建无依赖。 */
+/* ikat preview shell —— 深色中性、克制；无构建无依赖。 */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   --bg: #17191d; --panel: #1e2127; --line: #2c313a;

@@ -9,7 +9,7 @@
 //! 与 `TAGS` / `SHELL_TAGS` 注册表比对，不一致即 fail。这样「改 schema 必同步 fence.md」
 //! 有了可执行保证。
 
-use loomgui_fence::schema::tag::{SHELL_TAGS, TAGS};
+use ikat_fence::schema::tag::{SHELL_TAGS, TAGS};
 
 /// 从 `fence.md` 解析指定主表的标签清单。
 ///
@@ -104,7 +104,7 @@ fn fence_md_shell_tags_match_schema() {
 ///
 /// 非全量 CSS_PROPS 覆盖——标准 CSS longhand（padding/margin/border 四向）靠作者/AI 的
 /// CSS 先验，fence.md 用合并写法 `padding-top/right/bottom/left` 表达即可；本门只锁
-/// 「LoomGUI 特有 / 易漂移 / 漏了会坑 AI」的关键属性（resize noop、动画、文本控件私有、
+/// 「Ikat 特有 / 易漂移 / 漏了会坑 AI」的关键属性（resize noop、动画、文本控件私有、
 /// 九宫格、filter/transform/box-shadow 等非直觉项）。新增此类属性时须同步 fence.md。
 #[test]
 fn fence_md_covers_critical_css_props() {

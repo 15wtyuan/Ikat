@@ -2,7 +2,7 @@
 //
 // 投影层机制：Rust 核心是带 kind 判别的 enum + side
 // table，不做 OOP；C# 投影层用 typed 子类（Container/Button/Slider/...）给业务程序员稳定 API 表面。
-// NodeFactory 据 loomgui_stage_get_node_kind 返的 byte，switch 到对应 C# 子类构造。
+// NodeFactory 据 ikat_stage_get_node_kind 返的 byte，switch 到对应 C# 子类构造。
 //
 // 全 21 公共 NodeKind 变体都需 arm（对照 Projection/NodeKind.cs）。当前 C# 公共类型集已覆盖全部
 // Rust 公共 kind——OptionItem/Slot/CustomElement/TabList/Tab/Link 六容器型变体经本 factory 派发到专用
@@ -13,10 +13,10 @@
 // 兜底 arm：未知 byte → Container + 不 crash。围栏闭合保证理论上不达（pkg.bin 只装合法 kind_tag，
 // kind_from_tag 只接受围栏白名单），防御性兜底防 FFI 异常 byte 崩整树。
 
-using LoomGUI.Bindings;
+using Ikat.Bindings;
 using System;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// <summary>
     /// 投影层内部：NodeKind byte → typed C# Node 子类的工厂。所有 Node 实例的构造经此唯一入口。
@@ -37,7 +37,7 @@ namespace LoomGUI
             // get_node_kind：return-code + out byte。0=ok 且 *out=u8 判别值；
             // 非 0=节点不 live 或 out null。不用 ->u8 + 0 哨兵是因为 Container=0 会撞「不存在」。
             byte kind = 0xFF;
-            int rc = Native.loomgui_stage_get_node_kind(h, id, &kind);
+            int rc = Native.ikat_stage_get_node_kind(h, id, &kind);
             if (rc != 0)
                 throw new InvalidOperationException(
                     $"get_node_kind(node_id={id}) failed (rc={rc}); node not live or stage handle invalid");

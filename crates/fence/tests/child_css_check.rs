@@ -1,11 +1,11 @@
 //! #45 必需子节点 CSS 命中校验的集成测试（独立文件——lib 内嵌测试位曾出现
 //! Windows 增量编译行号/断言错位，隔离后稳定复现与验证）。
 
-use loomgui_fence::control_css_check::check_control_css;
-use loomgui_fence::diagnostic::{DiagnosticCode, LineMap};
-use loomgui_fence::pipeline::parse_template;
+use ikat_fence::control_css_check::check_control_css;
+use ikat_fence::diagnostic::{DiagnosticCode, LineMap};
+use ikat_fence::pipeline::parse_template;
 
-fn check(html: &str) -> Vec<loomgui_fence::diagnostic::Diagnostic> {
+fn check(html: &str) -> Vec<ikat_fence::diagnostic::Diagnostic> {
     let result = parse_template(html, "t.html");
     check_control_css(
         &result.tree,

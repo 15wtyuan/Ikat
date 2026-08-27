@@ -1,9 +1,9 @@
 // Browser rect exporter: measure every body descendant's getBoundingClientRect
-// in a real Chromium via Playwright, dump JSON for later diff against LoomGUI core.
+// in a real Chromium via Playwright, dump JSON for later diff against Ikat core.
 //
 // Usage: node browser-rect.mjs <showcase-html-abs-path> <out.json>
 //
-// 页面经 `loom preview` server 加载（单一注入事实源：人类预览和本工具看到的是
+// 页面经 `ikat preview` server 加载（单一注入事实源：人类预览和本工具看到的是
 // 同一个「页面 + 预览模拟脚本」栈——main.js/pages/*.js 的注入由 server 做，本
 // 脚本不再手工拼装）。脚本内起临时 server（--port 0 OS 挑端口），finally 杀掉。
 // 仍由本脚本注入/撤销的只有测量面：A1 reset（剥 UA 默认）+ zoom 清零 + data-fill
@@ -23,41 +23,41 @@ if (!htmlPath || !outPath) {
 
 const htmlAbs = resolve(htmlPath);
 
-// 工作区根 = 自页面路径向上找 loom.workspace.json。
+// 工作区根 = 自页面路径向上找 ikat.workspace.json。
 function findWorkspaceRoot(dir) {
   for (let d = dir; ; d = dirname(d)) {
     try {
-      readFileSync(join(d, 'loom.workspace.json'));
+      readFileSync(join(d, 'ikat.workspace.json'));
       return d;
     } catch { /* not here */ }
     const parent = dirname(d);
-    if (parent === d) throw new Error(`no loom.workspace.json above ${dir}`);
+    if (parent === d) throw new Error(`no ikat.workspace.json above ${dir}`);
   }
 }
 const wsRoot = findWorkspaceRoot(dirname(htmlAbs));
 const relFromWs = htmlAbs.slice(wsRoot.length + 1).replace(/\\/g, '/');
 
-// loom.exe：环境变量优先，其次仓库构建产物（rect-diff 在仓库 showcase/scripts/ 下）。
-function findLoom() {
-  if (process.env.LOOM_EXE) return process.env.LOOM_EXE;
+// ikat.exe：环境变量优先，其次仓库构建产物（rect-diff 在仓库 showcase/scripts/ 下）。
+function findIkat() {
+  if (process.env.IKAT_EXE) return process.env.IKAT_EXE;
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-  for (const c of [join(repoRoot, 'target/release/loom.exe'), join(repoRoot, 'target/release/loom')]) {
+  for (const c of [join(repoRoot, 'target/release/ikat.exe'), join(repoRoot, 'target/release/ikat')]) {
     try {
       readFileSync(c);
       return c;
     } catch { /* keep looking */ }
   }
-  throw new Error(`loom binary not found (build it or set LOOM_EXE): ${join(repoRoot, 'target/release/loom.exe')}`);
+  throw new Error(`ikat binary not found (build it or set IKAT_EXE): ${join(repoRoot, 'target/release/ikat.exe')}`);
 }
 
 async function startPreview() {
-  const loom = findLoom();
-  const child = spawn(loom, ['preview', wsRoot, '--port', '0', '--idle-timeout', '600'], {
+  const ikat = findIkat();
+  const child = spawn(ikat, ['preview', wsRoot, '--port', '0', '--idle-timeout', '600'], {
     stdio: ['ignore', 'pipe', 'ignore'],
   });
   const port = await new Promise((res, rej) => {
     let buf = '';
-    const timer = setTimeout(() => rej(new Error('loom preview did not report within 20s')), 20000);
+    const timer = setTimeout(() => rej(new Error('ikat preview did not report within 20s')), 20000);
     child.stdout.on('data', (d) => {
       buf += d;
       const line = buf.split('\n').find((l) => l.trim().startsWith('{'));
@@ -66,11 +66,11 @@ async function startPreview() {
         try {
           res(JSON.parse(line).port);
         } catch (e) {
-          rej(new Error(`loom preview stdout not JSON: ${line}`));
+          rej(new Error(`ikat preview stdout not JSON: ${line}`));
         }
       }
     });
-    child.on('exit', (code) => rej(new Error(`loom preview exited early (code ${code})`)));
+    child.on('exit', (code) => rej(new Error(`ikat preview exited early (code ${code})`)));
   });
   return { child, port };
 }

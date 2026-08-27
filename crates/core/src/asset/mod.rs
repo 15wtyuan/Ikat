@@ -48,7 +48,7 @@ use crate::style::dynamic::DynamicRuleTable;
 use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
-pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）
+pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）。两处魔数皆 LoomGUI 时代遗留：字节=格式兼容契约而非品牌，更名不改。
 pub const PKG_FORMAT_VERSION: u32 = 46; // v46: TemplateNode 加 href（#74 `<a>`）+ ResolvedStyle 加 text_decoration。bincode 布局变，旧包拒绝。
 pub(crate) const MIN_VERSION: u32 = 46;
 pub(crate) const MAX_VERSION: u32 = 46;
@@ -209,7 +209,7 @@ pub enum PkgError {
 impl std::fmt::Display for PkgError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PkgError::BadMagic => write!(f, "bad magic (not a loom package)"),
+            PkgError::BadMagic => write!(f, "bad magic (not a ikat package)"),
             PkgError::TooOld(v) => {
                 write!(f, "package formatVersion {v} too old (min {MIN_VERSION})")
             }

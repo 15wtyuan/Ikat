@@ -14,7 +14,7 @@
 // corlib 没有（编译不过）；__refvalue（refanyval）Mono 运行时校验 TypedReference 类型
 // 不符即抛 InvalidCastException。接口约束调用是唯一干净路径，struct 字段顺序不再受约束。
 
-namespace LoomGUI
+namespace Ikat
 {
     /// <summary>
     /// 投影层内部：路由事件核心状态。每个 typed event struct（<see cref="ClickEvent"/>/
@@ -24,7 +24,7 @@ namespace LoomGUI
     /// 一份相同实现（DRY）。
     ///
     /// 设计契约：
-    /// - <see cref="Target"/> = 命中节点（dispatch 时由 demux 从 <c>LoomEvent.nodeId</c>
+    /// - <see cref="Target"/> = 命中节点（dispatch 时由 demux 从 <c>IkatEvent.nodeId</c>
     ///   经 <c>NodeRegistry</c> 翻译填入，一次 dispatch 不变）。
     /// - <see cref="CurrentTarget"/> = 当前路由到的节点（capture/bubble 各祖先节点依次刷新，
     ///   EventBus 填）。DOM/W3C 三阶段模型对齐。

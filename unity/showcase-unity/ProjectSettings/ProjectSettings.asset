@@ -13,7 +13,7 @@ PlayerSettings:
   useOnDemandResources: 0
   accelerometerFrequency: 60
   companyName: DefaultCompany
-  productName: loomgui_unity
+  productName: ikat_unity
   defaultCursor: {fileID: 0}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
@@ -851,14 +851,14 @@ PlayerSettings:
   editorAssembliesCompatibilityLevel: 1
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: loomgui_unity
+  metroPackageName: ikat_unity
   metroPackageVersion: 
   metroCertificatePath: 
   metroCertificatePassword: 
   metroCertificateSubject: 
   metroCertificateIssuer: 
   metroCertificateNotAfter: 0000000000000000
-  metroApplicationDescription: loomgui_unity
+  metroApplicationDescription: ikat_unity
   wsaImages: {}
   metroTileShortName: 
   metroTileShowName: 0
@@ -932,7 +932,7 @@ PlayerSettings:
   cloudProjectId: 4d144e4c-b12d-4d70-8a27-dae67668aa22
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: loomgui_unity
+  projectName: ikat_unity
   organizationId: unity_15wtyuan
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0

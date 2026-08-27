@@ -1,7 +1,7 @@
 {
-  "name": "com.loomgui.unity",
+  "name": "com.ikat.unity",
   "version": "0.0.13",
-  "displayName": "LoomGUI",
+  "displayName": "Ikat",
   "description": "跨引擎游戏 UI 框架——Rust 核心 + HTML/CSS DSL，Unity 后端",
   "unity": "2021.3",
   "license": "MIT",
@@ -16,9 +16,9 @@
     "game-ui",
     "rust"
   ],
-  "changelogUrl": "https://github.com/15wtyuan/LoomGUI/blob/main/unity/package/CHANGELOG.md",
-  "documentationUrl": "https://github.com/15wtyuan/LoomGUI/blob/main/docs/design/main-design.md",
-  "licensesUrl": "https://github.com/15wtyuan/LoomGUI/blob/main/LICENSE",
+  "changelogUrl": "https://github.com/15wtyuan/Ikat/blob/main/unity/package/CHANGELOG.md",
+  "documentationUrl": "https://github.com/15wtyuan/Ikat/blob/main/docs/design/main-design.md",
+  "licensesUrl": "https://github.com/15wtyuan/Ikat/blob/main/LICENSE",
   "dependencies": {
     "com.unity.2d.sprite": "1.0.0",
     "com.unity.inputsystem": "1.7.0",

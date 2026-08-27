@@ -1,8 +1,8 @@
 // Normalize a Unity PlayMode DumpSceneJson export into the flat rect shape
 // diff.mjs consumes ({domIndex, tag, id, classes[], x, y, w, h}).
 //
-// Source shape (core dump_scene_json, via LoomHost.DumpSceneJson /
-// LoomBridge.DumpScene() on the Unity machine):
+// Source shape (core dump_scene_json, via IkatHost.DumpSceneJson /
+// IkatBridge.DumpScene() on the Unity machine):
 //   {node_id, parent, tag, id, classes: "a b" (space-joined string),
 //    kind, layout: {x,y,w,h}, world_matrix[6], anim_tr, anim_op, visible}
 //

@@ -1,4 +1,4 @@
-// 控件/交互模拟（AI 手写预览脚本，loom preview server 注入；不进打包）。
+// 控件/交互模拟（AI 手写预览脚本，ikat preview server 注入；不进打包）。
 // 镜像 core 的控件语义（sync_control_visuals 家族）：预览里控件要点得动、状态
 // 要长得对，人类预览才不骗人。作者在 HTML 里写好结构（fill/thumb/listbox/...），
 // 这里只负责驱动。

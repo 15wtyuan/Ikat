@@ -1,8 +1,0 @@
-{
-    "name": "LoomGUI.Runtime",
-    "rootNamespace": "LoomGUI",
-    "references": ["LoomGUI.Bindings", "Unity.InputSystem"],
-    "includePlatforms": [],
-    "excludePlatforms": [],
-    "allowUnsafeCode": true
-}

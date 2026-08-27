@@ -395,7 +395,7 @@ GameObject:
   - component: {fileID: 716283212}
   - component: {fileID: 716283211}
   m_Layer: 6
-  m_Name: LoomUICamera
+  m_Name: IkatUICamera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -573,7 +573,7 @@ GameObject:
   - component: {fileID: 1806355434}
   - component: {fileID: 1806355438}
   m_Layer: 6
-  m_Name: LoomGUI
+  m_Name: Ikat
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -605,7 +605,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3e59a64a749b5b9428ea1d269ede2cfd, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomInputCollector
+  m_EditorClassIdentifier: Ikat.Runtime::Ikat.IkatInputCollector
 --- !u!114 &1806355435
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -617,7 +617,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 807cafc80f771280949bbfadbeb16c63, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: LoomGUI.Runtime::LoomGUI.LoomStageDriver
+  m_EditorClassIdentifier: Ikat.Runtime::Ikat.IkatStageDriver
   _designSize: {x: 1920, y: 1080}
   _uiCamera: {fileID: 716283212}
   _showFps: 1

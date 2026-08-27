@@ -4,11 +4,11 @@
 //! 父节点动画 opacity（player 写 NodeAnim.opacity，或 CSS style.opacity）时整子树必须跟着
 //! 淡——否则父淡出、子仍全亮（pre-existing 行为缺陷，本测试锁定修正）。
 
-use loomgui_core::render::build_render_nodes;
-use loomgui_core::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
-use loomgui_core::scene::transform::compute_world_transforms;
-use loomgui_core::text::atlas::GlyphAtlas;
-use loomgui_core::text::layout::FontTable;
+use ikat_core::render::build_render_nodes;
+use ikat_core::scene::node::{Node, NodeId, NodeKind, Rect, Scene};
+use ikat_core::scene::transform::compute_world_transforms;
+use ikat_core::text::atlas::GlyphAtlas;
+use ikat_core::text::layout::FontTable;
 
 fn assert_close(a: f32, b: f32, msg: &str) {
     assert!((a - b).abs() < 1e-5, "{msg}: expected {b}, got {a}");
@@ -25,7 +25,7 @@ fn container_node(rect: Rect) -> Node {
 }
 
 /// 建 frame（空字体表 / 空图集：纯 Container 树无文本、无图，无需真实资源）。
-fn frame(scene: &mut Scene) -> loomgui_core::render::FrameData {
+fn frame(scene: &mut Scene) -> ikat_core::render::FrameData {
     compute_world_transforms(scene);
     let fonts = FontTable::new();
     build_render_nodes(
@@ -48,12 +48,7 @@ fn child_id(s: &Scene, parent: NodeId, idx: usize) -> NodeId {
 
 /// 断言这些 node_id 的所有 RenderNode alpha == 期望。容合批（同 DrawState 相邻节点
 /// merge 后子 node_id 被锚吞）：节点集里至少一个存在、每个存在者都携带累积值。
-fn assert_all_alphas(
-    frame: &loomgui_core::render::FrameData,
-    ids: &[u64],
-    expected: f32,
-    msg: &str,
-) {
+fn assert_all_alphas(frame: &ikat_core::render::FrameData, ids: &[u64], expected: f32, msg: &str) {
     let found: Vec<f32> = frame
         .nodes
         .iter()

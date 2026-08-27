@@ -1,4 +1,4 @@
-# LoomGUI 文档
+# Ikat 文档
 
 跨引擎游戏 UI 框架。Rust 核心 + 多引擎后端（Unity 首发），HTML/CSS 子集 DSL，自绘渲染。
 

@@ -1,5 +1,5 @@
 [package]
-name = "loomgui_core"
+name = "ikat_core"
 version = "0.1.0"
 edition = "2021"
 
@@ -20,7 +20,7 @@ bincode = "1"
 slotmap = { version = "1.1", features = [] }
 
 [dev-dependencies]
-loomgui_pkg = { path = "../packer/pkg" }
+ikat_pkg = { path = "../packer/pkg" }
 # solve 基准（benches/solve.rs）：增量 vs 全重建帧时对拍。cargo test 不跑 bench。
 criterion = "0.5"
 

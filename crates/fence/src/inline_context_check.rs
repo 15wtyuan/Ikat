@@ -1,10 +1,10 @@
 //! Stage 6.5：inline 元素布局上下文检查。
 //!
-//! taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在一种上下文里
+//! taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。Ikat 只在一种上下文里
 //! 让 inline 元素和浏览器一致：**flex 容器内**——inline 元素是 flex item，按 flex 规则排
 //! （两边行为相同）。
 //!
-//! 在 **block 容器**里（裸 `<div>` 等），LoomGUI 把 inline 标签当 block-level（撑满父宽 + 竖排），
+//! 在 **block 容器**里（裸 `<div>` 等），Ikat 把 inline 标签当 block-level（撑满父宽 + 竖排），
 //! 和浏览器的 inline 行为（按内容收缩 + 横排流）**必然不一致**。本检查在打包期拦下这种写法，
 //! 并教学改法（父容器加 flex / 元素显式 display:block），让 AI 一次就写对。
 //!
@@ -14,8 +14,8 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrElement, IrNodeKind, IrTree};
 use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
-use loomgui_core::style::dynamic::{AttrOp, Compound, DynamicRule};
-use loomgui_core::style::resolved::ResolvedStyle;
+use ikat_core::style::dynamic::{AttrOp, Compound, DynamicRule};
+use ikat_core::style::resolved::ResolvedStyle;
 
 /// 文本级 inline 语义豁免。这些标签是“文本片段”（span 终态是 TextRun）或结构占位（slot）
 /// ——它们在 block 容器里的“不一致”要等文本模型解决，不是靠强制作者声明 flex 能修的。
@@ -225,7 +225,7 @@ pub fn check_inline_context(
         // 元素自己显式 display:block（inline style 或 class 规则）→ 作者有意当块级
         // （撑满），浏览器也撑满，两边一致 → 放行。class 规则路径与 flex 判定同源
         // （css_resolve 只烘 inline style，class 规则的 display 要查 dynamic_rules）。
-        // （display:flex 的 inline 元素在浏览器仍 shrink-to-fit，和 LoomGUI 撑满不一致 → 不放行。）
+        // （display:flex 的 inline 元素在浏览器仍 shrink-to-fit，和 Ikat 撑满不一致 → 不放行。）
         if styles[idx].taffy_style.display == taffy::Display::Block
             || statically_declares_display(
                 el,
@@ -273,9 +273,9 @@ pub fn check_inline_context(
             DiagnosticCode::FenceInlineElementInBlockContext,
             format!(
                 "inline element <{tag}> is directly inside a block container — \
-                 LoomGUI renders it block-level (fills width + stacks vertically), \
+                 Ikat renders it block-level (fills width + stacks vertically), \
                  which differs from the browser's inline behavior (shrink-to-fit + horizontal flow). \
-                 LoomGUI has no inline flow outside flex. \
+                 Ikat has no inline flow outside flex. \
                  Fix (pick one): \
                  (1) make the parent a flex container (add display:flex; add flex-wrap:wrap for multi-element rows); \
                  (2) set display:block on the element if you intentionally want it to fill width / behave as a block.",

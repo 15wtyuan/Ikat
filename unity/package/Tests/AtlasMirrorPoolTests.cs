@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace LoomGUI.Tests
+namespace Ikat.Tests
 {
     /// <summary>
     /// SpriteResolver basic lookup smoke tests (self-drawn atlas, no Unity SpriteAtlas).

@@ -1,10 +1,10 @@
-# LoomGUI Runtime API Reference
+# Ikat Runtime API Reference
 
 Complete lookup table for the business-programmer API (nodes, controls,
 events, lists, animation, styling). The authoritative source is the
-shipped C# signatures (`LoomGUI.*.cs` in the Unity package) — this file
-mirrors their contract so you never need the LoomGUI repository. Load
-this on demand; the `loomgui-runtime` SKILL.md is the workflow manual.
+shipped C# signatures (`Ikat.*.cs` in the Unity package) — this file
+mirrors their contract so you never need the Ikat repository. Load
+this on demand; the `ikat-runtime` SKILL.md is the workflow manual.
 
 ## Object hierarchy
 
@@ -116,16 +116,16 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                      // sibling stacking, paint+hit only
-    public LoomColor BackgroundColor/TextColor { get; set; }   // text color = CSS color channel
+    public IkatColor BackgroundColor/TextColor { get; set; }   // text color = CSS color channel
     public float Opacity { get; set; }
-    public void SetVar(string name, Length/LoomColor/float/string value);
+    public void SetVar(string name, Length/IkatColor/float/string value);
     public void RemoveVar(string name);
 }
 public sealed class NodeTransform {
-    public LoomVector2 Position { get; set; }
-    public LoomVector2 Scale { get; set; }
+    public IkatVector2 Position { get; set; }
+    public IkatVector2 Scale { get; set; }
     public float Rotation { get; set; }                  // radians
-    public LoomVector2 Origin { get; set; }
+    public IkatVector2 Origin { get; set; }
 }
 ```
 
@@ -144,9 +144,9 @@ public class Container : Node {
     public void SetChildIndex(Node child, int index);
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
-    public LoomVector2 ScrollPos { get; }                    // (0,0) on non-scrolling
+    public IkatVector2 ScrollPos { get; }                    // (0,0) on non-scrolling
     public void RestartAnimations();                     // rebuild declarative players on this node AND its subtree; programmatic (Play) players untouched; node state kept
-    public void ScrollTo(LoomVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
+    public void ScrollTo(IkatVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);
 }
@@ -271,7 +271,7 @@ node, including text inside nested spans). UA default style is blue
 Keyboard focus/Enter activation is not in this stage.
 
 Container-semantics roles (plain `Container` from the game-code side —
-their structure rules live in the `loomgui-editor` skill's fence
+their structure rules live in the `ikat-editor` skill's fence
 schema): `role=listbox` (option group), `role=tabpanel` (the panel a
 tab points at via `aria-controls`), `role=dialog` (modal overlay
 layer).
@@ -366,7 +366,7 @@ auto-release; looped animations release on `Stop()`). Class-triggered
 animations have no handle — listen for `AnimationEndEvent` globally
 (`On<AnimationEndEvent>` broadcast). `OnKey(percent)` fires when the
 timeline crosses a registered percentage; `OnHook(name)` crosses
-`/* @loom-hook name */` comment anchors in the CSS. The last iteration
+`/* @ikat-hook name */` comment anchors in the CSS. The last iteration
 fires End only (browser `animationiteration` parity).
 
 Scheduling:
@@ -507,7 +507,7 @@ public sealed class UIContext {
     public void CallNextFrame(Action callback);
     public void CallAfterLayout(Action callback);   // fires after this frame's solve
     public bool IsPointerOnUI { get; }
-    public Node Pick(LoomVector2 globalPoint);
+    public Node Pick(IkatVector2 globalPoint);
 }
 public sealed class UIPackage {
     public string Name { get; }
@@ -534,7 +534,7 @@ public readonly struct TextMetrics {
   expanded instance is an ordinary `Container` obtained via
   `Instantiate("my-widget")` (or `GetTemplate` + deferred
   `Instantiate()`) — the registered stem, no `components/` prefix and
-  no extension (`loom show <pkg>` lists them). Query its internals
+  no extension (`ikat show <pkg>` lists them). Query its internals
   through the instance scope.
 - **`MeasureText` is node-free pre-layout measurement** (tips line
   breaking, floating-text width, auto-width buttons — no hand-counted
@@ -548,7 +548,7 @@ public readonly struct TextMetrics {
   break-word` in CSS, and the node then wraps wider than this
   default-mode prediction. Line height = `normal`, letter-spacing 0,
   regular weight (matches default-styled text nodes). `fontFamily`
-  must be a registered family (`LoomHost.RegisterFont` / runtime
+  must be a registered family (`IkatHost.RegisterFont` / runtime
   manifest) — unknown family throws `UIContractException` instead of
   silently falling back to the default
   font (measuring with the wrong font is worse than not measuring).
@@ -566,25 +566,25 @@ public readonly struct TextMetrics {
   hit, set a known-good key (one referenced by existing HTML) on the
   same node and compare.
 
-## LoomStageDriver serialized fields
+## IkatStageDriver serialized fields
 
 Programmatic setup (`SerializedObject`) and Inspector scripting use
 these field names (defaults in parentheses):
 
 | Field | Type | Notes |
 |---|---|---|
-| `_designSize` | UnityEngine.Vector2 | authoring resolution **fallback** — used only when `loom.runtime.json` omits `design` (the workspace is the source of truth; set it there via `loom design`). Default (1080,1920) is portrait |
+| `_designSize` | UnityEngine.Vector2 | authoring resolution **fallback** — used only when `ikat.runtime.json` omits `design` (the workspace is the source of truth; set it there via `ikat design`). Default (1080,1920) is portrait |
 | `_adaptMode` | AdaptMode enum | adaptation mode **fallback** (`Letterbox` default / `FitWidth` / `FitHeight`) — used only when the manifest omits `match_mode` |
 | `_safeArea` | bool | notch-safe letterboxing (true) |
 | `_showFps` | bool | FPS overlay (false) |
-| `_uiCamera` | Camera | null = driver creates `LoomUICamera` |
-| `_inputCollector` | LoomInputCollector | null = `GetComponent` fallback |
+| `_uiCamera` | Camera | null = driver creates `IkatUICamera` |
+| `_inputCollector` | IkatInputCollector | null = `GetComponent` fallback |
 | `_productRoot` | string | empty = Editor `Assets/Bundles` / player StreamingAssets |
 
 ## Runtime diagnostics
 
 ```csharp
-// LoomHost (public; dev bridges — not frozen API):
+// IkatHost (public; dev bridges — not frozen API):
 public string DumpSceneJson();                     // full scene JSON
 public string DumpSceneTree(string filter = null); // human-readable tree
 ```
@@ -601,9 +601,9 @@ public string DumpSceneTree(string filter = null); // human-readable tree
   tree view in `"text"` / `"scroll"` blocks per node.
 - **F8** (editor / development builds) dumps blob state + mirror pool
   **+ a `[Scene tree]` section** to the console and
-  `loom-dump-<time>.txt` next to the project — read the `[Scene tree]`
+  `ikat-dump-<time>.txt` next to the project — read the `[Scene tree]`
   section first for layout attribution.
-- **Runtime warnings** (`[LoomGUI]` prefix in the console,
+- **Runtime warnings** (`[Ikat]` prefix in the console,
   editor/development builds only): e.g.
   `wheel ignored: node N declares overflow:auto/scroll but has no
   overflow to scroll (content fits the viewport, overlap=0)` — the

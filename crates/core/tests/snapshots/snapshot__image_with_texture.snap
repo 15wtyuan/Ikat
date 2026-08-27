@@ -1,5 +1,5 @@
 ---
-source: loomgui_core/tests/snapshot.rs
+source: ikat_core/tests/snapshot.rs
 expression: json
 ---
 [

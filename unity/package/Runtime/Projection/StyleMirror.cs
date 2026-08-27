@@ -2,12 +2,12 @@
 //
 // 投影层契约：
 //   - 只存 setter 写过的属性（稀疏 dict，CSS prop name → typed value）。
-//   - getter 查 mirror：有 → 返 typed 值；无 → 返 Unset 哨兵（Length.Unset / LoomColor.Unset /
+//   - getter 查 mirror：有 → 返 typed 值；无 → 返 Unset 哨兵（Length.Unset / IkatColor.Unset /
 //     enum 的 Unset=0 变体；Thickness/float 无 Unset 概念，getter 走 default）。
 //   - setter 写 Unset 哨兵 → 视为撤销该属性（移除 key + unset_inline_override FFI），不写 Set。
 //
 // 攒批 flush：setter 只标脏（_dirty=true + 注册到 NodeRegistry dirty 集），
-// 不立即调 set_inline_override；帧末（LoomHost.Step 的 flush seam，或 UIContext.FlushPendingWrites）
+// 不立即调 set_inline_override；帧末（IkatHost.Step 的 flush seam，或 UIContext.FlushPendingWrites）
 // 一次性遍历 dirty 集 调 FlushInline。core 侧 inline_override 是累加语义（set 只 OR bit /
 // 覆盖值，不清其他），故帧末重建整个镜像拼 CSS 串送一次安全。
 //
@@ -19,9 +19,9 @@
 
 using System.Collections.Generic;
 using System.Text;
-using LoomGUI.Bindings;
+using Ikat.Bindings;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// <summary>
     /// 投影层内部：NodeStyle 写入属性的稀疏镜像 + FFI flush seam。
@@ -30,7 +30,7 @@ namespace LoomGUI
     internal sealed unsafe class StyleMirror
     {
         readonly Node _owner;
-        // CSS prop name → typed value（Length/LoomColor/Thickness/float/enum）。未在 dict 的属性 = 未写过。
+        // CSS prop name → typed value（Length/IkatColor/Thickness/float/enum）。未在 dict 的属性 = 未写过。
         readonly Dictionary<string, object> _set = new();
 
         // 攒批 dirty 标志：Set/Unset 置 true；FlushInline 末尾置 false。
@@ -81,13 +81,13 @@ namespace LoomGUI
             _owner._ctx._registry.MarkStyleDirty(_owner);
         }
 
-        // Length/LoomColor/enum 各自有 Unset 哨兵（值类型，无 null）。Thickness/float 无 Unset 概念
+        // Length/IkatColor/enum 各自有 Unset 哨兵（值类型，无 null）。Thickness/float 无 Unset 概念
         // （ Thickness 是裸四值结构；Opacity 是裸 float）—— setter 写啥就存啥，不走撤销路径。
         // enum 的 Unsent 变体恒为 0（frozen enum 全部以 Unset=0 开头），Convert.ToInt32 兜底判 0。
         static bool IsUnsetSentinel(object v) => v switch
         {
             Length l  => l.Unit == LengthUnit.Unset,
-            LoomColor c   => c.IsUnset,
+            IkatColor c   => c.IsUnset,
             System.Enum e => System.Convert.ToInt32(e) == 0,
             _ => false,
         };
@@ -127,7 +127,7 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_owner._ctx._stage.ToPointer();
             byte[] bytes = Encoding.UTF8.GetBytes(css);
             fixed (byte* p = bytes)
-                Native.loomgui_stage_set_inline_override(h, _owner._id, p, (nuint)bytes.Length);
+                Native.ikat_stage_set_inline_override(h, _owner._id, p, (nuint)bytes.Length);
         }
 
         void CallUnsetInlineOverride(string prop)
@@ -135,7 +135,7 @@ namespace LoomGUI
             StageHandle* h = (StageHandle*)_owner._ctx._stage.ToPointer();
             byte[] bytes = Encoding.UTF8.GetBytes(prop);
             fixed (byte* p = bytes)
-                Native.loomgui_stage_unset_inline_override(h, _owner._id, p, (nuint)bytes.Length);
+                Native.ikat_stage_unset_inline_override(h, _owner._id, p, (nuint)bytes.Length);
         }
     }
 }

@@ -1,7 +1,7 @@
 //! End-to-end tests: build() produces atlas + font + runtime artifacts.
 
-use loomgui_pkg::build::build;
-use loomgui_pkg::runtime::{RuntimeManifest, RUNTIME_FILE};
+use ikat_pkg::build::build;
+use ikat_pkg::runtime::{RuntimeManifest, RUNTIME_FILE};
 use std::path::Path;
 
 fn write_workspace_json(root: &Path, atlases: &str, fonts: &str) {
@@ -14,12 +14,12 @@ fn write_workspace_json(root: &Path, atlases: &str, fonts: &str) {
     "fonts": {fonts}
 }}"#
     );
-    std::fs::write(root.join("loom.workspace.json"), json).unwrap();
+    std::fs::write(root.join("ikat.workspace.json"), json).unwrap();
 }
 
 #[test]
 fn build_e2e_produces_all_artifacts() {
-    let tmp = std::env::temp_dir().join("loom_build_e2e_test");
+    let tmp = std::env::temp_dir().join("ikat_build_e2e_test");
     let _ = std::fs::remove_dir_all(&tmp);
 
     // Create workspace structure.
@@ -52,7 +52,7 @@ fn build_e2e_produces_all_artifacts() {
         "atlas/ui.atlas.json exists"
     );
     let atlas_text = std::fs::read_to_string(output.join("atlas/ui.atlas.json")).unwrap();
-    let atlas_m: loomgui_pkg::atlas::AtlasManifest = serde_json::from_str(&atlas_text).unwrap();
+    let atlas_m: ikat_pkg::atlas::AtlasManifest = serde_json::from_str(&atlas_text).unwrap();
     assert!(
         atlas_m.sprites.contains_key("assets/home.png"),
         "sprite_key 'assets/home.png' in atlas manifest"
@@ -68,7 +68,7 @@ fn build_e2e_produces_all_artifacts() {
 
     // Runtime manifest.
     let rt_path = output.join(RUNTIME_FILE);
-    assert!(rt_path.exists(), "loom.runtime.json exists");
+    assert!(rt_path.exists(), "ikat.runtime.json exists");
     let rt_text = std::fs::read_to_string(&rt_path).unwrap();
     let rt: RuntimeManifest = serde_json::from_str(&rt_text).unwrap();
     assert!(
@@ -82,7 +82,7 @@ fn build_e2e_produces_all_artifacts() {
 
 #[test]
 fn build_fails_when_font_file_missing() {
-    let tmp = std::env::temp_dir().join("loom_build_missing_font_test");
+    let tmp = std::env::temp_dir().join("ikat_build_missing_font_test");
     let _ = std::fs::remove_dir_all(&tmp);
 
     std::fs::create_dir_all(tmp.join("assets")).unwrap();
@@ -107,12 +107,12 @@ fn build_fails_when_font_file_missing() {
 
 #[test]
 fn build_fails_when_output_dir_empty() {
-    let tmp = std::env::temp_dir().join("loom_build_no_output_test");
+    let tmp = std::env::temp_dir().join("ikat_build_no_output_test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
 
     let json = r#"{"version":1,"output_dir":"","packages":[],"atlases":[],"fonts":[]}"#;
-    std::fs::write(tmp.join("loom.workspace.json"), json).unwrap();
+    std::fs::write(tmp.join("ikat.workspace.json"), json).unwrap();
 
     let result = build(&tmp);
     let err = result.expect_err("build should fail with empty output_dir");
@@ -127,7 +127,7 @@ fn build_fails_when_output_dir_empty() {
 /// 本测锁住「warning 经 build 进报告」的链路。
 #[test]
 fn build_propagates_warnings_into_report() {
-    let tmp = std::env::temp_dir().join("loom_build_warnings_test");
+    let tmp = std::env::temp_dir().join("ikat_build_warnings_test");
     let _ = std::fs::remove_dir_all(&tmp);
 
     let pkg_src_dir = tmp.join("ui/showcase");
@@ -156,7 +156,7 @@ fn build_propagates_warnings_into_report() {
     "atlases": [{ "name": "ui", "default": true, "dirs": ["ui/showcase"] }],
     "fonts": []
 }"#;
-    std::fs::write(tmp.join("loom.workspace.json"), json).unwrap();
+    std::fs::write(tmp.join("ikat.workspace.json"), json).unwrap();
 
     let report = build(&tmp).expect("warning 不阻断打包：build 应返 Ok");
     assert!(
@@ -189,7 +189,7 @@ fn build_propagates_warnings_into_report() {
 /// orchestration untested. This catches a silent regression in resolve_html_list/runtime ordering.
 #[test]
 fn build_e2e_packages_path_writes_pkg_bin_and_fills_runtime() {
-    let tmp = std::env::temp_dir().join("loom_build_packages_e2e_test");
+    let tmp = std::env::temp_dir().join("ikat_build_packages_e2e_test");
     let _ = std::fs::remove_dir_all(&tmp);
 
     // Workspace dir scanned by resolve_html_list (auto mode: pkg.html empty → scan pkg.dirs).
@@ -210,7 +210,7 @@ fn build_e2e_packages_path_writes_pkg_bin_and_fills_runtime() {
     "atlases": [],
     "fonts": []
 }"#;
-    std::fs::write(tmp.join("loom.workspace.json"), json).unwrap();
+    std::fs::write(tmp.join("ikat.workspace.json"), json).unwrap();
 
     let report = build(&tmp).expect("build should succeed");
     assert!(
@@ -228,9 +228,9 @@ fn build_e2e_packages_path_writes_pkg_bin_and_fills_runtime() {
         "pkg.bin should be non-empty"
     );
 
-    // loom.runtime.json packages matches report.packages (fill-back ordering correct).
+    // ikat.runtime.json packages matches report.packages (fill-back ordering correct).
     let rt_path = output.join(RUNTIME_FILE);
-    assert!(rt_path.exists(), "loom.runtime.json exists");
+    assert!(rt_path.exists(), "ikat.runtime.json exists");
     let rt_text = std::fs::read_to_string(&rt_path).unwrap();
     let rt: RuntimeManifest = serde_json::from_str(&rt_text).unwrap();
     assert_eq!(

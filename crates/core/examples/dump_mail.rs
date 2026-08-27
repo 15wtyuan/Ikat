@@ -2,8 +2,8 @@
 //! 实例化 showcase mail，set ItemCount=100，测 tick 耗时 + 动画 player 数 + slot 结构
 //! （复现 core 侧的 per-frame 开销 + 定位 blank gap）。
 
-use loomgui_core::scene::dynamic::append_child;
-use loomgui_core::stage::Stage;
+use ikat_core::scene::dynamic::append_child;
+use ikat_core::stage::Stage;
 use std::time::Instant;
 
 fn main() {
@@ -48,10 +48,10 @@ fn main() {
         .unwrap()
         .find_by_id_attr("mail-list")
         .expect("mail-list node");
-    // 进数据驱动模式（FFI loomgui_list_set_item_count 首调自动做这步；这里显式调），
+    // 进数据驱动模式（FFI ikat_list_set_item_count 首调自动做这步；这里显式调），
     // 再 set_item_count=100（触发虚拟化）。
-    loomgui_core::list::enter_data_driven(&mut s, mail_list, 1).expect("enter_data_driven");
-    loomgui_core::list::set_item_count(&mut s, mail_list, 100);
+    ikat_core::list::enter_data_driven(&mut s, mail_list, 1).expect("enter_data_driven");
+    ikat_core::list::set_item_count(&mut s, mail_list, 100);
     // 跑几帧让虚拟化落定 + bind + 高度回填
     for _ in 0..5 {
         let _ = s.tick_and_render();
@@ -96,7 +96,7 @@ fn main() {
 
     // 缩放测试：tick 耗时是否随 ItemCount 增长？（只密 14 slot，若有东西 O(items) 就暴露）
     for &ic in &[10usize, 100, 1000, 5000] {
-        loomgui_core::list::set_item_count(&mut s, mail_list, ic);
+        ikat_core::list::set_item_count(&mut s, mail_list, ic);
         for _ in 0..3 {
             let _ = s.tick_and_render();
         } // settle

@@ -36,10 +36,10 @@ jobs:
       - name: clippy (-D warnings)
         # 历史 warning 已清零（advisory 收紧为严门禁）。可辩护的测试/FFI 模式 lint 在各 crate
         # root 用 #![allow] 显式放行并注明理由；其余真错的已修。
-        # loomgui_gui (Tauri 2) 在 Linux 经 pkg-config 拉 webkit2gtk/glib 系统库；它是
+        # ikat_gui (Tauri 2) 在 Linux 经 pkg-config 拉 webkit2gtk/glib 系统库；它是
         # Windows-only 交付物（出 exe 供 Unity），Linux 不构建——clippy 门排除之（Windows 走
         # WebView2 无系统库依赖，test matrix 的 windows 腿仍全量编译覆盖）。
-        run: cargo clippy --all-targets --workspace --exclude loomgui_gui -- -D warnings
+        run: cargo clippy --all-targets --workspace --exclude ikat_gui -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
@@ -47,10 +47,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # loomgui_gui (Tauri 2) 在 Linux 需 webkit2gtk/glib 系统库（pkg-config），是 Windows-only
+          # ikat_gui (Tauri 2) 在 Linux 需 webkit2gtk/glib 系统库（pkg-config），是 Windows-only
           # 交付物，Linux CI 不构建。Windows 用 WebView2 无系统库依赖，保留全 workspace 编译覆盖。
           - os: ubuntu-latest
-            cargo-exclude: '--exclude loomgui_gui'
+            cargo-exclude: '--exclude ikat_gui'
           - os: windows-latest
             cargo-exclude: ''
     runs-on: ${{ matrix.os }}
@@ -72,20 +72,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: build release .dll
-        run: cargo build -p loomgui_ffi_c --release
+        run: cargo build -p ikat_ffi_c --release
       - name: upload .dll
         uses: actions/upload-artifact@v4
         with:
-          name: loomgui_ffi_c-windows-x64
-          path: target/release/loomgui_ffi_c.dll
+          name: ikat_ffi_c-windows-x64
+          path: target/release/ikat_ffi_c.dll
           retention-days: 7
-      - name: build release exe (loomgui_pkg, bin=loom)
-        run: cargo build -p loomgui_pkg --release
-      - name: upload loom.exe
+      - name: build release exe (ikat_pkg, bin=ikat)
+        run: cargo build -p ikat_pkg --release
+      - name: upload ikat.exe
         uses: actions/upload-artifact@v4
         with:
-          name: loom-exe-${{ github.sha }}
-          path: target/release/loom.exe
+          name: ikat-exe-${{ github.sha }}
+          path: target/release/ikat.exe
           retention-days: 7
 
   dotnet-test:
@@ -97,12 +97,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: dotnet test
-        run: dotnet test tests/dotnet/LoomGUI.Tests.Core.csproj
+        run: dotnet test tests/dotnet/Ikat.Tests.Core.csproj
 
   # HeadlessTests（P/Invoke 真 native）+ PublicApi 编译门。此前 CI 只跑纯 managed 的
   # Tests.Core，HeadlessTests 曾随 pkg 版本漂移静默腐烂（fixture v24 vs core v34）无人
   # 知——此 job 补上盲区：runner 现场编 Linux .so，替换输出目录（入库的 Windows dll
-  # 仅 Windows P/Invoke 解析命中，Linux 解析 __DllName="loomgui_ffi_c" 走 .so）。
+  # 仅 Windows P/Invoke 解析命中，Linux 解析 __DllName="ikat_ffi_c" 走 .so）。
   dotnet-headless:
     name: dotnet headless (P/Invoke native)
     runs-on: ubuntu-latest
@@ -114,13 +114,13 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: build native lib (linux .so)
-        run: cargo build -p loomgui_ffi_c --release
+        run: cargo build -p ikat_ffi_c --release
       - name: build headless tests
-        run: dotnet build tests/dotnet/LoomGUI.HeadlessTests/LoomGUI.HeadlessTests.csproj
+        run: dotnet build tests/dotnet/Ikat.HeadlessTests/Ikat.HeadlessTests.csproj
       - name: stage linux native lib into test output dir
-        run: cp target/release/libloomgui_ffi_c.so tests/dotnet/LoomGUI.HeadlessTests/bin/Debug/net10.0/
+        run: cp target/release/libikat_ffi_c.so tests/dotnet/Ikat.HeadlessTests/bin/Debug/net10.0/
       - name: dotnet test (no-build)
-        run: dotnet test tests/dotnet/LoomGUI.HeadlessTests/LoomGUI.HeadlessTests.csproj --no-build
+        run: dotnet test tests/dotnet/Ikat.HeadlessTests/Ikat.HeadlessTests.csproj --no-build
 
   dotnet-publicapi:
     name: dotnet public-api compile gate
@@ -131,4 +131,4 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       # 公共 API 冻结签名编译校验（无测试用例）：0 警告 0 错误 = 过。
-      - run: dotnet build tests/dotnet/LoomGUI.PublicApi/LoomGUI.PublicApi.csproj -warnaserror
+      - run: dotnet build tests/dotnet/Ikat.PublicApi/Ikat.PublicApi.csproj -warnaserror

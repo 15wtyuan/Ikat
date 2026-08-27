@@ -22,8 +22,8 @@ Post-fix: `grep -rn "Task [0-9]" crates/` → **0 matches**.
 ## Fix 2: Repack stale v21 dotnet fixtures → v24
 
 **Build mechanism (clear):** each fixture has a sibling `.workspace/` dir with
-`loom.workspace.json` (output_dir `../<name>-ws-out`). Built via
-`cargo run -p loomgui_pkg -- build <fixture>.workspace` → writes
+`ikat.workspace.json` (output_dir `../<name>-ws-out`). Built via
+`cargo run -p ikat_pkg -- build <fixture>.workspace` → writes
 `<name>-ws-out/ui/<name>.pkg.bin`, then copied to `fixtures/<name>.pkg.bin`.
 
 Three were v21 (`15 00 00 00`), now v24 (`18 00 00 00`):
@@ -31,7 +31,7 @@ Three were v21 (`15 00 00 00`), now v24 (`18 00 00 00`):
 - **test.workspace/test.html needed a source fix**: the branch's own fence rule
   `FenceInlineElementInBlockContext` (commit 9b4ed72) rejects `<button>`/`<img>`
   as inline children of the block container `#child`. Added `style="display:block"`
-  to both (the fence's recommended fix; LoomGUI already renders them block-level,
+  to both (the fence's recommended fix; Ikat already renders them block-level,
   so zero behavior change). All 9 AcceptanceGate criteria preserved.
 
 `controls.pkg.bin` was already v24 — untouched.
@@ -40,7 +40,7 @@ Three were v21 (`15 00 00 00`), now v24 (`18 00 00 00`):
 - `cargo test` (whole workspace): **GREEN** (698 + suites, 0 failed).
 - `cargo fmt --all -- --check`: clean. `cargo clippy --all-targets -D warnings`: clean.
 - `grep "Task [0-9]" crates/`: 0 matches.
-- Rebuilt + committed `loomgui_ffi_c.dll` (cargo recompiled core; FFI behavior
+- Rebuilt + committed `ikat_ffi_c.dll` (cargo recompiled core; FFI behavior
   unchanged — comment-only source edits).
 - dotnet filtered run (BlockLayout|VisualDecoration|AcceptanceGate|FixtureSmoke|
   UiContextCreation): **35 passed / 2 failed** — all 3 fixtures now LOAD past

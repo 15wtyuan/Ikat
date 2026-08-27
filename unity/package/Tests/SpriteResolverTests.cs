@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace LoomGUI.Tests
+namespace Ikat.Tests
 {
     /// <summary>
     /// SpriteResolver test for self-drawn atlas (atlas.png + atlas.json) lookup.
@@ -148,7 +148,7 @@ namespace LoomGUI.Tests
             // Register a sprite table entry AND a font atlas page with the same key.
             var atlas = new AtlasManifest();
             atlas.pages.Add("ui.png");
-            atlas.sprites["loomgui://font-atlas/p0"] = new SpriteEntry
+            atlas.sprites["ikat://font-atlas/p0"] = new SpriteEntry
             {
                 page = 0,
                 uv   = new float[] { 0, 0, 1, 1 },
@@ -161,10 +161,10 @@ namespace LoomGUI.Tests
 
             // Register font atlas page with same key
             var fontTex = new Texture2D(256, 256);
-            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", fontTex);
+            resolver.RegisterFontAtlasPage("ikat://font-atlas/p0", fontTex);
 
             // GetSprite should return the font atlas entry (priority), not the sprite table entry
-            var r = resolver.GetSprite("loomgui://font-atlas/p0");
+            var r = resolver.GetSprite("ikat://font-atlas/p0");
             Assert.IsTrue(r.found, "font atlas page should be found");
             Assert.AreEqual(fontTex, r.tex, "font atlas tex takes priority over sprite table");
             Assert.AreEqual(0, r.uvRect.x, "font atlas is full-region");
@@ -186,10 +186,10 @@ namespace LoomGUI.Tests
 
             var tex1 = new Texture2D(256, 256);
             var tex2 = new Texture2D(512, 512);
-            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", tex1);
-            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", tex2);
+            resolver.RegisterFontAtlasPage("ikat://font-atlas/p0", tex1);
+            resolver.RegisterFontAtlasPage("ikat://font-atlas/p0", tex2);
 
-            var r = resolver.GetSprite("loomgui://font-atlas/p0");
+            var r = resolver.GetSprite("ikat://font-atlas/p0");
             Assert.IsTrue(r.found);
             Assert.AreEqual(tex2, r.tex, "re-register replaces old entry");
             Assert.AreEqual(512, r.origW);
@@ -204,9 +204,9 @@ namespace LoomGUI.Tests
         {
             var resolver = new SpriteResolver();
             resolver.Init(null, null);
-            resolver.RegisterFontAtlasPage("loomgui://font-atlas/p0", null);
+            resolver.RegisterFontAtlasPage("ikat://font-atlas/p0", null);
             // no exception = pass
-            var r = resolver.GetSprite("loomgui://font-atlas/p0");
+            var r = resolver.GetSprite("ikat://font-atlas/p0");
             Assert.IsFalse(r.found, "null tex not registered");
         }
     }

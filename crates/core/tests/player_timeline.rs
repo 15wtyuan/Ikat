@@ -5,15 +5,15 @@
 //!
 //! 全部确定性：固定 dt 累计推进，断言取值（spec §9.2 确定性断言策略）。
 
-use loomgui_core::scene::{
+use ikat_core::scene::{
     AnimatableProps, KeyframePlayer, KeyframeStop, KeyframeStopSelector, KeyframesRule, NodeId,
     PlayerFrame, PlayerPlayState, TransformAnim,
 };
-use loomgui_core::style::resolved::{
+use ikat_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
-use loomgui_core::transform::LenPct;
-use loomgui_core::tween::Ease;
+use ikat_core::transform::LenPct;
+use ikat_core::tween::Ease;
 
 fn assert_close(a: f32, b: f32) {
     assert!((a - b).abs() < 1e-4, "expected {b} ± 1e-4, got {a}");

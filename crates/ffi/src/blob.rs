@@ -3,14 +3,15 @@
 
 #[allow(unused_imports)]
 // BlendMode/MaskContext/NodePayload/EffectBlock 仅测试 helper 经 super::* 用。
-use loomgui_core::render::node::{
+use ikat_core::render::node::{
     BlendMode, ChangeLevel, EffectBlock, MaskContext, NodePayload, RenderNode,
 };
-use loomgui_core::render::FrameData;
-use loomgui_core::scene::node::Scene;
-use loomgui_core::transform;
+use ikat_core::render::FrameData;
+use ikat_core::scene::node::Scene;
+use ikat_core::transform;
 
-/// magic = "LOOM" little-endian。
+/// magic = "LOOM" little-endian。LoomGUI 时代烙印的磁盘字节，非品牌面——不动它，
+/// 改名只换代码符号不换 ABI 兼容的魔数与 pkg 格式身份。
 const MAGIC: u32 = 0x4D4F4F4C;
 pub(crate) const VERSION: u32 = 14; // v14：node_id/parent_id 列 u32→u64（NodeId ABI 拓宽，#26）
 
@@ -229,7 +230,7 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
         col_effect_block.extend_from_slice(&[0u8; EffectBlock::SIZE]);
         col_shadow_params.extend_from_slice(&[0u8; 24]); // v12：[f32;6] 全零
         col_grad_params
-            .extend_from_slice(&[0u8; loomgui_core::render::gradient::GradientParams::SIZE]);
+            .extend_from_slice(&[0u8; ikat_core::render::gradient::GradientParams::SIZE]);
         parked_count += 1;
     }
     let node_count = n + parked_count;

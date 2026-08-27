@@ -1,0 +1,9 @@
+{
+    "name": "Ikat.Editor",
+    "rootNamespace": "Ikat.Editor",
+    "references": ["Ikat.Runtime"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "autoReferenced": true
+}

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// 纯事件路由算法——不依赖 Unity、不依赖 FFI、不自建字典。
-    /// 历史用途：曾被生产侧 LoomEventHandler 委托跑路由（Spec-4b P1 已退役 LoomEventHandler）。
+    /// 历史用途：曾被生产侧 IkatEventHandler 委托跑路由（Spec-4b P1 已退役 IkatEventHandler）。
     /// 现仅作算法参考实现，headless 测试 EventRouterTests 直接消费——非生产依赖。
 
     public static class EventRouter

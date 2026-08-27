@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// 圆角 clip 端到端：blob clip 表带 radii → MirrorPool 应建 CLIPPED_ROUNDED 材质
     /// 并写归一化 _CornerRadius（stat-bar fill 圆角链路的 Unity 半场守卫）。
@@ -105,7 +105,7 @@ namespace LoomGUI
         public void RoundedClipEntryEnablesClippedRoundedMaterial()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("LoomGUI/Unlit");
+            var shader = Shader.Find("Ikat/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;

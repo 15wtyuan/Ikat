@@ -1,4 +1,4 @@
-// inventory 页演示数据（AI 手写，loom preview server 按页注入；不进打包）。
+// inventory 页演示数据（AI 手写，ikat preview server 按页注入；不进打包）。
 // 格子列表运行时由 C# 填充（ItemCount）；预览侧克隆 template 轮换图标。
 import { ready } from '../main.js';
 import { fillList, pageDir } from '../lib/fill.js';

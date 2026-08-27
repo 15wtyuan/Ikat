@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using Xunit;
 
-namespace LoomGUI.Tests.Core
+namespace Ikat.Tests.Core
 {
     public class FrameBlobTests
     {
-        // 构造 v14 blob（镜像 loomgui_ffi_c/src/blob.rs::VERSION=14 + FrameBlob.cs）。
+        // 构造 v14 blob（镜像 ikat_ffi_c/src/blob.rs::VERSION=14 + FrameBlob.cs）。
         // v14 = v13 + node_id/parent_id 列 4B→8B（#26 u64 拓宽）；列数不变（23）。
         static byte[] BuildBlob(int nodeCount, byte[][] columnData, byte[] meshArena = null, byte[] clipTable = null, byte[] pathTable = null)
         {

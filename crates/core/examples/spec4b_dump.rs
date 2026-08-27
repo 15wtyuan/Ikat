@@ -13,10 +13,10 @@
 //! DFS 序与浏览器 `querySelectorAll('body *')` 的 DOM 序近似——核心侧含 TextNode 等
 //! 非元素节点，配对以 id 为主（domIndex 仅作辅助索引）。
 
-use loomgui_core::dump::kind_to_html_tag;
-use loomgui_core::scene::dynamic::append_child;
-use loomgui_core::scene::node::{Node, NodeId, NodeKind, Scene};
-use loomgui_core::stage::Stage;
+use ikat_core::dump::kind_to_html_tag;
+use ikat_core::scene::dynamic::append_child;
+use ikat_core::scene::node::{Node, NodeId, NodeKind, Scene};
+use ikat_core::stage::Stage;
 
 fn main() {
     let json_out = parse_json_out_arg();

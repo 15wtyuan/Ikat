@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Xunit;
 
-namespace LoomGUI.Tests.Core
+namespace Ikat.Tests.Core
 {
     public class EventRouterTests
     {

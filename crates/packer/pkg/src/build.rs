@@ -13,12 +13,12 @@ use crate::diag::{code, BuildFailure, PackDiagnostic, Severity};
 use crate::expand::{bridge_with_components, ComponentRegistry};
 use crate::runtime::{RuntimeFont, RuntimeManifest, RUNTIME_FILE};
 use crate::workspace::{load_workspace, PackageCfg};
-use loomgui_core::asset::{
+use ikat_core::asset::{
     write_package_with_scopes, ComponentScopeInput, PackageInput, TemplateNode,
 };
-use loomgui_core::scene::KeyframesRule;
-use loomgui_core::style::dynamic::DynamicRuleTable;
-use loomgui_core::style::resolved::BorderStyle;
+use ikat_core::scene::KeyframesRule;
+use ikat_core::style::dynamic::DynamicRuleTable;
+use ikat_core::style::resolved::BorderStyle;
 use std::path::Path;
 
 /// Build report: what was produced.
@@ -114,21 +114,21 @@ fn pack_components_inner(
     // 失败时 warning 也随 BuildFailure.diagnostics 一并给出。
     let mut diagnostics: Vec<PackDiagnostic> = Vec::new();
     // 本包页面类名分桶——组件 `<style>` 死规则检查（跨文件证据版）的墙外证据。
-    let mut scope_buckets = loomgui_fence::component_scope_check::ScopeClassBuckets::new();
+    let mut scope_buckets = ikat_fence::component_scope_check::ScopeClassBuckets::new();
     for comp in components {
         let Component {
             name,
             src,
             html_rel,
         } = comp;
-        let parsed = loomgui_fence::parse_template_with_css(src, html_rel, load_css);
+        let parsed = ikat_fence::parse_template_with_css(src, html_rel, load_css);
         scope_buckets.add_page_tree(&parsed.tree);
         // 该组件全部围栏诊断先进收集（Error+Warning）。Error 存在则跳过 bridge
         //（坏树不值得展开），但循环继续——后续组件的诊断也要给作者。
         let has_error = parsed
             .diagnostics
             .iter()
-            .any(|d| d.severity == loomgui_fence::diagnostic::Severity::Error);
+            .any(|d| d.severity == ikat_fence::diagnostic::Severity::Error);
         diagnostics.extend(
             parsed
                 .diagnostics
@@ -263,14 +263,14 @@ fn pack_components_inner(
     // 组件 `<style>` 纯类规则墙外死代码检查（跨文件证据版）：本包页面树作证据、
     // workspace 注册表全量组件作被检面。warning 级，随包报告给作者。
     for (comp_name, def) in registry.iter() {
-        let input = loomgui_fence::component_scope_check::ComponentScopeInput {
+        let input = ikat_fence::component_scope_check::ComponentScopeInput {
             name: comp_name,
             html_rel: &def.html_rel,
             tree: &def.parsed.tree,
             rules: &def.parsed.dynamic_rules,
         };
         let mut fence_diags = Vec::new();
-        loomgui_fence::component_scope_check::warn_component_rules_out_of_scope(
+        ikat_fence::component_scope_check::warn_component_rules_out_of_scope(
             &[input],
             &scope_buckets,
             &mut fence_diags,
@@ -396,7 +396,7 @@ pub(crate) fn normalize_bg_rules(
             if (d.prop == "background-image" || d.prop == "background")
                 && !d.value.trim().starts_with("linear-gradient(")
             {
-                if let Some(path) = loomgui_core::style::mapping::parse_url(&d.value) {
+                if let Some(path) = ikat_core::style::mapping::parse_url(&d.value) {
                     let norm = normalize_bg_ref(html_rel, &path, refs);
                     d.value = format!("url(\"{norm}\")");
                 }
@@ -460,7 +460,7 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
             diags.push(PackDiagnostic::synthetic_error(
                 code::CONFIG_INVALID,
                 "design",
-                "loom.workspace.json",
+                "ikat.workspace.json",
                 format!("design 分辨率须为正有限值，got {}x{}", d.w, d.h),
             ));
         }
@@ -470,7 +470,7 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
             diags.push(PackDiagnostic::synthetic_error(
                 code::CONFIG_INVALID,
                 "match_mode",
-                "loom.workspace.json",
+                "ikat.workspace.json",
                 format!("match_mode 须为 letterbox | fit-width | fit-height，got {m}"),
             ));
         }
@@ -564,7 +564,7 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
         &atlas_refs,
     ));
 
-    // 预览兜底：`data-fill` 是「本列表运行时才填充」的标记（loomgui-preview skill
+    // 预览兜底：`data-fill` 是「本列表运行时才填充」的标记（ikat-preview skill
     // 约定）；缺按页模拟脚本 = 人类预览看到空列表。不靠 AI 记得写，靠 check 提醒。
     for pkg in &ws.packages {
         for rel in resolve_html_list(workspace_root, pkg).unwrap_or_default() {
@@ -592,7 +592,7 @@ pub fn analyze(workspace_root: &Path) -> Result<AnalyzeOutcome, BuildFailure> {
                     &rel,
                     format!(
                         "页面带 data-fill（运行时填充）但缺 {}/preview/pages/{stem}.js \
-                         ——人类预览（loom preview）将看到空列表；按 loomgui-preview skill 补演示数据脚本",
+                         ——人类预览（ikat preview）将看到空列表；按 ikat-preview skill 补演示数据脚本",
                         dir.display()
                     ),
                 ));
@@ -640,7 +640,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
     }
     let outcome = analyze(workspace_root)?;
     let ws = outcome.workspace;
-    // 输出基座链：就近找到的 .loom/config.json 带 unity_root → output_dir 相对 Unity
+    // 输出基座链：就近找到的 .ikat/config.json 带 unity_root → output_dir 相对 Unity
     // 工程根解析（直达 Assets）；无 → 相对 ui 工作区（本地输出）。路径失效在 resolve
     // 内报 exit 2。
     let output_dir = crate::config::resolve_output_base(workspace_root)?
@@ -659,7 +659,7 @@ pub fn build(workspace_root: &Path) -> Result<BuildReport, BuildFailure> {
 
     // 清理上次构建的残留产物（删包重打场景）：删 ui/atlas/fonts 下的生成文件
     //（.pkg.bin / .atlas.json / .png / .bytes），保留 Unity 的 .meta（删了会重生成 GUID、断引用）。
-    // 不清理 loom.runtime.json（本函数末尾覆盖写）。
+    // 不清理 ikat.runtime.json（本函数末尾覆盖写）。
     clean_stale_outputs(&ui_dir, &["pkg.bin"])?;
     clean_stale_outputs(&atlas_dir, &["atlas.json", "png"])?;
     clean_stale_outputs(&fonts_dir, &["bytes"])?;
@@ -788,11 +788,11 @@ fn clean_stale_outputs(dir: &Path, exts: &[&str]) -> Result<(), String> {
 #[cfg(test)]
 mod package_tests {
     use super::*;
-    use loomgui_core::scene::NodeKind;
+    use ikat_core::scene::NodeKind;
 
     /// 写一个最小多页 + 组件工作区到临时目录，供 analyze 级 e2e 测试用。
     fn write_temp_ws(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
-        let tmp = std::env::temp_dir().join(format!("loom_ws_{tag}_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ikat_ws_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         for (rel, content) in files {
             let path = tmp.join(rel);
@@ -817,7 +817,7 @@ mod package_tests {
         let tmp = write_temp_ws(
             "dangling_slot",
             &[
-                ("loom.workspace.json", WS_JSON),
+                ("ikat.workspace.json", WS_JSON),
                 ("ui/components/tip-panel.html", TIP_PANEL_LINES),
                 (
                     "ui/battle.html",
@@ -852,7 +852,7 @@ mod package_tests {
         let tmp = write_temp_ws(
             "id_collision",
             &[
-                ("loom.workspace.json", WS_JSON),
+                ("ikat.workspace.json", WS_JSON),
                 (
                     "ui/components/tip-panel.html",
                     r#"<div class="tip"><slot name="line0"></slot><div id="tip-row-0"></div></div>"#,
@@ -912,7 +912,7 @@ mod package_tests {
     #[test]
     fn clean_stale_outputs_removes_products_keeps_meta() {
         // 模拟删包重打：ui 目录里有旧产物 + .meta + 非产物文件。clean 应删产物、留 .meta。
-        let tmp = std::env::temp_dir().join(format!("loom_clean_test_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ikat_clean_test_{}", std::process::id()));
         let ui = tmp.join("ui");
         std::fs::create_dir_all(&ui).unwrap();
         std::fs::write(ui.join("showcase.pkg.bin"), b"old").unwrap();
@@ -949,7 +949,7 @@ mod package_tests {
             referenced_sprites: refs,
             ..
         } = pack_components(&comps).unwrap();
-        let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
+        let pkg = ikat_core::asset::read_package(&bytes).unwrap();
         let comp = pkg.components.get("home").expect("home component");
         assert_eq!(comp.nodes[0].kind, NodeKind::Container); // div
         assert!(
@@ -974,7 +974,7 @@ mod package_tests {
             referenced_sprites: refs,
             ..
         } = pack_components(&comps).unwrap();
-        let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
+        let pkg = ikat_core::asset::read_package(&bytes).unwrap();
         let comp = pkg.components.get("spec4b").expect("spec4b component");
         let img = comp
             .nodes
@@ -1008,7 +1008,7 @@ mod package_tests {
             },
         ];
         let PackResult { bytes, .. } = pack_components(&comps).unwrap();
-        let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
+        let pkg = ikat_core::asset::read_package(&bytes).unwrap();
         assert!(pkg.components.contains_key("nav"));
         assert!(pkg.components.contains_key("page"));
     }
@@ -1136,11 +1136,11 @@ mod package_tests {
         }];
         // 双重断言：先证明确实产了 W1 warning（否则测试无效——HTML 没命中 warning），
         // 再证明 pack_components 仍返 Ok（warning 被放行）。
-        let parsed = loomgui_fence::parse_template(&comps[0].src, "warn.html");
+        let parsed = ikat_fence::parse_template(&comps[0].src, "warn.html");
         assert!(
             parsed.diagnostics.iter().any(|d| {
-                d.code == loomgui_fence::diagnostic::DiagnosticCode::FenceBorderWithoutStyle
-                    && d.severity == loomgui_fence::diagnostic::Severity::Warning
+                d.code == ikat_fence::diagnostic::DiagnosticCode::FenceBorderWithoutStyle
+                    && d.severity == ikat_fence::diagnostic::Severity::Warning
             }),
             "测试前置：HTML 应触发 W1 warning，否则此测试无效: {:?}",
             parsed.diagnostics
@@ -1149,7 +1149,7 @@ mod package_tests {
         let PackResult { bytes, .. } = pack_components(&comps)
             .expect("warning 不应阻断打包：pack_components 应返 Ok，但实际被当 fatal");
         // 确认产物可读（不是静默坏包）。
-        let pkg = loomgui_core::asset::read_package(&bytes).unwrap();
+        let pkg = ikat_core::asset::read_package(&bytes).unwrap();
         assert!(
             pkg.components.contains_key("warn"),
             "warning 组件应正常写入 pkg"

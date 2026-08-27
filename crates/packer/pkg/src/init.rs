@@ -1,7 +1,7 @@
-//! `loom init`：初始化工作区——会话根上落 agent skills + CLI 自拷贝 + 接线 config
-//! （`.loom/config.json`），ui 目录上落 workspace.json 骨架。
+//! `ikat init`：初始化工作区——会话根上落 agent skills + CLI 自拷贝 + 接线 config
+//! （`.ikat/config.json`），ui 目录上落 workspace.json 骨架。
 //!
-//! 产出即自足：游戏仓库的 agent 会话零安装（`.loom/loom(.exe)` 就地可用），打开
+//! 产出即自足：游戏仓库的 agent 会话零安装（`.ikat/ikat(.exe)` 就地可用），打开
 //! 即知道怎么干（skills + config 指针）。分离形态（`--ui`）下会话根 ≠ ui 目录，
 //! 单目录形态（无 `--ui`）下根即 ui 工作区——config 的 `ui_root = "."`。
 
@@ -9,13 +9,13 @@ use crate::diag::BuildFailure;
 use crate::workspace::{save_workspace, Workspace};
 use std::path::{Path, PathBuf};
 
-/// `.loom/` 里 CLI 二进制的来源。
+/// `.ikat/` 里 CLI 二进制的来源。
 pub enum CliSource {
     /// 拷 `current_exe`（CLI 自身跑 init 的正常形态）。
     CurrentExe,
-    /// 从指定路径拷（GUI dev fallback：GUI 同目录的 loom.exe）。
+    /// 从指定路径拷（GUI dev fallback：GUI 同目录的 ikat.exe）。
     Explicit(PathBuf),
-    /// 不拷（找不到 loom 二进制——工作区靠 PATH / Release 下载位兜底）。
+    /// 不拷（找不到 ikat 二进制——工作区靠 PATH / Release 下载位兜底）。
     Skip,
 }
 
@@ -24,7 +24,7 @@ pub struct InitOptions {
     pub agents: Vec<String>,
     /// ui 工作区位置（相对根目录的路径或绝对路径）。None = 单目录形态（根即 ui）。
     pub ui_dir: Option<PathBuf>,
-    /// Unity 工程根：写入 `.loom/config.json` 的 `unity_root`（内部相对化；None = 不写，
+    /// Unity 工程根：写入 `.ikat/config.json` 的 `unity_root`（内部相对化；None = 不写，
     /// 本地输出）。
     pub unity_root: Option<PathBuf>,
     /// workspace.json 的 output_dir 初始值。
@@ -51,9 +51,9 @@ impl Default for InitOptions {
 /// init 的产出摘要（CLI 打印后续步骤提示用）。
 #[derive(Debug)]
 pub struct InitOutcome {
-    /// 会话根（`.loom/` 与 skills 所在）。
+    /// 会话根（`.ikat/` 与 skills 所在）。
     pub root: PathBuf,
-    /// ui 工作区（`loom.workspace.json` 所在）。
+    /// ui 工作区（`ikat.workspace.json` 所在）。
     pub ui: PathBuf,
     pub agents: Vec<String>,
     pub unity_root_written: bool,
@@ -108,11 +108,11 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
     };
     crate::scaffold::write_agent_scaffold(&root, &agents)?;
 
-    // CLI 自拷贝 + 接线 config + 版本戳（同住根上 .loom/：整个目录入库，团队 clone 即得）。
+    // CLI 自拷贝 + 接线 config + 版本戳（同住根上 .ikat/：整个目录入库，团队 clone 即得）。
     let cli_copied = copy_cli_into(&root, &opts.cli_source);
     let _ = std::fs::write(
-        root.join(".loom").join(crate::scaffold::VERSION_STAMP),
-        crate::scaffold::LOOM_VERSION,
+        root.join(".ikat").join(crate::scaffold::VERSION_STAMP),
+        crate::scaffold::IKAT_VERSION,
     );
     crate::config::write(&root, &ui, opts.unity_root.as_deref()).map_err(BuildFailure::config)?;
     let unity_root_written = opts.unity_root.is_some();
@@ -126,8 +126,8 @@ pub fn init(dir: &Path, opts: InitOptions) -> Result<InitOutcome, BuildFailure> 
     })
 }
 
-/// 拷 CLI 二进制到 `<root>/.loom/`。失败（如 exe 被锁）不阻断 init——工作区已可用
-///（PATH 里的 loom / Release 下载位是兜底），CLI 缺席由调用方提示。
+/// 拷 CLI 二进制到 `<root>/.ikat/`。失败（如 exe 被锁）不阻断 init——工作区已可用
+///（PATH 里的 ikat / Release 下载位是兜底），CLI 缺席由调用方提示。
 fn copy_cli_into(root: &Path, source: &CliSource) -> bool {
     let src: PathBuf = match source {
         CliSource::Skip => return false,
@@ -142,11 +142,11 @@ fn copy_cli_into(root: &Path, source: &CliSource) -> bool {
             p.clone()
         }
     };
-    let loom_dir = root.join(".loom");
-    if std::fs::create_dir_all(&loom_dir).is_err() {
+    let ikat_dir = root.join(".ikat");
+    if std::fs::create_dir_all(&ikat_dir).is_err() {
         return false;
     }
-    let dst = loom_dir.join(src.file_name().unwrap_or_default());
+    let dst = ikat_dir.join(src.file_name().unwrap_or_default());
     if std::fs::copy(&src, &dst).is_ok() {
         return true;
     }
@@ -158,10 +158,10 @@ fn copy_cli_into(root: &Path, source: &CliSource) -> bool {
 mod tests {
     use super::*;
 
-    /// 分离形态全流程：根上 skills/.loom/config，ui 上 workspace.json；指针相对化。
+    /// 分离形态全流程：根上 skills/.ikat/config，ui 上 workspace.json；指针相对化。
     #[test]
     fn init_split_layout() {
-        let tmp = std::env::temp_dir().join(format!("loom_init_split_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ikat_init_split_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let unity = tmp.join("unity");
         std::fs::create_dir_all(&unity).unwrap();
@@ -182,12 +182,12 @@ mod tests {
         assert_eq!(out.root, tmp);
         assert!(out.unity_root_written);
         // ui 目录：workspace.json。
-        assert!(tmp.join("ui/loom.workspace.json").exists());
+        assert!(tmp.join("ui/ikat.workspace.json").exists());
         // 会话根：skills + config（无指令文档——AGENTS.md 不再生成）。
-        assert!(tmp.join(".agents/skills/loomgui-editor/SKILL.md").exists());
+        assert!(tmp.join(".agents/skills/ikat-editor/SKILL.md").exists());
         assert!(!tmp.join("ui/AGENTS.md").exists());
         assert!(!tmp.join("AGENTS.md").exists());
-        let cfg: crate::config::LoomConfig = serde_json::from_str(
+        let cfg: crate::config::IkatConfig = serde_json::from_str(
             &std::fs::read_to_string(tmp.join(crate::config::CONFIG_FILE)).unwrap(),
         )
         .unwrap();
@@ -223,13 +223,13 @@ mod tests {
     /// 单目录形态（无 --ui）：根即 ui，ui_root = "."，config 就近命中。
     #[test]
     fn init_standalone_layout() {
-        let tmp = std::env::temp_dir().join(format!("loom_init_solo_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ikat_init_solo_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let out = init(&tmp, InitOptions::default()).unwrap();
         assert_eq!(out.root, tmp);
         assert_eq!(out.ui, tmp);
-        assert!(tmp.join("loom.workspace.json").exists());
-        let cfg: crate::config::LoomConfig = serde_json::from_str(
+        assert!(tmp.join("ikat.workspace.json").exists());
+        let cfg: crate::config::IkatConfig = serde_json::from_str(
             &std::fs::read_to_string(tmp.join(crate::config::CONFIG_FILE)).unwrap(),
         )
         .unwrap();

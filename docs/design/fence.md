@@ -1,8 +1,8 @@
-﻿# LoomGUI 围栏（Fence）权威清单
+﻿# Ikat 围栏（Fence）权威清单
 
 > **单一真相源**：`crates/fence/src/schema/` 下的 Rust const 注册表（machine-readable）。本文档为人类可读副本，以代码为准。
 >
-> **防漂移门**：`cargo test -p loomgui_fence`——改围栏后必跑。
+> **防漂移门**：`cargo test -p ikat_fence`——改围栏后必跑。
 
 ---
 
@@ -65,7 +65,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 下表是完整的运行时标签注册表。控件与列表没有专属标签——作者在 `<div>` 上写 WAI-ARIA `role` 表达（spec §2.2），如 `<div role="slider">`、`<div role="list">`。列含义：
 
 - **SemanticKind**：打包期标注的稳定语义类型（base 标签按 tag、控件/列表按 `role`）。
-- **Display**：不写 CSS `display` 时的默认显示值。**注意：LoomGUI 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span`/`slot` 豁免（其行内混排走 rich-text 模型；但阶段 6.4 的混排检查仍把 slot 按 block 级对待——两次保守判定同因：rich-text 标志打包期烘焙）。
+- **Display**：不写 CSS `display` 时的默认显示值。**注意：Ikat 运行时不实现 CSS inline flow**——`Inline` 标签运行时被当作 block-level flex（撑满父宽、竖向堆叠），与浏览器的横向 inline 行为不同。为防止 AI 先验错误，inline 布局 box（button/img）**必须放进 flex 容器**，不能裸放在 block 容器里，否则打包报错（见阶段 6.5）。文本级 `span`/`slot` 豁免（其行内混排走 rich-text 模型；但阶段 6.4 的混排检查仍把 slot 按 block 级对待——两次保守判定同因：rich-text 标志打包期烘焙）。
 - **Category**：HTML 分类简化为四值——Block（块级结构）、Phrasing（行内文本级）、Void（自闭合）、Transparent（透明，继承父级）。
 - **ContentModel**：允许的子内容——None（无子内容）、Text（仅文本）、Phrasing（行内元素+文本）、Flow（任意）、Transparent（继承父级）、Only([...])（仅列出的子标签）。
 
@@ -143,7 +143,7 @@ Dropdown 选中值显示：**必需** `data-slot=value` 直接子（内嵌 TextN
 
 **组件 @keyframes 两级裁决**：打包期——同名同内容静默去重（同组件多实例必然同名）；同名异内容宿主胜 + warning。运行时——keyframes 全局按名表，后实例化的组件覆盖同名。
 
-**已知降级**：手工 file:// 双击打开 HTML 已退役（预览脚本改由 `loom preview` server 注入，HTML 源零 `<script>` 引用）——一切预览（含组件页）走 `loom preview` 工作台。
+**已知降级**：手工 file:// 双击打开 HTML 已退役（预览脚本改由 `ikat preview` server 注入，HTML 源零 `<script>` 引用）——一切预览（含组件页）走 `ikat preview` 工作台。
 
 ---
 
@@ -287,7 +287,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **文本**
 
-`color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，LoomGUI 私有扩展）
+`color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，Ikat 私有扩展）
 
 - `text-decoration`（**不继承**，#74）：值集 `none` / `underline`（`line-through`/`overline` 围栏拒绝）。作用于 rich inline 流的 run——`span`/`a` 声明均可；`<a>` 打包期烙 UA 默认 `underline`，作者声明覆盖。
 
@@ -313,7 +313,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 `@keyframes <name> { <stop> { decls } ... }` at-rule——`<style>` 内定义命名关键帧。stop 选择器子集：`from` / `to` / `<N>%`（0..=100 整数）；逗号多 stop（`0%,100%{...}`）按 CSS 语义展开为多条 stop（共享同声明块）。stop 声明块内可写 `animation-timing-function`（**per-stop timing**，CSS 标准语义：作用于本 stop 到下一 stop 的区段；未写回落 spec 级 timing）。transform 的 translate 分量收**百分比形**（`translateX(-50%)` / `translate(50%, 10px)`——相对自身布局尺寸，存储描述符、采样写入期解析；scale/rotate 无百分比概念照旧数值）。**停靠点可动属性全集（#10 起）**：`opacity` / `transform` / `background-color` / `color` / `width` / `height` / `flex-grow` / `box-shadow`——width/height 值须显式长度域（px/%/vw/vh/vmin/vmax，auto 拒）且同一 rule 内同域（`FenceLayoutTransitionEndpoint` error），box-shadow 收多层列表（插值语义同 transition 侧）。其他 at-rule（`@media` / `@font-face` 等）不在围栏子集，整块丢弃 + 诊断。
 
-`/* @loom-hook <name> */` 注释锦点——写在 keyframes 的 stop 声明块内或块间（如 `from{...}/* @loom-hook start */ to{...}` 或 `from{/* @loom-hook start */ ...} to{...}`），挂在该 stop 上。合法锦点注释保留为内部 marker 供 stop 解析，普通注释照常移除；纯文本 `@loom-hook`（非注释上下文）不识别。运行时 player 跨越该 stop 百分比时 emit `AnimationHookEvent`，C# 经 `Animation.OnHook(name)` 或 `On<AnimationHookEvent>` 路由（见 public-api §9.4）。
+`/* @ikat-hook <name> */` 注释锦点——写在 keyframes 的 stop 声明块内或块间（如 `from{...}/* @ikat-hook start */ to{...}` 或 `from{/* @ikat-hook start */ ...} to{...}`），挂在该 stop 上。合法锦点注释保留为内部 marker 供 stop 解析，普通注释照常移除；纯文本 `@ikat-hook`（非注释上下文）不识别。运行时 player 跨越该 stop 百分比时 emit `AnimationHookEvent`，C# 经 `Animation.OnHook(name)` 或 `On<AnimationHookEvent>` 路由（见 public-api §9.4）。
 
 **:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation` 简写实现错峰入场（delay 作简写第 2 个 time token，如 `.nav-card:nth-child(N){animation:fadeIn .4s .05s both}`——错峰单值也可用 `animation-delay` 长划单独声明）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
 
@@ -358,7 +358,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 **缓动函数全集**（真相源 = core 的 `parse_ease`/`css_ease_keyword`，fence/core 共用同一解析器防漂移）。
 
 - **CSS 标准**：`linear` / `ease` / `ease-in` / `ease-out` / `ease-in-out`（映射到 CSS Easing Functions L1 的**精确 bezier 等价**——早期 Quad/Cubic 幂函数近似已废除，缺省 timing = `ease`）；`cubic-bezier(x1,y1,x2,y2)`（x∈[0,1] 约束，y 可越界表 overshoot）；`step-start` / `step-end`（单步 steps；`steps(n,…)` 多步形不收）。
-- **loom 超集 keyword**（非 CSS 标准，游戏 UI 刚需，命名照 CSS keyword 惯例）：`ease-{in,out,in-out}-back` / `ease-{in,out,in-out}-elastic` / `ease-{in,out,in-out}-bounce`（固定系数；参数化 elastic 不收，要参数用 cubic-bezier 近似）。
+- **ikat 超集 keyword**（非 CSS 标准，游戏 UI 刚需，命名照 CSS keyword 惯例）：`ease-{in,out,in-out}-back` / `ease-{in,out,in-out}-elastic` / `ease-{in,out,in-out}-bounce`（固定系数；参数化 elastic 不收，要参数用 cubic-bezier 近似）。
 - **运行时专属**（不进 DSL）：`quad-*`/`cubic-*` 幂函数族在运行时 API（ScrollTo 等）可用，DSL 侧不收。
 - 非法值（未知 keyword / bezier x 越界 / 坏参数个数）→ `FenceBadCssValue`。
 
@@ -435,7 +435,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 ### 阶段 6.4：rich-text-block 分类 + mixed 报错
 
-**根因**：LoomGUI 运行时只在一种上下文里实现浏览器式 inline flow——**rich-text-block**：`display:block` 容器且其直接子**全是 inline 级**（text / `span`(TextElement) / `img`(Image)）。runtime 把这些 inline 子拍平成 `RichRun` 走 `measure_rich_text`（见 main-design 文本模型），与浏览器预览一致。若 block 容器的直接子**既有 inline 级又有 block 级**（`<div><span>x</span><div>y</div></div>`），inline flow 不可定义（一部分要横排流、一部分要纵向堆叠，同一 formatting context 无解）。本阶段在打包期分类 + 拦下这种混合。
+**根因**：Ikat 运行时只在一种上下文里实现浏览器式 inline flow——**rich-text-block**：`display:block` 容器且其直接子**全是 inline 级**（text / `span`(TextElement) / `img`(Image)）。runtime 把这些 inline 子拍平成 `RichRun` 走 `measure_rich_text`（见 main-design 文本模型），与浏览器预览一致。若 block 容器的直接子**既有 inline 级又有 block 级**（`<div><span>x</span><div>y</div></div>`），inline flow 不可定义（一部分要横排流、一部分要纵向堆叠，同一 formatting context 无解）。本阶段在打包期分类 + 拦下这种混合。
 
 **规则**：每个 `display:block` 容器（tag 默认或 inline style 烘入；**非 flex**——flex 子是 flex item，走 flex 排版）的直接子（过滤纯空白文本后）：
 - 全是 inline 级且 ≥1 个 → 标 rich-text-block（记进 `ParsedTemplate.rich_text_blocks` 的 ir_idx 集合，packer bridge 据此烘 flag）
@@ -458,9 +458,9 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 ### 阶段 6.5：inline 元素布局上下文检查
 
-**根因**：taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。LoomGUI 只在一种上下文里让 inline 元素和浏览器一致：**flex 容器内**——inline 元素是 flex item，按 flex 规则排（两边行为相同）。
+**根因**：taffy 0.12 不支持 CSS inline flow（inline 元素自动横排换行）。Ikat 只在一种上下文里让 inline 元素和浏览器一致：**flex 容器内**——inline 元素是 flex item，按 flex 规则排（两边行为相同）。
 
-在 **block 容器**里（裸 `<div>` 等），LoomGUI 把 inline 标签当 block-level（撑满 + 竖排），和浏览器的 inline 行为（收缩 + 横排）必然不一致。放任这种写法会让 AI 按浏览器先验预期横排、运行时却竖排 → 渲染不可预测 → 返工。
+在 **block 容器**里（裸 `<div>` 等），Ikat 把 inline 标签当 block-level（撑满 + 竖排），和浏览器的 inline 行为（收缩 + 横排）必然不一致。放任这种写法会让 AI 按浏览器先验预期横排、运行时却竖排 → 渲染不可预测 → 返工。
 
 **规则**：inline 布局 box（button/img）若**直接在 block 容器里**（parent 是 block、元素自己未显式 `display:block`）→ `FenceInlineElementInBlockContext` error，打包失败。错误信息教学两种改法（二选一）：
 1. 父容器加 `display:flex`（多元素横排加 `flex-wrap:wrap`）。
@@ -476,7 +476,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 ### 阶段 6.7：控件 CSS 命中校验
 
-**根因**：LoomGUI 控件（role 驱动：`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）**不带 UA 默认样式**——core 刻意保持纯净，不开「框架自带样式源」先例。写了控件却没匹配的 CSS 规则 = 运行时渲染空白。浏览器会套自己的 UA 样式表，预览看着正常，打包进 LoomGUI 却空——作者无法从预览察觉。本检查在打包期拦下，明确告诉作者差异。
+**根因**：Ikat 控件（role 驱动：`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）**不带 UA 默认样式**——core 刻意保持纯净，不开「框架自带样式源」先例。写了控件却没匹配的 CSS 规则 = 运行时渲染空白。浏览器会套自己的 UA 样式表，预览看着正常，打包进 Ikat 却空——作者无法从预览察觉。本检查在打包期拦下，明确告诉作者差异。
 
 **规则**：受校验控件（`role` 在控件 role 白名单）若**无任何 `<style>` 规则的选择器命中它本身** → `FenceControlWithoutCss` error，打包失败。**必需子节点（§6.8 契约表）的每个实例同样须被命中**，任一无命中 → `FenceControlChildWithoutCss` error——本体命中只证明作者在样式控件，不证明子部件被样式（thumb 无 background = 可拖不可见的隐形滑块头）；`option`/`listitem` 多实例逐个查（存在一个被命中的不算过），template 蓝图内的 listitem 同样查。tag / class / id / 后代 / 属性选择器落地在该节点都算命中；伪类（`:hover` 等）不门控（带状态规则同样表明作者在样式控件）。**只有完全无命中才报错**。
 
@@ -513,7 +513,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **直接子字面**：校验只看**直接子节点**，与 §2.2 结构字面对齐——把必需子角色嵌进 wrapper div（如 `slider > div.wrap > data-slot=thumb`）不算满足契约，仍报 error。唯一例外是 **`list` 的 template 蓝图模式**：数据驱动 ListView 把 item 蓝图写在 `<template>` 子节点里（运行时克隆产 slot），`role=list > template > role=listitem` 视同满足 list→listitem 契约（template 的首个元素子节点被当成 listitem 检查）。
 
-**教学文案**：诊断 message 按 role 给出作者应写的完整结构（如 combobox 引导 `role=listbox` 子 + `role=option` 孙；slider 引导 `data-slot=thumb` 子），取代旧 `.loom-*` 「照着填」的提示载体。
+**教学文案**：诊断 message 按 role 给出作者应写的完整结构（如 combobox 引导 `role=listbox` 子 + `role=option` 孙；slider 引导 `data-slot=thumb` 子），取代旧 `.ikat-*` 「照着填」的提示载体。
 
 ### 流水线特性
 
@@ -538,14 +538,14 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `UnregisteredCustomElement` | 自定义元素未注册（打包器 components/ 注册表校验，R3 已接） |
 | `InvalidAriaRelation` | `aria-controls` / `aria-labelledby` 目标不存在 |
 | `TokenizerError` | html5gum tokenizer 遇到无法恢复的词法错误 |
-| `FenceInlineElementInBlockContext` | inline 布局 box（button/img）裸放在 block 容器里（非 flex）；LoomGUI 无 flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
+| `FenceInlineElementInBlockContext` | inline 布局 box（button/img）裸放在 block 容器里（非 flex）；Ikat 无 flex 之外的 inline flow，撑满竖排会和浏览器不一致 |
 | `FenceMixedInlineBlock` | `display:block` 容器（非 flex）的直接子既有 inline 级（text/span/img）又有 block 级（div/控件/template）；rich-text inline flow 要求全 inline，混合不可定义。详见阶段 6.4 |
 | `FenceSlotInInlineContext` | `<slot>` 位于无显式 `display:flex` 的 span 内。投影进 slot 的 light 子落在 inline 上下文，块级子被折进 rich inline 流（挤成一行/隐身）或按 flex-row hack 横排，无法按自身 display 参与宿主布局；slot 须放在 div 或显式 flex 的 span 里。详见阶段 6.4 |
 | `FenceLinkHrefRequired` | `<a>` 缺 `href` 或值为空白（#74）。href 是链接身份标识（opaque，无 URI 解析语义），空链接是不可交互的死元素。详见 §2.2 `<a>` 规则 |
 | `FenceLinkOutsideRich` | `<a>` 出现在 rich-text-block 上下文之外（flex 容器 / 裸 block 容器 / `slot` / `template`）（#74）。a 的折叠渲染模型只在 rich inline flow 成立。详见 §2.2 `<a>` 规则 |
 | `FenceLinkInvalidChild` | `<a>` 的子元素不是文本/嵌 `span`（`img-in-a`、`a-in-a` 等）（#74）。详见 §2.2 `<a>` 规则 |
-| `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，LoomGUI 会画）；预览 ≠ 运行时 |
-| `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，LoomGUI 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
+| `FenceBorderWithoutStyle` | **warning**：`border-width` 已声明但 `border-style` 缺省（CSS initial=none，浏览器不画边框，Ikat 会画）；预览 ≠ 运行时 |
+| `FenceBgImageWithoutSize` | **warning**：`background-image` 已声明但 `background-size` 缺省（CSS 默认 auto=原始尺寸，Ikat 默认 stretch=拉伸填满）；预览 ≠ 运行时 |
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
 | `FenceControlChildWithoutCss` | 控件的必需子节点（`data-slot=fill`/`thumb`/`value`、`role=listbox`/`option`/`listitem`/`tab`）无任何规则命中——本体命中不证明子部件被样式（隐形滑块头/隐形列表行）。每个实例都查（详见阶段 6.7） |
 | `FenceControlStructureCss` | 控件结构 CSS 契约缺失（当前契约：`combobox` 本体缺 `position:relative`，或其子树内 `role=listbox` 弹层缺 `position:absolute`）。视觉规则命中 ≠ 结构声明齐全，缺锚点/脱流到 PlayMode 才显形；详见阶段 6.7b |
@@ -599,10 +599,10 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 ### 8.2 防漂移门
 
 ```bash
-cargo test -p loomgui_fence                                # 全部围栏测试
-cargo test -p loomgui_fence --test schema_contract         # schema 注册表契约
-cargo test -p loomgui_fence --test doc_schema_sync         # 文档↔schema 交叉校验（防描述层漂移）
-cargo test -p loomgui_fence --test pipeline_integration    # 端到端流水线
+cargo test -p ikat_fence                                # 全部围栏测试
+cargo test -p ikat_fence --test schema_contract         # schema 注册表契约
+cargo test -p ikat_fence --test doc_schema_sync         # 文档↔schema 交叉校验（防描述层漂移）
+cargo test -p ikat_fence --test pipeline_integration    # 端到端流水线
 ```
 
 改围栏后必跑。测试 fail = 围栏契约被破坏。`doc_schema_sync` 从本文档主表解析标签清单与 schema 注册表比对，防止「代码改了文档没跟上」的描述层漂移。
@@ -614,6 +614,6 @@ cargo test -p loomgui_fence --test pipeline_integration    # 端到端流水线
 | 消费者 | 位置 |
 |---|---|
 | 设计契约 | `docs/design/main-design.md` §3 |
-| 设计师工作区 AI 规则 | 打包器模板 `editor/references/`（loomgui-editor skill 的渐进披露参考表，scaffold 落各工作区会话根） |
+| 设计师工作区 AI 规则 | 打包器模板 `editor/references/`（ikat-editor skill 的渐进披露参考表，scaffold 落各工作区会话根） |
 
 **同步规则**：改 schema 代码 → 检查两处消费者是否需同步。

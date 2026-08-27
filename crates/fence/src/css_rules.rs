@@ -7,16 +7,16 @@
 //!
 //! @keyframes at-rule（「动画定义全在 CSS」终态）：fence 解析
 //! `@keyframes <name> { <stop-selector> { decls } ... }` 产 `KeyframesRule`。stop 声明块内
-//! 或块之间的 `/* @loom-hook name */` 注释解析为锚点（挂在前一个 stop 上，供 player
+//! 或块之间的 `/* @ikat-hook name */` 注释解析为锚点（挂在前一个 stop 上，供 player
 //! 播放到该 stop 时发事件）。pkg v30 起 core 有同形类型并序列化进 pkg.bin；fence → core
 //! 的类型转换（declarations → AnimatableProps）由打包器 bridge 完成。
 //!
-//! @loom-hook 的特殊处理：`parse_style_block` 将合法锚点注释替换为不可见 marker，普通
+//! @ikat-hook 的特殊处理：`parse_style_block` 将合法锚点注释替换为不可见 marker，普通
 //! CSS 注释仍被剥除；`parse_keyframes_rule` 消费 marker 并将锚点挂到对应 stop。
 use crate::css_resolve::unsupported_hint;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::schema::css::{find_css_prop, find_shorthand};
-use loomgui_core::style::dynamic::{
+use ikat_core::style::dynamic::{
     AttrOp, AttrSelector, Combinator, Compound, Declaration, DynamicRule, NthChildExpr,
     ParsedSelector, Specificity,
 };
@@ -35,7 +35,7 @@ pub enum KeyframeStopSelector {
 pub struct KeyframeStop {
     pub selector: KeyframeStopSelector,
     pub declarations: Vec<Declaration>,
-    /// `/* @loom-hook name */` 锚点：写在 stop 块后/块内，挂在该 stop 上。
+    /// `/* @ikat-hook name */` 锚点：写在 stop 块后/块内，挂在该 stop 上。
     /// player 播放到该 stop 的百分比时发事件。None = 无锚点。
     pub hook: Option<String>,
 }
@@ -489,10 +489,10 @@ fn split_at_keyword(s: &str) -> (String, String) {
 /// `from` / `to` / `<N>%`。逗号多 stop（`0%,100%{...}`）展开为多个 KeyframeStop 共享同声明块。
 /// 任一 stop-selector 非法 → 整个 @keyframes 块丢弃 + 诊断（CSS 严格失败模式）。
 ///
-/// `strip_comments` 会把合法的 `/* @loom-hook name */` 替换成不可见 marker，避免普通
+/// `strip_comments` 会把合法的 `/* @ikat-hook name */` 替换成不可见 marker，避免普通
 /// CSS 解析丢失锚点。本函数在 stop 前导（通常是上一个 stop 块之后）和声明块内部消费
 /// marker：前导注释挂前一个 stop，声明块内注释挂当前 stop。这样既支持 brief 的
-/// `from{...}/* @loom-hook start */ to{...}`，也支持更直观的 `from{/* @loom-hook start */ ...}`。
+/// `from{...}/* @ikat-hook start */ to{...}`，也支持更直观的 `from{/* @ikat-hook start */ ...}`。
 fn parse_keyframes_rule(
     name: &str,
     body: &str,
@@ -602,12 +602,12 @@ fn parse_stop_selector(
     }
 }
 
-const LOOM_HOOK_MARKER_START: char = '\u{1}';
-const LOOM_HOOK_MARKER_END: char = '\u{2}';
+const IKAT_HOOK_MARKER_START: char = '\u{1}';
+const IKAT_HOOK_MARKER_END: char = '\u{2}';
 
 /// 剥除 CSS 注释 `/* ... */`。UTF-8 安全：在 `&str` 上用 `find`（ASCII 针的偏移恒为 char 边界）。
 /// 不能逐字节 `u8 as char`——会损坏非 ASCII（CJK font-family、content 文本）。
-/// 合法 `@loom-hook` 注释保留为内部 marker，供 keyframes stop 解析；普通注释照常移除。
+/// 合法 `@ikat-hook` 注释保留为内部 marker，供 keyframes stop 解析；普通注释照常移除。
 /// marker 在声明/选择器解析前由 `remove_hook_markers` 清掉。
 fn strip_comments(css: &str) -> String {
     let mut out = String::with_capacity(css.len());
@@ -617,16 +617,16 @@ fn strip_comments(css: &str) -> String {
         match rest[start + 2..].find("*/") {
             Some(end) => {
                 let comment = &rest[start + 2..start + 2 + end];
-                if let Some(name) = parse_loom_hook_comment(comment) {
-                    out.push(LOOM_HOOK_MARKER_START);
+                if let Some(name) = parse_ikat_hook_comment(comment) {
+                    out.push(IKAT_HOOK_MARKER_START);
                     out.push_str(name);
-                    out.push(LOOM_HOOK_MARKER_END);
+                    out.push(IKAT_HOOK_MARKER_END);
                 }
                 rest = &rest[start + 2 + end + 2..];
             }
             None => {
                 // An unclosed comment consumes the remainder, as before. It cannot contain a
-                // complete `@loom-hook` comment and therefore must not produce a marker.
+                // complete `@ikat-hook` comment and therefore must not produce a marker.
                 rest = "";
                 break;
             }
@@ -636,11 +636,11 @@ fn strip_comments(css: &str) -> String {
     out
 }
 
-/// Parse exactly `@loom-hook <name>` from a comment body. The name is one non-whitespace
+/// Parse exactly `@ikat-hook <name>` from a comment body. The name is one non-whitespace
 /// token (`\\S+`); a missing separator or trailing token is not a hook comment.
-fn parse_loom_hook_comment(comment: &str) -> Option<&str> {
+fn parse_ikat_hook_comment(comment: &str) -> Option<&str> {
     let comment = comment.trim();
-    let rest = comment.strip_prefix("@loom-hook")?;
+    let rest = comment.strip_prefix("@ikat-hook")?;
     if !rest.chars().next().is_some_and(char::is_whitespace) {
         return None;
     }
@@ -656,13 +656,13 @@ fn remove_hook_markers(s: &str) -> (String, Vec<String>) {
     let mut hooks = Vec::new();
     let mut rest = s;
     loop {
-        let Some(start) = rest.find(LOOM_HOOK_MARKER_START) else {
+        let Some(start) = rest.find(IKAT_HOOK_MARKER_START) else {
             clean.push_str(rest);
             break;
         };
         clean.push_str(&rest[..start]);
-        let after_start = start + LOOM_HOOK_MARKER_START.len_utf8();
-        let Some(end_rel) = rest[after_start..].find(LOOM_HOOK_MARKER_END) else {
+        let after_start = start + IKAT_HOOK_MARKER_START.len_utf8();
+        let Some(end_rel) = rest[after_start..].find(IKAT_HOOK_MARKER_END) else {
             // Defensive: markers are generated as a pair, but preserve malformed text rather
             // than silently dropping source bytes if this helper is reused later.
             clean.push_str(&rest[start..]);
@@ -672,7 +672,7 @@ fn remove_hook_markers(s: &str) -> (String, Vec<String>) {
         if !name.is_empty() && !name.chars().any(char::is_whitespace) {
             hooks.push(name.to_string());
         }
-        rest = &rest[after_start + end_rel + LOOM_HOOK_MARKER_END.len_utf8()..];
+        rest = &rest[after_start + end_rel + IKAT_HOOK_MARKER_END.len_utf8()..];
     }
     (clean, hooks)
 }
@@ -750,7 +750,7 @@ fn parse_declarations(
         // 是 parse_gradient 不认的围栏外形态，返 None 即报）；url()/纯色走原宽松路径。
         if (prop == "background-image" || prop == "background")
             && value.contains("-gradient(")
-            && loomgui_core::style::mapping::parse_gradient(value).is_none()
+            && ikat_core::style::mapping::parse_gradient(value).is_none()
         {
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceBadCssValue,
@@ -758,7 +758,7 @@ fn parse_declarations(
                     "value \"{}\" is not valid for CSS property \"{}\" (gradient subset: \
                      `linear-gradient` / `radial-gradient` only, up to 8 stops — the \
                      `background-image` row of `css-reference.md` in the scaffolded \
-                     loomgui-editor skill lists the accepted forms)",
+                     ikat-editor skill lists the accepted forms)",
                     value, prop
                 ),
                 loc.clone(),
@@ -907,7 +907,7 @@ mod tests {
         assert_eq!(s.compound[0].tag.as_deref(), Some("div"));
         assert_eq!(
             s.specificity,
-            loomgui_core::style::dynamic::Specificity(0, 0, 1)
+            ikat_core::style::dynamic::Specificity(0, 0, 1)
         );
     }
 
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(s.compound[0].id.as_deref(), Some("bar"));
         assert_eq!(
             s.specificity,
-            loomgui_core::style::dynamic::Specificity(1, 1, 1)
+            ikat_core::style::dynamic::Specificity(1, 1, 1)
         );
     }
 
@@ -994,7 +994,7 @@ mod tests {
         assert!(s.compound[0].attrs[0].value.is_none());
     }
 
-    use loomgui_core::style::dynamic::Declaration;
+    use ikat_core::style::dynamic::Declaration;
 
     #[test]
     fn parse_style_block_basic() {
@@ -1125,7 +1125,7 @@ mod tests {
     #[test]
     fn hook_comment_outside_keyframes_is_inert_in_declarations() {
         let (rules, keyframes, diags) =
-            parse_style_block(".card { /* @loom-hook x */ color:#ff0000 }");
+            parse_style_block(".card { /* @ikat-hook x */ color:#ff0000 }");
         assert!(keyframes.is_empty());
         assert!(
             diags.is_empty(),
@@ -1141,7 +1141,7 @@ mod tests {
     #[test]
     fn hook_comment_before_normal_rule_is_inert_in_selector() {
         let (rules, keyframes, diags) =
-            parse_style_block("/* @loom-hook x */\n.card{color:#ff0000}");
+            parse_style_block("/* @ikat-hook x */\n.card{color:#ff0000}");
         assert!(keyframes.is_empty());
         assert!(
             diags.is_empty(),
@@ -1154,7 +1154,7 @@ mod tests {
 
     #[test]
     fn parse_style_block_keyframes_hook_after_stop_attaches_to_previous_stop() {
-        let css = "@keyframes slideIn{from{opacity:0}/* @loom-hook start */ to{opacity:1}}";
+        let css = "@keyframes slideIn{from{opacity:0}/* @ikat-hook start */ to{opacity:1}}";
         let (_rules, keyframes, diags) = parse_style_block(css);
         assert!(diags.is_empty(), "diags: {diags:?}");
         assert_eq!(keyframes.len(), 1);
@@ -1164,7 +1164,7 @@ mod tests {
 
     #[test]
     fn parse_style_block_keyframes_hook_inside_stop_attaches_to_current_stop() {
-        let css = "@keyframes slideIn{from{/* @loom-hook start */ opacity:0}to{opacity:1}}";
+        let css = "@keyframes slideIn{from{/* @ikat-hook start */ opacity:0}to{opacity:1}}";
         let (_rules, keyframes, diags) = parse_style_block(css);
         assert!(diags.is_empty(), "diags: {diags:?}");
         assert_eq!(keyframes[0].stops[0].hook.as_deref(), Some("start"));

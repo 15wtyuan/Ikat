@@ -246,7 +246,7 @@ impl Gradient {
     }
 }
 
-/// LoomGUI display 旁路字段（与 taffy_style.display 并行设置）。
+/// Ikat display 旁路字段（与 taffy_style.display 并行设置）。
 ///
 /// `display_mode` 让内部 Strategy 选择（Block vs Flex scrolling/text alignment
 /// 分支）不依赖 taffy 模式枚举。`taffy_style.display` 同步设置——block
@@ -505,7 +505,7 @@ pub struct ResolvedStyle {
     /// 视口相对长度声明（vw/vh/vmin/vmax）。与 taffy_style 并行——taffy 装不下
     /// 第四种长度 tag，solve 建树期按 root_size 换算覆写（见 [`ViewportStyle`]）。
     pub viewport: ViewportStyle,
-    /// CSS display 的 LoomGUI 旁路标记（与 taffy_style.display 解耦）。
+    /// CSS display 的 Ikat 旁路标记（与 taffy_style.display 解耦）。
     pub display_mode: DisplayMode,
     /// 视觉字段（不进 taffy，渲染层消费）
     pub background_color: Option<[f32; 4]>, // rgba 0..1
@@ -538,11 +538,11 @@ pub struct ResolvedStyle {
     /// CSS INHERITED 属性（照 CSS 规范），打包期 bake 进 base_style。
     pub caret_color: Option<[f32; 4]>,
     /// CSS `selection-background`（选中文本的背景色）。None = 缺省回退蓝半透
-    /// `[0,0,1,0.5]`（render arm fallback）。LoomGUI 私有属性
+    /// `[0,0,1,0.5]`（render arm fallback）。Ikat 私有属性
     /// （CSS 用 `::selection { background }`，围栏无伪元素选择器，故用平铺 prop）。
     pub selection_background: Option<[f32; 4]>,
     /// CSS `selection-color`（选中文本的文字色）。None = 缺省回退白色（render arm fallback）。
-    /// 同 `selection_background`，LoomGUI 私有属性（CSS `::selection { color }`）。
+    /// 同 `selection_background`，Ikat 私有属性（CSS `::selection { color }`）。
     pub selection_color: Option<[f32; 4]>,
     /// 占位符渲染色（CSS `::placeholder { color }`，围栏无伪元素选择器，故平铺 prop）。
     /// None = 缺省把 `color` alpha 折半（对齐浏览器 ::placeholder UA 默认 ~opacity 0.5）。
@@ -608,7 +608,7 @@ pub struct ResolvedStyle {
     /// Which inherited CSS properties were explicitly declared (set-ness bitmask).
     ///
     /// Baked at package time into base_style (rematch seeds from this each frame).
-    /// Fence `css_resolve` calls `loomgui_core::style::dynamic::inherited_bit` after
+    /// Fence `css_resolve` calls `ikat_core::style::dynamic::inherited_bit` after
     /// `apply_decl` success and OR's the bit into this field, so runtime
     /// `propagate_inherited` respects inline inherited declarations and does not
     /// overwrite them with the parent value.

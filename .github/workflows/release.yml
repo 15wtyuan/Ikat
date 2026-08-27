@@ -31,7 +31,7 @@ jobs:
           fi
 
       - name: cargo test --workspace (exclude GUI; release 不依赖 Tauri)
-        run: cargo test --workspace --exclude loomgui_gui
+        run: cargo test --workspace --exclude ikat_gui
 
       - name: release-check
         run: cargo run -p xtask -- release-check
@@ -53,16 +53,16 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: build loom CLI (release)
-        run: cargo build -p loomgui_pkg --release
+      - name: build ikat CLI (release)
+        run: cargo build -p ikat_pkg --release
 
       - name: create github release
         uses: softprops/action-gh-release@v2
         with:
           body: ${{ steps.cl.outputs.BODY }}
-          # loom.exe 与 dll 同 commit 产出：pkg.bin 写端（CLI）与读端（FFI）版本
-          # 恒配套；游戏仓库侧 .loom/ 的规范下载位。
-          files: target/release/loom.exe
+          # ikat.exe 与 dll 同 commit 产出：pkg.bin 写端（CLI）与读端（FFI）版本
+          # 恒配套；游戏仓库侧 .ikat/ 的规范下载位。
+          files: target/release/ikat.exe
           # 当前 `v0.` 把全部 0.x 判为 prerelease；发布 0.1.0 稳定点前需收窄为
           # `startsWith(github.ref_name, 'v0.0.')`，否则 0.1.0 会被误标 prerelease。
           prerelease: ${{ startsWith(github.ref_name, 'v0.') }}

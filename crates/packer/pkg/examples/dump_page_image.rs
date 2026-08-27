@@ -2,14 +2,14 @@
 //! instantiate page_image → tick_and_render，dump 所有 bg-image Mesh 的
 //! image_path / program / verts / box，验证 core 是否正确产出 bg-image 渲染节点。
 //! 区分「core/打包期没产 image_path」vs「Unity 侧 SpriteResolver/texture 断了」。
-//! 跑：`cargo run -p loomgui_pkg --example dump_page_image`
+//! 跑：`cargo run -p ikat_pkg --example dump_page_image`
 
-use loomgui_core::render::node::NodePayload;
-use loomgui_core::stage::Stage;
-use loomgui_pkg::atlas::AtlasManifest;
+use ikat_core::render::node::NodePayload;
+use ikat_core::stage::Stage;
+use ikat_pkg::atlas::AtlasManifest;
 
 fn main() {
-    let manifest = env!("CARGO_MANIFEST_DIR"); // loomgui_pkg
+    let manifest = env!("CARGO_MANIFEST_DIR"); // ikat_pkg
     let pkg_path = format!(
         "{}/../../../unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin",
         manifest
@@ -38,7 +38,7 @@ fn main() {
     // 0. 建 root scene（instantiate 前置；模拟 Unity CreateRoot）
     let root = stage.create_root("div", "").expect("create_root");
 
-    // 1. 加载包（模拟 LoomStageDriver.LoadPackage）
+    // 1. 加载包（模拟 IkatStageDriver.LoadPackage）
     stage
         .load_package("showcase", &pkg_bytes)
         .expect("load_package showcase");
@@ -82,7 +82,7 @@ fn main() {
         let Some(p) = image_path.as_deref() else {
             continue;
         };
-        if p.starts_with("loomgui://font-atlas") {
+        if p.starts_with("ikat://font-atlas") {
             continue;
         }
         img_count += 1;

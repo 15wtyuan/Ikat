@@ -2,20 +2,20 @@
 //!
 //! 围栏只拦「输入非法」（机制一：围栏外标签/属性/值 → error）。但还有一类问题：**属性本身
 //! 围栏合法，但漏写或默认值冲突导致 HTML 预览 ≠ 游戏运行时**。浏览器按 CSS 规范的 initial
-//! 值渲染，LoomGUI 的部分默认值与之不同 → 设计期预览（浏览器）和运行时（自绘）会不一致，
+//! 值渲染，Ikat 的部分默认值与之不同 → 设计期预览（浏览器）和运行时（自绘）会不一致，
 //! 作者却无法察觉。本 pass 在打包期检测这类组合并发 warning（不阻断打包）。
 //!
 //! 当前检测：
 //! - **W1**：`border-width` 有但 `border-style` 缺省。CSS initial `border-style:none` = 不画
-//!   边框，浏览器预览看不到边框；而 LoomGUI 历史实现会画 → 预览和运行时行为不一致。
+//!   边框，浏览器预览看不到边框；而 Ikat 历史实现会画 → 预览和运行时行为不一致。
 //!   提醒作者显式声明 `border-style`（或用 `border` 简写一并声明）。
 //! - **W2**：`background-image` 有但 `background-size` 缺省。CSS 默认 `auto`（原始尺寸），
-//!   LoomGUI 默认 `stretch`（拉伸填满）→ 预览和运行时尺寸不同。提醒作者显式声明
+//!   Ikat 默认 `stretch`（拉伸填满）→ 预览和运行时尺寸不同。提醒作者显式声明
 //!   `background-size`。
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
-use loomgui_core::style::resolved::{BackgroundSize, BorderStyle, ResolvedStyle};
+use ikat_core::style::resolved::{BackgroundSize, BorderStyle, ResolvedStyle};
 
 /// 把 taffy `LengthPercentage` 解析为 px。
 ///
@@ -82,7 +82,7 @@ pub fn check_consistency(
             diags.push(Diagnostic::warning(
                 DiagnosticCode::FenceBorderWithoutStyle,
                 "border-width declared without border-style — the CSS initial value \
-                 `border-style:none` means browsers render NO border, but LoomGUI \
+                 `border-style:none` means browsers render NO border, but Ikat \
                  draws one, so the browser preview will not match the runtime. \
                  Add `border-style:solid` (or use the `border:2px solid <color>` \
                  shorthand) so both render the border consistently."
@@ -95,7 +95,7 @@ pub fn check_consistency(
             diags.push(Diagnostic::warning(
                 DiagnosticCode::FenceBgImageWithoutSize,
                 "background-image declared without background-size — the CSS initial \
-                 value is `auto` (natural image size), but LoomGUI defaults to \
+                 value is `auto` (natural image size), but Ikat defaults to \
                  `stretch` (fill the box), so the browser preview will not match the \
                  runtime. Add explicit `background-size` (cover/contain/stretch) so \
                  both render identically."

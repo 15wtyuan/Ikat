@@ -1,10 +1,10 @@
-//! loom.runtime.json：后端自举清单（打包器产，替代 Unity LoomSettings SO）。
+//! ikat.runtime.json：后端自举清单（打包器产，替代 Unity IkatSettings SO）。
 //! packages / atlases / fonts 是 workspace 级平行列表——atlas 与字体不隶属任何包，
 //! UnloadPackage 只动模板注册表。
 
 use serde::{Deserialize, Serialize};
 
-pub const RUNTIME_FILE: &str = "loom.runtime.json";
+pub const RUNTIME_FILE: &str = "ikat.runtime.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RuntimeManifest {

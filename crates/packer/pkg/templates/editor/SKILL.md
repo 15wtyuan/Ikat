@@ -1,15 +1,15 @@
 ---
-name: loomgui-editor
+name: ikat-editor
 description: |
-  Author and self-correct UI screens for LoomGUI — the fenced standard
+  Author and self-correct UI screens for Ikat — the fenced standard
   HTML/CSS subset that compiles into the game's runtime UI. Use for ANY
-  task touching HTML or CSS in a LoomGUI workspace (the directory tree
-  holding loom.workspace.json, located via .loom/config.json at the
+  task touching HTML or CSS in a Ikat workspace (the directory tree
+  holding ikat.workspace.json, located via .ikat/config.json at the
   session root): creating or editing screens, components, controls,
   lists, styling, animations, or diagnosing packer build errors.
 ---
 
-# LoomGUI UI Authoring
+# Ikat UI Authoring
 
 Write fence-compliant UI and converge to a clean build. Rendering parity
 between the browser preview and the game runtime is a framework guarantee,
@@ -19,21 +19,21 @@ trust the build message.
 
 ## Boundaries
 
-- Editing C# game code that drives pages/nodes/events → `loomgui-runtime`.
-- Preview simulation scripts and the `loom preview` loop → `loomgui-preview`.
-- Workspace configuration, build invocation, CLI flags → `loom`.
+- Editing C# game code that drives pages/nodes/events → `ikat-runtime`.
+- Preview simulation scripts and the `ikat preview` loop → `ikat-preview`.
+- Workspace configuration, build invocation, CLI flags → `ikat`.
 - HTML/CSS authoring and fence diagnostics → this skill.
 
 ## Prerequisites
 
-- Session root has `.loom/` (config + `loom` CLI). Read `.loom/config.json`
+- Session root has `.ikat/` (config + `ikat` CLI). Read `.ikat/config.json`
   first: `ui_root` is where sources live, `unity_root` (if present) is where
-  `loom build` delivers artifacts.
-- Text needs a registered default font (`loom font add <file> --family <f>
+  `ikat build` delivers artifacts.
+- Text needs a registered default font (`ikat font add <file> --family <f>
   --default`). No font yet → ask the user for a font file before writing
   screens full of text.
 - Every image referenced by `<img>` must live under an atlas directory
-  (`loom atlas add <dir>`); the build cross-validates coverage.
+  (`ikat atlas add <dir>`); the build cross-validates coverage.
 
 ## Critical rules
 
@@ -92,7 +92,7 @@ trust the build message.
     (`transform-origin` does not exist).
 13. `z-index` reorders siblings for drawing and hit-testing only; it never
     affects flex order — that is `order`.
-14. **Ids are the game-code API** (see `loomgui-runtime`): keep interactive
+14. **Ids are the game-code API** (see `ikat-runtime`): keep interactive
     ids stable and semantic (`btn-start`, `hp-fill`). Renaming an id
     silently breaks C#. Ids must be unique per template scope;
     `aria-controls`/`aria-labelledby` must point at existing ids.
@@ -106,24 +106,24 @@ demand, not upfront.
 
 ## Workflow
 
-1. **Orient.** Read `.loom/config.json` → `ui_root`. `loom list pkg` /
-   `loom show <pkg>` to see what exists. Never bulk-scan the workspace.
+1. **Orient.** Read `.ikat/config.json` → `ui_root`. `ikat list pkg` /
+   `ikat show <pkg>` to see what exists. Never bulk-scan the workspace.
 2. **Author.** Write HTML/CSS under the package `dirs`. Check
    `references/fence-schema.md` for the tag/role tables and
    `references/patterns.md` for canonical control styling before
    inventing structure.
-3. **Check and fix in rounds.** `loom check` (from the session root, or
-   `loom check <ui-dir>`) → fix EVERY diagnostic in one editing pass →
+3. **Check and fix in rounds.** `ikat check` (from the session root, or
+   `ikat check <ui-dir>`) → fix EVERY diagnostic in one editing pass →
    repeat until exit 0. Diagnostics carry code/file/line/column/help.
 4. **Write preview simulation.** If the page has `data-fill` lists,
    custom elements, interactive controls, or game-code-driven content,
-   write the preview scripts per the `loomgui-preview` skill
+   write the preview scripts per the `ikat-preview` skill
    (`preview/main.js` + `preview/pages/<page>.js` — the server injects
    them; HTML stays clean). A `PreviewDataFillWithoutSim` warning means
    this step is missing.
-5. **Human preview (the gate).** Start or reuse `loom preview` (running
+5. **Human preview (the gate).** Start or reuse `ikat preview` (running
    instance reports the same URL; also recorded in
-   `.loom/preview.json`), give the human the URL, and iterate on their
+   `.ikat/preview.json`), give the human the URL, and iterate on their
    feedback — they refresh to see each fix. Self-check the same way if
    in doubt: the preview workbench renders at the design resolution
    under `match_mode` scaling and never reflows. Trust: flex layout,
@@ -135,18 +135,18 @@ demand, not upfront.
    dead sizing on inline text, page rules over projected content); if
    there are no warnings, the preview is honest.
 6. **Build on approval.** Only after the human approved the preview (or
-   explicitly waived it): `loom build` and report the artifact paths
+   explicitly waived it): `ikat build` and report the artifact paths
    from the report.
 
 ## Pre-flight checklist (before reporting done)
 
-- [ ] `loom check` exits 0.
+- [ ] `ikat check` exits 0.
 - [ ] Warnings handled, not just survived: `FenceBorderWithoutStyle` /
       `FenceBgImageWithoutSize` mean the preview will NOT match the runtime.
 - [ ] No id of an interactive element was renamed (game code depends on it).
 - [ ] New images are covered by an atlas dir; new fonts registered.
 - [ ] Preview simulation written (step 4) — no `PreviewDataFillWithoutSim`.
-- [ ] Human previewed the page via `loom preview` and approved (or
+- [ ] Human previewed the page via `ikat preview` and approved (or
       explicitly waived preview); artifacts rebuilt if sources changed.
 
 ## Failure patterns
@@ -175,7 +175,7 @@ demand, not upfront.
 | `FenceInlineElementInBlockContext` | bare `button`/`img` in block → flex parent or `display:block` |
 | `FenceMixedInlineBlock` | mixed children → wrap the inline run in a sub-`div` or switch to flex |
 | `FenceStylesheetNotFound` | `<link>` href misses → fix the path (relative to the HTML file) |
-| `SpriteMissingFromAtlas` | image not under any atlas dir → `loom atlas add` |
+| `SpriteMissingFromAtlas` | image not under any atlas dir → `ikat atlas add` |
 | `DuplicateId` | same id twice in a template scope → rename |
 | `UnregisteredCustomElement` | hyphenated tag without `components/<tag>.html` → create the file |
 

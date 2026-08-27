@@ -1,19 +1,17 @@
 //! IrTree → core TemplateNode 桥。
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
-use loomgui_core::asset::{ControlInit, EditInit, TemplateNode};
-use loomgui_core::scene::{
+use ikat_core::asset::{ControlInit, EditInit, TemplateNode};
+use ikat_core::scene::{
     AnimLen, AnimatableProps, KeyframeStopSelector, KeyframesRule, LenDomain, NodeKind,
 };
-use loomgui_core::style::mapping::{
-    parse_box_shadow, parse_color, parse_ease, parse_transform_trs,
-};
-use loomgui_fence::css_rules::{
+use ikat_core::style::mapping::{parse_box_shadow, parse_color, parse_ease, parse_transform_trs};
+use ikat_fence::css_rules::{
     KeyframeStopSelector as FenceKeyframeStopSelector, KeyframesRule as FenceKeyframesRule,
 };
-use loomgui_fence::ir::{IrElement, IrNodeKind, IrTree};
-use loomgui_fence::schema::tag::SemanticKind;
-use loomgui_fence::ParsedTemplate;
+use ikat_fence::ir::{IrElement, IrNodeKind, IrTree};
+use ikat_fence::schema::tag::SemanticKind;
+use ikat_fence::ParsedTemplate;
 
 /// 把一个组件 HTML 的 ParsedTemplate 翻译成 TemplateNode 树。
 ///
@@ -167,7 +165,7 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                             _ => {}
                         }
                     }
-                    loomgui_core::scene::KeyframeStop {
+                    ikat_core::scene::KeyframeStop {
                         selector: match fence_stop.selector {
                             FenceKeyframeStopSelector::From => KeyframeStopSelector::From,
                             FenceKeyframeStopSelector::To => KeyframeStopSelector::To,
@@ -508,7 +506,7 @@ mod tests {
     use super::*;
 
     fn bridged(html: &str) -> Vec<TemplateNode> {
-        let parsed = loomgui_fence::parse_template(html, "test.html");
+        let parsed = ikat_fence::parse_template(html, "test.html");
         assert!(
             parsed.diagnostics.is_empty(),
             "diags: {:?}",
@@ -528,7 +526,7 @@ mod tests {
 
     #[test]
     fn template_root_not_listitem_errors() {
-        let parsed = loomgui_fence::parse_template(
+        let parsed = ikat_fence::parse_template(
             r#"<div role="list"><template><div>x</div></template></div>"#,
             "test.html",
         );
@@ -539,7 +537,7 @@ mod tests {
     fn template_root_role_listitem_ok() {
         // role 驱动 ListView：作者写 <div role=list> > template > <div role=listitem>。
         // validate_template_children 按 semantic（ListItem）判定，不挑字面 tag。
-        let parsed = loomgui_fence::parse_template(
+        let parsed = ikat_fence::parse_template(
             r#"<style>[role="listitem"]{background:#ccc}</style><div role="list" data-fill="3"><template><div role="listitem" class="item"><span>x</span></div></template></div>"#,
             "test.html",
         );
@@ -563,7 +561,7 @@ mod tests {
     #[test]
     fn template_with_two_listitem_errors() {
         // template 根必须恰好一个 ListItem，两个是契约违反。
-        let parsed = loomgui_fence::parse_template(
+        let parsed = ikat_fence::parse_template(
             r#"<div role="list"><template><div role="listitem">a</div><div role="listitem">b</div></template></div>"#,
             "test.html",
         );
@@ -573,7 +571,7 @@ mod tests {
     #[test]
     fn template_with_only_text_errors() {
         // 零元素（纯文本）也拒：根必须是 ListItem。
-        let parsed = loomgui_fence::parse_template(
+        let parsed = ikat_fence::parse_template(
             r#"<div role="list"><template>just text</template></div>"#,
             "test.html",
         );
@@ -607,7 +605,7 @@ mod tests {
 
     #[test]
     fn multi_root_errors() {
-        let parsed = loomgui_fence::parse_template(r#"<div>a</div><div>b</div>"#, "t.html");
+        let parsed = ikat_fence::parse_template(r#"<div>a</div><div>b</div>"#, "t.html");
         assert!(bridge(&parsed).is_err(), "multi-root should error");
     }
 
@@ -623,7 +621,7 @@ mod tests {
         // display:none 由 fence tag schema 铺底 → render/layout 自动剪整子树。
         assert_eq!(
             nodes[1].style.display_mode,
-            loomgui_core::style::resolved::DisplayMode::None
+            ikat_core::style::resolved::DisplayMode::None
         );
         // 这才是真正驱动剪枝的字段：collect_display_none_subtree / taffy layout cut
         // / hit-test 全都看 taffy_style.display。display_mode 是旁路标记，无消费者。

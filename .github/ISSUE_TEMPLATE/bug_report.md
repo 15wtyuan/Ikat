@@ -21,7 +21,7 @@ labels: 'type: bug'
 
 ## 环境
 
-- LoomGUI 版本 / commit：
+- Ikat 版本 / commit：
 - Unity 版本：
 - 平台（Win/Mac/IL2CPP）：
 - 触发场景（showcase 哪页 / 自定义 html）：

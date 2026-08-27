@@ -1,9 +1,9 @@
 using UnityEngine;
-using LoomGUI;
+using Ikat;
 
 /// PlayMode showcase 查看器：导航完全走框架自己的事件系统，无 IMGUI。
 ///
-/// 挂在与 LoomStageDriver 同一 GameObject 上。Play 后：
+/// 挂在与 IkatStageDriver 同一 GameObject 上。Play 后：
 ///   - 首页 home：点 7 张 nav-card（nav-settings / nav-mail / ...）跳对应页
 ///   - 各页：点顶栏 / 侧栏的「← 首页」(button#back-home) 回 home
 /// 这些导航元素的 id 已在 showcase HTML 里就位（home.html 的 nav-card、各页的
@@ -33,7 +33,7 @@ public class ShowcaseRunner : MonoBehaviour
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
-    // 浏览器里 loom-preview.js 的 JS 切 panel display；LoomGUI 运行时无 JS，这里复刻该逻辑。
+    // 浏览器里 ikat-preview.js 的 JS 切 panel display；Ikat 运行时无 JS，这里复刻该逻辑。
     // panel-audio 默认可见，其余 HTML 里 style="display:none" 冻结进 pkg。
     static readonly (string tabId, string panelId)[] SETTINGS_TABS =
     {
@@ -44,7 +44,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("tab-search", "panel-search"),
     };
 
-    LoomStageDriver _driver;
+    IkatStageDriver _driver;
     Container _current;
     string _shown;
 
@@ -65,10 +65,10 @@ public class ShowcaseRunner : MonoBehaviour
         // 编辑器验收防冻：编辑器窗口失焦（看 Console/切窗）时播放器循环会被挂起，
         // 表现为「游戏只剩一两帧」。Run In Background 让循环失焦持续跑（真机默认行为）。
         Application.runInBackground = true;
-        _driver = GetComponent<LoomStageDriver>();
+        _driver = GetComponent<IkatStageDriver>();
         if (_driver == null)
         {
-            Debug.LogError("[Showcase] LoomStageDriver not found on same GameObject — runner wired wrong");
+            Debug.LogError("[Showcase] IkatStageDriver not found on same GameObject — runner wired wrong");
             return;
         }
         // 让 driver Awake 完成（同帧 Awake 先于 Start，理论已就绪）+ 给 LateUpdate 几帧余量。
@@ -156,7 +156,7 @@ public class ShowcaseRunner : MonoBehaviour
         }
         if (!page.TryGet<Container>("b12-target", out var handleTarget))
             return;
-        LoomGUI.AnimationHandle handle = null;
+        Ikat.AnimationHandle handle = null;
         if (page.TryGet<Button>("btn-h-play", out var bPlay))
             bPlay.Clicked += () =>
             {
@@ -635,7 +635,7 @@ public class ShowcaseRunner : MonoBehaviour
     }
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，
-    /// LoomGUI 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
+    /// Ikat 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
     /// panel 是裸 <div>（.panel CSS 无 display 声明）→ 默认 display:block（子元素 page-title/
     /// page-desc/field 垂直堆叠）。显示用 DisplayMode.Block，**不能用 Flex**——Flex 默认
     /// flex-direction:row 会让 panel 的子元素水平排列，布局错乱。隐藏用 DisplayMode.None。
@@ -781,8 +781,8 @@ public class ShowcaseRunner : MonoBehaviour
     }
 
     /// ListView 虚拟化驱动：背包 / 邮件左侧列表。
-    /// runtime ListView 是数据驱动的——data-fill 只供浏览器 preview 克隆（loom-preview.js），
-    /// runtime 必须业务侧设 ItemCount + BindItem 才克隆 slot 渲染 item（见 LoomGUI.Nodes ListView）。
+    /// runtime ListView 是数据驱动的——data-fill 只供浏览器 preview 克隆（ikat-preview.js），
+    /// runtime 必须业务侧设 ItemCount + BindItem 才克隆 slot 渲染 item（见 Ikat.Nodes ListView）。
     /// 按 index 区分图标（Image.Src 轮换）+ badge 数量 + 耐久（背包）/ 发件人 + 主题（邮件）。子节点用
     /// Query<T> 按类型取：template 蓝图克隆后 N 个 slot 子节点 id 重复，Get<T> 全局首匹配只命中
     /// 首个 slot（Nodes.cs Get gap），故不用 id。

@@ -1,8 +1,8 @@
 //! 控件状态面：ProgressBar/Slider 的 value/max/step、Toggle/Radio 的 checked、
 //! Dropdown/TabList 的选中态、NumberField 数值读写（含派生字符串读的公共骨架）。
 
-use loomgui_core::scene::node::{ControlState, EditState};
-use loomgui_core::scene::NodeId;
+use ikat_core::scene::node::{ControlState, EditState};
+use ikat_core::scene::NodeId;
 
 use crate::{ffi_guard, StageHandle};
 
@@ -19,7 +19,7 @@ use crate::{ffi_guard, StageHandle};
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_value(
+pub extern "C" fn ikat_stage_set_control_value(
     h: *mut StageHandle,
     node_id: u64,
     value: f32,
@@ -89,7 +89,7 @@ pub extern "C" fn loomgui_stage_set_control_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_value(
+pub extern "C" fn ikat_stage_get_control_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -116,7 +116,7 @@ pub extern "C" fn loomgui_stage_get_control_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_checked(
+pub extern "C" fn ikat_stage_set_control_checked(
     h: *mut StageHandle,
     node_id: u64,
     checked: bool,
@@ -149,7 +149,7 @@ pub extern "C" fn loomgui_stage_set_control_checked(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_checked(
+pub extern "C" fn ikat_stage_get_control_checked(
     h: *const StageHandle,
     node_id: u64,
     out: *mut bool,
@@ -176,11 +176,7 @@ pub extern "C" fn loomgui_stage_get_control_checked(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_max(
-    h: *mut StageHandle,
-    node_id: u64,
-    max: f32,
-) -> i32 {
+pub extern "C" fn ikat_stage_set_control_max(h: *mut StageHandle, node_id: u64, max: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -260,7 +256,7 @@ pub extern "C" fn loomgui_stage_set_control_max(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_max(
+pub extern "C" fn ikat_stage_get_control_max(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -292,11 +288,7 @@ pub extern "C" fn loomgui_stage_get_control_max(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_min(
-    h: *mut StageHandle,
-    node_id: u64,
-    min: f32,
-) -> i32 {
+pub extern "C" fn ikat_stage_set_control_min(h: *mut StageHandle, node_id: u64, min: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -352,7 +344,7 @@ pub extern "C" fn loomgui_stage_set_control_min(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_min(
+pub extern "C" fn ikat_stage_get_control_min(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -381,11 +373,7 @@ pub extern "C" fn loomgui_stage_get_control_min(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_step(
-    h: *mut StageHandle,
-    node_id: u64,
-    step: f32,
-) -> i32 {
+pub extern "C" fn ikat_stage_set_control_step(h: *mut StageHandle, node_id: u64, step: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -463,7 +451,7 @@ fn renumber_edit_value(edit: &mut EditState, min: f32, max: f32, step: f32) {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_step(
+pub extern "C" fn ikat_stage_get_control_step(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -491,7 +479,7 @@ pub extern "C" fn loomgui_stage_get_control_step(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_control_indeterminate(
+pub extern "C" fn ikat_stage_get_control_indeterminate(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -519,7 +507,7 @@ pub extern "C" fn loomgui_stage_get_control_indeterminate(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_control_indeterminate(
+pub extern "C" fn ikat_stage_set_control_indeterminate(
     h: *mut StageHandle,
     node_id: u64,
     v: u8,
@@ -549,7 +537,7 @@ pub extern "C" fn loomgui_stage_set_control_indeterminate(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_radio_name(
+pub extern "C" fn ikat_stage_get_radio_name(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -592,7 +580,7 @@ pub extern "C" fn loomgui_stage_get_radio_name(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
+pub extern "C" fn ikat_stage_get_dropdown_selected_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -601,7 +589,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
 ) -> i32 {
     ffi_guard(-1, || {
         let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
-            loomgui_core::scene::control::dropdown_selected_value(scene, id)
+            ikat_core::scene::control::dropdown_selected_value(scene, id)
         }) {
             Ok(v) => v,
             Err(rc) => return rc,
@@ -621,7 +609,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_option_value(
+pub extern "C" fn ikat_stage_get_option_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -630,7 +618,7 @@ pub extern "C" fn loomgui_stage_get_option_value(
 ) -> i32 {
     ffi_guard(-1, || {
         let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
-            loomgui_core::scene::control::option_value(scene, id)
+            ikat_core::scene::control::option_value(scene, id)
         }) {
             Ok(v) => v,
             Err(rc) => return rc,
@@ -647,7 +635,7 @@ pub extern "C" fn loomgui_stage_get_option_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn ikat_stage_is_option_selected(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -656,7 +644,7 @@ pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_i
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match loomgui_core::scene::control::option_selected(scene, NodeId(node_id)) {
+        match ikat_core::scene::control::option_selected(scene, NodeId(node_id)) {
             Some(true) => 1,
             Some(false) => 0,
             None => -1,
@@ -669,7 +657,7 @@ pub extern "C" fn loomgui_stage_is_option_selected(h: *const StageHandle, node_i
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_option_index(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn ikat_stage_get_option_index(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -678,7 +666,7 @@ pub extern "C" fn loomgui_stage_get_option_index(h: *const StageHandle, node_id:
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match loomgui_core::scene::control::option_index(scene, NodeId(node_id)) {
+        match ikat_core::scene::control::option_index(scene, NodeId(node_id)) {
             Some((_, idx)) => idx as i32,
             None => -1,
         }
@@ -690,7 +678,7 @@ pub extern "C" fn loomgui_stage_get_option_index(h: *const StageHandle, node_id:
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn ikat_stage_is_tab_selected(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -699,7 +687,7 @@ pub extern "C" fn loomgui_stage_is_tab_selected(h: *const StageHandle, node_id: 
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match loomgui_core::scene::control::tab_selected(scene, NodeId(node_id)) {
+        match ikat_core::scene::control::tab_selected(scene, NodeId(node_id)) {
             Some(true) => 1,
             Some(false) => 0,
             None => -1,
@@ -715,7 +703,7 @@ fn read_control_string(
     _out: *mut u8,
     _buf_cap: usize,
     out_len: *mut usize,
-    f: impl Fn(&loomgui_core::scene::Scene, NodeId) -> Option<String>,
+    f: impl Fn(&ikat_core::scene::Scene, NodeId) -> Option<String>,
 ) -> Result<Option<String>, i32> {
     if h.is_null() || out_len.is_null() {
         return Err(-1);
@@ -751,7 +739,7 @@ fn write_out_string(v: &str, out: *mut u8, buf_cap: usize, out_len: *mut usize) 
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_dropdown_selected_index(
+pub extern "C" fn ikat_stage_get_dropdown_selected_index(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u32,
@@ -780,7 +768,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
+pub extern "C" fn ikat_stage_set_dropdown_selected_index(
     h: *mut StageHandle,
     node_id: u64,
     index: u32,
@@ -813,7 +801,7 @@ pub extern "C" fn loomgui_stage_set_dropdown_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_tablist_selected_index(
+pub extern "C" fn ikat_stage_get_tablist_selected_index(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u32,
@@ -842,7 +830,7 @@ pub extern "C" fn loomgui_stage_get_tablist_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_tablist_selected_index(
+pub extern "C" fn ikat_stage_set_tablist_selected_index(
     h: *mut StageHandle,
     node_id: u64,
     index: u32,
@@ -871,7 +859,7 @@ pub extern "C" fn loomgui_stage_set_tablist_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_dropdown_open(
+pub extern "C" fn ikat_stage_get_dropdown_open(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -898,11 +886,7 @@ pub extern "C" fn loomgui_stage_get_dropdown_open(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_dropdown_open(
-    h: *mut StageHandle,
-    node_id: u64,
-    open: u8,
-) -> i32 {
+pub extern "C" fn ikat_stage_set_dropdown_open(h: *mut StageHandle, node_id: u64, open: u8) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -927,7 +911,7 @@ pub extern "C" fn loomgui_stage_set_dropdown_open(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_get_number_value(
+pub extern "C" fn ikat_stage_get_number_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -961,7 +945,7 @@ pub extern "C" fn loomgui_stage_get_number_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn loomgui_stage_set_number_value(
+pub extern "C" fn ikat_stage_set_number_value(
     h: *mut StageHandle,
     node_id: u64,
     value: f32,

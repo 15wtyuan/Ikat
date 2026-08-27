@@ -72,14 +72,14 @@ pub const EASE_IN_BEZIER: [f32; 4] = [0.42, 0.0, 1.0, 1.0];
 pub const EASE_OUT_BEZIER: [f32; 4] = [0.0, 0.0, 0.58, 1.0];
 pub const EASE_IN_OUT_BEZIER: [f32; 4] = [0.42, 0.0, 0.58, 1.0];
 
-/// easing 函数全集（CSS 标准 + loom 超集）。u8 判别值与 FFI / C# enum 对齐。
+/// easing 函数全集（CSS 标准 + ikat 超集）。u8 判别值与 FFI / C# enum 对齐。
 ///
 /// 变体追加纪律：**只从末尾追加**，既有判别值（0..9 keyword + Step）稳定——Ease 走
 /// bincode 进 pkg（variant index = 声明序），中途插入会错读旧包。
 ///
 /// - CSS 标准：`linear` / `ease` / `ease-in` / `ease-out` / `ease-in-out`（精确 bezier）、
 ///   `cubic-bezier(x1,y1,x2,y2)`（x∈[0,1] 由 parse 侧校验）、`steps` 单步（start/end）。
-/// - loom 超集（fence 认收的非标 keyword，游戏 UI 刚需）：`ease-{in,out,in-out}-{back,
+/// - ikat 超集（fence 认收的非标 keyword，游戏 UI 刚需）：`ease-{in,out,in-out}-{back,
 ///   elastic,bounce}` 固定系数族——参数化 elastic（amplitude/period）不做，DSL 侧用
 ///   cubic-bezier 近似或运行时 API 表达。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -116,7 +116,7 @@ pub enum Ease {
     BounceInOut,
 }
 
-/// FFI 侧 Ease 描述（`LoomTweenSpec.ease_kind` 值域）。core enum 的带数据变体
+/// FFI 侧 Ease 描述（`IkatTweenSpec.ease_kind` 值域）。core enum 的带数据变体
 /// （Step/CubicBezier）拆成 kind+params 平面形；与 core 判别值**有意不对齐**
 /// （数据变体无法用单 u32 表达），转换在 `ease_from_ffi`。
 pub mod ease_ffi {

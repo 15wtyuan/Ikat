@@ -1,4 +1,4 @@
-// layout-anim 页交互模拟（AI 手写，loom preview server 按页注入；不进打包）。
+// layout-anim 页交互模拟（AI 手写，ikat preview server 按页注入；不进打包）。
 // Unity 侧等价接线在 ShowcaseRunner.WireLayoutAnimDrivers：#1/#3/#4 按钮 add_class
 // 切换（CSS transition 起效），#6 是 C# TweenBuilder 运行时 API——浏览器侧用 rAF
 // + cubic-out 复刻同一节奏（预览只求视觉可对照，非逐帧等价）。

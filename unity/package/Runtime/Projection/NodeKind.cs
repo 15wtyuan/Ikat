@@ -1,4 +1,4 @@
-namespace LoomGUI
+namespace Ikat
 {
     /// <summary>
     /// 投影层内部：Rust <c>get_node_kind</c> FFI 返回的 <c>NodeKind</c> 判别值（u8）。

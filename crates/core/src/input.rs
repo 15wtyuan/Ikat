@@ -32,7 +32,7 @@ pub enum PointerKind {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct KeyEvent {
-    pub key_code: u32, // LoomKeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
+    pub key_code: u32, // IkatKeyCode 枚举值（Unity KeyCode 转 u32；core 不解释语义，只透传 + Tab 判定）
     pub modifiers: u8, // bit0=shift / bit1=ctrl / bit2=alt
     pub is_down: bool,
     pub pad: [u8; 2],
@@ -46,8 +46,8 @@ pub const MOD_ALT: u8 = 0x04;
 /// Tab 的 KeyCode 值（Unity KeyCode.Tab = 9）。core 内判定 Tab 导航用。
 pub const KEY_TAB: u32 = 9;
 
-/// 控制键 KeyCode 值。LoomInputCollector 用 `(uint)UnityEngine.KeyCode` 直传——core
-/// 须匹配 Unity KeyCode 枚举的原值。数值源：`unity/package/Runtime/Public/LoomGUI.Types.cs`
+/// 控制键 KeyCode 值。IkatInputCollector 用 `(uint)UnityEngine.KeyCode` 直传——core
+/// 须匹配 Unity KeyCode 枚举的原值。数值源：`unity/package/Runtime/Public/Ikat.Types.cs`
 /// 的 `KeyCode` enum（项目冻结的公共 API 镜像，注释明确「Values match Unity KeyCode enum」，
 /// 且其 Tab=9 / Backspace=8 / Left=276 等与本仓既有 KEY_TAB 及 Unity 公开文档一致，互为佐证）。
 /// 字母键 A-Z = 97-122（ASCII 小写区间，Unity KeyCode 同此）。Home/End 不在该 enum 内，

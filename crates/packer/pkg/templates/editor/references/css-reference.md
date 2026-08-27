@@ -24,7 +24,7 @@ error):
 - `word-break` — `normal` / `break-all` (break between any characters) / `keep-all` (no breaks inside CJK words)
 - `text-wrap` — `normal` / `nowrap` (disables soft wrap; `balance` / `stable` / `pretty` are rejected — use `text-align` for centered headings)
 - `text-decoration` — `none` / `underline` only (not inherited; `<a>` UA default is `underline`, author declarations override)
-- `-webkit-text-stroke` / `font-effect` — LoomGUI text extensions
+- `-webkit-text-stroke` / `font-effect` — Ikat text extensions
 - `caret-color` / `selection-background` / `selection-color` / `placeholder-color` / `-webkit-text-security` — text-control theming
 - `animation` and longhands: `animation-name` / `animation-duration` / `animation-timing-function` / `animation-delay` / `animation-iteration-count` / `animation-direction` / `animation-fill-mode` / `animation-play-state`
 - `transition`
@@ -143,8 +143,8 @@ The build flags every one of these with a warning; with zero warnings the
 browser preview is honest.
 
 - `background-image` without `background-size`: browsers show the
-  original size, LoomGUI stretches to fill.
-- `border-width` without `border-style`: browsers draw nothing, LoomGUI
+  original size, Ikat stretches to fill.
+- `border-width` without `border-style`: browsers draw nothing, Ikat
   draws the border.
 - Adjacent margins never collapse (browsers collapse them vertically);
   prefer `gap` for spacing.

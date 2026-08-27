@@ -5,8 +5,8 @@
 //! mirroring how downstream stages (6.5 img exemption, packer bridge) consume
 //! the classification.
 
-use loomgui_fence::diagnostic::DiagnosticCode;
-use loomgui_fence::pipeline::parse_template;
+use ikat_fence::diagnostic::DiagnosticCode;
+use ikat_fence::pipeline::parse_template;
 
 fn mixed_diags(html: &str) -> Vec<String> {
     let out = parse_template(html, "t.html");

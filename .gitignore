@@ -46,10 +46,10 @@ tests/dotnet/obj/
 
 # ===== Rust↔Unity 产物 =====
 # csbindgen 生成的 C# 绑定（由 Rust 侧生成，不入库）
-**/LoomGUI*Bindings*.cs
-**/LoomGUI*Bindings*.cs.meta
-!**/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs
-!**/Plugins/LoomGUI/Bindings/LoomGUIBindings.cs.meta
+**/Ikat*Bindings*.cs
+**/Ikat*Bindings*.cs.meta
+!**/Plugins/Ikat/Bindings/IkatBindings.cs
+!**/Plugins/Ikat/Bindings/IkatBindings.cs.meta
 # native 库产物（按需，若想入库 prebuilt 可注释掉）
 /**/*.dll
 /**/*.dylib
@@ -85,8 +85,8 @@ crates/packer/gui/src-tauri/gen/
 .superpowers/
 *.snap.new
 
-# HeadlessTests fixture packer output (loom-pkg build of *.workspace → ../<name>-ws-out/)
-tests/dotnet/LoomGUI.HeadlessTests/fixtures/*-ws-out/
+# HeadlessTests fixture packer output (ikat-pkg build of *.workspace → ../<name>-ws-out/)
+tests/dotnet/Ikat.HeadlessTests/fixtures/*-ws-out/
 node_modules
 tmp
 

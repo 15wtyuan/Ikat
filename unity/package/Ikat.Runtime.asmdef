@@ -1,0 +1,8 @@
+{
+    "name": "Ikat.Runtime",
+    "rootNamespace": "Ikat",
+    "references": ["Ikat.Bindings", "Unity.InputSystem"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true
+}

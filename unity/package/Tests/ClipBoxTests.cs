@@ -1,7 +1,7 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace LoomGUI.Tests
+namespace Ikat.Tests
 {
     /// _ClipBox 纯数学测。锁 design→world 转换、safe-blank、y-down design → y-up world 符号约定。
     public class ClipBoxTests

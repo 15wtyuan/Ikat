@@ -1,10 +1,10 @@
-// showcase 预览模拟入口（AI 手写，loom preview server 自动注入本文件 + 按页的
+// showcase 预览模拟入口（AI 手写，ikat preview server 自动注入本文件 + 按页的
 // pages/<页名>.js；HTML 源零引用、不进打包）。
 //
-// 分层约定（loomgui-preview skill）：本文件管「能从源码推断」的全页模拟——
+// 分层约定（ikat-preview skill）：本文件管「能从源码推断」的全页模拟——
 // 组件展开、控件语义、tabs/dialogs、导航、动画重播；每页专属的演示数据归
 // pages/<页名>.js。font/letterbox 等基础设施在 preview-base.css；分辨率缩放
-// 由 loom preview 外壳按 match_mode 负责（页面自身不再缩放）。
+// 由 ikat preview 外壳按 match_mode 负责（页面自身不再缩放）。
 
 import { expandComponents, fetchRegistry } from './lib/expand.js';
 import { pageDir } from './lib/fill.js';
@@ -93,7 +93,7 @@ function replayAnimations() {
 // 手法：内联 animation:none → 强制 reflow → 移除内联，浏览器按原声明重新起播。
 function installAnimReplay() {
   const btn = document.createElement('button');
-  btn.id = 'loom-anim-replay';
+  btn.id = 'ikat-anim-replay';
   btn.textContent = '↻ 重播动画';
   btn.addEventListener('click', replayAnimations);
   document.body.appendChild(btn);

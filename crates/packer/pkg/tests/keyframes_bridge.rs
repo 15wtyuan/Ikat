@@ -1,19 +1,19 @@
-//! fence @keyframes → bridge → pkg.bin 往返契约测试（@loom-hook 锚点 + transform TRS 分解）。
+//! fence @keyframes → bridge → pkg.bin 往返契约测试（@ikat-hook 锚点 + transform TRS 分解）。
 //!
 //! `ComponentTemplate.keyframes: Vec<KeyframesRule>`（pkg v30 序列化）落地但 bridge 曾
 //! 静默丢弃 keyframes；本测试锁死「不再丢弃」：HTML 里的 @keyframes 必须进 pkg，且
-//! `/* @loom-hook name */` 注释锚点挂在前一个 stop 上、stop 的 transform 按 TRS 分解
+//! `/* @ikat-hook name */` 注释锚点挂在前一个 stop 上、stop 的 transform 按 TRS 分解
 //! （translateY(20px) → translate [0,20]，不做矩阵合并）。
 
-use loomgui_core::asset::read_package;
-use loomgui_core::scene::animation::{AnimatableProps, KeyframeStopSelector, TransformAnim};
-use loomgui_core::scene::LenDomain;
-use loomgui_pkg::build::{pack_components, Component};
+use ikat_core::asset::read_package;
+use ikat_core::scene::animation::{AnimatableProps, KeyframeStopSelector, TransformAnim};
+use ikat_core::scene::LenDomain;
+use ikat_pkg::build::{pack_components, Component};
 
 /// 单组件 HTML：@keyframes slideIn（from 带 hook 注释 + translateY，to 为终态）
 /// + .card 挂 animation 简写（断言 base_style.animation 与 keyframes 名字连通）。
 const HTML: &str = r#"<style>
-@keyframes slideIn{from{opacity:0;transform:translateY(20px)}/* @loom-hook start */ to{opacity:1;transform:none}}
+@keyframes slideIn{from{opacity:0;transform:translateY(20px)}/* @ikat-hook start */ to{opacity:1;transform:none}}
 .card{animation:slideIn .4s both}
 </style>
 <div class="card">slide</div>"#;
@@ -41,7 +41,7 @@ fn keyframes_survive_roundtrip_with_hook_and_trs() {
     assert_eq!(kf.stops[0].selector, KeyframeStopSelector::From);
     assert_eq!(kf.stops[1].selector, KeyframeStopSelector::To);
 
-    // ② @loom-hook 锚点：注释写在 from 块后、to 前 → 挂在前一个 stop（from）上。
+    // ② @ikat-hook 锚点：注释写在 from 块后、to 前 → 挂在前一个 stop（from）上。
     assert_eq!(
         kf.stops[0].hook.as_deref(),
         Some("start"),
@@ -56,8 +56,8 @@ fn keyframes_survive_roundtrip_with_hook_and_trs() {
             opacity: Some(0.0),
             transform: Some(TransformAnim {
                 translate: Some([
-                    loomgui_core::transform::LenPct::ZERO,
-                    loomgui_core::transform::LenPct { px: 20.0, pct: 0.0 },
+                    ikat_core::transform::LenPct::ZERO,
+                    ikat_core::transform::LenPct { px: 20.0, pct: 0.0 },
                 ]),
                 scale: None,
                 rotate: None,
@@ -107,12 +107,12 @@ fn percent_translate_and_per_stop_timing_survive_roundtrip() {
     let bytes = pack_components(&comps).unwrap().bytes;
     let pkg = read_package(&bytes).unwrap();
     let kf = &pkg.components["pc"].keyframes[0];
-    let pct = |v: f32| loomgui_core::transform::LenPct { px: 0.0, pct: v };
+    let pct = |v: f32| ikat_core::transform::LenPct { px: 0.0, pct: v };
     assert_eq!(
         kf.stops[0].props.transform.as_ref().unwrap().translate,
         Some([
             pct(-50.0),
-            loomgui_core::transform::LenPct { px: 0.0, pct: 0.0 }
+            ikat_core::transform::LenPct { px: 0.0, pct: 0.0 }
         ]),
         "from translateX(-50%) 进 pkg（不再静默丢）"
     );
@@ -120,12 +120,12 @@ fn percent_translate_and_per_stop_timing_survive_roundtrip() {
         kf.stops[1].props.transform.as_ref().unwrap().translate,
         Some([
             pct(50.0),
-            loomgui_core::transform::LenPct { px: 0.0, pct: 0.0 }
+            ikat_core::transform::LenPct { px: 0.0, pct: 0.0 }
         ])
     );
     assert_eq!(
         kf.stops[0].timing,
-        Some(loomgui_core::tween::Ease::BackOut),
+        Some(ikat_core::tween::Ease::BackOut),
         "per-stop animation-timing-function: ease-out-back → BackOut"
     );
     assert_eq!(kf.stops[1].timing, None, "to stop 未声明 timing");

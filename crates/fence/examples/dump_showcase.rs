@@ -1,7 +1,7 @@
 //! Dump fence parse result for a showcase HTML: diagnostics + whether the
 //! resolver actually applies <style>-declared display (proves whether fence
 //! consumes <style> blocks or only inline style="...").
-use loomgui_fence::{parse_template, IrNodeKind};
+use ikat_fence::{parse_template, IrNodeKind};
 
 fn main() {
     let path = std::env::args()

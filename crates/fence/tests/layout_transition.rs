@@ -3,8 +3,8 @@
 //! - transition 元素级端点扫描（静态可见端点同域显式；伪类变体进池）
 //! - transition 白名单扩展（width/height/flex-grow/box-shadow 不再警告）
 
-use loomgui_fence::diagnostic::Severity;
-use loomgui_fence::parse_template;
+use ikat_fence::diagnostic::Severity;
+use ikat_fence::parse_template;
 
 fn errors(html: &str) -> Vec<String> {
     let parsed = parse_template(html, "test.html");

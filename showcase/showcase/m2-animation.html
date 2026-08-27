@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="utf-8">
-  <title>LoomGUI 靶子冻结 Showcase · M2 动画验收</title>
+  <title>Ikat 靶子冻结 Showcase · M2 动画验收</title>
   <style>
   .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
   .body {display:flex;flex-direction:column; flex-grow:1; padding:32px 56px; gap:22px; overflow-y:auto; }
@@ -87,7 +87,7 @@
   @keyframes m2-play-fade { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
   @keyframes m2-hookanim {
     from { opacity:0; }
-    50% { opacity:.5; } /* @loom-hook half */
+    50% { opacity:.5; } /* @ikat-hook half */
     to { opacity:1; }
   }
   .b-target { width:120px; height:48px; border-radius:8px; background-color:#2a5a75; color:#e0e6ec; font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; }
@@ -195,7 +195,7 @@
 
       <div class="section">
         <div class="section-title">11 · node.Play + OnKey / OnHook（driver 占位）</div>
-        <div class="section-desc">@keyframes m2-play-fade（程序化 Play 目标）+ m2-hookanim（50% stop 带 /* @loom-hook half */ 锚点）。Play/OnKey(.5)/OnHook("half") 由 driver C# 驱动，本页只到 HTML 结构。</div>
+        <div class="section-desc">@keyframes m2-play-fade（程序化 Play 目标）+ m2-hookanim（50% stop 带 /* @ikat-hook half */ 锚点）。Play/OnKey(.5)/OnHook("half") 由 driver C# 驱动，本页只到 HTML 结构。</div>
         <div class="stage">
           <div class="stage-col"><span class="label">Play("m2-play-fade") · 点击盒子触发</span><div id="b11-target" class="b-target">target</div></div>
           <div class="stage-col"><span class="label">OnKey(.5) + OnHook("half") · 点击盒子触发</span><div id="b11-hook" class="b-target">hook</div></div>

@@ -3,8 +3,8 @@
 //!
 //! load_package 不再建 scene（进资源池）。本 example 暂只验 load_package 成功 +
 //! 包内 Image 节点 src（从 packages 字典读，非 scene）。
-use loomgui_core::scene::node::NodeKind;
-use loomgui_core::stage::Stage;
+use ikat_core::scene::node::NodeKind;
+use ikat_core::stage::Stage;
 
 fn main() {
     let font_path = concat!(

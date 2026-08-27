@@ -1,8 +1,8 @@
-# LoomGUI 公共 API 权威契约
+# Ikat 公共 API 权威契约
 
-> **单一真相源**：`unity/package/Runtime/Public/LoomGUI.*.cs`（冻结的 C# 签名，machine-readable）。本文档为人类可读契约，以签名文件为准。
+> **单一真相源**：`unity/package/Runtime/Public/Ikat.*.cs`（冻结的 C# 签名，machine-readable）。本文档为人类可读契约，以签名文件为准。
 >
-> **防漂移门**：`tests/dotnet/LoomGUI.PublicApi` 编译校验——改公共签名后必编过。
+> **防漂移门**：`tests/dotnet/Ikat.PublicApi` 编译校验——改公共签名后必编过。
 >
 > **定位**：面向游戏业务程序员的终态公共 API。自上而下设计，公共契约优先，core/FFI/后端为它服务。摸黑+三束的实现完成后，用本契约作验收靶子。实现机制（真身 Rust + C# 投影）见 [projection-layer.md](projection-layer.md)。
 
@@ -141,16 +141,16 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                   // 兄弟层叠序（CSS z-index）：绘制/命中层，不改 flex 排列
-    public LoomColor BackgroundColor/TextColor { get; set; }   // TextColor = 文字色（CSS color 通道；旧名 LoomColor 已 Obsolete）
+    public IkatColor BackgroundColor/TextColor { get; set; }   // TextColor = 文字色（CSS color 通道；旧名 IkatColor 已 Obsolete）
     public float Opacity { get; set; }
-    public void SetVar(string name, Length/LoomColor/float/string value);
+    public void SetVar(string name, Length/IkatColor/float/string value);
     public void RemoveVar(string name);
 }
 ```
 
 **不变量（inline override 层语义）**：
 - Style 是**最高优先级的 inline override 层**，不是 cascade 的读取窗口。
-- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `LoomColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走只读 computed style 查询接口（时效：rematch 后有效、本帧 tick 后反映最新 cascade）。
+- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `IkatColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走只读 computed style 查询接口（时效：rematch 后有效、本帧 tick 后反映最新 cascade）。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
 - `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递。不提供 `GetVar`（var 不当状态存储读回）。
 - 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。）
@@ -159,10 +159,10 @@ public sealed class NodeStyle {
 
 ```csharp
 public sealed class NodeTransform {
-    public LoomVector2 Position { get; set; }   // 视觉偏移
-    public LoomVector2 Scale { get; set; }
+    public IkatVector2 Position { get; set; }   // 视觉偏移
+    public IkatVector2 Scale { get; set; }
     public float Rotation { get; set; }      // 弧度
-    public LoomVector2 Origin { get; set; }
+    public IkatVector2 Origin { get; set; }
 }
 ```
 
@@ -172,12 +172,12 @@ public sealed class NodeTransform {
 
 ```csharp
 public readonly struct NodeGeometry {
-    public LoomRect LayoutRect { get; }          // 父坐标系
-    public LoomRect WorldRect { get; }           // 全局坐标系
-    public LoomVector2 LocalToGlobal(LoomVector2 point);
-    public LoomVector2 GlobalToLocal(LoomVector2 point);
-    public LoomRect LocalToGlobal(LoomRect rect);
-    public LoomRect GlobalToLocal(LoomRect rect);
+    public IkatRect LayoutRect { get; }          // 父坐标系
+    public IkatRect WorldRect { get; }           // 全局坐标系
+    public IkatVector2 LocalToGlobal(IkatVector2 point);
+    public IkatVector2 GlobalToLocal(IkatVector2 point);
+    public IkatRect LocalToGlobal(IkatRect rect);
+    public IkatRect GlobalToLocal(IkatRect rect);
 }
 ```
 
@@ -200,9 +200,9 @@ public class Container : Node {
     public void SetChildIndex(Node child, int index);
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
-    public LoomVector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
+    public IkatVector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
     public void RestartAnimations();     // 重启子树内声明式（class 触发）keyframes：player 原地重建，节点状态全保留；node.Play 程序化 player 不受影响
-    public void ScrollTo(LoomVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
+    public void ScrollTo(IkatVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);          // 取内联 template
 }
@@ -444,14 +444,14 @@ public sealed class AnimationHandle {
 | `AnimationEndEvent` | `OnEnd` | 完成（最后一次 iteration 结束帧；class 触发也走此）|
 | `AnimationIterationEvent` | — | 非最后一次的 iteration 边界跨越（最后一次只发 End，对齐浏览器 `animationiteration`）|
 | `AnimationKeyEvent` | `OnKey(float pct)` | 时间轴跨越注册的百分比键 |
-| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@loom-hook` 命名键（见 §9.4）|
+| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@ikat-hook` 命名键（见 §9.4）|
 | `TransitionEndEvent` | — | transition 完成后发（type=TweenComplete 分流）|
 
 class 触发的动画无句柄，只走 EventBus 全局 `On<T>` 广播；`Play` 触发的动画句柄回调与全局广播并存（同一事件两路由都触发）。
 
-### 9.4 @loom-hook
+### 9.4 @ikat-hook
 
-`/* @loom-hook name */` 注释标记命名锚点。百分比 + 语义名双锚并存。
+`/* @ikat-hook name */` 注释标记命名锚点。百分比 + 语义名双锚并存。
 
 ### 9.5 调度
 
@@ -516,9 +516,9 @@ public sealed class UIContext {
     public TextMetrics MeasureText(string text, string fontFamily, float sizePx, float maxWidth = 0f);
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
-    public void CallAfterLayout(Action callback);  // tick 后泵（LoomHost.Step 在 stage tick 之后调）
+    public void CallAfterLayout(Action callback);  // tick 后泵（IkatHost.Step 在 stage tick 之后调）
     public bool IsPointerOnUI { get; }
-    public Node Pick(LoomVector2 globalPoint);
+    public Node Pick(IkatVector2 globalPoint);
 }
 
 public sealed class UIPackage {
@@ -561,13 +561,13 @@ fallback 到默认字体会给出误导性宽度）。
 
 ### 11.3 边界与入口（引擎集成层职责）
 
-公共 API 是引擎中立的语义层。以下**不进公共 API**，由引擎集成层（如 Unity 的 `LoomStageDriver`）实现：
+公共 API 是引擎中立的语义层。以下**不进公共 API**，由引擎集成层（如 Unity 的 `IkatStageDriver`）实现：
 
 - **UIContext 是「获取而非创建」**：无公共构造，由集成层创建、持有、驱动。业务程序员从集成层暴露的入口获取一个已跑起来的 UIContext。
 - **tick / 输入采集 / 渲染产出**：集成层每帧驱动 tick、采集引擎输入喂入、把渲染树交后端镜像。
 - **纹理注册**：`Image.Src` 是字符串 key（包内 or 运行时注册）。动态纹理的注册（`byte[]→Texture` 解码 + 注册 key）是引擎后端契约（Unity 侧 `SpriteResolver.Register(key, Texture2D)` 一类），用户自己解码塞入。查不到 key = 静默 error 态 + 警告一次，不抛。**每个引擎后端必须提供 runtime key 注册能力。**
 - **原生渲染挂载**：3D 模型/粒子等非 UI 渲染挂载是引擎后端契约（Unity 侧 NativeHost），不进公共 API；集成层自行桥接。
-- **分辨率适配**：策略数学在核心（`loomgui_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `loom.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `LoomHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
+- **分辨率适配**：策略数学在核心（`ikat_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `ikat.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `IkatHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
 
 ### 11.4 变长内容范式（替代预置满额）
 
@@ -583,7 +583,7 @@ fallback 到默认字体会给出误导性宽度）。
 
 **id 语义**：运行时创建的子树里，模板内静态 id 每实例一份；跨实例重名由作用域根隔离（`IsScopeRoot`）——从实例根（`Instantiate` 返回值）向下 `Get`，不从全局根跨作用域查。
 
-Unity 集成层的接入手册（LoomStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 loom CLI 的 workspace 脚手架分发：`loomgui-runtime` skill（scaffold 落各工作区会话根的 `.agents/skills/` / `.claude/skills/`；模板源在打包器 crate 的 `templates/runtime/SKILL.md`）。
+Unity 集成层的接入手册（IkatStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 ikat CLI 的 workspace 脚手架分发：`ikat-runtime` skill（scaffold 落各工作区会话根的 `.agents/skills/` / `.claude/skills/`；模板源在打包器 crate 的 `templates/runtime/SKILL.md`）。
 
 模板根、作用域根用 `IsScopeRoot` 运行时标记（非类型），`Get<T>` 边界据此判定。
 
@@ -604,7 +604,7 @@ inventory.Style.Top = Length.Px(200);
 inventory.Style.ZIndex = 1;
 
 Container mask = ui.Create<Container>();
-mask.Style.BackgroundColor = new LoomColor(0, 0, 0, 0.5f);
+mask.Style.BackgroundColor = new IkatColor(0, 0, 0, 0.5f);
 mask.Touchable = true;
 mask.Style.ZIndex = 0;
 layer.AddChild(mask);

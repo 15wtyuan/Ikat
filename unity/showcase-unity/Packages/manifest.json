@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.loomgui.unity": "file:../../package",
+    "com.ikat.unity": "file:../../package",
     "io.github.hatayama.uloopmcp": "https://github.com/hatayama/unity-cli-loop.git?path=/Packages/src",
     "com.unity.2d.sprite": "1.0.0",
     "com.unity.ai.navigation": "2.0.13",
@@ -50,6 +50,6 @@
     "com.unity.modules.xr": "1.0.0"
   },
   "testables": [
-    "com.loomgui.unity"
+    "com.ikat.unity"
   ]
 }

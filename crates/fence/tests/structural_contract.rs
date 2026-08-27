@@ -5,9 +5,9 @@
 //! structure is now validated by `control_structure_check` via `role`. Only the
 //! ARIA IdRef relation check (aria-controls / aria-labelledby) remains here.
 
-use loomgui_fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, Severity};
-use loomgui_fence::structural::run_structural;
-use loomgui_fence::tree_builder::parse_html_to_ir;
+use ikat_fence::diagnostic::{Diagnostic, DiagnosticCode, LineMap, Severity};
+use ikat_fence::structural::run_structural;
+use ikat_fence::tree_builder::parse_html_to_ir;
 
 fn structural(html: &str) -> Vec<Diagnostic> {
     let (tree, _) = parse_html_to_ir(html);

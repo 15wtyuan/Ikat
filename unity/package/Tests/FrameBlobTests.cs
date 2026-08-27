@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 
-namespace LoomGUI.Tests
+namespace Ikat.Tests
 {
     /// FrameBlob Visible/Parked bit accessor 单元测试（v12 blob，22 列 SOA）。
     /// 焦点：active 条目 bit0=1 bit1=0；parked keepalive 条目 bit0=0 bit1=1。

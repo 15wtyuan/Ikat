@@ -32,7 +32,7 @@ pub mod code {
     /// 彩色边框与 background-image/gradient 共存（互斥渲染，边框不画）。
     pub const BORDER_BG_EXCLUSIVE: &str = "BorderBgExclusive";
     /// 页面有 `data-fill`（运行时填充标记）但缺按页预览模拟脚本——人类预览
-    /// 将看到空列表。见 loomgui-preview skill。
+    /// 将看到空列表。见 ikat-preview skill。
     pub const PREVIEW_DATA_FILL_WITHOUT_SIM: &str = "PreviewDataFillWithoutSim";
 }
 
@@ -43,11 +43,11 @@ pub enum Severity {
     Warning,
 }
 
-impl From<loomgui_fence::diagnostic::Severity> for Severity {
-    fn from(s: loomgui_fence::diagnostic::Severity) -> Self {
+impl From<ikat_fence::diagnostic::Severity> for Severity {
+    fn from(s: ikat_fence::diagnostic::Severity) -> Self {
         match s {
-            loomgui_fence::diagnostic::Severity::Error => Severity::Error,
-            loomgui_fence::diagnostic::Severity::Warning => Severity::Warning,
+            ikat_fence::diagnostic::Severity::Error => Severity::Error,
+            ikat_fence::diagnostic::Severity::Warning => Severity::Warning,
         }
     }
 }
@@ -82,7 +82,7 @@ impl PackDiagnostic {
     /// file 即 html_rel。占位标签（`"<style>"`/`"<inline>"`，字符串单测直接调
     /// `parse_style_block` 时出现）回落 `html_rel` 参数。
     pub fn from_fence(
-        d: &loomgui_fence::diagnostic::Diagnostic,
+        d: &ikat_fence::diagnostic::Diagnostic,
         component: &str,
         html_rel: &str,
     ) -> Self {
@@ -101,7 +101,7 @@ impl PackDiagnostic {
             help: d
                 .notes
                 .iter()
-                .find(|n| n.kind == loomgui_fence::diagnostic::NoteKind::Help)
+                .find(|n| n.kind == ikat_fence::diagnostic::NoteKind::Help)
                 .map(|n| n.text.clone()),
         }
     }

@@ -1,15 +1,15 @@
 ---
-name: loomgui-preview
+name: ikat-preview
 description: |
-  Write browser preview simulation scripts for LoomGUI pages and run the
-  human preview loop. Use when a LoomGUI page is finished and a human needs
-  to see it (`loom preview` workbench), when `loom check` reports
+  Write browser preview simulation scripts for Ikat pages and run the
+  human preview loop. Use when a Ikat page is finished and a human needs
+  to see it (`ikat preview` workbench), when `ikat check` reports
   PreviewDataFillWithoutSim, or when a preview script (preview/main.js,
   preview/pages/<page>.js) needs writing or fixing. The framework ships NO
   simulator — every preview script is workspace-owned AI code.
 ---
 
-# LoomGUI Preview Simulation
+# Ikat Preview Simulation
 
 Pages render statically in the browser, but runtime behavior (component
 expansion, control state, data-driven lists, navigation) does not exist
@@ -19,7 +19,7 @@ guarantee; your scripts only restore **behavior**, never re-layout.
 
 ## The mechanism (what the server does for you)
 
-`loom preview <workspace>` (long-running; prints one JSON with `url`) serves
+`ikat preview <workspace>` (long-running; prints one JSON with `url`) serves
 a workbench: package/page tree on the left, device-frame preview on the
 right (scaled by the workspace `match_mode` — the page itself never
 reflows). The server auto-injects at most two ES module entries per page,
@@ -38,7 +38,7 @@ port, so an open tab survives (human just refreshes).
 ## When you MUST write a script
 
 - Page has `data-fill` lists (runtime-populated ListView) → the human
-  preview shows empty lists otherwise. `loom check` warns
+  preview shows empty lists otherwise. `ikat check` warns
   `PreviewDataFillWithoutSim` when the per-page script is missing — that
   warning is your cue.
 - Page uses custom elements (`<item-card>` …) → needs the shared
@@ -52,17 +52,17 @@ A workspace with none of the above needs no scripts at all.
 
 ## Workflow (the human preview gate)
 
-1. Write/fix the page HTML/CSS until `loom check` exits 0.
+1. Write/fix the page HTML/CSS until `ikat check` exits 0.
 2. Write the simulation scripts (recipes in `references/recipes.md`).
-3. Start or reuse the server: `loom preview` from the session root — if
+3. Start or reuse the server: `ikat preview` from the session root — if
    one is already running it prints the same URL (`reused: true`); find it
-   in `.loom/preview.json` if stdout was swallowed by backgrounding.
+   in `.ikat/preview.json` if stdout was swallowed by backgrounding.
 4. Give the human the URL. They refresh (F5) after each of your edits —
    the server reads sources live, no restart needed.
 5. Iterate on feedback; only after the human approves the preview does the
-   page proceed to `loom build` / runtime wiring. Human preview is the
+   page proceed to `ikat build` / runtime wiring. Human preview is the
    gate before handing off to Unity.
-6. Stop the server with `loom preview --stop` when the session is done
+6. Stop the server with `ikat preview --stop` when the session is done
    (it also self-exits after 4h idle).
 
 ## Boundaries

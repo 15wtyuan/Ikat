@@ -1,16 +1,16 @@
 //! settings showcase 诊断：定位「spinbutton 无法渲染」「switch 文字黑色」两个问题。
 //!
-//! 用法：cargo run -p loomgui_core --example dump_settings
+//! 用法：cargo run -p ikat_core --example dump_settings
 //!
 //! 输出三块：
 //! 1. 全节点表（nid/kind/id/class/rect/color/meshes/verts）——看 spinbutton 是否有尺寸、是否产生 mesh
 //! 2. 控件 ControlState 详情——看 spinbutton 是否有 NumberField 状态、value 是否 "32"
 //! 3. switch 旁 span 的 color——验证是否继承到默认黑色 [0,0,0,1]
 
-use loomgui_core::render::node::NodePayload;
-use loomgui_core::scene::dynamic::append_child;
-use loomgui_core::scene::node::{ControlState, NodeKind};
-use loomgui_core::stage::Stage;
+use ikat_core::render::node::NodePayload;
+use ikat_core::scene::dynamic::append_child;
+use ikat_core::scene::node::{ControlState, NodeKind};
+use ikat_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");

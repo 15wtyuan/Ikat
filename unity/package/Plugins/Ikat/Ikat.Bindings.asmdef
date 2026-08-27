@@ -1,0 +1,9 @@
+{
+    "name": "Ikat.Bindings",
+    "rootNamespace": "Ikat.Bindings",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "autoReferenced": true
+}

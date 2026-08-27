@@ -6,18 +6,18 @@
 //! 自己持有的通道（tween/base 接管）且 player 保留 Completed 态（防 sync 重启）；
 //! Stopped 清通道 + 回收；Paused 位置保持；全 None TRS 不 override。
 
-use loomgui_core::scene::animation::{update_all, KeyframePlayer};
-use loomgui_core::scene::{
+use ikat_core::scene::animation::{update_all, KeyframePlayer};
+use ikat_core::scene::{
     AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, Node, NodeId, NodeKind,
     PlayerPlayState, Scene, TransformAnim,
 };
-use loomgui_core::stage::Stage;
-use loomgui_core::style::resolved::{
+use ikat_core::stage::Stage;
+use ikat_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
-use loomgui_core::transform::LenPct;
-use loomgui_core::transform::{from_scale, from_translate, Affine2Ext};
-use loomgui_core::tween::{Ease, TweenProp, TweenSpec};
+use ikat_core::transform::LenPct;
+use ikat_core::transform::{from_scale, from_translate, Affine2Ext};
+use ikat_core::tween::{Ease, TweenProp, TweenSpec};
 
 fn assert_close(a: f32, b: f32) {
     assert!((a - b).abs() < 1e-4, "expected {b} ± 1e-4, got {a}");

@@ -24,7 +24,7 @@ pub enum CheckError {
         path: String,
         source: String,
     },
-    /// loomgui_pkg crate 版本与 unity 包不同轨（loom CLI 的 `cli == unity` 契约）。
+    /// ikat_pkg crate 版本与 unity 包不同轨（ikat CLI 的 `cli == unity` 契约）。
     PkgCrateVersionMismatch {
         crate_version: String,
         package_version: String,
@@ -36,7 +36,7 @@ impl std::fmt::Display for CheckError {
         match self {
             Self::MissingField(n) => write!(f, "package.json missing required field: {n}"),
             Self::InvalidSemver(v) => write!(f, "version is not valid SemVer: {v}"),
-            Self::DllNotFound => write!(f, "loomgui_ffi_c.dll not found in package"),
+            Self::DllNotFound => write!(f, "ikat_ffi_c.dll not found in package"),
             Self::AsmdefMissing(n) => write!(f, "asmdef missing: {n}"),
             Self::ChangelogMissingVersion(v) => {
                 write!(f, "CHANGELOG.md has no section for version {v}")
@@ -50,9 +50,9 @@ impl std::fmt::Display for CheckError {
                 package_version,
             } => write!(
                 f,
-                "loomgui_pkg crate version {crate_version} != unity package version \
-                 {package_version}; bump crates/packer/pkg/Cargo.toml to align (loom CLI \
-                 reports both from the crate version — a mismatch ships a lying `loom version`)"
+                "ikat_pkg crate version {crate_version} != unity package version \
+                 {package_version}; bump crates/packer/pkg/Cargo.toml to align (ikat CLI \
+                 reports both from the crate version — a mismatch ships a lying `ikat version`)"
             ),
         }
     }
@@ -113,9 +113,9 @@ pub fn dll_status(committed: &Path) -> DllStatus {
 /// 校验三个 asmdef 齐全。任一缺失返回 `AsmdefMissing`。
 pub fn check_asmdef_present(pkg_dir: &Path) -> Result<(), CheckError> {
     let expected = [
-        "LoomGUI.Runtime.asmdef",
-        "Editor/LoomGUI.Editor.asmdef",
-        "Plugins/LoomGUI/LoomGUI.Bindings.asmdef",
+        "Ikat.Runtime.asmdef",
+        "Editor/Ikat.Editor.asmdef",
+        "Plugins/Ikat/Ikat.Bindings.asmdef",
     ];
     for rel in expected {
         let p = pkg_dir.join(rel);
@@ -151,7 +151,7 @@ pub fn parse_crate_version(cargo_toml: &str) -> Option<String> {
     None
 }
 
-/// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef + loom crate 版本同轨。
+/// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef + ikat crate 版本同轨。
 /// 任意一项失败返回 Err，调用方据此退出非 0。
 pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
     let pkg = paths::repo_root().join("unity/package/package.json");
@@ -165,7 +165,7 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
 
     // dll：入库必须存在。
     let pkg_dir = paths::repo_root().join("unity/package");
-    let committed_dll = pkg_dir.join("Plugins/LoomGUI/loomgui_ffi_c.dll");
+    let committed_dll = pkg_dir.join("Plugins/Ikat/ikat_ffi_c.dll");
     match dll_status(&committed_dll) {
         DllStatus::NotFound => return Err(CheckError::DllNotFound.into()),
         DllStatus::Ok => {}
@@ -173,8 +173,8 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
 
     check_asmdef_present(&pkg_dir)?;
 
-    // loom CLI 版本同轨：crate 版本 == unity 包版本。链条 tag → package.json →
-    // pkg crate → `loom version`，缺环即消费者装错版本号。
+    // ikat CLI 版本同轨：crate 版本 == unity 包版本。链条 tag → package.json →
+    // pkg crate → `ikat version`，缺环即消费者装错版本号。
     let cargo_toml = read_file(&paths::repo_root().join("crates/packer/pkg/Cargo.toml"))?;
     let crate_version = parse_crate_version(&cargo_toml).ok_or_else(|| CheckError::ReadFailed {
         path: "crates/packer/pkg/Cargo.toml".into(),
@@ -213,12 +213,12 @@ mod tests {
         // version 行不得干扰。
         let toml = r#"
 [package]
-name = "loomgui_pkg"
+name = "ikat_pkg"
 version = "0.0.5"
 edition = "2021"
 
 [[bin]]
-name = "loom"
+name = "ikat"
 path = "src/main.rs"
 
 [dependencies]
@@ -293,22 +293,22 @@ serde = { version = "1", features = ["derive"] }
     #[test]
     fn asmdef_present_ok() {
         let dir = tmp_pkg_dir();
-        write_rel(&dir, "LoomGUI.Runtime.asmdef", b"{}");
-        write_rel(&dir, "Editor/LoomGUI.Editor.asmdef", b"{}");
-        write_rel(&dir, "Plugins/LoomGUI/LoomGUI.Bindings.asmdef", b"{}");
+        write_rel(&dir, "Ikat.Runtime.asmdef", b"{}");
+        write_rel(&dir, "Editor/Ikat.Editor.asmdef", b"{}");
+        write_rel(&dir, "Plugins/Ikat/Ikat.Bindings.asmdef", b"{}");
         assert!(check_asmdef_present(&dir).is_ok());
     }
 
     #[test]
     fn asmdef_present_missing() {
         let dir = tmp_pkg_dir();
-        write_rel(&dir, "LoomGUI.Runtime.asmdef", b"{}");
-        write_rel(&dir, "Editor/LoomGUI.Editor.asmdef", b"{}");
-        // 故意不写 Plugins/LoomGUI/LoomGUI.Bindings.asmdef
+        write_rel(&dir, "Ikat.Runtime.asmdef", b"{}");
+        write_rel(&dir, "Editor/Ikat.Editor.asmdef", b"{}");
+        // 故意不写 Plugins/Ikat/Ikat.Bindings.asmdef
         assert!(matches!(
             check_asmdef_present(&dir),
             Err(CheckError::AsmdefMissing(n))
-                if n == "Plugins/LoomGUI/LoomGUI.Bindings.asmdef"
+                if n == "Plugins/Ikat/Ikat.Bindings.asmdef"
         ));
     }
 

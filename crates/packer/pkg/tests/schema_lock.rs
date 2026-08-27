@@ -10,7 +10,7 @@
 //! FNV-1a 64 手写实现（标准库 hasher 无跨版本稳定性承诺，自实现保证任意工具链下
 //! 同字节同哈希）。fixture 见 `fixtures/schema-lock.html`。
 
-use loomgui_pkg::build::{pack_components, Component, PackResult};
+use ikat_pkg::build::{pack_components, Component, PackResult};
 
 const HTML: &str = include_str!("fixtures/schema-lock.html");
 

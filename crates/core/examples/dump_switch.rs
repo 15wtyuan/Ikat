@@ -1,18 +1,18 @@
 //! 诊断：精确复现 Unity 切页序列，验证 core 是否在「多次切页」后偶现非确定性布局。
 //!
-//! 用法：cargo run -p loomgui_core --example dump_switch -- <final> [seq...] [--runs N]
+//! 用法：cargo run -p ikat_core --example dump_switch -- <final> [seq...] [--runs N]
 //!   序列为页面名列表，按顺序 instantiate→tick→remove，最后一个保留并 dump。
 //!   默认 runs=8（每次全新 Stage）。
 //!
-//! 例：cargo run -p loomgui_core --example dump_switch -- settings home settings home settings
-//!     cargo run -p loomgui_core --example dump_switch -- inventory home mail home inventory --runs 12
+//! 例：cargo run -p ikat_core --example dump_switch -- settings home settings home settings
+//!     cargo run -p ikat_core --example dump_switch -- inventory home mail home inventory --runs 12
 //!
 //! 每页之间 tick 3 帧（模拟 Unity 里页面停留）。对比每次 run 最后一页的关键容器 rect +
 //! 渲染节点数 + world_matrix 偏差，若跨 run 不一致 → core 切页偶现（根因在 core）。
 
-use loomgui_core::render::node::NodePayload;
-use loomgui_core::scene::dynamic::append_child;
-use loomgui_core::stage::Stage;
+use ikat_core::render::node::NodePayload;
+use ikat_core::scene::dynamic::append_child;
+use ikat_core::stage::Stage;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

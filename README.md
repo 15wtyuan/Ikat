@@ -1,10 +1,10 @@
-# LoomGUI
+# Ikat
 
 > 跨引擎游戏 UI 框架。标准 HTML/CSS 子集作设计期 DSL，类型化对象树作运行时 API，Rust 核心自绘渲染。
 >
 > **核心目的**：AI 驱动的界面拼装——HTML 作 DSL，让 AI 既能编辑（文本）又能预测渲染结果（AI 对 HTML/CSS 有强先验）。
 
-[![Rust CI](https://github.com/15wtyuan/LoomGUI/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/15wtyuan/LoomGUI/actions/workflows/rust-ci.yml)
+[![Rust CI](https://github.com/15wtyuan/Ikat/actions/workflows/rust-ci.yml/badge.svg)](https://github.com/15wtyuan/Ikat/actions/workflows/rust-ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## 为什么
@@ -21,24 +21,24 @@
 cargo test
 
 # 打包器 CLI：校验一个 HTML+CSS 工作区
-cargo run -p loomgui_pkg -- check <workspace-dir>
+cargo run -p ikat_pkg -- check <workspace-dir>
 ```
 
 Unity 集成见下节。完整工作流（GUI 打包器、FFI .dll 闭环、发版）文档待补——随 v1.0 公共文档波次补齐。
 
 ## 在 Unity 项目中使用
 
-LoomGUI 以 UPM 包发布，通过 git URL 安装（Windows 打包器工具链）。
+Ikat 以 UPM 包发布，通过 git URL 安装（Windows 打包器工具链）。
 
 **推荐**：把[本手册链接](docs/ai-setup.md)交给你的 AI 编码代理——它能全自动完成安装与工作区初始化（改 manifest → 下载 CLI → init → 示例验证 → 等你开一次 Unity），只需回答它两个问题（UI 目录与构建产物目录）。
 
-手动安装：在目标工程的 `Packages/manifest.json` 加一行（tag 从 [Releases](https://github.com/15wtyuan/LoomGUI/releases) 取最新，替换下例的 `v0.0.12`）：
+手动安装：在目标工程的 `Packages/manifest.json` 加一行（tag 从 [Releases](https://github.com/15wtyuan/Ikat/releases) 取最新，替换下例的 `v0.0.12`）：
 
 ```json
-"com.loomgui.unity": "https://github.com/15wtyuan/LoomGUI.git?path=/unity/package#v0.0.12"
+"com.ikat.unity": "https://github.com/15wtyuan/Ikat.git?path=/unity/package#v0.0.12"
 ```
 
-升级：把 tag 改成目标版本，或在 Unity 的 Package Manager 窗口选新版本；工作区侧用新 exe 跑一次 `loom scaffold` 刷新（详见手册「日常版本升级」）。
+升级：把 tag 改成目标版本，或在 Unity 的 Package Manager 窗口选新版本；工作区侧用新 exe 跑一次 `ikat scaffold` 刷新（详见手册「日常版本升级」）。
 
 版本要求：最低支持 Unity 2021.3 LTS（URP 12.1+）。
 
@@ -55,7 +55,7 @@ LoomGUI 以 UPM 包发布，通过 git URL 安装（Windows 打包器工具链�
 | 目录 | 职责 |
 |---|---|
 | `crates/core/` | Rust 核心（引擎无关） |
-| `crates/packer/pkg/` | 打包器 CLI（loom） |
+| `crates/packer/pkg/` | 打包器 CLI（ikat） |
 | `crates/packer/gui/` | 打包器 GUI（Tauri） |
 | `crates/ffi/` | C ABI 导出（csbindgen） |
 | `crates/fence/` | 围栏验证 |

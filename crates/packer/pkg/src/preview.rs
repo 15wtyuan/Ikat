@@ -1,4 +1,4 @@
-//! `loom preview` — 人类预览工作台：本地只读 HTTP server，serve 工作区源文件 +
+//! `ikat preview` — 人类预览工作台：本地只读 HTTP server，serve 工作区源文件 +
 //! 内嵌外壳，把「AI 写完页面 → 人类浏览器过目 → 进 Unity」补成闭环。
 //!
 //! 设计要点（grilling 定案，2026-08）：
@@ -9,11 +9,11 @@
 //!   HTML 源零引用、不进打包；模拟脚本全部 AI 手写，框架不 ship 模拟器。
 //! - 生命周期（吸收 superpowers 踩坑）：per-workspace 稳定端口（路径哈希
 //!   41000–41999，浏览器 tab 跨重启不断链）；server-info 落盘
-//!   `<会话根>/.loom/preview.json` 兜底「AI 后台起进程 stdout 被吞」；空闲超时
+//!   `<会话根>/.ikat/preview.json` 兜底「AI 后台起进程 stdout 被吞」；空闲超时
 //!   自杀（默认 4h——30 分钟会打断人类评审）；`--stop` 先验 token 归属再杀、
 //!   确认死亡才算成功；属主进程死亡追踪尽力而为，空闲超时兜底一切。
 //! - 安全：只绑 127.0.0.1；Host 头白名单（防 DNS rebinding）；路径沙箱
-//!   （canonicalize 后必须仍在工作区内，拒绝点开头的路径段——`.loom`/`.git`
+//!   （canonicalize 后必须仍在工作区内，拒绝点开头的路径段——`.ikat`/`.git`
 //!   不可达）。
 
 use crate::config::Located;
@@ -31,7 +31,7 @@ const PORT_BASE: u16 = 41_000;
 const PORT_SPAN: u16 = 1_000;
 /// 空闲超时缺省：4 小时（superpowers 实证 30 分钟会打断人类评审会话）。
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 4 * 60 * 60;
-/// server-info 落盘文件（会话根 `.loom/` 下，路径沙箱使其不经 HTTP 可达）。
+/// server-info 落盘文件（会话根 `.ikat/` 下，路径沙箱使其不经 HTTP 可达）。
 pub const INFO_FILE: &str = "preview.json";
 
 // ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ pub struct PreviewOpts {
     pub idle_timeout: Option<u64>,
 }
 
-/// `loom preview`（长驻）：定位工作区 → 复用/起服务 → stdout 吐单 JSON → 阻塞至
+/// `ikat preview`（长驻）：定位工作区 → 复用/起服务 → stdout 吐单 JSON → 阻塞至
 /// 超时/被停/属主死亡。返回值只在启动失败时出现（成功不返回）。
 pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     let ui = &located.ui;
@@ -85,7 +85,7 @@ pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     let accept_shared = Arc::clone(&shared);
     print_started(&info, false);
     eprintln!(
-        "preview: serving {} (pid {}, idle timeout {}s); Ctrl+C or `loom preview --stop` to quit",
+        "preview: serving {} (pid {}, idle timeout {}s); Ctrl+C or `ikat preview --stop` to quit",
         info.workspace,
         info.pid,
         idle_timeout.as_secs()
@@ -121,12 +121,12 @@ pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     Ok(0)
 }
 
-/// `loom preview --stop`：读 server-info → ping 验明正身 → 请求关停 → 确认死亡
+/// `ikat preview --stop`：读 server-info → ping 验明正身 → 请求关停 → 确认死亡
 /// （强杀兜底）。归属验证失败绝不杀（防 PID 复用误杀无关进程）。
 pub fn stop(located: &Located) -> Result<i32, String> {
     let Some(info) = read_info(&located.root) else {
         return Err(
-            "no preview server on record for this workspace (missing .loom/preview.json)".into(),
+            "no preview server on record for this workspace (missing .ikat/preview.json)".into(),
         );
     };
     let Some(got) = ping(&info) else {
@@ -197,7 +197,7 @@ pub struct ServerInfo {
 }
 
 fn info_path(root: &Path) -> PathBuf {
-    root.join(".loom").join(INFO_FILE)
+    root.join(".ikat").join(INFO_FILE)
 }
 
 fn read_info(root: &Path) -> Option<ServerInfo> {
@@ -238,7 +238,7 @@ fn fnv1a(s: &str) -> u32 {
 fn bind_listener(ui: &Path, explicit: Option<u16>) -> Result<TcpListener, String> {
     if let Some(p) = explicit {
         return TcpListener::bind(("127.0.0.1", p)).map_err(|e| {
-            format!("bind 127.0.0.1:{p}: {e}（端口被占？`loom preview --port <n>` 换端口）")
+            format!("bind 127.0.0.1:{p}: {e}（端口被占？`ikat preview --port <n>` 换端口）")
         });
     }
     let base = PORT_BASE + (fnv1a(&ui_string(ui)) % u32::from(PORT_SPAN)) as u16;
@@ -523,12 +523,12 @@ fn route(req: &Request, shared: &Shared) -> Response {
             Response::new(200, "OK", "text/css", shell::STYLE_CSS)
         }
         ("GET", "/api/workspace.json") => api_workspace(shared),
-        ("GET", "/_loom/ping") => Response::json(
+        ("GET", "/_ikat/ping") => Response::json(
             200,
             "OK",
             json!({"ok": true, "token": shared.token, "pid": std::process::id()}),
         ),
-        ("POST", "/_loom/shutdown") => match req.header("x-loom-token") {
+        ("POST", "/_ikat/shutdown") => match req.header("x-ikat-token") {
             Some(t) if t == shared.token => {
                 shared.shutdown.store(true, Ordering::SeqCst);
                 Response::json(200, "OK", json!({"ok": true}))
@@ -639,7 +639,7 @@ fn serve_workspace_file(ui: &Path, rel: &str) -> Response {
     Response::new(200, "OK", mime, body)
 }
 
-/// 相对路径规整：URL 解码后逐段校验——拒绝 `..`/反斜杠/点开头段（`.loom`、
+/// 相对路径规整：URL 解码后逐段校验——拒绝 `..`/反斜杠/点开头段（`.ikat`、
 /// `.git` 不可达）。返回以正斜杠重组的工作区相对路径。
 fn normalize_rel(rel: &str) -> Option<String> {
     let mut parts = Vec::new();
@@ -739,7 +739,7 @@ fn http_call(port: u16, method: &str, path: &str, token: Option<&str>) -> Option
     let mut req =
         format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n");
     if let Some(t) = token {
-        req.push_str(&format!("X-Loom-Token: {t}\r\n"));
+        req.push_str(&format!("X-Ikat-Token: {t}\r\n"));
     }
     req.push_str("Content-Length: 0\r\n\r\n");
     stream.write_all(req.as_bytes()).ok()?;
@@ -753,12 +753,12 @@ fn http_call(port: u16, method: &str, path: &str, token: Option<&str>) -> Option
 
 /// ping 通则返回 server 的 JSON body（含 token）。
 fn ping(info: &ServerInfo) -> Option<serde_json::Value> {
-    let body = http_call(info.port, "GET", "/_loom/ping", None)?;
+    let body = http_call(info.port, "GET", "/_ikat/ping", None)?;
     serde_json::from_str(&body).ok()
 }
 
 fn request_shutdown(info: &ServerInfo) {
-    let _ = http_call(info.port, "POST", "/_loom/shutdown", Some(&info.token));
+    let _ = http_call(info.port, "POST", "/_ikat/shutdown", Some(&info.token));
 }
 
 /// 内嵌外壳资产（templates/preview-shell/，手写无构建）。
@@ -793,7 +793,7 @@ mod tests {
         assert_eq!(normalize_rel("a/./b.html").as_deref(), Some("a/b.html"));
         assert_eq!(normalize_rel("../x"), None);
         assert_eq!(normalize_rel("a/../../x"), None);
-        assert_eq!(normalize_rel(".loom/preview.json"), None);
+        assert_eq!(normalize_rel(".ikat/preview.json"), None);
         assert_eq!(normalize_rel("a/.git/config"), None);
         assert_eq!(normalize_rel("a\\b"), None);
         assert_eq!(normalize_rel(""), None);
@@ -820,7 +820,7 @@ mod tests {
 
     #[test]
     fn inject_only_existing_entries() {
-        let tmp = std::env::temp_dir().join(format!("loom_preview_inject_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ikat_preview_inject_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("preview/pages")).unwrap();
         std::fs::write(tmp.join("preview/main.js"), "// shared").unwrap();
@@ -858,7 +858,7 @@ mod tests {
 
         fn write_ws(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
             let tmp =
-                std::env::temp_dir().join(format!("loom_preview_{tag}_{}", std::process::id()));
+                std::env::temp_dir().join(format!("ikat_preview_{tag}_{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&tmp);
             for (rel, content) in files {
                 let path = tmp.join(rel);
@@ -917,7 +917,7 @@ mod tests {
             let ui = write_ws(
                 "serve",
                 &[
-                    ("loom.workspace.json", WS_JSON),
+                    ("ikat.workspace.json", WS_JSON),
                     ("ui/home.html", "<html><head></head><body>hi</body></html>"),
                     (
                         "ui/plain.html",
@@ -957,11 +957,11 @@ mod tests {
             assert_eq!(st5, 404);
 
             // 沙箱：路径逃逸与点开头段一律 403。
-            let (st6, _) = get(port, "/ws/../loom.workspace.json");
+            let (st6, _) = get(port, "/ws/../ikat.workspace.json");
             assert_eq!(st6, 403);
-            let (st7, _) = get(port, "/ws/ui/../../loom.workspace.json");
+            let (st7, _) = get(port, "/ws/ui/../../ikat.workspace.json");
             assert_eq!(st7, 403);
-            let (st8, _) = get(port, "/ws/.loom/preview.json");
+            let (st8, _) = get(port, "/ws/.ikat/preview.json");
             assert_eq!(st8, 403);
 
             // Host 白名单：非本机 Host 拒（防 DNS rebinding）。
@@ -974,7 +974,7 @@ mod tests {
             // 外壳可达。
             let (st10, body10) = get(port, "/");
             assert_eq!(st10, 200);
-            assert!(body10.contains("loom preview"));
+            assert!(body10.contains("ikat preview"));
             let _ = std::fs::remove_dir_all(&ui);
         }
 
@@ -983,7 +983,7 @@ mod tests {
             let ui = write_ws(
                 "api",
                 &[
-                    ("loom.workspace.json", WS_JSON),
+                    ("ikat.workspace.json", WS_JSON),
                     ("ui/home.html", "<html><head></head><body></body></html>"),
                     ("ui/shop.html", "<html><head></head><body></body></html>"),
                     ("ui/preview/main.js", "// sim"),
@@ -1008,10 +1008,10 @@ mod tests {
 
         #[test]
         fn ping_and_shutdown_roundtrip() {
-            let ui = write_ws("stop", &[("loom.workspace.json", WS_JSON)]);
+            let ui = write_ws("stop", &[("ikat.workspace.json", WS_JSON)]);
             let (port, shared) = spawn_server(&ui);
 
-            let (st, body) = get(port, "/_loom/ping");
+            let (st, body) = get(port, "/_ikat/ping");
             assert_eq!(st, 200);
             let v: serde_json::Value = serde_json::from_str(&body).unwrap();
             assert_eq!(v["token"], "t0");
@@ -1019,7 +1019,7 @@ mod tests {
             // 错 token 拒关停、flag 不动。
             let (st2, _) = raw(
                 port,
-                "POST /_loom/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Loom-Token: wrong\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "POST /_ikat/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Ikat-Token: wrong\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             );
             assert_eq!(st2, 403);
             assert!(!shared.shutdown.load(Ordering::SeqCst));
@@ -1027,7 +1027,7 @@ mod tests {
             // 对 token → flag 置位（真正退出由监控线程负责，单测只验协议面）。
             let (st3, _) = raw(
                 port,
-                "POST /_loom/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Loom-Token: t0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "POST /_ikat/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Ikat-Token: t0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             );
             assert_eq!(st3, 200);
             assert!(shared.shutdown.load(Ordering::SeqCst));

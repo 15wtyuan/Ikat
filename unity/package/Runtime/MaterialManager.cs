@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// DrawState 缓存。
     /// key = (program, texture, mask_context, rounded)。同 key 复用 Material 实例。

@@ -1,0 +1,15 @@
+{
+    "name": "Showcase.IkatBridge",
+    "rootNamespace": "Showcase.IkatBridge",
+    "references": [
+        "Ikat.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "autoReferenced": true,
+    "versionDefines": [],
+    "noEngineReferences": false
+}

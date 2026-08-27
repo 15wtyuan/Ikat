@@ -16,13 +16,13 @@
 //!
 //! 用法（默认读 worktree 根 showcase.pkg.bin）：
 //! ```bash
-//! cargo run -p loomgui_core --example dump_nativehost_slot
+//! cargo run -p ikat_core --example dump_nativehost_slot
 //! # 或指定 pkg.bin 路径
-//! cargo run -p loomgui_core --example dump_nativehost_slot -- <path-to-pkg.bin>
+//! cargo run -p ikat_core --example dump_nativehost_slot -- <path-to-pkg.bin>
 //! ```
-use loomgui_core::asset::read_package;
-use loomgui_core::scene::node::NodeId;
-use loomgui_core::stage::Stage;
+use ikat_core::asset::read_package;
+use ikat_core::scene::node::NodeId;
+use ikat_core::stage::Stage;
 use std::env;
 
 fn main() {
@@ -40,7 +40,7 @@ fn main() {
     );
     assert!(
         pkg.components.contains_key("page_nativehost"),
-        "pkg missing page_nativehost component (重打 pkg：cargo run -p loomgui_pkg)"
+        "pkg missing page_nativehost component (重打 pkg：cargo run -p ikat_pkg)"
     );
 
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");

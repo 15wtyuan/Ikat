@@ -2,14 +2,14 @@
 name: session-summary
 description: >
   Use when the user says "summarize this session", "总结到 skill", "更新踩坑",
-  "总结到 AGENTS.md", or after completing a significant LoomGUI feature or bugfix and wanting to persist
-  the session's learnings into the project knowledge base. 把当前 session 的 LoomGUI 经验分类沉淀：
+  "总结到 AGENTS.md", or after completing a significant Ikat feature or bugfix and wanting to persist
+  the session's learnings into the project knowledge base. 把当前 session 的 Ikat 经验分类沉淀：
   可复用坑规则进 docs/pitfalls.md（按主题归位，不记 bug 编年史），高价值原则/调试/偏好进 AGENTS.md。
 ---
 
-# LoomGUI Session Summary
+# Ikat Session Summary
 
-将当前会话中与 LoomGUI 相关的经验分类沉淀进项目知识库。**设计契约变化或契约文档漂移都要同步 `docs/design/main-design.md`**——不只看本轮改了什么，还要 grep 确认设计文档和实现一致（见 Process 步骤 3 的强制检查）。
+将当前会话中与 Ikat 相关的经验分类沉淀进项目知识库。**设计契约变化或契约文档漂移都要同步 `docs/design/main-design.md`**——不只看本轮改了什么，还要 grep 确认设计文档和实现一致（见 Process 步骤 3 的强制检查）。
 
 ## 两个去处（判据：是否高价值可复用 + 不希望 AI 遗忘）
 
@@ -24,7 +24,7 @@ description: >
 
 ### 1. Review Session Context
 
-从当前会话提取 LoomGUI 相关工作：
+从当前会话提取 Ikat 相关工作：
 - 改了哪些文件/模块？
 - 解决了什么问题？
 - 踩了什么坑（尤其**依赖 API 与草稿/plan 不符**、**AI 可预测性约束违背**）？

@@ -1,0 +1,20 @@
+{
+    "name": "Ikat.Tests.PlayMode",
+    "rootNamespace": "Ikat.Tests",
+    "references": [
+        "Ikat.Runtime",
+        "Ikat.Bindings",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "autoReferenced": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ]
+}

@@ -1,11 +1,11 @@
 //! 压测 api-infra 的持续掉帧复现：Load/Unload 反复循环 + 时钟 churn，每 60 帧量化
 //! tick_and_render 耗时（μs）。掉帧 = 单帧耗时随交互次数增长（泄漏/累积）或绝对值异常。
 
-use loomgui_core::list::{enter_data_driven, set_item_count};
-use loomgui_core::scene::dynamic::{
+use ikat_core::list::{enter_data_driven, set_item_count};
+use ikat_core::scene::dynamic::{
     append_child, create_node, remove_node, set_inline_override, set_text,
 };
-use loomgui_core::stage::Stage;
+use ikat_core::stage::Stage;
 use std::time::Instant;
 
 fn tick_ms(s: &mut Stage) -> f64 {
@@ -158,20 +158,20 @@ fn main() {
         (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
     for _ in 0..n {
         let t = Instant::now();
-        loomgui_core::scroll::advance_all(0.016, s.scene.as_mut().unwrap());
+        ikat_core::scroll::advance_all(0.016, s.scene.as_mut().unwrap());
         t_scroll += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let ops = loomgui_core::list::plan_visible(s.scene.as_mut().unwrap());
-        loomgui_core::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+        let ops = ikat_core::list::plan_visible(s.scene.as_mut().unwrap());
+        ikat_core::list::execute_visible(s.scene.as_mut().unwrap(), ops);
         t_list += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::style::dynamic::rematch_pseudo_classes(s.scene.as_mut().unwrap());
+        ikat_core::style::dynamic::rematch_pseudo_classes(s.scene.as_mut().unwrap());
         t_rematch += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::style::dynamic::sync_animation_players(s.scene.as_mut().unwrap());
+        ikat_core::style::dynamic::sync_animation_players(s.scene.as_mut().unwrap());
         t_anim += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
@@ -185,16 +185,12 @@ fn main() {
             .copied()
             .collect();
         for cid in ctrl_ids {
-            loomgui_core::scene::control::sync_control_visuals(
-                s.scene.as_mut().unwrap(),
-                cid,
-                1080.0,
-            );
+            ikat_core::scene::control::sync_control_visuals(s.scene.as_mut().unwrap(), cid, 1080.0);
         }
         t_ctrl += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::layout::solve(
+        ikat_core::layout::solve(
             s.scene.as_mut().unwrap(),
             &s.fonts,
             s.root_size,
@@ -203,19 +199,19 @@ fn main() {
         t_solve += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::scene::control::measure_text_controls(s.scene.as_mut().unwrap(), &s.fonts);
+        ikat_core::scene::control::measure_text_controls(s.scene.as_mut().unwrap(), &s.fonts);
         t_measure += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::list::collect_heights(s.scene.as_mut().unwrap());
+        ikat_core::list::collect_heights(s.scene.as_mut().unwrap());
         t_heights += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::scroll::refresh_content_sizes(s.scene.as_mut().unwrap());
+        ikat_core::scroll::refresh_content_sizes(s.scene.as_mut().unwrap());
         t_content += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        loomgui_core::scene::transform::compute_world_transforms(s.scene.as_mut().unwrap());
+        ikat_core::scene::transform::compute_world_transforms(s.scene.as_mut().unwrap());
         t_world += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();

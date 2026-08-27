@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn collect_recursive_sorted() {
-        let tmp = std::env::temp_dir().join("loom_collect_test");
+        let tmp = std::env::temp_dir().join("ikat_collect_test");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("assets/icons")).unwrap();
         std::fs::create_dir_all(tmp.join("assets/sub")).unwrap();

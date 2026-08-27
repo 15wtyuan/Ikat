@@ -2,11 +2,11 @@
 //! tick_and_render，两路取证：(1) scene 节点找 border_color 接近 #3a3f55 的 .sec-h
 //! 候选，打印 ts.border/ts.padding/layout_rect 验 padding-bottom longhand 是否被忽略；
 //! (2) frame mesh 打印纯色 mesh box/tint 确认 border mesh 产出。
-//! 跑：`cargo run -p loomgui_pkg --example dump_border_pos`
+//! 跑：`cargo run -p ikat_pkg --example dump_border_pos`
 
-use loomgui_core::render::node::NodePayload;
-use loomgui_core::stage::Stage;
-use loomgui_pkg::atlas::AtlasManifest;
+use ikat_core::render::node::NodePayload;
+use ikat_core::stage::Stage;
+use ikat_pkg::atlas::AtlasManifest;
 
 fn box_of(verts: &[[f32; 2]]) -> (f32, f32, f32, f32) {
     let xmin = verts.iter().map(|v| v[0]).fold(f32::MAX, f32::min);

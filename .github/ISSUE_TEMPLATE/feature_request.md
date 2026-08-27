@@ -15,7 +15,7 @@ labels: 'type: capability'
 
 ## 对 AI 可预测性的影响
 
-<!-- LoomGUI 首要判据：AI 读这段 HTML/CSS 能否正确预测渲染？新机制是否增加歧义？ -->
+<!-- Ikat 首要判据：AI 读这段 HTML/CSS 能否正确预测渲染？新机制是否增加歧义？ -->
 
 ## 备选
 

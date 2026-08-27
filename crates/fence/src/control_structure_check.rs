@@ -1,6 +1,6 @@
 //! Stage 6.8：控件结构契约校验（必需子角色）。
 //!
-//! 旧模式下框架运行时注入 `.loom-*` 子节点（fill/track/thumb/listbox/...），
+//! 旧模式下框架运行时注入 `.ikat-*` 子节点（fill/track/thumb/listbox/...），
 //! 控件结构必然完整，无需校验。role 化重构后，作者自己写
 //! `<div role="combobox"><div role="listbox"><div role="option">`——作者可能漏写
 //! 必需子节点。本 pass 在打包期（annotate 之后）严格拦截这种缺陷：缺必需子角色
@@ -162,15 +162,15 @@ pub fn check_control_structure(tree: &IrTree, file: &str, line_map: &LineMap) ->
             }
             let hint = structure_hint(role).unwrap_or(
                 "see the role registry in the scaffolded \
-                 loomgui-editor skill (`references/fence-schema.md`)",
+                 ikat-editor skill (`references/fence-schema.md`)",
             );
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceMissingControlChild,
                 format!(
-                    "LoomGUI control `<{tag} role=\"{role}\">` is missing its required \
+                    "Ikat control `<{tag} role=\"{role}\">` is missing its required \
                      {label} child element. Controls have NO framework-injected children — \
                      the author writes the full structure. Expected: {hint}. \
-                     Contract table: the role registry in the scaffolded loomgui-editor \
+                     Contract table: the role registry in the scaffolded ikat-editor \
                      skill (`references/fence-schema.md`).",
                     tag = el.tag,
                     label = spec_label(*spec),
@@ -225,14 +225,14 @@ pub fn check_tabpanel_author_hidden(
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceTabpanelHiddenByAuthor,
                 format!(
-                    "LoomGUI `<{tag} role=\"tabpanel\">` declares inline `display:none`. \
+                    "Ikat `<{tag} role=\"tabpanel\">` declares inline `display:none`. \
                      The TabList runtime shows the ACTIVE panel by clearing its own inline \
                      display override and falling back to author styles — an author-baked \
                      display:none survives that (baked into the packed base style) and keeps \
                      the active panel permanently invisible. Hiding inactive panels is the \
                      control runtime's job (applied on the first frame) — remove the \
                      declaration. The `tabpanel` row of the role registry in the scaffolded \
-                     loomgui-editor skill (`references/fence-schema.md`) states this rule.",
+                     ikat-editor skill (`references/fence-schema.md`) states this rule.",
                     tag = el.tag,
                 ),
                 line_map.source_location(node.span.start, file.to_string()),

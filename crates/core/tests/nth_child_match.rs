@@ -3,8 +3,8 @@
 //!
 //! 选择器手构（core 不依赖 parse feature，测试与 runtime 同路径走 compound_matches_node）。
 
-use loomgui_core::scene::{Node, NodeId, NodeKind, Scene};
-use loomgui_core::style::dynamic::{
+use ikat_core::scene::{Node, NodeId, NodeKind, Scene};
+use ikat_core::style::dynamic::{
     compound_matches_node, Combinator, Compound, NthChildExpr, ParsedSelector, Specificity,
 };
 

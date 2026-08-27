@@ -1,14 +1,14 @@
 //! 控件必须被 CSS 命中校验（端到端）。
 //!
-//! LoomGUI 控件（role 驱动：progressbar/slider/switch/radio/textbox/...）不带 UA
+//! Ikat 控件（role 驱动：progressbar/slider/switch/radio/textbox/...）不带 UA
 //! 默认样式——写了控件却没匹配的 CSS 规则 = 运行时空白。本测试覆盖打包期校验：
 //! 有匹配 CSS → 静默通过；完全无 CSS 命中 → `FenceControlWithoutCss` error + 教学。
 
-use loomgui_fence::diagnostic::{DiagnosticCode, Severity};
-use loomgui_fence::pipeline::parse_template;
+use ikat_fence::diagnostic::{DiagnosticCode, Severity};
+use ikat_fence::pipeline::parse_template;
 
 /// 判定是否含「控件缺 CSS」诊断（按 code + message 含控件可读名片段）。
-fn has_control_css_diag(result: &loomgui_fence::pipeline::ParsedTemplate, needle: &str) -> bool {
+fn has_control_css_diag(result: &ikat_fence::pipeline::ParsedTemplate, needle: &str) -> bool {
     result
         .diagnostics
         .iter()
@@ -67,8 +67,8 @@ fn progressbar_without_css_message_is_actionable() {
         d.message
     );
     assert!(
-        !d.message.contains(".loom-"),
-        "msg 不应再引用已删除的 .loom-* 注入: {}",
+        !d.message.contains(".ikat-"),
+        "msg 不应再引用已删除的 .ikat-* 注入: {}",
         d.message
     );
 }
@@ -197,7 +197,7 @@ fn pseudo_class_rule_still_counts() {
 }
 
 // 文本输入控件同样不带 UA 默认样式：浏览器给 textbox 套自带外观
-// （边框/底色/光标），但 LoomGUI core 无 UA 表——打包后运行时空白。
+// （边框/底色/光标），但 Ikat core 无 UA 表——打包后运行时空白。
 
 /// 裸 `role=textbox` 无 CSS → error。
 #[test]

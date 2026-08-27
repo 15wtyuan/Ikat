@@ -1,11 +1,11 @@
-//! 工作区配置（loom.workspace.json）：AI 直接编辑的真相源。
+//! 工作区配置（ikat.workspace.json）：AI 直接编辑的真相源。
 //! 全路径相对工作区根 + 正斜杠。
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// 工作区根下 loom.workspace.json 的文件名。
-pub const WORKSPACE_FILE: &str = "loom.workspace.json";
+/// 工作区根下 ikat.workspace.json 的文件名。
+pub const WORKSPACE_FILE: &str = "ikat.workspace.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Workspace {
@@ -67,7 +67,7 @@ pub struct FontCfg {
     pub fallback: bool,
 }
 
-/// 读工作区根下的 loom.workspace.json。
+/// 读工作区根下的 ikat.workspace.json。
 pub fn load_workspace(root: &Path) -> Result<Workspace, String> {
     let path = root.join(WORKSPACE_FILE);
     let text =
@@ -75,7 +75,7 @@ pub fn load_workspace(root: &Path) -> Result<Workspace, String> {
     serde_json::from_str(&text).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
-/// 写回工作区根下的 loom.workspace.json（pretty，AI 好读）。
+/// 写回工作区根下的 ikat.workspace.json（pretty，AI 好读）。
 pub fn save_workspace(root: &Path, ws: &Workspace) -> Result<(), String> {
     let path = root.join(WORKSPACE_FILE);
     let text = serde_json::to_string_pretty(ws).map_err(|e| format!("serialize workspace: {e}"))?;

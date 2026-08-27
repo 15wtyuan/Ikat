@@ -1,14 +1,14 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace LoomGUI.Tests
+namespace Ikat.Tests
 {
     public class MaterialManagerTests
     {
         [Test]
         public void SameKeyReturnsSameMaterial()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var a = mm.Get(program: 0, white, maskContext: 0, false, false);
             var b = mm.Get(program: 0, white, maskContext: 0, false, false);
@@ -18,7 +18,7 @@ namespace LoomGUI.Tests
         [Test]
         public void DifferentMaskContextReturnsDifferentMaterial()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var a = mm.Get(0, white, 0, false, false);
             var b = mm.Get(0, white, 1, false, false);
@@ -29,7 +29,7 @@ namespace LoomGUI.Tests
         [Test]
         public void CtxGtZero_MaterialHasClippedKeyword()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var m0 = mm.Get(0, white, 0, false, false);
             var m1 = mm.Get(0, white, 1, false, false);
@@ -41,7 +41,7 @@ namespace LoomGUI.Tests
         [Test]
         public void SetClipBox_UpdatesCachedMaterialVector()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var m = mm.Get(0, white, 7, false, false);   // 建 ctx=7 material
             var box = new Vector4(-1.5f, 2.5f, 0.01f, 0.02f);
@@ -53,7 +53,7 @@ namespace LoomGUI.Tests
         [Test]
         public void SetClipBox_BeforeGet_AppliedOnCreation()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var box = new Vector4(-2f, 2f, 0.01f, 0.01f);
             mm.SetClipBox(3, box);
@@ -67,7 +67,7 @@ namespace LoomGUI.Tests
         [Test]
         public void RoundedFlag_SelectsCorrectKeyword()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var mRect = mm.Get(0, white, 5, false, false);
             var mRound = mm.Get(0, white, 5, false, true);
@@ -82,7 +82,7 @@ namespace LoomGUI.Tests
         [Test]
         public void SetCornerRadius_UpdatesCachedMaterialFloat()
         {
-            var mm = new MaterialManager(Shader.Find("LoomGUI/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
             var white = Texture2D.whiteTexture;
             var m = mm.Get(0, white, 9, false, true);   // 建 ctx=9 rounded material
             mm.SetCornerRadius(9, 0.25f);

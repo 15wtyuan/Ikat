@@ -1,4 +1,4 @@
-# LoomGUI C# 投影层契约
+# Ikat C# 投影层契约
 
 > **定位**：公共 API（[public-api.md](public-api.md)）的实现机制契约。跨摸黑+三束有效——不是用过即丢的 spec，是实现层的长期不变量。
 >
@@ -42,8 +42,8 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 ### 2.1 回写时序 = 混合（Q30）
 
 - **结构操作即时过桥**：`AddChild`/`InsertChild`/`RemoveChild`/`Instantiate`/`Dispose`。必须即时——要立刻拿到 Rust 分配的 NodeId 建立 C#↔Rust 映射；且低频，即时无所谓。
-- **属性写攒批**：`Style.X = v` / `Transform.X = v` 只改 C# 镜像 + 标脏，帧末一次性 flush。高频（拖拽/动画/批量改样式），攒批把 N 次过桥压成每帧每脏节点一次。StyleMirror setter 标脏不立即调 `set_inline_override`，NodeTransform.Store 标脏不立即调 `set_transform`；帧末（`LoomHost.Step` flush seam / `UIContext.FlushPendingWrites`）遍历 NodeRegistry dirty 集中过桥。
-- **flush 时机**：在 `LoomHost.Step(dt)` 中 tick **之前**——先 flush 脏属性 → tick（solve）→ borrow_frame 读回。与 tick 时序契合。
+- **属性写攒批**：`Style.X = v` / `Transform.X = v` 只改 C# 镜像 + 标脏，帧末一次性 flush。高频（拖拽/动画/批量改样式），攒批把 N 次过桥压成每帧每脏节点一次。StyleMirror setter 标脏不立即调 `set_inline_override`，NodeTransform.Store 标脏不立即调 `set_transform`；帧末（`IkatHost.Step` flush seam / `UIContext.FlushPendingWrites`）遍历 NodeRegistry dirty 集中过桥。
+- **flush 时机**：在 `IkatHost.Step(dt)` 中 tick **之前**——先 flush 脏属性 → tick（solve）→ borrow_frame 读回。与 tick 时序契合。
 
 ### 2.2 攒批编码（Q31）
 
@@ -92,7 +92,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 2. **NodeId→Node 缓存 + 生命周期** ✅ — `NodeRegistry` Dictionary\<uint,Node\> + `Dispose` 清缓存 + `IsDisposed` 守卫。NodeRegistry 同时持攒批 dirty 集合（§2.1）。
 3. **Geometry 直读 FFI** ✅ — `get_node_layout_rect` / `get_node_world_matrix` 即时 FFI（blob 缓存推后，YAGNI）。
 4. **`set_transform` FFI** ✅（Task 7）— 纯 f32 9-arg（tx,ty,sx,sy,rot,ox,oy），写 user_transform 不触发 solve。
-5. **攒批 flush seam** ✅（Task 9）— StyleMirror setter 标脏不立即过桥；NodeTransform.Store 标脏 + 帧末 `FlushTransform`。`LoomHost.Step()` 中 flush 位在 tick 前（`UIContext.FlushPendingWrites` 遍历 dirty 集）。
+5. **攒批 flush seam** ✅（Task 9）— StyleMirror setter 标脏不立即过桥；NodeTransform.Store 标脏 + 帧末 `FlushTransform`。`IkatHost.Step()` 中 flush 位在 tick 前（`UIContext.FlushPendingWrites` 遍历 dirty 集）。
 
 ### 3.2 Link 投影（#74）
 
@@ -100,7 +100,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 - **kind 映射**：Rust `NodeKind::Link` 判别值 21，C# `NodeKind.Link = 21` 显式对应（Template=18 跳号先例）；NodeFactory switch 加臂派发 `new Link(ctx, id)`。
 - **类型面**：`Link : Container`（含 `TextContent`）——富文本行内链接的子树是用户内容（文本/嵌 span），走容器投影。
-- **Href 读通道**：getter → FFI `loomgui_stage_get_link_href`，双调法（同 `get_node_id_attr`/`get_control_text` 家族：先探容量，-2 按所需扩容重调）。rc 语义：0 = ok；-2 = 扩容重调；-1 = 句柄/场景错误；**1 = 非 Link 节点 → 抛 `UIContractException`**（类型错配的调用方错误，区别于 -1 的内部错）。
+- **Href 读通道**：getter → FFI `ikat_stage_get_link_href`，双调法（同 `get_node_id_attr`/`get_control_text` 家族：先探容量，-2 按所需扩容重调）。rc 语义：0 = ok；-2 = 扩容重调；-1 = 句柄/场景错误；**1 = 非 Link 节点 → 抛 `UIContractException`**（类型错配的调用方错误，区别于 -1 的内部错）。
 - **点击 = 既有事件面**：`Clicked` 走 `On<ClickEvent>` 订阅翻译（backing-dict 模式同 Button），**无新事件 ABI**——Rust 侧命中细化到 a 节点即够，投影层不加聚合。
 - **无运行时建树入口**：`<a>` 仅 rich 上下文合法（围栏保证），运行时 create_node/TagToNodeKind 均不产此 kind。
 

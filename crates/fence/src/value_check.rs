@@ -48,7 +48,7 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
     // core 解析器是唯一真相源，这里只借它判定合法性（防校验/解析两张表漂移）。
     match prop {
         "transform-origin" => {
-            if loomgui_core::style::mapping::parse_transform_origin(value).is_some() {
+            if ikat_core::style::mapping::parse_transform_origin(value).is_some() {
                 return None;
             }
             return Some(format!(
@@ -56,11 +56,11 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
             ));
         }
         "animation-timing-function" => {
-            if loomgui_core::style::mapping::parse_ease(value).is_some() {
+            if ikat_core::style::mapping::parse_ease(value).is_some() {
                 return None;
             }
             return Some(format!(
-                "value \"{value}\" is not valid for CSS property \"animation-timing-function\"                  (see fence.md 缓动函数全集: CSS keyword + cubic-bezier(x1,y1,x2,y2)                  + loom superset ease-in/out/in-out-back/elastic/bounce)"
+                "value \"{value}\" is not valid for CSS property \"animation-timing-function\"                  (see fence.md 缓动函数全集: CSS keyword + cubic-bezier(x1,y1,x2,y2)                  + ikat superset ease-in/out/in-out-back/elastic/bounce)"
             ));
         }
         _ => {}
@@ -71,7 +71,7 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
             // 清色可用）。命名色全通道恒无效；`transparent` 关键字仅 `color` 有 core
             // 拦截，其余颜色属性写它 = 静默不覆盖。
             let lowered = value.to_ascii_lowercase();
-            let ok = loomgui_core::style::mapping::parse_color(value).is_some()
+            let ok = ikat_core::style::mapping::parse_color(value).is_some()
                 || (prop == "color" && lowered == "transparent");
             if ok {
                 return None;
@@ -92,7 +92,7 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
             // 委托 core parse_box_shadow（与运行时同一真相源）：任一层语法非法、或层数
             // 超过合成 node_id 编码硬限（inset ≤ 8 / outer ≤ 4，超限层 id 撞相邻编码区
             // → 静默错渲染）都返 None——打包期报清，不静默降级。
-            if loomgui_core::style::mapping::parse_box_shadow(value).is_some() {
+            if ikat_core::style::mapping::parse_box_shadow(value).is_some() {
                 return None;
             }
             Some(format!(
@@ -199,7 +199,7 @@ pub fn keyword_error(prop: &str, value: &str) -> Option<String> {
 pub fn display_inline_warning(value: &str) -> Option<&'static str> {
     if value.trim() == "inline" {
         Some(
-            "display:inline has no inline-flow layout in LoomGUI — \
+            "display:inline has no inline-flow layout in Ikat — \
              the element is laid out as a flex container (children become flex items). \
              Use display:flex explicitly, or display:none to hide.",
         )
@@ -240,7 +240,7 @@ pub fn transition_warnings(value: &str) -> Vec<String> {
         if prop == "all" {
             out.push(
                 "transition \"all\": only background-color / color / opacity / transform / \
-                 width / height / flex-grow / box-shadow are transitioned in LoomGUI — all \
+                 width / height / flex-grow / box-shadow are transitioned in Ikat — all \
                  other properties (margin, filter, ...) change instantly"
                     .into(),
             );

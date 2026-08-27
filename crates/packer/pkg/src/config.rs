@@ -1,6 +1,6 @@
-//! `.loom/config.json`：工作区接线 —— 会话根目录指向 UI 工作区与 Unity 工程的指针。
+//! `.ikat/config.json`：工作区接线 —— 会话根目录指向 UI 工作区与 Unity 工程的指针。
 //!
-//! 分离拓扑（会话根 ≠ ui 目录）下，会话根的 `.loom/` 是接线枢纽：CLI 自拷贝、
+//! 分离拓扑（会话根 ≠ ui 目录）下，会话根的 `.ikat/` 是接线枢纽：CLI 自拷贝、
 //! `ui_root`、`unity_root` 同住一处，整个目录入库（团队 clone 即得配套 CLI）。
 //! 指针优先相对根目录落盘（可入库、团队通用）；跨盘符等无法相对化时落绝对路径
 //! （机器绑定）。`ui_root = "."` 是单目录形态（根即 ui 工作区）。
@@ -13,27 +13,27 @@ use crate::workspace::WORKSPACE_FILE;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 
-pub const CONFIG_FILE: &str = ".loom/config.json";
+pub const CONFIG_FILE: &str = ".ikat/config.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct LoomConfig {
+pub struct IkatConfig {
     pub ui_root: String,
     pub unity_root: Option<String>,
 }
 
-/// 工作区定位结果：会话根（`.loom/` 所在）+ ui 工作区（`loom.workspace.json` 所在）。
+/// 工作区定位结果：会话根（`.ikat/` 所在）+ ui 工作区（`ikat.workspace.json` 所在）。
 /// 单目录形态下两者相同。
 #[derive(Debug)]
 pub struct Located {
     pub root: PathBuf,
     pub ui: PathBuf,
-    pub config: Option<LoomConfig>,
+    pub config: Option<IkatConfig>,
 }
 
 /// 从任意起点定位工作区，认三种摆放：
 ///
-/// 1. 起点即 ui 工作区（含 `loom.workspace.json`）——显式传 ui 路径，或单目录形态；
-/// 2. 起点是会话根（`<起点>/.loom/config.json`）——分离形态下从仓库根裸跑命令；
+/// 1. 起点即 ui 工作区（含 `ikat.workspace.json`）——显式传 ui 路径，或单目录形态；
+/// 2. 起点是会话根（`<起点>/.ikat/config.json`）——分离形态下从仓库根裸跑命令；
 /// 3. 起点的上一级是会话根——在 `ui/` 目录里直接跑命令。
 ///
 /// 都不命中 → 工具性失败（exit 2），报三步排查指引。
@@ -41,8 +41,8 @@ pub fn locate(start: &Path) -> Result<Located, BuildFailure> {
     let start = std::path::absolute(start)
         .map_err(|e| BuildFailure::config(format!("resolve {}: {e}", start.display())))?;
 
-    // 形态 1：起点即 ui 工作区。config 就近找（本目录 .loom = 单目录形态；
-    // 上一级 .loom = 分离形态）；找不到（无 config 的裸工作区）→ 本地输出形态。
+    // 形态 1：起点即 ui 工作区。config 就近找（本目录 .ikat = 单目录形态；
+    // 上一级 .ikat = 分离形态）；找不到（无 config 的裸工作区）→ 本地输出形态。
     if start.join(WORKSPACE_FILE).is_file() {
         let (root, config) = match find_config(&start)? {
             Some((base, cfg)) => (base, Some(cfg)),
@@ -62,7 +62,7 @@ pub fn locate(start: &Path) -> Result<Located, BuildFailure> {
             if !ui.join(WORKSPACE_FILE).is_file() {
                 return Err(BuildFailure::config(format!(
                     "{}: ui_root `{}` 指向的目录没有 {}（ui 目录挪位或 config 失配）；\
-                     修正 {}/{} 或重新 `loom init`",
+                     修正 {}/{} 或重新 `ikat init`",
                     base.join(CONFIG_FILE).display(),
                     cfg.ui_root,
                     WORKSPACE_FILE,
@@ -77,8 +77,8 @@ pub fn locate(start: &Path) -> Result<Located, BuildFailure> {
             })
         }
         None => Err(BuildFailure::config(format!(
-            "{} 不是 LoomGUI 工作区：该目录与其上一级都没有 {}，目录里也没有 {}。\
-             在会话根（含 .loom/ 的目录）或 ui 目录里运行，或先 `loom init`。",
+            "{} 不是 Ikat 工作区：该目录与其上一级都没有 {}，目录里也没有 {}。\
+             在会话根（含 .ikat/ 的目录）或 ui 目录里运行，或先 `ikat init`。",
             start.display(),
             CONFIG_FILE,
             WORKSPACE_FILE
@@ -86,9 +86,9 @@ pub fn locate(start: &Path) -> Result<Located, BuildFailure> {
     }
 }
 
-/// 就近找 config：先 `<dir>/.loom/config.json`，再 `<dir>/../.loom/config.json`。
+/// 就近找 config：先 `<dir>/.ikat/config.json`，再 `<dir>/../.ikat/config.json`。
 /// 返回 config 所在的根目录（解析指针的基准）。文件存在但解析失败 → exit 2。
-fn find_config(dir: &Path) -> Result<Option<(PathBuf, LoomConfig)>, BuildFailure> {
+fn find_config(dir: &Path) -> Result<Option<(PathBuf, IkatConfig)>, BuildFailure> {
     let mut bases = [Some(dir), dir.parent()].into_iter().flatten();
     for base in bases.by_ref() {
         let path = base.join(CONFIG_FILE);
@@ -97,7 +97,7 @@ fn find_config(dir: &Path) -> Result<Option<(PathBuf, LoomConfig)>, BuildFailure
         }
         let text = std::fs::read_to_string(&path)
             .map_err(|e| BuildFailure::config(format!("read {}: {e}", path.display())))?;
-        let cfg: LoomConfig = serde_json::from_str(&text).map_err(|e| {
+        let cfg: IkatConfig = serde_json::from_str(&text).map_err(|e| {
             BuildFailure::config(format!(
                 "parse {} (expect `ui_root` field): {e}",
                 path.display()
@@ -153,11 +153,11 @@ pub fn write(root: &Path, ui: &Path, unity_root: Option<&Path>) -> Result<(), St
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|| u.to_string_lossy().into_owned())
     });
-    let cfg = LoomConfig {
+    let cfg = IkatConfig {
         ui_root: ui_stored,
         unity_root: unity_stored,
     };
-    let dir = root.join(".loom");
+    let dir = root.join(".ikat");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let path = root.join(CONFIG_FILE);
     let text = serde_json::to_string_pretty(&cfg).map_err(|e| format!("serialize: {e}"))?;
@@ -234,14 +234,14 @@ mod tests {
     /// locate 三形态 + 失败路径。
     #[test]
     fn locate_three_layouts() {
-        let tmp = std::env::temp_dir().join("loom_config_locate_test");
+        let tmp = std::env::temp_dir().join("ikat_config_locate_test");
         let _ = std::fs::remove_dir_all(&tmp);
-        // repo 根：.loom/config.json；ui 子目录：workspace.json。
+        // repo 根：.ikat/config.json；ui 子目录：workspace.json。
         std::fs::create_dir_all(tmp.join("ui")).unwrap();
-        std::fs::create_dir_all(tmp.join(".loom")).unwrap();
+        std::fs::create_dir_all(tmp.join(".ikat")).unwrap();
         std::fs::write(tmp.join("ui").join(WORKSPACE_FILE), "{}").unwrap();
         write(&tmp, &tmp.join("ui"), None).unwrap();
-        let cfg: LoomConfig =
+        let cfg: IkatConfig =
             serde_json::from_str(&std::fs::read_to_string(tmp.join(CONFIG_FILE)).unwrap()).unwrap();
         assert_eq!(cfg.ui_root, "ui");
         assert_eq!(cfg.unity_root, None);
@@ -258,25 +258,25 @@ mod tests {
 
         // 单目录形态：根即 ui，ui_root = "."。
         let solo = tmp.join("solo");
-        std::fs::create_dir_all(solo.join(".loom")).unwrap();
+        std::fs::create_dir_all(solo.join(".ikat")).unwrap();
         std::fs::write(solo.join(WORKSPACE_FILE), "{}").unwrap();
         write(&solo, &solo, None).unwrap();
         let loc = locate(&solo).unwrap();
         assert_eq!(loc.root, solo);
         assert_eq!(loc.ui, solo);
 
-        // 都不命中 → exit 2（注意：tmp 内的子目录会合法命中 tmp 的 .loom——上级
+        // 都不命中 → exit 2（注意：tmp 内的子目录会合法命中 tmp 的 .ikat——上级
         // 发现是特性不是 bug，所以"非工作区"样本必须放在发现范围之外）。
-        let nowhere = std::env::temp_dir().join("loom_config_locate_nowhere");
+        let nowhere = std::env::temp_dir().join("ikat_config_locate_nowhere");
         let _ = std::fs::remove_dir_all(&nowhere);
         std::fs::create_dir_all(&nowhere).unwrap();
         let err = locate(&nowhere).unwrap_err();
         assert_eq!(err.exit_code, 2);
 
         // config 指向的 ui 失联（无 workspace.json）→ exit 2（同样须在发现范围外）。
-        let broken = std::env::temp_dir().join("loom_config_locate_broken");
+        let broken = std::env::temp_dir().join("ikat_config_locate_broken");
         let _ = std::fs::remove_dir_all(&broken);
-        std::fs::create_dir_all(broken.join(".loom")).unwrap();
+        std::fs::create_dir_all(broken.join(".ikat")).unwrap();
         std::fs::write(broken.join(CONFIG_FILE), r#"{ "ui_root": "gone" }"#).unwrap();
         let err = locate(&broken).unwrap_err();
         assert_eq!(err.exit_code, 2);
@@ -289,7 +289,7 @@ mod tests {
     /// 输出基座三态：无 config → None；带 unity_root → 解析目录；目录失效 → exit 2。
     #[test]
     fn output_base_three_states() {
-        let tmp = std::env::temp_dir().join("loom_config_base_test");
+        let tmp = std::env::temp_dir().join("ikat_config_base_test");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("ui")).unwrap();
         std::fs::create_dir_all(tmp.join("unity")).unwrap();

@@ -2,11 +2,11 @@ using System;
 using System.Text;
 using UnityEngine;
 
-namespace LoomGUI
+namespace Ikat
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 loomgui_ffi_c/src/blob.rs，v14）：
+    /// 布局（镜像 ikat_ffi_c/src/blob.rs，v14）：
     ///   header (128B): magic(u32 LE), version(u32)=14, node_count(u32),
     ///                 23× col_offset(u32, byte offset from blob start),
     ///                 mesh_arena_off(u32), mesh_arena_len(u32),
@@ -276,7 +276,7 @@ namespace LoomGUI
         ulong ReadU64(int o) => BitConverter.ToUInt64(_buf, o);
         float ReadF32(int o) => BitConverter.ToSingle(_buf, o);
 
-        // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityLoomBackend.DumpBlobState 线性扫表）。
+        // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityIkatBackend.DumpBlobState 线性扫表）。
         public uint ReadU32Public(int o) => ReadU32(o);
         public float ReadF32Public(int o) => ReadF32(o);
         public int ClipTableOffPub => ClipTableOff;

@@ -1665,6 +1665,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "ikat_core"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph_rasterizer",
+ "bincode",
+ "bitflags 2.13.0",
+ "criterion",
+ "etagere",
+ "ikat_pkg",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "taffy",
+ "ttf-parser",
+ "unicode-linebreak",
+]
+
+[[package]]
+name = "ikat_fence"
+version = "0.1.0"
+dependencies = [
+ "html5gum",
+ "ikat_core",
+ "taffy",
+]
+
+[[package]]
+name = "ikat_ffi_c"
+version = "0.1.0"
+dependencies = [
+ "csbindgen",
+ "ikat_core",
+ "taffy",
+]
+
+[[package]]
+name = "ikat_gui"
+version = "0.1.0"
+dependencies = [
+ "ikat_fence",
+ "ikat_pkg",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "ikat_pkg"
+version = "0.0.13"
+dependencies = [
+ "etagere",
+ "ikat_core",
+ "ikat_fence",
+ "image",
+ "serde",
+ "serde_json",
+ "taffy",
+]
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1936,68 +1998,6 @@ name = "log"
 version = "0.4.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
-
-[[package]]
-name = "loomgui_core"
-version = "0.1.0"
-dependencies = [
- "ab_glyph_rasterizer",
- "bincode",
- "bitflags 2.13.0",
- "criterion",
- "etagere",
- "loomgui_pkg",
- "serde",
- "serde_json",
- "slotmap",
- "taffy",
- "ttf-parser",
- "unicode-linebreak",
-]
-
-[[package]]
-name = "loomgui_fence"
-version = "0.1.0"
-dependencies = [
- "html5gum",
- "loomgui_core",
- "taffy",
-]
-
-[[package]]
-name = "loomgui_ffi_c"
-version = "0.1.0"
-dependencies = [
- "csbindgen",
- "loomgui_core",
- "taffy",
-]
-
-[[package]]
-name = "loomgui_gui"
-version = "0.1.0"
-dependencies = [
- "loomgui_fence",
- "loomgui_pkg",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
-]
-
-[[package]]
-name = "loomgui_pkg"
-version = "0.0.13"
-dependencies = [
- "etagere",
- "image",
- "loomgui_core",
- "loomgui_fence",
- "serde",
- "serde_json",
- "taffy",
-]
 
 [[package]]
 name = "markup5ever"

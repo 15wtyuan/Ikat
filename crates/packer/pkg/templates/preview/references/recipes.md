@@ -51,12 +51,12 @@ children kept when nothing assigned); whitespace-only light children
 dropped; relative URLs inside the template resolved against the component
 file location (`components/<name>.html`); nested components expand in
 further passes to a fixpoint (≤16); component `<style>` prefixed with
-`[data-loom-comp="name"]` for scope emulation. Registry data comes from
+`[data-ikat-comp="name"]` for scope emulation. Registry data comes from
 the server: `fetch('/api/workspace.json')` → `components: { name:
 <workspace-rel-path> }` → fetch each `/ws/<path>` source.
 
 Full reference implementation: `showcase/showcase/preview/lib/expand.js`
-in the LoomGUI repository.
+in the Ikat repository.
 
 ## lib/controls.js — control wiring (mirror core semantics)
 

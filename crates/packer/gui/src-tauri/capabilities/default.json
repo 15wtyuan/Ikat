@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "LoomGUI Packer 默认权限：core + 原生目录选择对话框",
+  "description": "Ikat Packer 默认权限：core + 原生目录选择对话框",
   "windows": ["main"],
   "permissions": ["core:default", "dialog:default"]
 }
