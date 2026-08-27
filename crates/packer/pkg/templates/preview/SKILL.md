@@ -17,9 +17,12 @@ there. The preview server closes that gap in **two layers** (#92):
 
 - **A layer — shipped by the framework.** For every HTML page the server
   auto-injects `/ikat-preview/lib/boot.js`, which performs component
-  expansion (custom elements, slot projection, scoped styles), wires
-  control semantics (slider/combobox/switch/spinbutton/tabs/dialogs/
-  progressbar/textbox), and injects the structural base polyfill
+  expansion (custom elements, slot projection, host-state mirroring) and
+  injects each component's scoped stylesheet — a server-rewritten copy
+  (`/ikat-preview/comp-style/<name>.css`, single truth in Rust) that matches
+  core's style-wall semantics, including root-class rules on the template
+  root. It also wires control semantics (slider/combobox/switch/spinbutton/
+  tabs/dialogs/progressbar/textbox) and injects the structural base polyfill
   (`box-sizing`, button reset, placeholder line). Its content is embedded
   in the running `ikat` binary — always version-matched to the CLI. You
   never copy or reimplement any of this; a workspace copy would rot into a

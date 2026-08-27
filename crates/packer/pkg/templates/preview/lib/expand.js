@@ -4,8 +4,15 @@
 // <slot name=x> 在拼接位被宿主 light children（slot="x"）替换（无投射内容时保留
 // slot 的 fallback 子女）；纯空白文本节点丢弃；嵌套组件迭代展开至不动点（≤16 pass）。
 // 组件清单来自 server 的 /api/workspace.json（与打包同一套扫描口径）。
+//
+// 组件 <style> 的作用域改写不在本文件（#95 教训：手写正则前缀只会拼后代选择器，
+// 根类规则整条死；@media 放行、keyframes 同名优先级反转同批审计实锤）——CSS
+// 语义单真相在 Rust：server 经 /ikat-preview/comp-style/<name>.css 供给双分支
+// 改写版，这里只注入 <link>。本文件残留职责是纯 DOM 机械层。
 
 // 组件清单缓存（fetchRegistry 灌入）：expandComponentsNow 的补展开数据源。
+// 条目 = { src: 组件 HTML 文本, rel: 工作区相对路径 }——rel 是模板内相对 URL
+// 的解析基准（server 已按打包口径给出，不猜目录布局）。
 let cachedReg = null;
 
 export async function fetchRegistry() {
@@ -16,7 +23,8 @@ export async function fetchRegistry() {
     entries.map(async ([name, rel]) => {
       // rel 是工作区相对路径（如 showcase/components/item-card.html）；
       // server 把工作区挂载在 /ws/ 下。
-      reg[name] = await fetch('/ws/' + rel).then((r) => r.text());
+      const src = await fetch('/ws/' + rel).then((r) => r.text());
+      reg[name] = { src, rel };
     }),
   );
   cachedReg = reg;
@@ -41,14 +49,15 @@ export function expandComponents(reg) {
     for (const host of hosts) {
       host.setAttribute('data-ikat-expanded', '');
       const name = host.tagName.toLowerCase();
-      const doc = new DOMParser().parseFromString(reg[name], 'text/html');
-      for (const st of Array.from(doc.querySelectorAll('style'))) {
-        injectComponentStyle(name, st.textContent);
-        st.remove();
-      }
-      // 模板内相对 URL（src/href）按组件文件位置（components/<name>.html）解析成绝对
+      const def = reg[name];
+      const doc = new DOMParser().parseFromString(def.src, 'text/html');
+      // <style> 只负责登记作用域样式表（server 改写版），节点本身不进页面——
+      // 原样 import 会全局裸生效。
+      for (const st of Array.from(doc.querySelectorAll('style'))) st.remove();
+      ensureComponentStylesheet(name);
+      // 模板内相对 URL（src/href）按组件文件位置（server 给的 rel）解析成绝对
       // URL——镜像打包器的 html_rel 归一。不重写则按页面位置解析，fallback 图 404。
-      const compBase = new URL('components/' + name + '.html', document.baseURI);
+      const compBase = new URL('/ws/' + def.rel, document.baseURI);
       for (const el of Array.from(doc.querySelectorAll('[src],[href]'))) {
         const attr = el.hasAttribute('src') ? 'src' : 'href';
         el.setAttribute(attr, new URL(el.getAttribute(attr), compBase).href);
@@ -135,68 +144,27 @@ function observeHostState(host, root) {
   });
 }
 
-// ---- 组件 <style> 作用域前缀 ----
+// ---- 组件作用域样式表（server 单真相）----
 //
-// 每实例一条前缀 `[data-ikat-comp="name"]` 预览作用域模拟。@keyframes 内部的帧
-// 选择器（0%/from/to）不是元素选择器，必须原样放行（Tripawd 狗粮实证：朴素前缀
-// 把 `0% {` 改写成非法选择器 → 浏览器整帧丢弃 → 组件动画全灭）；@media 等外层
-// @-rule 维持旧约定原样放行（内部规则不加前缀）。宿主标签开头的复合链（见上节）
-// 吃掉链首 TAG 段后同样加前缀。
+// 每组件一条 <link>，指向 server 的 Rust 改写版 CSS（双分支选择器、@media 拒绝、
+// url() 绝对化都在 server 做）。注入位置 = head 里第一个「页面自有」style/link 之前
+// （base.css 与本类链接都算框架自有）——三层 keyframes/级联序由此对齐 core：
+// base < 组件（后展开者后插 = 后胜，镜像 core「后实例化组件覆盖同名规则」）
+// < 页面（同名 @keyframes 宿主胜，镜像打包期 host 优先）。同名组件去重，多实例/
+// 克隆补展开只登记一次。
 
-function injectComponentStyle(name, css) {
-  if (!css || !css.trim()) return;
-  // 同名组件只注入一份：多实例/克隆补展开都会再进这里，规则相同纯去重（防
-  // <style> 堆积；组件名围栏保证 [a-z0-9-]，可安全内插进属性选择器）。
-  if (document.querySelector(`style[data-ikat-comp-style="${name}"]`)) return;
-  const out = splitKeyframes(css)
-    .map(({ raw, text }) =>
-      raw ? text : text.replace(/([^{}]+)\{/g, (m, sel) => prefixSelector(name, sel)),
-    )
-    .join('');
-  const st = document.createElement('style');
-  st.setAttribute('data-ikat-comp-style', name);
-  st.textContent = out;
-  document.head.appendChild(st);
-}
-
-function escapeRe(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function prefixSelector(name, sel) {
-  const trimmed = sel.trim();
-  if (trimmed.charAt(0) === '@') return sel; // @media 等外层 @-rule 原样放行
-  const hostLed = new RegExp('^' + escapeRe(name) + '(?=[.:[]|\\s|$)');
-  const prefixed = trimmed
-    .split(',')
-    .map((part) => part.replace(hostLed, '').trim())
-    .map((part) =>
-      part ? '[data-ikat-comp="' + name + '"] ' + part : '[data-ikat-comp="' + name + '"]',
-    )
-    .join(', ');
-  return prefixed + ' {';
-}
-
-// 按 `@keyframes 名 {...}` 坐标切段：raw=true 的段原样保留（平衡大括号跟踪覆盖
-// 内嵌百分比块），其余段交给朴素前缀器。
-function splitKeyframes(css) {
-  const segs = [];
-  let i = 0;
-  const re = /@(?:-webkit-)?keyframes\b/g;
-  let m;
-  while ((m = re.exec(css))) {
-    if (m.index > i) segs.push({ raw: false, text: css.slice(i, m.index) });
-    let depth = 0;
-    let j = m.index;
-    let started = false;
-    for (; j < css.length; j++) {
-      if (css[j] === '{') { depth++; started = true; }
-      else if (css[j] === '}') { depth--; if (started && depth === 0) { j++; break; } }
-    }
-    segs.push({ raw: true, text: css.slice(m.index, j) });
-    i = j;
-    re.lastIndex = i;
-  }
-  if (i < css.length) segs.push({ raw: false, text: css.slice(i) });
-  return segs;
+function ensureComponentStylesheet(name) {
+  if (document.querySelector(`link[data-ikat-comp-style="${name}"]`)) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.setAttribute('data-ikat-comp-style', name);
+  link.href = '/ikat-preview/comp-style/' + name + '.css';
+  const isOwned = (el) =>
+    el.tagName === 'STYLE' ||
+    (el.tagName === 'LINK' && (el.rel || '').toLowerCase() === 'stylesheet');
+  const isFramework = (el) =>
+    el.hasAttribute('data-ikat-comp-style') || el.hasAttribute('data-ikat-preview');
+  const anchor = Array.from(document.head.children).find((el) => isOwned(el) && !isFramework(el));
+  if (anchor) document.head.insertBefore(link, anchor);
+  else document.head.appendChild(link);
 }

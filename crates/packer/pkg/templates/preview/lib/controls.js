@@ -4,15 +4,16 @@
 // 要长得对，人类预览才不骗人。作者在 HTML 里写好结构（fill/thumb/listbox/...），
 // 这里只负责驱动。
 
-// role=progressbar → 按 aria-valuenow/min/max 驱动 [data-slot=fill] 宽度。
+// role=progressbar → 按 aria-valuenow 驱动 [data-slot=fill] 宽度。口径 = core
+// sync_control_visuals 的 (value/max).clamp(0,1)——min 不参与（core 侧行为；
+// min≠0 的 ARIA 标准数学分歧另立 issue，预览跟 core 不跟标准）。
 export function wireProgressbars() {
   document.querySelectorAll('[role="progressbar"]').forEach((pb) => {
     const fill = pb.querySelector('[data-slot="fill"]');
     if (!fill) return;
-    const min = parseFloat(pb.getAttribute('aria-valuemin')) || 0;
     const max = parseFloat(pb.getAttribute('aria-valuemax')) || 100;
     const val = parseFloat(pb.getAttribute('aria-valuenow')) || 0;
-    const pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+    const pct = max > 0 ? Math.min(1, Math.max(0, val / max)) * 100 : 0;
     fill.style.width = pct + '%';
   });
 }
@@ -146,13 +147,19 @@ export function wireComboboxes() {
 }
 
 // role=spinbutton（NumberField）→ aria-valuenow 渲染为文本；滚轮/方向键/点按键入
-// 调值，blur/Enter 提交（解析、量化、夹取）。
+// 调值，blur/Enter 提交（解析、量化、夹取）。缺省 min/max 无界（镜像 core 的
+// f32::MIN/MAX——旧版缺 aria-valuemax 时 max=0，任何交互都被钳死到 0）；缺省
+// step=0 不量化（core 语义），方向键步进用 1 兜底。
 export function wireSpinbuttons() {
   document.querySelectorAll('[role="spinbutton"]').forEach((sb) => {
+    const bound = (attr, fallback) => {
+      const v = parseFloat(sb.getAttribute(attr));
+      return Number.isNaN(v) ? fallback : v;
+    };
     const read = () => ({
-      min: parseFloat(sb.getAttribute('aria-valuemin')) || 0,
-      max: parseFloat(sb.getAttribute('aria-valuemax')) || 0,
-      step: parseFloat(sb.getAttribute('data-step')) || 1,
+      min: bound('aria-valuemin', -Infinity),
+      max: bound('aria-valuemax', Infinity),
+      step: bound('data-step', 0),
       val: parseFloat(sb.getAttribute('aria-valuenow')) || 0,
     });
     const render = () => {
@@ -160,7 +167,13 @@ export function wireSpinbuttons() {
     };
     const setVal = (v) => {
       const s = read();
-      let nv = s.min + Math.round((v - s.min) / s.step) * s.step;
+      let nv = v;
+      if (s.step > 0) {
+        // 量化锚点：有界 min 锚 min（保持旧网格语义），无界退 0——锚 -Infinity
+        // 会把 (v - min) 做成 Infinity、整个量化 NaN。
+        const anchor = Number.isFinite(s.min) ? s.min : 0;
+        nv = anchor + Math.round((v - anchor) / s.step) * s.step;
+      }
       nv = Math.max(s.min, Math.min(s.max, nv));
       sb.setAttribute('aria-valuenow', String(nv));
       render();
@@ -172,7 +185,7 @@ export function wireSpinbuttons() {
       (e) => {
         e.preventDefault();
         const s = read();
-        setVal(s.val + (e.deltaY < 0 ? s.step : -s.step));
+        setVal(s.val + (e.deltaY < 0 ? s.step || 1 : -(s.step || 1)));
       },
       { passive: false },
     );
@@ -182,10 +195,10 @@ export function wireSpinbuttons() {
       const s = read();
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setVal(s.val + s.step);
+        setVal(s.val + (s.step || 1));
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setVal(s.val - s.step);
+        setVal(s.val - (s.step || 1));
       }
     });
     const commit = () => {

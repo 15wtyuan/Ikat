@@ -46,8 +46,11 @@ async function boot() {
 function injectBaseCss() {
   // 插到 head 顶：polyfill 先、页面 <style> 后（同名规则胜负不翻转——经典级联序
   // 语义。ESM 延后执行需显式 insertBefore 复原，appendChild 会落在最后）。
+  // data-ikat-preview 标「框架自有」：expand.js 的组件样式链接按「页面自有
+  // style/link 之前」定位插入点，靠它把 base.css 与组件链接排除在锚点外。
   const link = document.createElement('link');
   link.rel = 'stylesheet';
+  link.setAttribute('data-ikat-preview', 'base');
   link.href = '/ikat-preview/lib/base.css';
   document.head.insertBefore(link, document.head.firstChild);
 }

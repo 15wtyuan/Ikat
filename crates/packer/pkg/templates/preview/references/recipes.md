@@ -79,13 +79,20 @@ A-layer wiring does.
 ## Trust list (what a preview can and cannot show)
 
 - **Trustworthy**: flex layout, gap, px sizes, colors, gradient subset,
-  `position:absolute`, `border-radius`, `@keyframes timing` (including
-  inside component `<style>`), component expansion (with host-state class/
-  data/aria mirroring), control visual state, `cursor`
-  (browser-native; matches #93 runtime defaults).
+  `position:absolute`, `border-radius`, `@keyframes timing` (including inside
+  component `<style>`; same-name collisions resolve page-wins, matching the
+  packer's host priority), component expansion with scoped styles (server
+  rewritten — root-class rules on the template root DO apply), control visual
+  state, `cursor` (browser-native; matches #93 runtime defaults).
 - **Approximate**: fonts (same files via @font-face, different rasterizer
   than the game), letterboxing (the shell scales per match_mode — check
-  readability, not exact device pixels).
+  readability, not exact device pixels), page rules leaking into component
+  subtrees (the browser has no style wall; the rewritten selectors carry a
+  +0,1,0 specificity bump that keeps component rules winning equal-specificity
+  contests — a higher-specificity page rule can still pierce).
+- **Preview rejects like the build does (shown as CSS comments in the served
+  sheet)**: non-`@keyframes` at-rules (`@media` …) and out-of-fence selectors
+  inside component `<style>` — dropped, never silently applied.
 - **Runtime-only (preview cannot show)**: NativeHost 3D projection,
   driver-driven list virtualization beyond demo fill, C# tween callbacks,
   focus/keyboard routing beyond the simulated bits, safe-area insets

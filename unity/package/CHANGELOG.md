@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **preview 组件样式作用域根类规则失配（#95）**：组件 `<style>` 的浏览器作用域
+  改写收编进 Rust 单实现（server 新路由 `/ikat-preview/comp-style/<name>.css`，
+  fence 同一入口抽样式），每条规则输出「后代 + 根匹配」双分支——core 语义
+  「作用域 = 子树含模板根、选择器原样」在浏览器侧全等兑现，模板根自身类的规则
+  （`.tip { … }`）不再整条静默失效。同批口径对齐：@keyframes 同名碰撞宿主优先
+  （注入次序 base < 组件 < 页面）；非 @keyframes at-rule（@media 等）与围栏外
+  选择器在 preview 同步丢弃 + 注释（fail-closed，不产「预览能看、构建报错」的
+  假象）；组件 `<link rel=stylesheet>` 与声明块 `url()` 相对路径按组件文件位置
+  归一；spinbutton 缺省 aria-valuemax/min 无界（旧版缺 max 时钳死到 0）；
+  progressbar 对齐 core 的 (value/max) 口径。expand.js 的正则 CSS 前缀器删除
+  （#94 前半步：CSS 语义单真相在 Rust，客户端 A 层收敛为纯 DOM 机械层）。
+
 ## [0.0.14] - 2026-08-28
 
 ### Added

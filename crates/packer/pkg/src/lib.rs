@@ -8,6 +8,7 @@ pub mod diag;
 pub mod expand;
 pub mod init;
 pub mod preview;
+pub mod preview_comp_style;
 pub mod report;
 pub mod runtime;
 pub mod scaffold;

@@ -553,6 +553,11 @@ fn route(req: &Request, shared: &Shared) -> Response {
             }
         }
         ("GET", "/api/workspace.json") => api_workspace(shared),
+        // 组件作用域 CSS（#95 / #94 前半步）：server 用 fence 同一入口抽组件样式，
+        // 双分支改写后供给——客户端 expand.js 只注入本链接，CSS 语义单真相在 Rust。
+        (m, p) if p.starts_with("/ikat-preview/comp-style/") && (m == "GET" || m == "HEAD") => {
+            serve_comp_style(shared, &p["/ikat-preview/comp-style/".len()..])
+        }
         ("GET", "/_ikat/ping") => Response::json(
             200,
             "OK",
@@ -628,6 +633,67 @@ fn api_workspace(shared: &Shared) -> Response {
             "components": serde_json::Value::Object(components),
         }),
     )
+}
+
+/// `/ikat-preview/comp-style/<name>.css`：组件样式的浏览器作用域版。fence 同一
+/// 入口（`parse_html_to_ir_named`）抽 `<style>` 文本 + `<link rel=stylesheet>`
+/// 内容，`preview_comp_style::rewrite_component_css` 双分支改写后供给。注册表
+/// 复用打包期扫描器（live 读源——预览哲学：读活文件，不快照打包期解析）。
+fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
+    let Some(name) = rest.strip_suffix(".css") else {
+        return Response::text(404, "Not Found", "expected <name>.css");
+    };
+    // 组件名围栏 [a-z0-9-]（注册表入口已验）：内插进改写器的属性选择器前的最后防线。
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Response::text(404, "Not Found", "bad component name");
+    }
+    let Ok((reg, _)) = crate::expand::scan_component_registry(&shared.ui, &shared.ws.packages)
+    else {
+        return Response::text(
+            500,
+            "Internal Server Error",
+            "component registry has errors (see `ikat check`)",
+        );
+    };
+    let Some((_, def)) = reg.entries().find(|(n, _)| n.as_str() == name) else {
+        return Response::text(404, "Not Found", "unknown component");
+    };
+    let html_rel = def.html_rel.clone();
+    let Ok(src) = std::fs::read_to_string(shared.ui.join(&html_rel)) else {
+        return Response::text(404, "Not Found", "component source unreadable");
+    };
+    let raw = ikat_fence::tree_builder::parse_html_to_ir_named(&src, html_rel.clone());
+    let mut css = String::new();
+    for st in &raw.style_texts {
+        css.push_str(st);
+        css.push('\n');
+    }
+    // 组件 <link rel=stylesheet> 同页面待遇：href 相对组件文件解析读入。找不到 →
+    // 留注释（打包侧是 FenceStylesheetNotFound error——preview 不放行假样式）。
+    let comp_dir = html_rel
+        .rsplit_once('/')
+        .map(|(dir, _)| dir.to_string())
+        .unwrap_or_default();
+    for (href, _) in &raw.stylesheet_links {
+        let loaded = crate::preview_comp_style::resolve_ws_rel(&comp_dir, href.trim())
+            .filter(|_| !href.contains("://"))
+            .and_then(|rel| std::fs::read_to_string(shared.ui.join(&rel)).ok());
+        match loaded {
+            Some(text) => {
+                css.push_str(&text);
+                css.push('\n');
+            }
+            None => css.push_str(&format!(
+                "/* preview: component stylesheet `{href}` not found — `ikat build` errors on it */\n"
+            )),
+        }
+    }
+    let body = crate::preview_comp_style::rewrite_component_css(name, &css, &html_rel);
+    Response::new(200, "OK", "text/css; charset=utf-8", body)
 }
 
 /// serve 工作区文件：路径沙箱（canonicalize 后必须仍在工作区内；拒绝点开头
@@ -1112,6 +1178,48 @@ mod tests {
             );
             assert_eq!(st3, 200);
             assert!(shared.shutdown.load(Ordering::SeqCst));
+            let _ = std::fs::remove_dir_all(&ui);
+        }
+
+        #[test]
+        fn serves_component_scoped_style() {
+            // #95 复现形状：模板根带类 + 样式写在组件 <style> 的根类上。
+            let comp = "<style>.tip { background: #eee; width: 320px; }\n\
+                        tip-panel.is-press .slot { color: #ff0000; }\n\
+                        .tip .slot:hover { text-decoration: underline; }</style>\n\
+                        <div class=\"tip\"><slot></slot></div>";
+            let ui = write_ws(
+                "compstyle",
+                &[
+                    ("ikat.workspace.json", WS_JSON),
+                    ("ui/components/tip-panel.html", comp),
+                ],
+            );
+            let (port, _shared) = spawn_server(&ui);
+
+            let (st, body) = get(port, "/ikat-preview/comp-style/tip-panel.css");
+            assert_eq!(st, 200);
+            // 双分支：根类规则必须能命中携带标记的模板根（旧 JS 前缀只有后代分支）。
+            assert!(body.contains(
+                "[data-ikat-comp=\"tip-panel\"] .tip, [data-ikat-comp=\"tip-panel\"].tip"
+            ));
+            // host 链剥标签（host 类由镜像机制落到根上）+ 链中根 + 伪类。
+            assert!(body.contains(
+                "[data-ikat-comp=\"tip-panel\"] .is-press .slot, [data-ikat-comp=\"tip-panel\"].is-press .slot"
+            ));
+            assert!(body.contains(
+                "[data-ikat-comp=\"tip-panel\"] .tip .slot:hover, [data-ikat-comp=\"tip-panel\"].tip .slot:hover"
+            ));
+            // 声明原文透传。
+            assert!(body.contains("width: 320px"));
+
+            // 未知名 / 缺后缀 / 大写（围栏外字符）→ 404。
+            let (st2, _) = get(port, "/ikat-preview/comp-style/nope.css");
+            assert_eq!(st2, 404);
+            let (st3, _) = get(port, "/ikat-preview/comp-style/tip-panel");
+            assert_eq!(st3, 404);
+            let (st4, _) = get(port, "/ikat-preview/comp-style/TipPanel.css");
+            assert_eq!(st4, 404);
             let _ = std::fs::remove_dir_all(&ui);
         }
     }
