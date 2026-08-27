@@ -463,9 +463,9 @@
 
       <div class="section">
         <div class="section-title">19 · 链接（&lt;a&gt; rich 内链接 · #74）</div>
-        <div class="section-desc">验收：① 点击「商店」——读数变为 open-shop（href 原样回传）；点击「背包」——读数变为 open-bag；点击「任务日志」——读数变为 open-quest（嵌 span 内的文字同样命中链接）。② 链接文字呈蓝色下划线（UA 默认样式，浅底面板上与深色正文一眼区分）。③ 鼠标悬停任一链接——文字变红（a:hover 生效），移开复原蓝色。④ 点击链接外的普通文字——读数保持「未点击」或上次值不变（命中未落到 a 节点）。</div>
+        <div class="section-desc">验收：① 点击「商店」——读数变为 open-shop（href 原样回传）；点击「背包」——读数变为 open-bag；点击「任务日志」——读数变为 open-quest（嵌 span 内的文字同样命中链接）；点击「自定义链接」——读数变为 open-custom。② 链接文字呈蓝色下划线（UA 默认样式，浅底面板上与深色正文一眼区分）。③ 鼠标悬停任一链接——文字变红（a:hover 生效），移开复原蓝色。④ 点击链接外的普通文字——读数保持「未点击」或上次值不变（命中未落到 a 节点）。⑤ 「自定义链接」呈绿色且**无下划线**（作者 color 声明覆盖 UA 蓝、text-decoration:none 覆盖 UA 下划线——同一条级联通道）。⑥ 「下划线 span」普通文字带下划线（text-decoration 不限 &lt;a&gt;，rich 流内任意 inline 声明均可）。</div>
         <div class="specimen" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
-          <div class="link-rich">查看<a id="link-shop" href="open-shop">商店</a>或<a id="link-bag" href="open-bag">背包</a>，也可翻看<a id="link-quest" href="open-quest"><span>任务日志</span></a>。这句普通文字可点击，但读数不应变化。</div>
+          <div class="link-rich">查看<a id="link-shop" href="open-shop">商店</a>或<a id="link-bag" href="open-bag">背包</a>，也可翻看<a id="link-quest" href="open-quest"><span>任务日志</span></a>。这句普通文字可点击，但读数不应变化。还可打开<a id="link-custom" href="open-custom" style="color:#2e8b57;text-decoration:none">自定义链接</a>，或看<span style="text-decoration:underline">下划线 span</span>。</div>
           <span id="link-readout" style="color:#e0e6ec;font-size:13px;min-width:220px">未点击</span>
         </div>
       </div>
