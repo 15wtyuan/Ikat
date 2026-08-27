@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.13] - 2026-08-27
+
+v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
+全接线）+ `loom preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
+AI 安装手册重写；发版轮收尾批（transition 首帧修复 / 预览体验三连修 /
+agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F8 dump
+归因增强 / 运行时告警面 / 动态内容范式文档 + lab §17 用例）。
+
 ### Added
 - **文本测量公共 API（#86）**：`UIContext.MeasureText(text, family, sizePx,
   maxWidth)` → `TextMetrics{W, H, LineCount}`——布局前纯文本预估（tips 预分行 /
@@ -34,15 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   :nth-child）对实例化节点照常生效的适用面声明。showcase lab §17 摆台验证：
   `GetTemplate` 实例化 ×3 + Query 注入 + `dyn-selected` 类切换（读 computed
   背景色进读数）+ hover/斑马纹判据；`lab.dynamic.css` 同批入库。
-
-## [0.0.13] - 2026-08-27
-
-v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
-全接线）+ `loom preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
-AI 安装手册重写；发版轮收尾批（transition 首帧修复 / 预览体验三连修 /
-agent 文档补齐）。
-
-### Added
 - **动画引擎终态基建（#9）**：ease 全集、统一 `TweenValue`、tween 池化、
   percent keyframes（#77）、transform-origin；C# 侧 `TweenBuilder`
   fluent wrapper + `TweenComplete` 标签路由 + lab §16 运行时用例
