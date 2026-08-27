@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.15] - 2026-08-28
+
 ### Changed
 - **光标皮肤去内置，改消费侧注册（#93 followup）**：`IkatStageDriver` 删除内置手型
   像素画——intent 0/1（箭头/手型）缺省均为系统光标；新增

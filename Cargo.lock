@@ -1715,7 +1715,7 @@ dependencies = [
 
 [[package]]
 name = "ikat_pkg"
-version = "0.0.14"
+version = "0.0.15"
 dependencies = [
  "etagere",
  "ikat_core",
