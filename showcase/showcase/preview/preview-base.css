@@ -1,13 +1,11 @@
-/* Ikat browser preview base (preview-only — packer consumes body only, head not in pkg.bin).
-   polyfill to align Ikat rendering conventions. */
+/* showcase 预览主题面（消费侧 B 层资产——#92 分层后结构性 polyfill 在
+   /ikat-preview/lib/base.css 由 boot.js 注入，本文件只剩字体与配色）。
+   preview-only：打包器只消费 body，head 不进 pkg.bin。 */
 @font-face {
   font-family: 'LXGW WenKai';
   src: url('../../res/fonts/LXGWWenKai.ttf') format('truetype');
   font-display: block;
 }
-/* Workspace font families pages reference by name (ikat.workspace.json fonts):
-   without these the browser preview silently falls back to system fonts,
-   and rect-diff baselines diverge from core's real-font measurements. */
 @font-face {
   font-family: 'JetBrainsMono';
   src: url('../../res/fonts/JetBrainsMono.ttf') format('truetype');
@@ -23,16 +21,7 @@
   src: url('../../res/fonts/DejaVuSans.ttf') format('truetype');
   font-display: block;
 }
-/* No tag-level display polyfill: fence DisplayDefault matches the browser
-   (div/ul/li -> block, span/button/... -> inline), and the
-   runtime resolves inline -> Flex+Row. Authors must declare display:flex
-   explicitly per main-design.md; do not reintroduce a "div is flex" shim. */
-* { box-sizing: border-box; }
-/* iframe 视口 = 设计视口（shell 按设备框呈现）：body 不做任何包装（旧 file://
-   直开时代的 padding:24px + 居中卡片美化会把 1080 高的页面顶成 1128 出滚动条，
-   且与运行时 .root@(0,0) 不符——rect-diff 的 reset.css 一直就是按「无包装」对齐的）。 */
 body {
-  margin: 0;
   color: #e0e6ec;
   font-family: 'LXGW WenKai', sans-serif;
   background: #05080d;
@@ -44,13 +33,9 @@ body {
   overflow: hidden;
 }
 .page-title, .section-title, .panel-title, .group-title, .dialog-title, .read-title, .col-title, .side-title, .stage-name { letter-spacing: -0.01em; }
-button { background: none; border: none; color: inherit; font: inherit; padding: 0; cursor: pointer; text-decoration: none; }
-input::placeholder, textarea::placeholder { color: #6c7080; opacity: 1; }
-/* role=textbox placeholder: author writes aria-placeholder; preview JS toggles data-empty when content is blank. */
-[role="textbox"][data-empty]::before { content: attr(aria-placeholder); color: #6c7080; opacity: 1; }
 select option { color: #e0e6ec; background-color: #152433; }
 
-/* 「重播动画」按钮（ikat-preview.js 注入，preview-only） */
+/* 「重播动画」按钮（showcase main.js 注入，preview-only） */
 #ikat-anim-replay {
   position: fixed; right: 18px; bottom: 16px; z-index: 9999;
   padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;

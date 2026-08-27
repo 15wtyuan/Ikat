@@ -2,7 +2,7 @@
 // Unity 侧等价接线在 ShowcaseRunner.WireLayoutAnimDrivers：#1/#3/#4 按钮 add_class
 // 切换（CSS transition 起效），#6 是 C# TweenBuilder 运行时 API——浏览器侧用 rAF
 // + cubic-out 复刻同一节奏（预览只求视觉可对照，非逐帧等价）。
-import { ready } from '../main.js';
+import { ready } from '/ikat-preview/lib/boot.js';
 
 const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 

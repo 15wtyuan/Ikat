@@ -1,12 +1,15 @@
 //! `ikat preview` — 人类预览工作台：本地只读 HTTP server，serve 工作区源文件 +
 //! 内嵌外壳，把「AI 写完页面 → 人类浏览器过目 → 进 Unity」补成闭环。
 //!
-//! 设计要点（grilling 定案，2026-08）：
+//! 设计要点（grilling 定案，2026-08；#92 分层修订）：
 //! - 忠实预览：分辨率切换由外壳按 match_mode 缩放设计分辨率渲染，永不触发浏览器
 //!   reflow——core 按固定设计分辨率 solve，预览必须预测运行时。
-//! - 注入约定：每包最多两个 ESM 入口（`<包目录>/preview/main.js` 全页共享 +
-//!   `preview/pages/<页名>.js` 按页），文件存在才注入 `<script type=module>`。
-//!   HTML 源零引用、不进打包；模拟脚本全部 AI 手写，框架不 ship 模拟器。
+//! - 注入分层（#92）：A 层「单真相语义」（组件展开 / 控件语义 / 结构 polyfill）
+//!   嵌在二进制里，boot 入口对每个 HTML 页**恒注入**、经 `/ikat-preview/lib/*`
+//!   路由供给——与 CLI 版本天然同版本，工作区不拷贝（复刻物 = 第二真相源）。
+//!   B 层「消费侧语义」（演示数据 / 页面导航 / 页面交互）归工作区：
+//!   `<包目录>/preview/main.js` 全页 + `preview/pages/<页名>.js` 按页，文件存在
+//!   才追加注入。HTML 源零引用、不进打包。
 //! - 生命周期（吸收 superpowers 踩坑）：per-workspace 稳定端口（路径哈希
 //!   41000–41999，浏览器 tab 跨重启不断链）；server-info 落盘
 //!   `<会话根>/.ikat/preview.json` 兜底「AI 后台起进程 stdout 被吞」；空闲超时
@@ -522,6 +525,32 @@ fn route(req: &Request, shared: &Shared) -> Response {
         ("GET", "/shell/style.css") | ("HEAD", "/shell/style.css") => {
             Response::new(200, "OK", "text/css", shell::STYLE_CSS)
         }
+        // A 层库路由（#92）：boot 自动注入引这里；工作区 B 层脚本 import 这些
+        // 绝对 URL——内容嵌在二进制里，与 CLI 版本天然同版本。
+        (m, p) if p.starts_with("/ikat-preview/lib/") && (m == "GET" || m == "HEAD") => {
+            match p.rsplit('/').next().unwrap_or("") {
+                "boot.js" => {
+                    Response::new(200, "OK", "text/javascript; charset=utf-8", simlib::BOOT_JS)
+                }
+                "expand.js" => Response::new(
+                    200,
+                    "OK",
+                    "text/javascript; charset=utf-8",
+                    simlib::EXPAND_JS,
+                ),
+                "controls.js" => Response::new(
+                    200,
+                    "OK",
+                    "text/javascript; charset=utf-8",
+                    simlib::CONTROLS_JS,
+                ),
+                "fill.js" => {
+                    Response::new(200, "OK", "text/javascript; charset=utf-8", simlib::FILL_JS)
+                }
+                "base.css" => Response::new(200, "OK", "text/css; charset=utf-8", simlib::BASE_CSS),
+                _ => Response::text(404, "Not Found", "not found"),
+            }
+        }
         ("GET", "/api/workspace.json") => api_workspace(shared),
         ("GET", "/_ikat/ping") => Response::json(
             200,
@@ -626,7 +655,8 @@ fn serve_workspace_file(ui: &Path, rel: &str) -> Response {
         Ok(b) => b,
         Err(_) => return Response::text(500, "Internal Server Error", "read failed"),
     };
-    if mime == "text/html" {
+    // 注入判定按前缀（text/* 已带 charset 后缀，等值比较会漏判）。
+    if mime.starts_with("text/html") {
         let dir = canon.parent().unwrap_or(Path::new("")).to_path_buf();
         let stem = canon
             .file_stem()
@@ -683,15 +713,18 @@ fn percent_decode(s: &str) -> String {
 
 fn mime_for(path: &Path) -> String {
     match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
-        "html" | "htm" => "text/html",
-        "js" | "mjs" => "text/javascript",
-        "css" => "text/css",
+        // 文本类一律带 charset=utf-8（#92）：浏览器对无 charset 的 text/* 按本地
+        // 传统编码解码，静态中文会乱码；ESM 因规范恒 UTF-8 不受影响——恰好证明
+        // 同一 server 两套解码真相的不一致。
+        "html" | "htm" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
         "webp" => "image/webp",
         "svg" => "image/svg+xml",
-        "json" => "application/json",
         "txt" | "md" => "text/plain; charset=utf-8",
         "woff2" => "font/woff2",
         "woff" => "font/woff",
@@ -700,11 +733,15 @@ fn mime_for(path: &Path) -> String {
     .to_string()
 }
 
-/// HTML 注入：`<包目录>/preview/main.js`（全页）与 `preview/pages/<页stem>.js`
-/// （按页）存在才注入；src 用相对路径（浏览器按页面 URL 解析 → 落回本 server
-/// 的 /ws/ 下同一目录）。module 自带 defer 语义，DOM ready 后执行。
+/// HTML 注入（#92 分层后的注入约定）：A 层 boot（`/ikat-preview/lib/boot.js`，
+/// 组件展开 + 控件语义 + base polyfill）**恒注入**；工作区 B 层
+/// `<包目录>/preview/main.js`（全页）与 `preview/pages/<页stem>.js`（按页）
+/// 存在才追加。module 自带 defer 语义、按注入序执行——boot 先跑（A 层就绪后
+/// B 层才动 DOM）。src 用绝对路径（boot 落 server 根路由）；工作区脚本仍用相对
+/// 路径（浏览器按页面 URL 解析 → 落回本 server 的 /ws/ 下同一目录）。
 pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str) -> String {
     let mut tags = String::new();
+    tags.push_str(r#"<script type="module" src="/ikat-preview/lib/boot.js"></script>"#);
     if page_dir.join("preview/main.js").is_file() {
         tags.push_str(r#"<script type="module" src="preview/main.js"></script>"#);
     }
@@ -712,9 +749,6 @@ pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str) -> String
         tags.push_str(&format!(
             r#"<script type="module" src="preview/pages/{stem}.js"></script>"#
         ));
-    }
-    if tags.is_empty() {
-        return html.to_string();
     }
     // 插在 </head> 前（页面自带 <style> 之后，模拟脚本不抢样式声明）；无 head
     // 的退化 HTML 直接前置。大小写不敏感找 tag（HTML 大小写不敏感）。
@@ -768,6 +802,17 @@ mod shell {
     pub const STYLE_CSS: &str = include_str!("../templates/preview-shell/style.css");
 }
 
+/// 预览 A 层库（templates/preview/lib/，#92）：boot 引导 / 组件展开 / 控件语义 /
+/// 演示填充 / 结构性 polyfill——「单真相语义」的框架真相副本，经路由
+/// `/ikat-preview/lib/*` 供给（与运行二进制天然同版本），工作区不拷贝。
+mod simlib {
+    pub const BOOT_JS: &str = include_str!("../templates/preview/lib/boot.js");
+    pub const EXPAND_JS: &str = include_str!("../templates/preview/lib/expand.js");
+    pub const CONTROLS_JS: &str = include_str!("../templates/preview/lib/controls.js");
+    pub const FILL_JS: &str = include_str!("../templates/preview/lib/fill.js");
+    pub const BASE_CSS: &str = include_str!("../templates/preview/lib/base.css");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -811,9 +856,21 @@ mod tests {
 
     #[test]
     fn mime_coverage() {
-        assert_eq!(mime_for(Path::new("a.js")), "text/javascript");
-        assert_eq!(mime_for(Path::new("a.mjs")), "text/javascript");
-        assert_eq!(mime_for(Path::new("a.html")), "text/html");
+        // 文本类一律带 charset=utf-8（#92：静态中文按浏览器本地编码解码会乱码）。
+        assert_eq!(
+            mime_for(Path::new("a.js")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            mime_for(Path::new("a.mjs")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(mime_for(Path::new("a.html")), "text/html; charset=utf-8");
+        assert_eq!(mime_for(Path::new("a.css")), "text/css; charset=utf-8");
+        assert_eq!(
+            mime_for(Path::new("a.json")),
+            "application/json; charset=utf-8"
+        );
         assert_eq!(mime_for(Path::new("a.png")), "image/png");
         assert_eq!(mime_for(Path::new("a.unknown")), "application/octet-stream");
     }
@@ -828,24 +885,29 @@ mod tests {
 
         let html = "<html><head><style>x{}</style></head><body></body></html>";
         let out = inject_preview_scripts(html, &tmp, "home");
+        // A 层 boot 恒注入（#92）+ 工作区两入口存在才追加。
+        assert!(out.contains(r#"src="/ikat-preview/lib/boot.js""#));
         assert!(out.contains(r#"<script type="module" src="preview/main.js"></script>"#));
         assert!(out.contains(r#"<script type="module" src="preview/pages/home.js"></script>"#));
         // 注入位置在 </head> 前、页面 <style> 之后。
         let style_pos = out.find("<style>").unwrap();
-        let main_pos = out.find("preview/main.js").unwrap();
+        let boot_pos = out.find("/ikat-preview/lib/boot.js").unwrap();
         let head_pos = out.find("</head>").unwrap();
-        assert!(style_pos < main_pos && main_pos < head_pos);
+        assert!(style_pos < boot_pos && boot_pos < head_pos);
 
-        // 无按页脚本的页：只注入 main。
+        // 无按页脚本的页：boot + main。
         let out2 = inject_preview_scripts(html, &tmp, "other");
+        assert!(out2.contains("/ikat-preview/lib/boot.js"));
         assert!(out2.contains("preview/main.js"));
         assert!(!out2.contains("pages/"));
 
-        // 两个入口都不存在：原样返回。
+        // 工作区入口全缺：只剩 A 层 boot（不再原样返回——无组件页也吃 polyfill/
+        // 控件语义，消费侧零脚本成本是 #92 的目标之一）。
         std::fs::remove_dir_all(&tmp).unwrap();
         std::fs::create_dir_all(&tmp).unwrap();
         let out3 = inject_preview_scripts(html, &tmp, "home");
-        assert_eq!(out3, html);
+        assert!(out3.contains(r#"src="/ikat-preview/lib/boot.js""#));
+        assert!(!out3.contains("preview/main.js"));
     }
 
     // ------------------------------------------------------------------
@@ -933,17 +995,36 @@ mod tests {
             );
             let (port, _shared) = spawn_server(&ui);
 
-            // 页 + 两个入口都注入；相对 src 由浏览器按页面 URL 解析回 /ws/ui/preview/。
+            // 页 + 两个入口都注入；boot 恒在先（A 层先于 B 层执行），工作区入口
+            // 相对 src 由浏览器按页面 URL 解析回 /ws/ui/preview/。
             let (st, body) = get(port, "/ws/ui/home.html");
             assert_eq!(st, 200);
-            assert!(body.contains(r#"src="preview/main.js""#));
-            assert!(body.contains(r#"src="preview/pages/home.js""#));
+            assert!(body.contains(r#"src="/ikat-preview/lib/boot.js""#));
+            assert!(body.contains(r#"<script type="module" src="preview/main.js"></script>"#));
+            assert!(body.contains(r#"<script type="module" src="preview/pages/home.js"></script>"#));
+            let boot_pos = body.find("/ikat-preview/lib/boot.js").unwrap();
+            let main_pos = body.find("preview/main.js").unwrap();
+            assert!(boot_pos < main_pos, "A 层 boot 先于 B 层注入");
 
-            // 无按页脚本的页只注入 main。
+            // 无按页脚本的页：boot + main。
             let (st2, body2) = get(port, "/ws/ui/plain.html");
             assert_eq!(st2, 200);
+            assert!(body2.contains("/ikat-preview/lib/boot.js"));
             assert!(body2.contains("preview/main.js"));
             assert!(!body2.contains("pages/"));
+
+            // A 层库路由：内容嵌在二进制、charset 齐全（#92）。
+            for p in [
+                "/ikat-preview/lib/boot.js",
+                "/ikat-preview/lib/expand.js",
+                "/ikat-preview/lib/controls.js",
+                "/ikat-preview/lib/fill.js",
+                "/ikat-preview/lib/base.css",
+            ] {
+                let (stl, bodyl) = get(port, p);
+                assert_eq!(stl, 200, "{p}");
+                assert!(!bodyl.is_empty(), "{p}");
+            }
 
             // 模拟脚本本体以 JS MIME 可达（ESM 必需）。
             let (st3, body3) = get(port, "/ws/ui/preview/main.js");

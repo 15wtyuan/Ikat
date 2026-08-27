@@ -76,9 +76,10 @@ package/page tree on the left, preview on the right at the design
 resolution under `match_mode` scaling (never reflows — preview must
 predict the runtime), device-frame switching with safe-area guides,
 settings in browser localStorage. It auto-injects the workspace's
-preview simulation entries (`<pkg-dir>/preview/main.js` +
-`preview/pages/<page>.js`) when they exist — sources stay clean and the
-`preview/` dir never packs. Simulation scripts themselves are the
+the framework behavior boot (`/ikat-preview/lib/boot.js`, always) plus
+workspace consumer scripts (`<pkg-dir>/preview/main.js` + the
+matching `preview/pages/<page>.js`) when they exist — sources stay clean
+and the `preview/` dir never packs. Consumer simulation scripts are the
 `ikat-preview` skill's business.
 
 Lifecycle (absorbed from real-world server pain): stable port per

@@ -115,12 +115,12 @@ demand, not upfront.
 3. **Check and fix in rounds.** `ikat check` (from the session root, or
    `ikat check <ui-dir>`) → fix EVERY diagnostic in one editing pass →
    repeat until exit 0. Diagnostics carry code/file/line/column/help.
-4. **Write preview simulation.** If the page has `data-fill` lists,
-   custom elements, interactive controls, or game-code-driven content,
-   write the preview scripts per the `ikat-preview` skill
-   (`preview/main.js` + `preview/pages/<page>.js` — the server injects
-   them; HTML stays clean). A `PreviewDataFillWithoutSim` warning means
-   this step is missing.
+4. **Write preview simulation.** If the page has `data-fill` lists or
+   game-code-driven content, write the consumer-layer preview scripts per
+   the `ikat-preview` skill (`preview/main.js` + `preview/pages/<page>.js`
+   — the server injects them after its own behavior boot; component pages
+   and controls are alive without any workspace script; HTML stays clean).
+   A `PreviewDataFillWithoutSim` warning means this step is missing.
 5. **Human preview (the gate).** Start or reuse `ikat preview` (running
    instance reports the same URL; also recorded in
    `.ikat/preview.json`), give the human the URL, and iterate on their

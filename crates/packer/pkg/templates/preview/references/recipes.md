@@ -1,96 +1,17 @@
 # Preview simulation recipes
 
-Copy-paste starting points, distilled from the showcase workspace's
-battle-tested simulation stack (rect-diff verified against core). Import
-what you need from `preview/lib/` — create it by copying from these
-recipes; the convention only pins the two entry files (`main.js`,
-`pages/<page>.js`), everything inside `lib/` is yours to organize via
-ESM imports.
-
-## main.js skeleton (shared, per package)
-
-```js
-// preview/main.js — injected into every page of the package.
-import { expandComponents, fetchRegistry } from './lib/expand.js';
-import { wireTabs, wireDialogs, wireProgressbars, wireSliders,
-         wireSwitchesAndRadios, wireComboboxes, wireSpinbuttons,
-         wireTextboxes } from './lib/controls.js';
-
-export const ready = boot();          // pages/<page>.js awaits this
-
-async function boot() {
-  injectBaseCss();                    // preview/preview-base.css, head-FIRST
-  try { expandComponents(await fetchRegistry()); } catch (_) {}
-  wireTabs(); wireDialogs();
-  wireProgressbars(); wireSliders(); wireSwitchesAndRadios();
-  wireComboboxes(); wireSpinbuttons(); wireTextboxes();
-}
-
-function injectBaseCss() {
-  // Base polyfill (@font-face for workspace fonts, box-sizing reset) must
-  // ride the script channel — the fence validates every <link>, and the
-  // polyfill is intentionally out-of-fence. Insert at head TOP: polyfill
-  // first, page <style> after (same cascade the old inline stack had).
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = 'preview/preview-base.css';
-  document.head.insertBefore(link, document.head.firstChild);
-}
-```
-
-`preview-base.css` essentials: `@font-face` for every workspace font
-(`../../res/fonts/<file>.ttf` relative to `preview/`), `* { box-sizing:
-border-box }`, button/img display resets matching fence semantics.
-
-## lib/expand.js — component expansion
-
-Semantics to mirror (pack-time Custom Element expansion): host keeps its
-place/attrs; template root appended under it; `<slot name=x>` replaced at
-its splice position by host light children with `slot="x"` (fallback
-children kept when nothing assigned); whitespace-only light children
-dropped; relative URLs inside the template resolved against the component
-file location (`components/<name>.html`); nested components expand in
-further passes to a fixpoint (≤16); component `<style>` prefixed with
-`[data-ikat-comp="name"]` for scope emulation. Registry data comes from
-the server: `fetch('/api/workspace.json')` → `components: { name:
-<workspace-rel-path> }` → fetch each `/ws/<path>` source.
-
-Full reference implementation: `showcase/showcase/preview/lib/expand.js`
-in the Ikat repository.
-
-## lib/controls.js — control wiring (mirror core semantics)
-
-- `role=progressbar`: drive `[data-slot=fill]` width from
-  `aria-valuenow/min/max` (percent).
-- `role=slider`: position `[data-slot=thumb]` (`left = (trackW − thumbW) ×
-  pct`, vertically centered via translateY) and `[data-slot=fill]` width;
-  pointer drag updates `aria-valuenow`, clamps, quantizes to `data-step`.
-- `role=switch`: click toggles `aria-checked`.
-- `role=radio`: click checks it and unchecks `[data-name=…]` siblings.
-- `role=combobox`: click toggles `aria-expanded` + `listbox` display;
-  clicking an `role=option` writes its text into `[data-slot=value]`,
-  marks `aria-selected`, collapses; outside click closes; starts closed.
-- `role=spinbutton`: render `aria-valuenow` as text; wheel/ArrowUp/Down
-  adjust by `data-step`; contenteditable typing commits on blur/Enter
-  (parse → quantize → clamp).
-- `role=tab`: target panel keeps author CSS (`display=''`), all other
-  panels `display='none'`; initialize from the first
-  `aria-selected=true` tab.
-- `role=textbox`: `contenteditable=true`; toggle `data-empty` attribute —
-  the placeholder line renders via `[data-empty]::before` in CSS (an
-  empty textbox must keep its placeholder line height, or rect-diff
-  fabricates diffs).
-- dialogs: `[data-open-dialog=id]` shows (`display=''`),
-  `[data-close-dialog]` hides the closest `[role=dialog]`.
-
-Full reference implementation: `showcase/showcase/preview/lib/controls.js`.
+Consumer-layer (B) starting points. The behavior layer (component
+expansion, control wiring, structural polyfill) is served by the preview
+server itself from the running binary (`/ikat-preview/lib/*`, auto-injected
+boot entry — see SKILL.md). Everything below is what a workspace still
+owns: demo data, fonts/theming, page navigation.
 
 ## pages/<page>.js — demo data
 
 ```js
 // preview/pages/inventory.js — injected only into inventory.html.
-import { ready } from '../main.js';
-import { fillList, pageDir } from '../lib/fill.js';
+import { ready } from '/ikat-preview/lib/boot.js';
+import { fillList, pageDir } from '/ikat-preview/lib/fill.js';
 
 const ICONS = ['item-potion', 'item-chest', 'item-gem'];
 ready.then(() => {
@@ -110,18 +31,65 @@ ready.then(() => {
 removes these clones before measuring (core's static dump has no driver),
 so fill freely — it never breaks the alignment gate.
 
+Import both modules by absolute URL (`/ikat-preview/lib/...`) — they are
+version-matched to the running CLI, never copied into the workspace.
+
+## main.js (optional) — fonts, theming, shared page glue
+
+```js
+// preview/main.js — injected into every page of the package (after boot).
+const link = document.createElement('link');
+link.rel = 'stylesheet';
+link.href = 'preview/preview-theme.css';
+document.head.insertBefore(link, document.head.firstChild);
+```
+
+`preview-theme.css` (name it anything) holds workspace-owned styling:
+
+- `@font-face` for every font `ikat.workspace.json` declares
+  (`../../res/fonts/<file>.ttf` relative to `preview/`). Without these the
+  browser silently falls back to system fonts and rect-diff baselines
+  diverge from core's real-font measurements.
+- Theme colors/backgrounds/decoration. Do **not** re-declare structural
+  resets already owned by `/ikat-preview/lib/base.css` (`box-sizing`,
+  button reset, placeholder line) — same-name rules here would fight the
+  framework copy as a second truth.
+
+## Navigation & page-specific interaction (main.js)
+
+```js
+const NAV = { 'nav-settings': 'settings', 'nav-mail': 'mail' };
+for (const [id, page] of Object.entries(NAV)) {
+  const el = document.getElementById(id);
+  el?.addEventListener('click', () => {
+    location.href =
+      location.href.substring(0, location.href.lastIndexOf('/') + 1) +
+      page + '.html';
+  });
+}
+```
+
+Page-private interactions (battle replay, hotkey demos, readouts) follow
+the same shape: plain DOM listeners on top of booted state. If a control
+needs programmatic driving, import nothing extra — after `ready`, the
+elements carry live attributes (`aria-valuenow`, `aria-expanded`,
+`aria-checked`); mutate them and dispatch the matching Event the way the
+A-layer wiring does.
+
 ## Trust list (what a preview can and cannot show)
 
 - **Trustworthy**: flex layout, gap, px sizes, colors, gradient subset,
-  `position:absolute`, `border-radius`, `@keyframes` timing, component
-  expansion, control visual state (with the recipes above).
+  `position:absolute`, `border-radius`, `@keyframes timing` (including
+  inside component `<style>`), component expansion (with host-state class/
+  data/aria mirroring), control visual state, `cursor`
+  (browser-native; matches #93 runtime defaults).
 - **Approximate**: fonts (same files via @font-face, different rasterizer
   than the game), letterboxing (the shell scales per match_mode — check
   readability, not exact device pixels).
 - **Runtime-only (preview cannot show)**: NativeHost 3D projection,
   driver-driven list virtualization beyond demo fill, C# tween callbacks,
   focus/keyboard routing beyond the simulated bits, safe-area insets
-  (shell draws reference guides only; the core has no inset concept).
+  (shell draws reference guides only).
 
 If the build emits a preview≠runtime warning (`FenceBorderWithoutStyle`,
 `FenceBgImageWithoutSize`, non-transitionable `transition` properties,

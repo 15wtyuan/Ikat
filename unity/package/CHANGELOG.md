@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **桌面指针 affordance（#93）**：悬停 pressable 控件（button/tab/toggle/radio/
+  slider/dropdown/option 与 `<a>` 链接）软件指针自动变手型——UA 默认行为，作者
+  零声明；disabled/不可命中控件不给手型。新围栏属性 `cursor`
+  （`auto` 缺省 = UA 默认 / `pointer` 手型，标非控件可点区 / `default` 箭头 /
+  `none` 元素级隐藏——作者显式声明恒压 UA 行为，浏览器一致）。pkg 格式 v47
+  （旧包拒绝加载）。Unity 侧 Driver 订阅 `IkatHost.CursorIntentChanged`
+  （0 箭头/1 手型/2 隐藏），手型纹理程序化生成、Destroy 还原系统光标；
+  自定义软件光标纹理帧业务仍走 `Cursor.visible=false + 自绘 sprite` 的既有方案。
+- **preview 行为层分层（#92）**：组件展开/控件语义/结构性 polyfill 收编为框架
+  真相副本（嵌在 ikat 二进制），preview server 对每个 HTML 页**恒注入** A 层 boot；
+  消费侧脚本（B 层：演示数据/导航/页面交互）经 `/ikat-preview/lib/*` 绝对 URL
+  import，不再拷贝 showcase 参考实现——第二真相源腐烂路径（宿主态选择器失配/
+  keyframes 帧选择器误杀/#90 式契约漂移不同步）结构性消除。Tripawd 三处狗粮
+  补丁已吸收进真相副本（宿主态镜像到模板根 + `@keyframes` 内部原样放行）。
+  静态文本响应补齐 `charset=utf-8`（无 charset 时中文按本地编码解码乱码）。
+  展开层完全收编进 Rust 单实现开 deferred 票 #94。
+
 ### Changed
 - **品牌更名 LoomGUI → Ikat（#91）**：crate 前缀 `loomgui_*`→`ikat_*`、CLI `loom`→`ikat`、
   C# namespace/类型 `LoomGUI.*`/`Loom*`→`Ikat`（一步到位不留过渡 alias）、

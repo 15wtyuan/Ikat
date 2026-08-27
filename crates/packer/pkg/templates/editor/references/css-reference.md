@@ -17,6 +17,13 @@ error):
 - `border-color` / `border-style` / `border-radius` / `border-image-slice`
 - `background-color` / `background-image` / `background-size` / `background-repeat` / `background-clip` / `-webkit-background-clip`
 - `opacity` / `box-shadow` / `pointer-events` / `transform` / `transform-origin` / `filter`
+- `cursor` — `auto` / `default` / `none` / `pointer` (not inherited). `auto` = UA default:
+  hovering pressable controls (button / tab / toggle / radio / slider / dropdown /
+  option, and `<a>` links) shows the pointer hand at runtime; everything else stays
+  the system arrow. Explicit declarations always win over the UA default — use
+  `pointer` to mark clickable non-controls (map nodes etc.), `default` to force an
+  arrow on a control, `none` for element-level software-cursor hiding. Browser
+  preview renders `cursor` natively, so there is no preview/runtime gap here.
 - `color` / `font-size` / `font-family` / `font-weight`
 - `text-align` / `line-height` / `letter-spacing` / `white-space` / `text-shadow`
 - `white-space` — full set: `normal` / `nowrap` / `pre` / `pre-wrap` / `pre-line` (space collapsing × auto-wrap × source-newline preservation); CJK line breaking avoids line-start punctuation / line-end opening brackets (kinsoku)
@@ -114,7 +121,6 @@ Properties that do NOT exist in the fence (using any of these is a
 `FenceUnknownCssProp` build error):
 
 - `box-sizing` — there is no border-box switch; padding adds to the set width/height
-- `cursor`
 - `font-style` — no italic via CSS (and no `em` / `i` tags either)
 - `text-transform`
 - `user-select` — use `pointer-events` for interaction gating

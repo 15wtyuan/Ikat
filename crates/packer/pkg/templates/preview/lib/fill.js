@@ -1,4 +1,5 @@
-// 演示数据填充（AI 手写预览脚本；不进打包）。
+// 演示数据填充（框架真相副本，嵌在 ikat 二进制里由 preview server 路由供给；
+// 消费侧经 `/ikat-preview/lib/fill.js` 导入，不拷贝、跟 CLI 版本走）。
 // 运行时 ListView 是数据驱动的（C# 设 ItemCount 填充），HTML 里只留 <template>。
 // 预览侧克隆 template 补足条目，人类预览才不空列表。
 // rect-diff 对拍时克隆会被测量脚本撤掉（core 静态 dump 无 C# 驱动）——两侧口径一致。

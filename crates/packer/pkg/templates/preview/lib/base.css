@@ -1,0 +1,25 @@
+/* Ikat browser preview base（框架真相副本，嵌在 ikat 二进制里由 preview server
+   路由供给 /ikat-preview/lib/base.css；boot.js 自动注入 head 顶部）。
+   只含「与 core 渲染约定对齐」的结构性 polyfill——主题（配色/字体）是消费侧资产，
+   @font-face 归工作区自己的 preview 样式，不在此处。
+   polyfill-only：打包器只消费 body，head 不进 pkg.bin。 */
+
+* { box-sizing: border-box; }
+/* iframe 视口 = 设计视口：body 零包装——core 页面根从 (0,0) 起，浏览器默认
+   margin:8px 会整体平移出 rect-diff 系统性偏移。 */
+body { margin: 0; }
+/* button 的 UA 外观（灰底/边框/字体链）与 core 自绘 Button 不符 → 裸化；
+   cursor:pointer 与 #93 后的运行时 UA 默认一致（pressable 控件悬停手型）。 */
+button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+input::placeholder, textarea::placeholder { color: #6c7080; opacity: 1; }
+/* role=textbox 占位行：作者写 aria-placeholder；controls.js 依内容空否翻
+   data-empty。空 textbox 必须保住占位行高（= core 一致），rect-diff 才不出假 diff。 */
+[role="textbox"][data-empty]::before { content: attr(aria-placeholder); color: #6c7080; opacity: 1; }

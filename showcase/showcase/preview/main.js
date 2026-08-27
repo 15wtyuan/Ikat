@@ -1,55 +1,15 @@
-// showcase 预览模拟入口（AI 手写，ikat preview server 自动注入本文件 + 按页的
-// pages/<页名>.js；HTML 源零引用、不进打包）。
+// showcase 预览模拟入口（B 层，ikat preview server 自动注入；HTML 源零引用、
+// 不进打包）。
 //
-// 分层约定（ikat-preview skill）：本文件管「能从源码推断」的全页模拟——
-// 组件展开、控件语义、tabs/dialogs、导航、动画重播；每页专属的演示数据归
-// pages/<页名>.js。font/letterbox 等基础设施在 preview-base.css；分辨率缩放
-// 由 ikat preview 外壳按 match_mode 负责（页面自身不再缩放）。
+// 分层契约（#92，A 层 = /ikat-preview/lib/boot.js 由 server 恒注入先行）：
+// 组件展开、控件语义、结构性 polyfill 全在 A 层——本文件只写「showcase 专属」的
+// B 层：主题样式注入、导航接线、动画重播。演示数据归 pages/<页名>.js。
 
-import { expandComponents, fetchRegistry } from './lib/expand.js';
-import { pageDir } from './lib/fill.js';
-import {
-  wireComboboxes,
-  wireDialogs,
-  wireProgressbars,
-  wireSliders,
-  wireSpinbuttons,
-  wireSwitchesAndRadios,
-  wireTabs,
-  wireTextboxes,
-} from './lib/controls.js';
-
-// pages/<页名>.js 等 main 就绪后再填数据/做页面级演示。
-export const ready = boot();
-
-async function boot() {
-  // preview-base.css（浏览器侧 polyfill：@font-face、box-sizing、button reset）
-  // 必须走脚本通道注入——围栏校验每个 <link rel=stylesheet>，polyfill 故意满含
-  // 围栏外声明。插到 head 顶：polyfill 先、页面 <style> 后（旧内联脚本的级联序
-  // 语义——经典 script 在解析中 appendChild 天然落位在前；ESM 延后执行需显式
-  // insertBefore 复原，否则同名规则胜负翻转）。
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = 'preview/preview-base.css';
-  document.head.insertBefore(link, document.head.firstChild);
-
-  try {
-    const reg = await fetchRegistry();
-    expandComponents(reg);
-  } catch (_) {
-    // 组件清单拿不到（如直接 file:// 打开）→ 退化预览：不展开组件。
-  }
-  wireNav();
-  wireTabs();
-  wireDialogs();
-  wireProgressbars();
-  wireSliders();
-  wireSwitchesAndRadios();
-  wireComboboxes();
-  wireSpinbuttons();
-  wireTextboxes();
-  installAnimReplay();
-}
+// showcase 主题面（@font-face、配色、装饰）——消费侧资产，与 A 层 polyfill 无重叠。
+const link = document.createElement('link');
+link.rel = 'stylesheet';
+link.href = 'preview/preview-base.css';
+document.head.insertBefore(link, document.head.firstChild);
 
 const NAV = {
   'nav-settings': 'settings',
@@ -62,6 +22,13 @@ const NAV = {
   'nav-anim': 'm2-animation',
   'nav-infra': 'api-infra',
 };
+
+wireNav();
+installAnimReplay();
+
+function pageDir() {
+  return location.href.substring(0, location.href.lastIndexOf('/') + 1);
+}
 
 function goPage(name) {
   location.href = pageDir() + name + '.html';

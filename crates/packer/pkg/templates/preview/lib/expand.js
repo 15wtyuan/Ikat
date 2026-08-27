@@ -1,4 +1,5 @@
-// 组件展开模拟（AI 手写预览脚本，ikat preview server 注入；不进打包）。
+// 组件展开模拟（框架真相副本，嵌在 ikat 二进制里由 preview server 路由供给；
+// 消费侧经 `/ikat-preview/lib/expand.js` 导入，不拷贝、跟 CLI 版本走）。
 // 镜像打包期 Custom Element 展开：宿主保留位置/属性；模板根 append 到宿主下；
 // <slot name=x> 在拼接位被宿主 light children（slot="x"）替换（无投射内容时保留
 // slot 的 fallback 子女）；纯空白文本节点丢弃；嵌套组件迭代展开至不动点（≤16 pass）。
@@ -61,6 +62,7 @@ export function expandComponents(reg) {
       const imported = document.importNode(root, true);
       projectSlots(imported, assign, defaults);
       host.appendChild(imported);
+      observeHostState(host, imported);
       // 悬空投影（打包期会报错）：重新挂回宿主，退化预览里仍可测量。
       for (const nodes of Object.values(assign)) {
         for (const n of nodes) {
@@ -88,21 +90,102 @@ function projectSlots(root, assign, defaults) {
   }
 }
 
-// 组件 <style> 加 per-component 选择器前缀（[data-ikat-comp="name"]）——预览侧
-// 作用域模拟（core 按展开实例作用域规则）。@-rule 原样放行（无元素选择器可前缀）。
+// ---- 宿主状态镜像 ----
+//
+// 组件惯用「宿主标签开头」的规则寻址自身态（`skill-slot.is-press .slot`）——core
+// 里这条匹配 host 节点（标签保留、状态类挂 host）再下探。预览没有 :host 伪类，
+// 改写选择器后由模板根承接：把 host 的 class 与 data-*/aria-* 属性镜像到根
+// （data-ikat-comp 载体），使改写后的规则与 core 判定一致（Tripawd 狗粮实证：
+// 无镜像时整套状态样式在预览里静默全坏）。
+//
+// 合并而非覆盖：根自身的类保留在前（组件样式链可能锚根自身类），host 类追加在后；
+// 同名冲突时 CSS 以样式表语义裁决，属可接受近似。host 永远是真源——镜像只读，
+// 不回写。
+
+function mirrorHostState(host, root) {
+  const hostCls = host.className;
+  // 追加去重：host 类串原样整体追加（不逐 token 拆分，避免与根自身 token 撞名时
+  // 误删）；host 清空类名的罕见路径不做缩减——镜像只增不减是可接受的近似。
+  if (hostCls && !root.className.includes(hostCls)) {
+    root.className = (root.className ? root.className + ' ' : '') + hostCls;
+  }
+  for (const attr of Array.from(host.attributes)) {
+    if (/^(data|aria)-/.test(attr.name)) root.setAttribute(attr.name, attr.value);
+  }
+}
+
+function observeHostState(host, root) {
+  if (typeof MutationObserver === 'undefined') return;
+  const attrs = ['class'].concat(
+    Array.from(host.attributes)
+      .filter((a) => /^(data|aria)-/.test(a.name))
+      .map((a) => a.name),
+  );
+  new MutationObserver(() => mirrorHostState(host, root)).observe(host, {
+    attributes: true,
+    attributeFilter: attrs,
+  });
+}
+
+// ---- 组件 <style> 作用域前缀 ----
+//
+// 每实例一条前缀 `[data-ikat-comp="name"]` 预览作用域模拟。@keyframes 内部的帧
+// 选择器（0%/from/to）不是元素选择器，必须原样放行（Tripawd 狗粮实证：朴素前缀
+// 把 `0% {` 改写成非法选择器 → 浏览器整帧丢弃 → 组件动画全灭）；@media 等外层
+// @-rule 维持旧约定原样放行（内部规则不加前缀）。宿主标签开头的复合链（见上节）
+// 吃掉链首 TAG 段后同样加前缀。
+
 function injectComponentStyle(name, css) {
   if (!css || !css.trim()) return;
-  const out = css.replace(/([^{}]+)\{/g, (m, sel) => {
-    const trimmed = sel.trim();
-    if (trimmed.charAt(0) === '@') return m;
-    const prefixed = trimmed
-      .split(',')
-      .map((part) => `[data-ikat-comp="${name}"] ${part.trim()}`)
-      .join(', ');
-    return prefixed + ' {';
-  });
+  const out = splitKeyframes(css)
+    .map(({ raw, text }) =>
+      raw ? text : text.replace(/([^{}]+)\{/g, (m, sel) => prefixSelector(name, sel)),
+    )
+    .join('');
   const st = document.createElement('style');
   st.setAttribute('data-ikat-comp-style', name);
   st.textContent = out;
   document.head.appendChild(st);
+}
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function prefixSelector(name, sel) {
+  const trimmed = sel.trim();
+  if (trimmed.charAt(0) === '@') return sel; // @media 等外层 @-rule 原样放行
+  const hostLed = new RegExp('^' + escapeRe(name) + '(?=[.:[]|\\s|$)');
+  const prefixed = trimmed
+    .split(',')
+    .map((part) => part.replace(hostLed, '').trim())
+    .map((part) =>
+      part ? '[data-ikat-comp="' + name + '"] ' + part : '[data-ikat-comp="' + name + '"]',
+    )
+    .join(', ');
+  return prefixed + ' {';
+}
+
+// 按 `@keyframes 名 {...}` 坐标切段：raw=true 的段原样保留（平衡大括号跟踪覆盖
+// 内嵌百分比块），其余段交给朴素前缀器。
+function splitKeyframes(css) {
+  const segs = [];
+  let i = 0;
+  const re = /@(?:-webkit-)?keyframes\b/g;
+  let m;
+  while ((m = re.exec(css))) {
+    if (m.index > i) segs.push({ raw: false, text: css.slice(i, m.index) });
+    let depth = 0;
+    let j = m.index;
+    let started = false;
+    for (; j < css.length; j++) {
+      if (css[j] === '{') { depth++; started = true; }
+      else if (css[j] === '}') { depth--; if (started && depth === 0) { j++; break; } }
+    }
+    segs.push({ raw: true, text: css.slice(m.index, j) });
+    i = j;
+    re.lastIndex = i;
+  }
+  if (i < css.length) segs.push({ raw: false, text: css.slice(i) });
+  return segs;
 }
