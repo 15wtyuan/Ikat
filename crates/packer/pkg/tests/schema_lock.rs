@@ -15,8 +15,8 @@ use ikat_pkg::build::{pack_components, Component, PackResult};
 const HTML: &str = include_str!("fixtures/schema-lock.html");
 
 /// 当前布局的登记哈希。改 pkg 布局（有意 bump 版本）时同步更新此值。
-/// v46（#74 TemplateNode 加 href 列 + ResolvedStyle 加 text_decoration）。
-const LOCKED_HASH: u64 = 0x6501_d4ad_d3ea_980c;
+/// v47（#93 ResolvedStyle 加 cursor）。
+const LOCKED_HASH: u64 = 0xa59a_256e_a8a9_6219;
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
