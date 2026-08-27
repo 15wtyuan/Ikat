@@ -1,6 +1,6 @@
 {
   "name": "com.ikat.unity",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "displayName": "Ikat",
   "description": "跨引擎游戏 UI 框架——Rust 核心 + HTML/CSS DSL，Unity 后端",
   "unity": "2021.3",

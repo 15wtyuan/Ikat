@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-08-28
+
 ### Added
 - **桌面指针 affordance（#93）**：悬停 pressable 控件（button/tab/toggle/radio/
   slider/dropdown/option 与 `<a>` 链接）软件指针自动变手型——UA 默认行为，作者
