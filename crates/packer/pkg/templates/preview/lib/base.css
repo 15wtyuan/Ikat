@@ -9,7 +9,8 @@
    margin:8px 会整体平移出 rect-diff 系统性偏移。 */
 body { margin: 0; }
 /* button 的 UA 外观（灰底/边框/字体链）与 core 自绘 Button 不符 → 裸化；
-   cursor:pointer 与 #93 后的运行时 UA 默认一致（pressable 控件悬停手型）。 */
+   cursor:pointer 对齐 #93 的运行时手型意图（浏览器原生渲染手型；Unity 侧
+   渲染取决于消费侧是否经 SetCursorTexture 注册贴图）。 */
 button {
   background: none;
   border: none;

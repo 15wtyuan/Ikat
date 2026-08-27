@@ -83,7 +83,9 @@ A-layer wiring does.
   component `<style>`; same-name collisions resolve page-wins, matching the
   packer's host priority), component expansion with scoped styles (server
   rewritten — root-class rules on the template root DO apply), control visual
-  state, `cursor` (browser-native; matches #93 runtime defaults).
+  state, `cursor` (browser-native; mirrors the #93 runtime hand-intent
+  default — in the Unity runtime the drawn hand depends on the host
+  registering a cursor texture).
 - **Approximate**: fonts (same files via @font-face, different rasterizer
   than the game), letterboxing (the shell scales per match_mode — check
   readability, not exact device pixels), page rules leaking into component

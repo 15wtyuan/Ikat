@@ -19,13 +19,16 @@ error):
 - `opacity` / `box-shadow` / `pointer-events` / `transform` / `transform-origin` / `filter`
 - `cursor` — `auto` / `default` / `none` / `pointer` (not inherited). `auto` = UA default:
   hovering pressable controls (button / tab / toggle / radio / slider / dropdown /
-  option, and `<a>` links) shows the pointer hand at runtime; everything else stays
-  the system arrow. Hovering a control's text/inline children counts as hovering
-  the control (browser-consistent), and disabled controls never show the hand.
+  option, and `<a>` links) reports pointer-hand *intent* at runtime; everything else
+  stays the system arrow. Hovering a control's text/inline children counts as hovering
+  the control (browser-consistent), and disabled controls never get the hand.
   Explicit declarations always win over the UA default — use
   `pointer` to mark clickable non-controls (map nodes etc.), `default` to force an
   arrow on a control, `none` for element-level software-cursor hiding. Browser
-  preview renders `cursor` natively, so there is no preview/runtime gap here.
+  preview renders `cursor` natively, so there is no preview gap. In the Unity
+  runtime the hand is drawn only if the game registers a cursor texture
+  (`IkatStageDriver.SetCursorTexture`); unregistered, hover falls back to the
+  system arrow.
 - `color` / `font-size` / `font-family` / `font-weight`
 - `text-align` / `line-height` / `letter-spacing` / `white-space` / `text-shadow`
 - `white-space` — full set: `normal` / `nowrap` / `pre` / `pre-wrap` / `pre-line` (space collapsing × auto-wrap × source-newline preservation); CJK line breaking avoids line-start punctuation / line-end opening brackets (kinsoku)

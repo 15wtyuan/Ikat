@@ -249,6 +249,19 @@ Subclass `IkatStageDriver` and override the virtual loading hooks
 | `LoadTexture(relPath)` | atlas page PNG | `atlas/ui.png` |
 | `LoadFontBytes(fontFile)` | font bytes (the manifest's `file` value) | `NotoSansSC.ttc.bytes` |
 
+## Cursor affordance (optional)
+
+By default hover shows the system cursor. To skin an intent, register a
+texture (0 = arrow, 1 = pointer hand, 2 = hidden):
+
+```csharp
+// hotspot = offset from the texture's top-left to the pointing pixel.
+// null unregisters back to the default.
+_driver.SetCursorTexture(1u, handTexture, new Vector2(12f, 1f));
+```
+
+`cursor:none` hides the pointer per element out of the box.
+
 ## Checklist
 
 - [ ] Driver + collector on one GameObject; Design Size matches the
