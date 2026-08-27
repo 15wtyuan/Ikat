@@ -112,7 +112,9 @@ fn required_child_must_be_direct() {
 fn missing_child_message_is_actionable() {
     let msgs = struct_errors(r#"<div role="combobox"></div>"#);
     let m = &msgs[0];
-    // 必须告诉作者该写什么结构（含 role=listbox + 指向 fence.md §2.3 契约表）
+    // 必须告诉作者该写什么结构（含 role=listbox）+ 指向 scaffold 分发的契约表
+    // （fence-schema.md 的 role registry——错误信息不得引工作区拿不到的仓库文档）。
     assert!(m.contains("role=\"listbox\""), "{}", m);
-    assert!(m.contains("fence.md §2.3"), "{}", m);
+    assert!(m.contains("fence-schema.md"), "{}", m);
+    assert!(!m.contains("docs/design/"), "{}", m);
 }

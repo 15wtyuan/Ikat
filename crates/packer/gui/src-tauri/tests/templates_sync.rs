@@ -5,7 +5,9 @@
 //! 本测试把模板中的标签/role/CSS 清单拉回与 schema 对账，改 schema 必须同步
 //! 模板，否则这里红。loom skill 的命令面/退出码与 CLI main.rs 对账（同一模式）。
 
+use loomgui_fence::control_structure_check::{CheckSpec, REQUIRED_CHILDREN};
 use loomgui_fence::schema::{find_css_prop, find_shorthand, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS};
+use loomgui_fence::value_check::TRANSITION_PROPS;
 
 const EDITOR_SKILL_MD: &str = include_str!("../../../pkg/templates/editor/SKILL.md");
 const EDITOR_SCHEMA_MD: &str =
@@ -135,6 +137,58 @@ fn not_supported_css_tokens_are_absent_from_whitelist() {
             "css-reference.md claims `{token}` is unsupported, but the fence schema \
              DOES register it — the doc is stale, update it"
         );
+    }
+}
+
+/// transition 通道集 ↔ fence `TRANSITION_PROPS` 双向对账（#90 P0-1：#10 把通道
+/// 扩到 8 个后分发文档仍写 4 个——作者信文档就不会去试文档说没有的能力，
+/// 静默损失比「没写」更危险）。
+#[test]
+fn transition_channels_match_engine_set() {
+    let section = section_between(
+        EDITOR_CSS_MD,
+        "fence-sync:transition-channels-begin",
+        "fence-sync:transition-channels-end",
+    );
+    let mut doc: Vec<String> = list_line_tokens(section);
+    doc.sort();
+    let mut engine: Vec<String> = TRANSITION_PROPS.iter().map(|s| s.to_string()).collect();
+    engine.sort();
+    assert_eq!(
+        doc, engine,
+        "css-reference.md transition channel list drifted from fence TRANSITION_PROPS \
+         — missing channel = doc stale (update the doc); extra channel = engine set \
+         changed (update both)"
+    );
+}
+
+/// 控件必需子契约 ↔ fence-schema.md role registry 行对账（#90 P0-2：combobox 行
+/// 漏写 `data-slot=value`，作者照抄文档的契约表直接 build 失败）。
+#[test]
+fn required_children_contracts_in_schema_doc() {
+    for (role, specs) in REQUIRED_CHILDREN {
+        let row_start = EDITOR_SCHEMA_MD
+            .find(&format!("| `{role}` |"))
+            .unwrap_or_else(|| panic!("fence-schema.md missing role registry row for `{role}`"));
+        let row_end = EDITOR_SCHEMA_MD[row_start..]
+            .find('\n')
+            .map(|i| row_start + i)
+            .unwrap_or(EDITOR_SCHEMA_MD.len());
+        let row = &EDITOR_SCHEMA_MD[row_start..row_end];
+        for spec in *specs {
+            match spec {
+                CheckSpec::Role(r) => assert!(
+                    row.contains(&format!("role={r}")),
+                    "fence-schema.md row for `{role}` must state its required `role={r}` \
+                     child (fence enforces it: FenceMissingControlChild)"
+                ),
+                CheckSpec::Slot(s) => assert!(
+                    row.contains(&format!("data-slot={s}")),
+                    "fence-schema.md row for `{role}` must state its required \
+                     `data-slot={s}` child (fence enforces it: FenceMissingControlChild)"
+                ),
+            }
+        }
     }
 }
 

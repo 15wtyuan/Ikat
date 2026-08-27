@@ -755,7 +755,10 @@ fn parse_declarations(
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceBadCssValue,
                 format!(
-                    "value \"{}\" is not valid for CSS property \"{}\" (gradient subset: see docs/design/fence.md)",
+                    "value \"{}\" is not valid for CSS property \"{}\" (gradient subset: \
+                     `linear-gradient` / `radial-gradient` only, up to 8 stops — the \
+                     `background-image` row of `css-reference.md` in the scaffolded \
+                     loomgui-editor skill lists the accepted forms)",
                     value, prop
                 ),
                 loc.clone(),

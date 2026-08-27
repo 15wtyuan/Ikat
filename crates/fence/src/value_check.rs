@@ -212,7 +212,9 @@ pub fn display_inline_warning(value: &str) -> Option<&'static str> {
 /// BgColor/TextColor/Opacity/Transform/Width/Height/FlexGrow/BoxShadow 八通道——
 /// transform 走整矩阵 TRS 分解插值；layout 通道要求端点同域显式值，见
 /// `layout_transition_endpoint_check`；box-shadow 走逐对列表插值）。
-const TRANSITION_PROPS: &[&str] = &[
+/// pub：templates_sync 交叉校验用（分发的 css-reference.md transition 段与本表
+/// 双向对账——历史上文档只写 4 通道、#10 扩容后静默漂移，#90 实证）。
+pub const TRANSITION_PROPS: &[&str] = &[
     "background-color",
     "color",
     "opacity",

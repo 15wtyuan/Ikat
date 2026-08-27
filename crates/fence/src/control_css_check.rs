@@ -458,7 +458,8 @@ pub fn check_control_css(
             format!(
                 "LoomGUI {kind_name} element <{tag}> has no matching CSS rule. \
                  Controls have NO built-in default style — without CSS they render blank. \
-                 {fix_hint} See docs/design/fence.md §6.7."
+                 {fix_hint} Canonical control CSS: `patterns.md` in the scaffolded \
+                 loomgui-editor skill."
             ),
             line_map.source_location(node.span.start, file.to_string()),
         ));
@@ -530,7 +531,8 @@ fn check_required_child_css(
                          Control children have NO built-in default style — without CSS \
                          they render invisible (e.g. a thumb without background is a \
                          draggable-but-invisible handle). Provide CSS for every \
-                         {label} child. See docs/design/fence.md §6.7."
+                         {label} child. Canonical control CSS: `patterns.md` in the \
+                         scaffolded loomgui-editor skill."
                     ),
                     line_map.source_location(child.span.start, file.to_string()),
                 ));

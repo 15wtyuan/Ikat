@@ -21,9 +21,13 @@ blank. Canonical patterns:
 [role="slider"] [data-slot="fill"] { position: absolute; left: 0; top: 0; height: 100%; background: #5fb4d4; }
 [role="slider"] [data-slot="thumb"] { position: absolute; left: 0; top: 0; width: 16px; height: 16px; background: #fff; border-radius: 8px; }
 
-/* combobox — structure contract: the anchor + the popup MUST both be
-   declared, otherwise FenceControlStructureCss fails the build */
-[role="combobox"] { position: relative; }
+/* combobox — structure contract: the selected-value anchor
+   (data-slot="value") + the popup (role="listbox") MUST both be
+   declared, otherwise FenceMissingControlChild fails the build. The
+   runtime writes the selected option's text into the value slot's
+   inner text node. */
+[role="combobox"] { position: relative; display: flex; flex-direction: row; }
+[role="combobox"] [data-slot="value"] { flex-grow: 1; }
 [role="combobox"] [role="listbox"] { display: none; position: absolute; left: 0; top: 100%; width: 100%; }
 [role="combobox"][aria-expanded="true"] [role="listbox"] { display: flex; flex-direction: column; }
 ```

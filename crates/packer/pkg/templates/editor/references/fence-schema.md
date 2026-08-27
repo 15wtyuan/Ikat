@@ -69,7 +69,7 @@ in an intermediate div fails the check); the only exception is the
 
 | role | Type | Required direct children (build-checked) |
 |---|---|---|
-| `combobox` | Dropdown | `role=listbox` child, which itself needs `role=option` children |
+| `combobox` | Dropdown | `role=listbox` child (which itself needs `role=option` children) **and** a `data-slot=value` child (the selected-value display) |
 | `listbox` | Container | at least one `role=option` child |
 | `option` | OptionItem | none; may carry `value` (the only place `value` is legal) |
 | `slider` | Slider | `data-slot=thumb` child |
@@ -82,7 +82,7 @@ in an intermediate div fails the check); the only exception is the
 | `listitem` | ListItem | none |
 | `tablist` | TabList | `role=tab` children |
 | `tab` | Tab | none (may also be written `button role=tab`) |
-| `tabpanel` | plain Container | none — a panel is a div a tab points at via `aria-controls` |
+| `tabpanel` | plain Container | none — a panel is a div a tab points at via `aria-controls`; hiding inactive panels is the TabList runtime's job, never author `display:none` (it bakes into the packed base style and keeps the active panel invisible — `FenceTabpanelHiddenByAuthor`) |
 | `dialog` | plain Container | none — a modal overlay layer |
 
 Initial values go into ARIA (`aria-valuenow`, `aria-checked`,

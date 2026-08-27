@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **工作区分发文档与 check 漂移批（#90，Tripawd 0.0.13 验收实证）**：
+  - css-reference 的 transition 支持集从过时的 4 通道修为实际 8 项
+    （width/height/flex-grow/box-shadow 自 #10 起可过渡），并纳入
+    `fence-sync` 锚点块与 `TRANSITION_PROPS` **双向对账测试**——少写/多写
+    通道即 CI 红；顺带修同段「transform-origin 不存在」的陈旧声明
+    （#9 已交付）。
+  - fence-schema 的 combobox 契约行补 `data-slot=value` 必需子（照抄旧
+    文档直接 build 失败）；patterns.md canonical CSS 同步补 value 锚样式
+    行与措辞。新增「`REQUIRED_CHILDREN` ↔ role registry 行」对账测试。
+  - fence 错误信息 6 处 `docs/design/fence.md §x` 死链（工作区拿不到的
+    仓库文档）改指 scaffold 分发的技能文件（fence-schema.md /
+    patterns.md / css-reference.md）。
+  - api-reference 补「Runtime diagnostics」段：`DumpSceneTree(filter)`
+    签名与读法（`lh=NN.00x` 等直读信号）、F8 `[Scene tree]` 段、
+    overlap=0 滚轮告警语义；ProgressBar.AnimateValue 注记不再声称
+    「CSS transition 做不了 width」；Value domains 补 `line-height`
+    单位域（无单位=倍数的陷阱）；CustomElement「打包期类型、C# 侧
+    `Instantiate("stem")` 拿普通 Container」等式补全。
+  - 仓库内 fence.md 两处内部矛盾顺手修（诊断表「四通道」→ 全集表述、
+    Dropdown value 锚「可选」→ 必需）。
+  - 随 loom.exe 分发；消费侧 `loom scaffold` 刷新技能即可拿到新文档。
+
 ## [0.0.13] - 2026-08-27
 
 v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder

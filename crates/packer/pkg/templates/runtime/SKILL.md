@@ -272,7 +272,8 @@ Subclass `LoomStageDriver` and override the virtual loading hooks
 | Text renders but looks wrong | font fallback missing glyphs → register a `--fallback` font |
 | Tofu boxes (□) in text | the Console logs every missing glyph as `[LoomGUI] missing glyphs (tofu): font-family "X" has no glyph for 'c' (U+....)` — fix by registering a font containing it with `--fallback`, or change the text |
 | Clicks pass through UI to 3D | expected — LoomGUI never blocks input → gate your raycasts on `IsPointerOnUI` |
-| Page looks wrong at runtime | press F8, read the core-vs-mirror dump → if core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue |
+| Page looks wrong at runtime | press F8, read the `[Scene tree]` section first (one line per node with rect, text `font/lh/lines`, scroll `viewport/content/overlap`) → `lh=NN.00x` with a big NN means a unitless line-height multiplier; `ov 0x0` on a scroll container means it has nothing to scroll. If core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue. `LoomHost.DumpSceneTree("id-or-class")` prints just the matching subtrees |
+| `[LoomGUI] wheel ignored: node N ... no overflow to scroll` | the wheel landed on a container whose content does not overflow (`overlap=0`) — fix content sizing or remove `overflow:auto` (editor/development builds only) |
 
 ## Reference consumer
 

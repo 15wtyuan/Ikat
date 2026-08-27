@@ -12,8 +12,10 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrElement, IrNodeKind, IrTree};
 
 /// 必需子节点的判定方式：按 role 或按 data-slot。
+/// pub：templates_sync 交叉校验用（分发的 fence-schema.md role registry 行与本表
+/// 对账——契约行漏写 data-slot=value 会让人照抄文档 build 失败，#90 实证）。
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum CheckSpec {
+pub enum CheckSpec {
     /// 直接子节点带某个 `role` 值。
     Role(&'static str),
     /// 直接子节点带某个 `data-slot` 值。
@@ -27,7 +29,7 @@ pub(crate) enum CheckSpec {
 /// 校验（`<div role="listbox">`），与 SemanticKind 无关。
 /// combobox 的 `data-slot=value` 是选中值显示区——运行时 sync 把选中 option 文本
 /// 写进它内嵌的 TextNode，漏写 = 选中值静默无显示（此前无任何拦截）。
-pub(crate) const REQUIRED_CHILDREN: &[(&str, &[CheckSpec])] = &[
+pub const REQUIRED_CHILDREN: &[(&str, &[CheckSpec])] = &[
     (
         "combobox",
         &[CheckSpec::Role("listbox"), CheckSpec::Slot("value")],
@@ -158,14 +160,18 @@ pub fn check_control_structure(tree: &IrTree, file: &str, line_map: &LineMap) ->
             if has_required_child(tree, idx, *spec) {
                 continue;
             }
-            let hint = structure_hint(role).unwrap_or("see docs/design/fence.md §2.2");
+            let hint = structure_hint(role).unwrap_or(
+                "see the role registry in the scaffolded \
+                 loomgui-editor skill (`references/fence-schema.md`)",
+            );
             diagnostics.push(Diagnostic::error(
                 DiagnosticCode::FenceMissingControlChild,
                 format!(
                     "LoomGUI control `<{tag} role=\"{role}\">` is missing its required \
                      {label} child element. Controls have NO framework-injected children — \
                      the author writes the full structure. Expected: {hint}. \
-                     Contract table: docs/design/fence.md §2.3.",
+                     Contract table: the role registry in the scaffolded loomgui-editor \
+                     skill (`references/fence-schema.md`).",
                     tag = el.tag,
                     label = spec_label(*spec),
                 ),
@@ -225,7 +231,8 @@ pub fn check_tabpanel_author_hidden(
                      display:none survives that (baked into the packed base style) and keeps \
                      the active panel permanently invisible. Hiding inactive panels is the \
                      control runtime's job (applied on the first frame) — remove the \
-                     declaration. See docs/design/fence.md §6.8.",
+                     declaration. The `tabpanel` row of the role registry in the scaffolded \
+                     loomgui-editor skill (`references/fence-schema.md`) states this rule.",
                     tag = el.tag,
                 ),
                 line_map.source_location(node.span.start, file.to_string()),

@@ -16,7 +16,7 @@ error):
 - `margin-top` / `margin-right` / `margin-bottom` / `margin-left`
 - `border-color` / `border-style` / `border-radius` / `border-image-slice`
 - `background-color` / `background-image` / `background-size` / `background-repeat` / `background-clip` / `-webkit-background-clip`
-- `opacity` / `box-shadow` / `pointer-events` / `transform` / `filter`
+- `opacity` / `box-shadow` / `pointer-events` / `transform` / `transform-origin` / `filter`
 - `color` / `font-size` / `font-family` / `font-weight`
 - `text-align` / `line-height` / `letter-spacing` / `white-space` / `text-shadow`
 - `-webkit-text-stroke` / `font-effect` — LoomGUI text extensions
@@ -49,15 +49,30 @@ Shorthands (expand to the properties above):
 - `background-size`: `cover` / `contain` / `100%` / `stretch`.
 - `filter`: grayscale / brightness / contrast / saturate / hue-rotate /
   invert / sepia.
-- `transform`: translate / rotate / scale. Rotations pivot around the
-  element's **center** (`transform-origin` does not exist); to pivot
-  around a non-center point, position the element at the midpoint of the
-  desired arc and rotate.
-- `transition`: animates `background-color` / `color` / `opacity` /
-  `transform` (interpolated as a decomposed translate-scale-rotate).
-  Everything else — layout properties (`width`, `margin`, ...),
-  `box-shadow`, `filter` — changes instantly; the build warns per
-  property.
+- `transform`: translate / rotate / scale. `transform-origin` sets the
+  pivot (two `<length|%>` values or position keywords
+  `left/center/right/top/bottom`; default `center`) — rotate around a
+  non-center point directly, no need to offset-position the element at
+  an arc midpoint.
+- `transition`: animates exactly these channels (layout channels
+  interpolate same-unit explicit endpoints; `box-shadow` interpolates
+  per layer):
+  <!-- fence-sync:transition-channels-begin -->
+  - `background-color`
+  - `color`
+  - `opacity`
+  - `transform` — decomposed translate-scale-rotate interpolation
+  - `width`
+  - `height`
+  - `flex-grow`
+  - `box-shadow`
+  <!-- fence-sync:transition-channels-end -->
+  Everything else (`margin`, `filter`, ...) changes instantly; the build
+  warns per property.
+- `line-height`: unitless multiplier (`1.5`), `px`, or `normal` (`em` and
+  `%` are build errors). A bare unitless number is a **multiplier**, not
+  pixels — `line-height: 26` at `font-size: 16` gives a 416px line; write
+  `26px` for pixel line height.
 - `position`: `absolute` / `relative` / `static` — `fixed` and `sticky` are build
   errors.
 - `z-index`: integer only, no `auto`.

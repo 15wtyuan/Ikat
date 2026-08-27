@@ -111,7 +111,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 - **textbox/textarea/spinbutton** 共用编辑初始值：`aria-placeholder`（占位文本）、`data-maxlength`、`aria-readonly`；textbox/textarea 的初始**值**来自元素文本内容（ARIA 无 textbox-value 属性）。
 - **radio** 分组用 `data-name`：ARIA 无「radio 组名」属性（标准靠 radiogroup 容器/相邻性表达），用 `data-*` 私有承载；同 `data-name` 自动互斥。
 
-Dropdown 选中值显示：可选 `data-slot=value` 子（内嵌 TextNode）——框架把当前选中项文本写进去；漏写 = 无选中值显示（静默）。Dropdown 无内置箭头（作者自画）。
+Dropdown 选中值显示：**必需** `data-slot=value` 直接子（内嵌 TextNode）——框架把当前选中项文本写进去；漏写 = `FenceMissingControlChild` 打包期报错（不再静默）。Dropdown 无内置箭头（作者自画）。
 
 `switch` / `radio` 无框架槽位（没有 knob slot）：框架只切换 `aria-checked` 状态、不驱动子节点几何——视觉状态全在 CSS 状态选择器（含旋钮位移：`[role="switch"][aria-checked="true"] .knob { transform: translateX(...) }`，rematch 状态变化自动重评）。
 
@@ -531,7 +531,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `FenceStylesheetNotFound` | `<link rel="stylesheet">` 的外部 CSS 读取失败（href 相对所在 HTML 文件解析，报错带完整路径；静默丢样式是最难排查的降级形态） |
 | `FenceDisplayInline` | **warning**：显式 `display: inline` 声明。围栏没有 inline flow——inline 运行时映射为 flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同，显式声明多半是先验误用 |
 | `FenceLayoutTransitionEndpoint` | **error**：layout 动画端点域不一致或含 auto（#10）。transition width/height 的静态可见端点（inline + 结构匹配 class 规则，伪类变体算结构命中；`.a.b` 这类运行时 add_class 组合不在此列）域不齐（px vs % vs vw）或含 `auto`——运行时行为是离散跳变而浏览器平滑过渡，先验分歧打包期硬拒。运行时组合端点由 core `EVT_TRANSITION_SNAP` 警告事件兜底 |
-| `FenceTransitionUnsupportedProp` | **warning**：`transition` 声明了运行时不支持的属性。transition 引擎驱动 `background-color` / `color` / `opacity` / `transform` 四通道（transform 按 TRS 分解插值）；布局属性（width 等）声明了也不过渡，浏览器先验会翻车（`transition: all` 同理单独提示） |
+| `FenceTransitionUnsupportedProp` | **warning**：`transition` 声明了运行时不支持的属性。transition 引擎驱动的通道全集 = `TRANSITION_PROPS` 八项（`background-color` / `color` / `opacity` / `transform` / `width` / `height` / `flex-grow` / `box-shadow`，#10 起扩容）；域外属性（margin/filter 等）声明了也不过渡，浏览器先验会翻车（`transition: all` 同理单独提示） |
 | `FenceInlineSizing` | **warning**：rich-text inline flow 内的行内元素（span 等）声明 `width`/`height` 族。该类元素无独立盒子，尺寸声明恒无效（与浏览器对 inline 元素一致）。可定尺寸路径：flex item div / `<img>` / 显式 `display:flex` |
 | `FencePageRuleProjectedOnly` | **warning**：页面侧纯类规则只可能命中 slot 投射内容。样式墙下页面规则不穿 host 边界，该规则运行时恒为死代码——给投影内容定样式写在组件 `<style>` 里 |
 | `FenceComponentRuleOutOfScope` | **warning**：组件 `<style>` 纯类规则在本组件样式宇宙（模板 + 本组件投影内容）外恒无命中——类名只出现在页面 host 外区域或其它组件的投影内容上（组件 CSS 不穿出 host）。跨文件证据版：类名在宇宙内可命中或全库不出现（运行时 `Classes.Add` 挂类）则静默，宁漏报不误报 |

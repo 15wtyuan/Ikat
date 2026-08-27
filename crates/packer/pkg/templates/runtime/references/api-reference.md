@@ -249,8 +249,9 @@ arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
   data value); the interpolated display value only feeds rendering.
   Assigning `Value` directly cancels a running animation and wins.
   Retargeting mid-animation re-anchors from the current display value.
-  CSS `transition` cannot do this (width is a layout channel); use
-  this for health bars and other value-driven fills.
+  CSS `transition: width` animates the same channel as a plain visual
+  tween — prefer `AnimateValue` for value-driven fills (health bars
+  etc.): it keeps the data-value semantics and re-anchoring.
 - RadioButtons sharing one `Name` auto-exclude; only the newly checked
   one fires `CheckedChanged`. Aggregating by name (RadioGroup) is user
   code, not framework.
@@ -516,6 +517,13 @@ public readonly struct TextMetrics {
   `Image` only. Controls and scope roots come exclusively from
   template instantiation (`Instantiate`) — their semantics need the
   HTML signature. Other `T` throws `UIContractException`.
+- **Custom elements have no runtime node type.** A `<my-widget>` in
+  the workspace HTML is a CustomElement at *pack* time; from C# the
+  expanded instance is an ordinary `Container` obtained via
+  `Instantiate("my-widget")` (or `GetTemplate` + deferred
+  `Instantiate()`) — the registered stem, no `components/` prefix and
+  no extension (`loom show <pkg>` lists them). Query its internals
+  through the instance scope.
 - **`MeasureText` is node-free pre-layout measurement** (tips line
   breaking, floating-text width, auto-width buttons — no hand-counted
   "N chars per line" constants). It runs the same wrapping code the
@@ -554,6 +562,35 @@ these field names (defaults in parentheses):
 | `_uiCamera` | Camera | null = driver creates `LoomUICamera` |
 | `_inputCollector` | LoomInputCollector | null = `GetComponent` fallback |
 | `_productRoot` | string | empty = Editor `Assets/Bundles` / player StreamingAssets |
+
+## Runtime diagnostics
+
+```csharp
+// LoomHost (public; dev bridges — not frozen API):
+public string DumpSceneJson();                     // full scene JSON
+public string DumpSceneTree(string filter = null); // human-readable tree
+```
+
+- **`DumpSceneTree(filter)`** — one line per node
+  (`div#id.class (x,y,w,h)`), ASCII-nested; text nodes append
+  `font=<px> lh=<multiplier>x lines=<n>` plus a content snippet,
+  scroll containers append
+  `scroll[vp WxH ct WxH ov WxH pos x,y tw a,b]`. `filter` = id/class
+  substring → only matching subtrees print (no more grepping a full
+  dump). A `lh=26.00x` next to `font=16` is the smoking gun for a
+  unitless `line-height: 26` (multiplier, not pixels).
+- **`DumpSceneJson()`** — machine-readable; same resolved fields as the
+  tree view in `"text"` / `"scroll"` blocks per node.
+- **F8** (editor / development builds) dumps blob state + mirror pool
+  **+ a `[Scene tree]` section** to the console and
+  `loom-dump-<time>.txt` next to the project — read the `[Scene tree]`
+  section first for layout attribution.
+- **Runtime warnings** (`[LoomGUI]` prefix in the console,
+  editor/development builds only): e.g.
+  `wheel ignored: node N declares overflow:auto/scroll but has no
+  overflow to scroll (content fits the viewport, overlap=0)` — the
+  scroll container under the wheel never scrolls because its content
+  does not overflow; fix content sizing or drop `overflow:auto`.
 
 ## Exceptions
 
