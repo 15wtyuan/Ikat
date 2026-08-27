@@ -99,6 +99,21 @@ jobs:
       - name: dotnet test
         run: dotnet test tests/dotnet/Ikat.Tests.Core.csproj
 
+  # 「改 Rust 必重出 dll」的仓库规矩机器化：release-check 的 staleness 门在 CI 拦截——
+  # dll/exe 上次入库提交之后 crates/ 有源变更（xtask/gui 除外，不进产物）即红。
+  # 需要完整提交拓扑（产物锚点..HEAD 的 diff），浅克隆不够——fetch-depth: 0。
+  # Release workflow 同样跑 release-check，自动继承该门。
+  artifact-staleness:
+    name: artifact staleness gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p xtask -- release-check
+
   # HeadlessTests（P/Invoke 真 native）+ PublicApi 编译门。此前 CI 只跑纯 managed 的
   # Tests.Core，HeadlessTests 曾随 pkg 版本漂移静默腐烂（fixture v24 vs core v34）无人
   # 知——此 job 补上盲区：runner 现场编 Linux .so，替换输出目录（入库的 Windows dll

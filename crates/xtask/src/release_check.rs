@@ -29,6 +29,11 @@ pub enum CheckError {
         crate_version: String,
         package_version: String,
     },
+    /// 产物（dll/exe）上次入库提交之后 crates/ 有影响产物字节的源变更——
+    /// 入库产物可疑陈旧，拒绝发版（重出后重跑）。
+    ArtifactsStale {
+        files: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for CheckError {
@@ -53,6 +58,13 @@ impl std::fmt::Display for CheckError {
                 "ikat_pkg crate version {crate_version} != unity package version \
                  {package_version}; bump crates/packer/pkg/Cargo.toml to align (ikat CLI \
                  reports both from the crate version — a mismatch ships a lying `ikat version`)"
+            ),
+            Self::ArtifactsStale { files } => write!(
+                f,
+                "Rust sources changed after the last dll/exe artifact commit — committed \
+                 artifacts may be stale; re-out and commit first \
+                 (`cargo run -p xtask -- reout`): [{}]",
+                files.join(", ")
             ),
         }
     }
@@ -151,6 +163,63 @@ pub fn parse_crate_version(cargo_toml: &str) -> Option<String> {
     None
 }
 
+/// staleness 判定的单文件过滤：`crates/` 下会影响 dll/exe 产物字节的源变更。
+/// 排除 xtask（编排工具自身不进产物）与 packer/gui（GUI exe 不在 dll/ikat.exe 重出面，
+/// 重出条件另有人工判据）。
+fn affects_artifacts(path: &str) -> bool {
+    path.starts_with("crates/")
+        && !path.starts_with("crates/xtask/")
+        && !path.starts_with("crates/packer/gui/")
+}
+
+/// 两组「自产物锚点提交以来的变更清单」→ 影响产物的违例清单（去重保序）。
+/// 纯函数供单测；git 侧采集见 [`collect_staleness`]。
+pub fn staleness_violations(
+    changed_since_dll: &[String],
+    changed_since_exe: &[String],
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for p in changed_since_dll.iter().chain(changed_since_exe.iter()) {
+        if affects_artifacts(p) && !out.contains(p) {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
+/// git 拓扑采集：dll 与 exe 各自上次入库提交为锚点，diff 到 HEAD 的 crates/ 变更。
+/// 锚点为空（产物从未入库）按全量违例处理——存在性门只盯 dll，exe 缺席在此兜底。
+fn collect_staleness() -> Result<Vec<String>, CheckError> {
+    let anchor = |path: &str| -> Result<String, CheckError> {
+        crate::git::git(&["log", "-1", "--format=%H", "--", path]).map_err(|e| {
+            CheckError::ReadFailed {
+                path: path.into(),
+                source: e,
+            }
+        })
+    };
+    let dll_anchor = anchor("unity/package/Plugins/Ikat/ikat_ffi_c.dll")?;
+    let exe_anchor = anchor("unity/package/Editor/Tools/ikat.exe")?;
+    let changed_since = |a: &str| -> Vec<String> {
+        if a.is_empty() {
+            return vec!["<artifact never committed>".to_string()];
+        }
+        crate::git::git(&[
+            "diff",
+            "--name-only",
+            &format!("{a}..HEAD"),
+            "--",
+            "crates/",
+        ])
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+    };
+    Ok(staleness_violations(
+        &changed_since(&dll_anchor),
+        &changed_since(&exe_anchor),
+    ))
+}
+
 /// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef + ikat crate 版本同轨。
 /// 任意一项失败返回 Err，调用方据此退出非 0。
 pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
@@ -169,6 +238,15 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
     match dll_status(&committed_dll) {
         DllStatus::NotFound => return Err(CheckError::DllNotFound.into()),
         DllStatus::Ok => {}
+    }
+
+    // staleness 硬门：dll/exe 上次入库提交之后 crates/ 有影响产物字节的源变更 → 拒绝。
+    // 堵此前自认的「只查存在、不查新旧」洞（stale dll 提交史：本地缓存掩盖、干净环境才
+    // 暴露）。字节哈希对拍不可行——构建路径非确定性（同源码不同目录产物字节不同），
+    // 只能用 git 提交拓扑代理；过近似可接受（多重出一次便宜，漏报才是灾难）。
+    let stale = collect_staleness()?;
+    if !stale.is_empty() {
+        return Err(CheckError::ArtifactsStale { files: stale }.into());
     }
 
     check_asmdef_present(&pkg_dir)?;
@@ -322,5 +400,33 @@ serde = { version = "1", features = ["derive"] }
     fn dll_present() {
         let present = tmp_bytes("a.dll", b"AAA");
         assert_eq!(dll_status(&present), DllStatus::Ok);
+    }
+
+    /// staleness 过滤：xtask/gui 排除、非 crates/ 排除、跨两组去重保序。
+    #[test]
+    fn staleness_filters_and_dedups() {
+        let dll_side = [
+            "crates/core/src/lib.rs".to_string(),
+            "crates/xtask/src/main.rs".to_string(), // 编排工具，不进产物
+            "docs/design/fence.md".to_string(),     // 非 crates/
+        ];
+        let exe_side = [
+            "crates/core/src/lib.rs".to_string(), // 与 dll 侧重复 → 去重
+            "crates/packer/pkg/src/bridge.rs".to_string(),
+            "crates/packer/gui/src-tauri/main.rs".to_string(), // GUI 不在重出面
+        ];
+        assert_eq!(
+            staleness_violations(&dll_side, &exe_side),
+            vec![
+                "crates/core/src/lib.rs".to_string(),
+                "crates/packer/pkg/src/bridge.rs".to_string(),
+            ]
+        );
+        // 全部被排除 → 无违例。
+        assert!(staleness_violations(
+            &["crates/xtask/src/git.rs".to_string()],
+            &["crates/packer/gui/x".to_string()]
+        )
+        .is_empty());
     }
 }
