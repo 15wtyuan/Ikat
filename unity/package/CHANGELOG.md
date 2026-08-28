@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.16] - 2026-08-28
+
 ### Fixed
 - **preview 静态资产 revalidate 化**：`/ws/` 静态资产（字体/图/
   CSS/JS）从无差别 `no-store` 改为 `no-cache` + `Last-Modified` + 304 再验证——
