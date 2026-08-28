@@ -1,4 +1,4 @@
-﻿//! Packer library: atlas packing, font copying, HTML -> .pkg.bin compilation, runtime manifest.
+//! Packer library: atlas packing, font copying, HTML -> .pkg.bin compilation, runtime manifest.
 
 pub mod atlas;
 pub mod bridge;
@@ -12,5 +12,6 @@ pub mod preview_comp_style;
 pub mod report;
 pub mod runtime;
 pub mod scaffold;
+pub mod verify;
 pub mod workspace;
 pub mod workspace_cmd;

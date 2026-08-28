@@ -36,6 +36,8 @@ pub mod code {
     pub const PREVIEW_DATA_FILL_WITHOUT_SIM: &str = "PreviewDataFillWithoutSim";
     /// 工作区 CLI 与 Unity 包（com.ikat.unity）版本漂移（warning，双向都报）。
     pub const IKAT_VERSION_DRIFT: &str = "IkatVersionDrift";
+    /// `ikat verify` 冒烟中 Unity 导入失败的产物（error，逐资产一条）。
+    pub const UNITY_IMPORT_FAILED: &str = "UnityImportFailed";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

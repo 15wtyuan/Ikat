@@ -58,6 +58,19 @@ pub struct CommandOutput {
     /// 产物报告，仅 build 成功时出现。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<BuildReport>,
+    /// verify 摘要，仅 verify 成功时出现（检查的资产数 + 用的编辑器 + 日志路径）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify: Option<VerifySummary>,
+}
+
+/// `ikat verify` 成功的摘要（CommandOutput.verify）。
+#[derive(Serialize)]
+pub struct VerifySummary {
+    pub assets_checked: usize,
+    /// 实际拉起的编辑器可执行文件路径（--unity-editor 或 Hub 发现）。
+    pub editor: String,
+    /// Unity batchmode 日志路径（失败排查入口；成功后文件仍在 temp）。
+    pub log: String,
 }
 
 impl CommandOutput {
@@ -74,6 +87,7 @@ impl CommandOutput {
             message: None,
             diagnostics: warnings,
             report: None,
+            verify: None,
         }
     }
 
@@ -91,6 +105,24 @@ impl CommandOutput {
             message: None,
             diagnostics: warnings,
             report: Some(report),
+            verify: None,
+        }
+    }
+
+    /// verify 成功（导入冒烟全过；build 的 warning 原样携带）。
+    pub fn verify_ok(summary: VerifySummary, warnings: Vec<PackDiagnostic>) -> Self {
+        Self {
+            command: "verify",
+            format_version: FORMAT_VERSION,
+            success: true,
+            summary: Summary {
+                errors: 0,
+                warnings: warnings.len(),
+            },
+            message: None,
+            diagnostics: warnings,
+            report: None,
+            verify: Some(summary),
         }
     }
 
@@ -115,6 +147,7 @@ impl CommandOutput {
             message: Some(f.message.clone()),
             diagnostics: f.diagnostics.clone(),
             report: None,
+            verify: None,
         }
     }
 

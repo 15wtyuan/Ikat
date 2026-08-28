@@ -49,6 +49,8 @@ pointer fails with exit 2 — never a silent local fallback.
 ```
 ikat check  [<dir>] [--format human|json]     validate: fence + registry + asset coverage; writes NOTHING
 ikat build  [<dir>] [--format human|json]     check + write artifacts into output_dir
+ikat verify [<dir>] [--unity-editor <path>] [--format human|json]
+                                              build + Unity batchmode import smoke (release gate)
 ikat init   <dir> [--ui <dir>] [--agent claude|agents]... [--unity-root <path>] [--output <dir>] [--force]
 ikat new    <name>                            create ui/<name>/main.html + register the package
 ikat list   pkg|atlas|font [--format json]    summary per entity (one line each)
@@ -66,6 +68,24 @@ config discovery (see Workspace topology). **Editing
 `ikat.workspace.json` always goes through these commands — never
 hand-edit it.** The workspace holds an entire game's UI; hand edits are
 how configurations break silently.
+
+## `ikat verify` — Unity import smoke (release gate)
+
+Builds fresh artifacts, then launches Unity in batchmode on the bound
+`unity_root` project and imports the output dir (`Refresh` + a positive
+per-file load: png → Texture2D, everything else → a non-null Object).
+One command answers "can Unity actually ingest what we just built".
+Unity-root workspaces only (local-output mode has no project to smoke);
+`output_dir` must be under `Assets/`. The editor binary is found via
+`ProjectVersion.txt` + the Unity Hub standard install dir, or pass
+`--unity-editor <path>` for nonstandard installs — never store the editor
+path in `.ikat/config.json` (that file is committed). The Unity project
+must NOT be open in an editor while verify runs (batchmode takes the
+project lock). Exit codes: 0 clean · 1 import failures (per-asset
+diagnostics) · 2 tool failures (no editor found / timeout / project
+locked / executeMethod did not run). Division of labor: this is the
+LOCAL release gate; CI-side Unity EditMode/PlayMode tests are a separate
+layer (unity-smoke workflow).
 
 ## `ikat preview` — the human preview workbench
 

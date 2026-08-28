@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`ikat verify`：Unity batchmode 导入冒烟（#99）**：build 重打 → 拉起工程绑定的
+  Unity 编辑器（batchmode）→ 包内 `Ikat.Editor.IkatVerifySmoke.Run` 做 Refresh +
+  逐文件正向加载（png → Texture2D、其余 → 非空 Object）→ 解析报告。把「产物可
+  导入」从人肉开 Unity 变成一条命令（发版本地验收面）。编辑器三层查找：
+  `--unity-editor` 参数 → `ProjectVersion.txt` 匹配 Hub 标准目录 → exit 2 教
+  用法；编辑器路径不进入库共享的 config。退出码：0 全过 / 1 导入失败（逐资产
+  诊断）/ 2 工具性失败（工程被编辑器占用、超时 15min、executeMethod 未运行）。
+  分层：本地导入冒烟归 verify，CI 的 EditMode/PlayMode 测试归 unity-smoke
+  workflow（等 license 启用），两层不重复。
 - **画序声明完整性双门（#101）**：E1（error）= z-index 声明在非定位、非
   flex item 元素上直接拒绝——浏览器对该声明视而不见而运行时恒生效，预览
   会说谎；围栏里写不出来的分歧够不着，运行时 API 直改 z 不受影响。

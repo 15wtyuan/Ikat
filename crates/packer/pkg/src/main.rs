@@ -3,6 +3,7 @@
 //! 用法（详情见 --help）：
 //!   ikat check [<dir>] [--format human|json]
 //!   ikat build [<dir>] [--format human|json]
+//!   ikat verify [<dir>] [--unity-editor <path>] [--format human|json]
 //!   ikat init <dir> [--ui <dir>] [--agent claude|agents]... [--unity-root <path>] [--output <dir>] [--force]
 //!   ikat new <name>
 //!   ikat list pkg|atlas|font [--format json]
@@ -42,6 +43,13 @@ enum Cmd {
     Build {
         root: PathBuf,
         format: Format,
+    },
+    /// Unity batchmode 导入冒烟（发版验收）：build 重打 → 拉起 Unity 导入产物
+    /// → 逐文件正向加载报告。仅 unity 模式工作区（config 带 unity_root）。
+    Verify {
+        root: PathBuf,
+        format: Format,
+        unity_editor: Option<PathBuf>,
     },
     Init {
         root: PathBuf,
@@ -108,6 +116,16 @@ fn usage() -> ! {
     );
     eprintln!(
         "  {bin} build [<dir>] [--format human|json]     check + write artifacts to output_dir"
+    );
+    eprintln!("  {bin} verify [<dir>] [--unity-editor <p>] [--format human|json]");
+    eprintln!(
+        "                                            build + Unity batchmode import smoke (release"
+    );
+    eprintln!(
+        "                                            gate; unity-root workspaces only; editor found"
+    );
+    eprintln!(
+        "                                            via ProjectVersion + Unity Hub, or pass a path)"
     );
     eprintln!(
         "  {bin} init <dir> [--ui <dir>] [--agent <kind>]... [--unity-root <path>] [--output <dir>] [--force]"
@@ -242,18 +260,22 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
     let rest = &args[1..];
     let mut scan = ArgScan::new(rest);
     match sub {
-        "check" | "build" => {
+        "check" | "build" | "verify" => {
             // <dir> 可选：缺省当前目录（AI 在工作区内裸跑 `ikat check` 的主形态）。
             let root = match scan.positional() {
                 Some(d) => PathBuf::from(d),
                 None => std::env::current_dir().ok()?,
             };
             let format = parse_format(rest)?;
-            Some(if sub == "check" {
-                Cmd::Check { root, format }
-            } else {
-                Cmd::Build { root, format }
-            })
+            match sub {
+                "check" => Some(Cmd::Check { root, format }),
+                "build" => Some(Cmd::Build { root, format }),
+                _ => Some(Cmd::Verify {
+                    root,
+                    format,
+                    unity_editor: scan.flag_value("--unity-editor").map(PathBuf::from),
+                }),
+            }
         }
         "init" => Some(Cmd::Init {
             root: PathBuf::from(scan.positional()?),
@@ -370,6 +392,11 @@ fn main() -> ExitCode {
     match cmd {
         Cmd::Check { root, format } => run_check(&root, format),
         Cmd::Build { root, format } => run_build(&root, format),
+        Cmd::Verify {
+            root,
+            format,
+            unity_editor,
+        } => run_verify(&root, format, unity_editor),
         Cmd::Init {
             root,
             ui,
@@ -502,6 +529,45 @@ fn run_build(root: &std::path::Path, format: Format) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(f) => failure_exit("build", &f, format),
+    }
+}
+
+fn run_verify(root: &std::path::Path, format: Format, unity_editor: Option<PathBuf>) -> ExitCode {
+    let ui = match locate_arg(root) {
+        Ok(p) => p,
+        Err(f) => return failure_exit("verify", &f, format),
+    };
+    match ikat_pkg::verify::run(&ui, unity_editor.as_deref()) {
+        Ok(outcome) => match format {
+            Format::Human => {
+                for w in &outcome.warnings {
+                    eprintln!("{}", w.render());
+                }
+                eprintln!(
+                    "OK: {} asset(s) imported clean via {} (log: {})",
+                    outcome.assets_checked,
+                    outcome.editor.display(),
+                    outcome.log.display()
+                );
+                ExitCode::SUCCESS
+            }
+            Format::Json => {
+                println!(
+                    "{}",
+                    CommandOutput::verify_ok(
+                        ikat_pkg::report::VerifySummary {
+                            assets_checked: outcome.assets_checked,
+                            editor: outcome.editor.display().to_string(),
+                            log: outcome.log.display().to_string(),
+                        },
+                        outcome.warnings,
+                    )
+                    .to_json()
+                );
+                ExitCode::SUCCESS
+            }
+        },
+        Err(f) => failure_exit("verify", &f, format),
     }
 }
 
