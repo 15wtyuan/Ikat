@@ -4591,6 +4591,7 @@ fn control_shell_paints_own_background() {
             NodeKind::ProgressBar,
             ControlState::Progress {
                 value: 0.5,
+                min: 0.0,
                 max: 1.0,
                 indeterminate: false,
             },

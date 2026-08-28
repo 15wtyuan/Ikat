@@ -116,6 +116,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 
 控件初始值属性分三类（围栏禁止 `<div>` 上出现 plain 控件属性）：
 
+- **progressbar**：`aria-valuenow`/`aria-valuemin`/`aria-valuemax`（缺省 min=0/max=100）。填充比例按 ARIA 语义 `(value-min)/(max-min)`（min=0 时与 value/max 等价）；运行时合成 `aria-valuemin` 镜像（改 min 后属性选择器同拍生效）。
 - **spinbutton**（NumberField）：`aria-valuenow`/`aria-valuemin`/`aria-valuemax` + `data-step`。
 - **textbox/textarea/spinbutton** 共用编辑初始值：`aria-placeholder`（占位文本）、`data-maxlength`、`aria-readonly`；textbox/textarea 的初始**值**来自元素文本内容（ARIA 无 textbox-value 属性）。
 - **radio** 分组用 `data-name`：ARIA 无「radio 组名」属性（标准靠 radiogroup 容器/相邻性表达），用 `data-*` 私有承载；同 `data-name` 自动互斥。

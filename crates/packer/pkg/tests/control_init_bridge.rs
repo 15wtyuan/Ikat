@@ -30,8 +30,8 @@ fn run_bridge(html: &str) -> Vec<TemplateNode> {
 
 #[test]
 fn bridge_extracts_progress_role_aria_attrs() {
-    // <div role="progressbar" aria-valuenow/min/max> → Progress{value,max,false}.
-    let html = r#"<div role="progressbar" aria-valuenow="780" aria-valuemin="0" aria-valuemax="1000"><div data-slot="fill"></div></div>"#;
+    // <div role="progressbar" aria-valuenow/min/max> → Progress{value,min,max,false}.
+    let html = r#"<div role="progressbar" aria-valuenow="780" aria-valuemin="100" aria-valuemax="1000"><div data-slot="fill"></div></div>"#;
     let node = &run_bridge(html)[0];
     assert_eq!(node.kind, NodeKind::ProgressBar);
     let init = node.control_init.as_ref().expect("control_init set");
@@ -39,6 +39,7 @@ fn bridge_extracts_progress_role_aria_attrs() {
         init,
         ControlInit::Progress {
             value: 780.0,
+            min: 100.0,
             max: 1000.0,
             indeterminate: false
         }
@@ -56,6 +57,7 @@ fn bridge_extracts_progress_role_indeterminate_when_no_valuenow() {
         init,
         ControlInit::Progress {
             value: 0.0,
+            min: 0.0,
             max: 100.0,
             indeterminate: true
         }

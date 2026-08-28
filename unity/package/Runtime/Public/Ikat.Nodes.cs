@@ -2837,6 +2837,12 @@ namespace Ikat
             get { ThrowIfDisposed(); return GetControlMax(); }
             set { ThrowIfDisposed(); SetControlMax(value); }
         }
+        // min 参与填充数学（ARIA：(value-min)/(max-min)，#97），运行时可改；FFI 已对 Progress 开放。
+        public float Min
+        {
+            get { ThrowIfDisposed(); return GetControlMin(); }
+            set { ThrowIfDisposed(); SetControlMin(value); }
+        }
         // indeterminate（不确定进度态）：FFI 读写 Progress 状态位（get/set_control_indeterminate）。
         // 纯状态——视觉切换走作者 CSS 选择器（core 不做 marquee 渲染）。value/max 不受扰动。
         public bool IsIndeterminate
@@ -2942,6 +2948,20 @@ namespace Ikat
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             int rc = Native.ikat_stage_set_control_max(h, _id, v);
             if (rc != 0) throw new InvalidOperationException($"set_control_max failed (node {_id})");
+        }
+        float GetControlMin()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            float v = 0f;
+            int rc = Native.ikat_stage_get_control_min(h, _id, &v);
+            if (rc != 0) throw new InvalidOperationException($"get_control_min failed (node {_id})");
+            return v;
+        }
+        void SetControlMin(float v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.ikat_stage_set_control_min(h, _id, v);
+            if (rc != 0) throw new InvalidOperationException($"set_control_min failed (node {_id})");
         }
     }
 

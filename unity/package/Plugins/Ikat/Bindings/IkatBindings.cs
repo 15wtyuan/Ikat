@@ -798,8 +798,8 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_get_control_max(StageHandle* h, ulong node_id, float* @out);
 
         /// <summary>
-        ///  设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
-        ///  null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
+        ///  设控件 min（ProgressBar / Slider / NumberField）。null 句柄 / 节点缺失 → -1。
+        ///  改 min 后 value 重新 clamp。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -807,7 +807,7 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_set_control_min(StageHandle* h, ulong node_id, float min);
 
         /// <summary>
-        ///  读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
+        ///  读控件 min（ProgressBar / Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>

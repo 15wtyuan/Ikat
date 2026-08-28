@@ -136,7 +136,8 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
 /// `set_inline_override` 而非另建并行机制。
 ///
 /// 各控件映射：
-/// - ProgressBar：`value / max` → `data-slot="fill"` 子节点的 `width:%`；`indeterminate`
+/// - ProgressBar：`(value-min) / (max-min)`（ARIA 语义，min 缺省 0）→ `data-slot="fill"` 子节点的
+///   `width:%`；`indeterminate`
 ///   时让权——清 fill 的 inline width（几何归作者 `[aria-indeterminate]` 规则）。
 /// - Slider：`value` → `data-slot="fill"` 的 `width:%`（fill 可选）+ `data-slot="thumb"` 的
 ///   `user_transform.translate` = `(slider_w - thumb_w) × pct`（水平，扣自身宽的可滑动距离）
@@ -158,6 +159,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
     match state {
         ControlState::Progress {
             value,
+            min,
             max,
             indeterminate,
         } => {
@@ -168,8 +170,9 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                     // inline 语义优先级最高，残留会压死作者规则（跳过不写不够，必须清 bit）。
                     let _ = unset_inline_override(scene, fill, "width");
                 } else {
-                    let pct = if max > 0.0 {
-                        (value / max).clamp(0.0, 1.0)
+                    // ARIA 填充比例：(value-min)/(max-min)。min=0（缺省）时与 value/max 等价。
+                    let pct = if max > min {
+                        ((value - min) / (max - min)).clamp(0.0, 1.0)
                     } else {
                         0.0
                     };

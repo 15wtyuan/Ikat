@@ -183,6 +183,7 @@ fn instantiate_non_focusable_progress_stays_no_tabindex() {
         NodeKind::ProgressBar,
         crate::asset::ControlInit::Progress {
             value: 0.0,
+            min: 0.0,
             max: 100.0,
             indeterminate: false,
         },

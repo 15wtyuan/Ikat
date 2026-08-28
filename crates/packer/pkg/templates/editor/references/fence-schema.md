@@ -99,8 +99,11 @@ in an intermediate div fails the check); the only exception is the
 | `tabpanel` | plain Container | none — a panel is a div a tab points at via `aria-controls`; hiding inactive panels is the TabList runtime's job, never author `display:none` (it bakes into the packed base style and keeps the active panel invisible — `FenceTabpanelHiddenByAuthor`) |
 | `dialog` | plain Container | none — a modal overlay layer |
 
-Initial values go into ARIA (`aria-valuenow`, `aria-checked`,
+Initial values go into ARIA (`aria-valuenow`, `aria-valuemin`,
+`aria-valuemax`, `aria-checked`,
 `aria-selected`, ...) or `data-*` (`data-step`, `data-name`) — never plain
-attributes (`value` is legal only on `role=option`).
+attributes (`value` is legal only on `role=option`). Progressbar fill
+follows ARIA math: `(valuenow - valuemin) / (valuemax - valuemin)`
+(`valuemin` defaults to 0, so `valuenow/valuemax` when absent).
 
 Canonical CSS for each control shape: `patterns.md`.

@@ -14,6 +14,8 @@
 // Usage: node normalize-dump-scene.mjs <dump-scene.json> <out.json>
 
 import { readFileSync, writeFileSync } from 'fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const [, , inPath, outPath] = process.argv;
 if (!inPath || !outPath) {
@@ -21,29 +23,11 @@ if (!inPath || !outPath) {
   process.exit(2);
 }
 
-const KIND_TAG = {
-  Container: 'div',
-  TextNode: '#text',
-  TextElement: 'span',
-  Button: 'button',
-  Image: 'img',
-  TextField: 'input',
-  NumberField: 'input',
-  Slider: 'input',
-  Toggle: 'input',
-  RadioButton: 'input',
-  TextArea: 'textarea',
-  Dropdown: 'select',
-  OptionItem: 'option',
-  ProgressBar: 'progress',
-  ListView: 'ul',
-  ListItem: 'li',
-  Slot: 'slot',
-  CustomElement: 'custom',
-  Template: 'template',
-  TabList: 'div',
-  Tab: 'button',
-};
+// kind→tag 表来自 Rust 单源导出（semantic-tags.json，ikat_pkg 测试钉新鲜度，
+// 真相源 = core kind_to_html_tag / ALL_NODE_KINDS）。
+const KIND_TAG = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'semantic-tags.json'), 'utf8'),
+).kind;
 
 const nodes = JSON.parse(readFileSync(inPath, 'utf8'));
 const out = nodes.map((n, i) => ({

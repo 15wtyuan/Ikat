@@ -94,6 +94,7 @@ fn build_golden_bytes() -> (Vec<u8>, Vec<u8>) {
             NodeId(bar),
             ControlState::Progress {
                 value: 0.55,
+                min: 0.0,
                 max: 1.0,
                 indeterminate: false,
             },

@@ -202,7 +202,7 @@ pub fn create_node_from_template(
     // （`<progress max="-5">`、`<input min="100" max="0">`），无 schema 约束。下游所有
     // clamp 调用（指针交互 slider_pos_to_value/set_slider_value、FFI set_control_value）都用
     // f32::clamp(min,max)，它在 min>max 时 debug 断言 abort——FFI 边界 panic = 杀宿主进程。
-    // 在此单一入口建立不变量（max≥0、min≤max、value∈[lo,hi]、step≥0），下游方可无守卫 clamp。
+    // 在此单一入口建立不变量（max≥min、value∈[min,max]、step≥0），下游方可无守卫 clamp。
     if let Some(init) = control_init {
         // 缓存 init 供 clone_node_recursive 重建克隆控件的 ControlState（虚拟列表每槽控件
         // 全相同的根因：克隆控件无 ControlState → set_control_value 静默失败、sync_control_visuals
@@ -211,12 +211,14 @@ pub fn create_node_from_template(
         let state = match init {
             ControlInit::Progress {
                 value,
+                min,
                 max,
                 indeterminate,
             } => {
-                let max = max.max(0.0);
+                let max = max.max(min);
                 ControlState::Progress {
-                    value: value.clamp(0.0, max),
+                    value: value.clamp(min, max),
+                    min,
                     max,
                     indeterminate,
                 }
@@ -1247,6 +1249,7 @@ mod tests {
             ResolvedStyle::default(),
             Some(ControlInit::Progress {
                 value: 0.5,
+                min: 0.0,
                 max: 1.0,
                 indeterminate: false,
             }),

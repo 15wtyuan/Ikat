@@ -518,6 +518,8 @@ impl EditState {
 pub enum ControlState {
     Progress {
         value: f32,
+        /// 填充比例分母域下端（ARIA 语义：pct = (value-min)/(max-min)，min=0 时与 value/max 等价）。
+        min: f32,
         max: f32,
         indeterminate: bool,
     },

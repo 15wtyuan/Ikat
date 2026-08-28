@@ -16,7 +16,7 @@ const HTML: &str = include_str!("fixtures/schema-lock.html");
 
 /// 当前布局的登记哈希。改 pkg 布局（有意 bump 版本）时同步更新此值。
 /// v47（#93 ResolvedStyle 加 cursor）。
-const LOCKED_HASH: u64 = 0xecfb_0fc1_faf9_31e1; // v48 z_declared（#96 画序分层）
+const LOCKED_HASH: u64 = 0x2c64_f29b_9f4b_8d3a; // v49 progress min（#97 ARIA 填充域）
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

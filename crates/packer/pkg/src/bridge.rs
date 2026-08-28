@@ -249,31 +249,39 @@ pub(crate) fn validate_template_children(tree: &IrTree) -> Result<(), String> {
     Ok(())
 }
 
+/// SemanticKind → NodeKind（total）。rect-diff tag-map 导出（tests/rectdiff_tag_map.rs）
+/// 经此把 role→SemanticKind→NodeKind→tag 串成单源链，不再手抄。
+pub fn semantic_to_kind(s: SemanticKind) -> NodeKind {
+    match s {
+        SemanticKind::Container => NodeKind::Container,
+        SemanticKind::TextElement => NodeKind::TextElement,
+        SemanticKind::Button => NodeKind::Button,
+        SemanticKind::Image => NodeKind::Image,
+        SemanticKind::TextField => NodeKind::TextField,
+        SemanticKind::NumberField => NodeKind::NumberField,
+        SemanticKind::Slider => NodeKind::Slider,
+        SemanticKind::Toggle => NodeKind::Toggle,
+        SemanticKind::RadioButton => NodeKind::RadioButton,
+        SemanticKind::TextArea => NodeKind::TextArea,
+        SemanticKind::Dropdown => NodeKind::Dropdown,
+        SemanticKind::OptionItem => NodeKind::OptionItem,
+        SemanticKind::ProgressBar => NodeKind::ProgressBar,
+        SemanticKind::ListView => NodeKind::ListView,
+        SemanticKind::ListItem => NodeKind::ListItem,
+        SemanticKind::TabList => NodeKind::TabList,
+        SemanticKind::Tab => NodeKind::Tab,
+        SemanticKind::Link => NodeKind::Link,
+        SemanticKind::Slot => NodeKind::Slot,
+        SemanticKind::CustomElement => NodeKind::CustomElement,
+        SemanticKind::Template => NodeKind::Template,
+    }
+}
+
 /// SemanticKind → NodeKind（total，非静默）。
 /// None = 未识别标签 → Err（围栏门应已挡，防御性兜底）。
 pub(crate) fn map_semantic(el: &IrElement) -> Result<NodeKind, String> {
     match el.semantic {
-        Some(SemanticKind::Container) => Ok(NodeKind::Container),
-        Some(SemanticKind::TextElement) => Ok(NodeKind::TextElement),
-        Some(SemanticKind::Button) => Ok(NodeKind::Button),
-        Some(SemanticKind::Image) => Ok(NodeKind::Image),
-        Some(SemanticKind::TextField) => Ok(NodeKind::TextField),
-        Some(SemanticKind::NumberField) => Ok(NodeKind::NumberField),
-        Some(SemanticKind::Slider) => Ok(NodeKind::Slider),
-        Some(SemanticKind::Toggle) => Ok(NodeKind::Toggle),
-        Some(SemanticKind::RadioButton) => Ok(NodeKind::RadioButton),
-        Some(SemanticKind::TextArea) => Ok(NodeKind::TextArea),
-        Some(SemanticKind::Dropdown) => Ok(NodeKind::Dropdown),
-        Some(SemanticKind::OptionItem) => Ok(NodeKind::OptionItem),
-        Some(SemanticKind::ProgressBar) => Ok(NodeKind::ProgressBar),
-        Some(SemanticKind::ListView) => Ok(NodeKind::ListView),
-        Some(SemanticKind::ListItem) => Ok(NodeKind::ListItem),
-        Some(SemanticKind::TabList) => Ok(NodeKind::TabList),
-        Some(SemanticKind::Tab) => Ok(NodeKind::Tab),
-        Some(SemanticKind::Link) => Ok(NodeKind::Link),
-        Some(SemanticKind::Slot) => Ok(NodeKind::Slot),
-        Some(SemanticKind::CustomElement) => Ok(NodeKind::CustomElement),
-        Some(SemanticKind::Template) => Ok(NodeKind::Template),
+        Some(s) => Ok(semantic_to_kind(s)),
         None => Err(format!(
             "未识别标签 <{}>（semantic=None；围栏门应已挡）",
             el.tag
@@ -320,8 +328,12 @@ pub(crate) fn extract_control_init(
             let max = attr(el, "aria-valuemax")
                 .and_then(|v| v.parse::<f32>().ok())
                 .unwrap_or(100.0);
+            let min = attr(el, "aria-valuemin")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0);
             Some(ControlInit::Progress {
                 value,
+                min,
                 max,
                 indeterminate,
             })

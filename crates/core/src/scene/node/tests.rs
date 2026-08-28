@@ -875,6 +875,7 @@ fn instantiate_fills_control_state_progress_from_init() {
         ResolvedStyle::default(),
         Some(crate::asset::ControlInit::Progress {
             value: 70.0,
+            min: 0.0,
             max: 100.0,
             indeterminate: false,
         }),
@@ -885,6 +886,7 @@ fn instantiate_fills_control_state_progress_from_init() {
             state,
             ControlState::Progress {
                 value: 70.0,
+                min: 0.0,
                 max: 100.0,
                 indeterminate: false
             }

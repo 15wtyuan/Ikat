@@ -39,15 +39,20 @@ pub extern "C" fn ikat_stage_set_control_value(
         };
         let new_state = match state {
             ControlState::Progress {
-                max, indeterminate, ..
+                min,
+                max,
+                indeterminate,
+                ..
             } => {
-                // 存储的 max 来自 ControlInit（instantiate sanitize 到 ≥0）或 set_control_max
-                // （guard 到 ≥0），但 FFI 边界纵深守卫：负 max 会让 clamp(0.0,max) panic。
-                let max = max.max(0.0);
-                let clamped = value.clamp(0.0, max);
+                // 存储的 min/max 来自 ControlInit（instantiate sanitize 到 min≤max）或
+                // set_control_min/max（各自 guard），但 FFI 边界纵深守卫：min>max 会让
+                // clamp panic（镜像 Slider arm 的 lo/hi 交换守卫）。
+                let (lo, hi) = if min <= max { (min, max) } else { (max, min) };
+                let clamped = value.clamp(lo, hi);
                 ControlState::Progress {
                     value: clamped,
-                    max,
+                    min: lo,
+                    max: hi,
                     indeterminate,
                 }
             }
@@ -193,17 +198,18 @@ pub extern "C" fn ikat_stage_set_control_max(h: *mut StageHandle, node_id: u64, 
         let new_state = match state {
             ControlState::Progress {
                 value,
+                min,
                 indeterminate,
                 ..
             } => {
-                // Progress 的 max 天然非负；caller 可能传负值，先 guard 到 ≥0 再 clamp。
-                // f32::clamp 在 min > max（即 0.0 > max）时 panic，FFI 不可因 caller
-                // 输入 abort 宿主进程（镜像 Slider arm 的 max.max(min) 守卫）。
-                let max = max.max(0.0);
+                // Progress 的区间守卫与 Slider 同口径：f32::clamp 在 min > max 时 panic，
+                // FFI 不可因 caller 输入 abort 宿主进程（max.max(min) 守卫）。
+                let max = max.max(min);
                 // 改 max 后把 value 重新 clamp 进新区间（避免 value > max 的悬空态）
-                let value = value.clamp(0.0, max);
+                let value = value.clamp(min, max);
                 ControlState::Progress {
                     value,
+                    min,
                     max,
                     indeterminate,
                 }
@@ -283,8 +289,8 @@ pub extern "C" fn ikat_stage_get_control_max(
     })
 }
 
-/// 设控件 min（Slider / NumberField；ProgressBar 无 min 语义 → -1）。
-/// null 句柄 / 节点缺失 → -1。改 min 后 value 重新 clamp。
+/// 设控件 min（ProgressBar / Slider / NumberField）。null 句柄 / 节点缺失 → -1。
+/// 改 min 后 value 重新 clamp。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -303,6 +309,21 @@ pub extern "C" fn ikat_stage_set_control_min(h: *mut StageHandle, node_id: u64, 
             return -1;
         };
         let new_state = match state {
+            ControlState::Progress {
+                value,
+                max,
+                indeterminate,
+                ..
+            } => {
+                let min = min.min(max);
+                let value = value.clamp(min, max);
+                ControlState::Progress {
+                    value,
+                    min,
+                    max,
+                    indeterminate,
+                }
+            }
             ControlState::Slider {
                 value,
                 max,
@@ -340,7 +361,7 @@ pub extern "C" fn ikat_stage_set_control_min(h: *mut StageHandle, node_id: u64, 
     })
 }
 
-/// 读控件 min（Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
+/// 读控件 min（ProgressBar / Slider / NumberField）。非数值控件 / null out / 节点缺失 → -1。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -358,7 +379,11 @@ pub extern "C" fn ikat_stage_get_control_min(
             return -1;
         };
         match scene.controls.get(NodeId(node_id)) {
-            Some(ControlState::Slider { min, .. } | ControlState::NumberField { min, .. }) => {
+            Some(
+                ControlState::Progress { min, .. }
+                | ControlState::Slider { min, .. }
+                | ControlState::NumberField { min, .. },
+            ) => {
                 unsafe { *out = *min };
                 0
             }

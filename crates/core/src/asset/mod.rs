@@ -49,13 +49,13 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）。两处魔数皆 LoomGUI 时代遗留：字节=格式兼容契约而非品牌，更名不改。
-pub const PKG_FORMAT_VERSION: u32 = 48; // v48: ResolvedStyle 加 z_declared（#96 画序 CSS 语义化——paint_key 分层需要「z 是否声明」位，bincode 布局变，旧包拒绝）。v47: ResolvedStyle 加 cursor（#93，1 字节枚举，bincode 布局变，旧包拒绝）+ 同批 TemplateNode flags 字节新增 disabled 位（bit 0x08，HTML button disabled 属性载体，字节布局不变）。
+pub const PKG_FORMAT_VERSION: u32 = 49; // v49: ControlInit::Progress 加 min（#97 progressbar 填充比例 ARIA 语义化——(value-min)/(max-min)，bincode 布局变，旧包拒绝）。v48: ResolvedStyle 加 z_declared（#96 画序 CSS 语义化——paint_key 分层需要「z 是否声明」位，bincode 布局变，旧包拒绝）。v47: ResolvedStyle 加 cursor（#93，1 字节枚举，bincode 布局变，旧包拒绝）+ 同批 TemplateNode flags 字节新增 disabled 位（bit 0x08，HTML button disabled 属性载体，字节布局不变）。
                                         // MIN 必须随 bump 同拍（历史不变量：每版都改 bincode 布局，旧包解不动）。MIN
                                         // 落后会让旧版包漏过版本门、以 Bincode 结构错配炸成「malformed」（rc -1 无指引），
                                         // 而非 TooOld 的「Unity 包与 ikat.exe 同版本重打」专属文案——v48 bump 漏拍 MIN 的
                                         // 实证（0.0.16 起 CI 红）。护栏：asset/tests 的 min_version_tracks_current。
-pub(crate) const MIN_VERSION: u32 = 48;
-pub(crate) const MAX_VERSION: u32 = 48;
+pub(crate) const MIN_VERSION: u32 = 49;
+pub(crate) const MAX_VERSION: u32 = 49;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
@@ -96,6 +96,7 @@ pub struct EditInit {
 pub enum ControlInit {
     Progress {
         value: f32,
+        min: f32,
         max: f32,
         indeterminate: bool,
     },

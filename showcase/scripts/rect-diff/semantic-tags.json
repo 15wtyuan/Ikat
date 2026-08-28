@@ -1,0 +1,41 @@
+{
+  "kind": {
+    "Button": "button",
+    "Container": "div",
+    "CustomElement": "custom",
+    "Dropdown": "select",
+    "Image": "img",
+    "Link": "a",
+    "ListItem": "li",
+    "ListView": "ul",
+    "NumberField": "input",
+    "OptionItem": "option",
+    "ProgressBar": "progress",
+    "RadioButton": "input",
+    "Slider": "input",
+    "Slot": "slot",
+    "Tab": "button",
+    "TabList": "div",
+    "Template": "template",
+    "TextArea": "textarea",
+    "TextElement": "span",
+    "TextField": "input",
+    "TextNode": "#text",
+    "Toggle": "input"
+  },
+  "role": {
+    "combobox": "select",
+    "list": "ul",
+    "listbox": "div",
+    "listitem": "li",
+    "option": "option",
+    "progressbar": "progress",
+    "radio": "input",
+    "slider": "input",
+    "spinbutton": "input",
+    "switch": "input",
+    "tab": "button",
+    "tablist": "div",
+    "textbox": "input"
+  }
+}

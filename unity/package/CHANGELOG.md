@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **progressbar 填充比例 ARIA 语义化（#97）**：`aria-valuemin` 此前不参与填充
+  数学（core 按 `value/max`，ARIA 标准是 `(value-min)/(max-min)`，min≠0 时
+  填充偏少）。`ControlInit/ControlState::Progress` 补 min 字段（pkg 格式
+  v49，旧包拒绝——Unity 包与 ikat.exe 同版本重打），打包期解析
+  `aria-valuemin`（缺省 0，min=0 行为不变、零迁移）；FFI `set/get_control_min`
+  对 ProgressBar 开放（此前返回 -1 的「无 min 语义」禁区废除），C# `ProgressBar.Min`
+  可读写；运行时合成 `aria-valuemin` 属性镜像（改 min 后 CSS 属性选择器同拍
+  生效）；preview `controls.js` 同口径对齐。
+
 ## [0.0.17] - 2026-08-28
 
 ### Fixed

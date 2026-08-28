@@ -18,6 +18,7 @@ fn make_progress_stage(value: f32, max: f32) -> (*mut StageHandle, u64) {
         NodeId(root),
         ControlState::Progress {
             value,
+            min: 0.0,
             max,
             indeterminate: false,
         },
@@ -328,14 +329,15 @@ fn ffi_set_get_control_min_step_slider() {
     ikat_stage_free(h);
 }
 
-/// Progress 无 min/step 语义 → set/get_control_min/step 返 -1。
+/// #97 后 ProgressBar 开放 min（ARIA 填充域参与数学，set/get 生效）；step 仍无语义 → -1。
 #[test]
 fn ffi_control_min_step_progress_err() {
     let (h, node) = make_progress_stage(50.0, 100.0);
-    assert_eq!(ikat_stage_set_control_min(h, node, 10.0), -1);
+    assert_eq!(ikat_stage_set_control_min(h, node, 10.0), 0);
     assert_eq!(ikat_stage_set_control_step(h, node, 2.0), -1);
     let mut out = 99.0f32;
-    assert_eq!(ikat_stage_get_control_min(h, node, &mut out), -1);
+    assert_eq!(ikat_stage_get_control_min(h, node, &mut out), 0);
+    assert_eq!(out, 10.0);
     assert_eq!(ikat_stage_get_control_step(h, node, &mut out), -1);
     ikat_stage_free(h);
 }

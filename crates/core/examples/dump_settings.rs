@@ -247,12 +247,13 @@ fn cs_summary(cs: &ControlState) -> String {
         }
         ControlState::Progress {
             value,
+            min,
             max,
             indeterminate,
         } => {
             format!(
-                "Progress{{value={},max={},indet={}}}",
-                value, max, indeterminate
+                "Progress{{value={},min={},max={},indet={}}}",
+                value, min, max, indeterminate
             )
         }
         ControlState::TabList { selected_index } => {

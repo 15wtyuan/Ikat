@@ -50,6 +50,34 @@ pub fn kind_to_html_tag(k: NodeKind) -> &'static str {
     }
 }
 
+/// 全部 NodeKind 变体（`showcase/scripts/rect-diff/semantic-tags.json` 导出遍历用）。
+/// 新增变体须同步：`kind_to_html_tag` match（编译器穷尽性强制）+ 本表 + 下方单测的
+/// 逐变体断言。详情见 `kind_to_html_tag_matches_browser_pairing_semantics` 注释。
+pub const ALL_NODE_KINDS: &[NodeKind] = &[
+    NodeKind::Container,
+    NodeKind::TextNode,
+    NodeKind::TextElement,
+    NodeKind::Button,
+    NodeKind::Image,
+    NodeKind::TextField,
+    NodeKind::NumberField,
+    NodeKind::Slider,
+    NodeKind::Toggle,
+    NodeKind::RadioButton,
+    NodeKind::TextArea,
+    NodeKind::Dropdown,
+    NodeKind::OptionItem,
+    NodeKind::ProgressBar,
+    NodeKind::ListView,
+    NodeKind::ListItem,
+    NodeKind::Slot,
+    NodeKind::CustomElement,
+    NodeKind::Template,
+    NodeKind::TabList,
+    NodeKind::Tab,
+    NodeKind::Link,
+];
+
 /// 整树 JSON：每节点 {node_id, parent, tag, id, classes, kind, layout, world_matrix, visible}。
 /// 文本节点附 `"text"` 块（font-size / 行高（乘数标记，#65 类 `line-height:26` 被当
 /// 26 倍乘数一眼可见）/ 行数 / 每行宽）；滚动容器附 `"scroll"` 块（viewport/content/
@@ -384,27 +412,47 @@ mod tests {
 
     #[test]
     fn kind_to_html_tag_matches_browser_pairing_semantics() {
-        assert_eq!(kind_to_html_tag(NodeKind::Container), "div");
-        assert_eq!(kind_to_html_tag(NodeKind::TextNode), "#text");
-        assert_eq!(kind_to_html_tag(NodeKind::TextElement), "span");
-        assert_eq!(kind_to_html_tag(NodeKind::Button), "button");
-        assert_eq!(kind_to_html_tag(NodeKind::Image), "img");
-        assert_eq!(kind_to_html_tag(NodeKind::TextField), "input");
-        assert_eq!(kind_to_html_tag(NodeKind::NumberField), "input");
-        assert_eq!(kind_to_html_tag(NodeKind::Slider), "input");
-        assert_eq!(kind_to_html_tag(NodeKind::Toggle), "input");
-        assert_eq!(kind_to_html_tag(NodeKind::RadioButton), "input");
-        assert_eq!(kind_to_html_tag(NodeKind::TextArea), "textarea");
-        assert_eq!(kind_to_html_tag(NodeKind::Dropdown), "select");
-        assert_eq!(kind_to_html_tag(NodeKind::OptionItem), "option");
-        assert_eq!(kind_to_html_tag(NodeKind::ProgressBar), "progress");
-        assert_eq!(kind_to_html_tag(NodeKind::ListView), "ul");
-        assert_eq!(kind_to_html_tag(NodeKind::ListItem), "li");
-        assert_eq!(kind_to_html_tag(NodeKind::Slot), "slot");
-        assert_eq!(kind_to_html_tag(NodeKind::CustomElement), "custom");
-        assert_eq!(kind_to_html_tag(NodeKind::Template), "template");
-        assert_eq!(kind_to_html_tag(NodeKind::TabList), "div");
-        assert_eq!(kind_to_html_tag(NodeKind::Tab), "button");
+        // 逐变体断言 + ALL_NODE_KINDS 全量走查：新增 NodeKind 时 match 因穷尽性编译失败，
+        // 本测试与 ALL_NODE_KINDS 同步补条目（漏登 ALL_NODE_KINDS = tag-map 导出缺行，
+        // rect-diff 配对表 freshness 测试会跟着红）。
+        let expected: &[(NodeKind, &str)] = &[
+            (NodeKind::Container, "div"),
+            (NodeKind::TextNode, "#text"),
+            (NodeKind::TextElement, "span"),
+            (NodeKind::Button, "button"),
+            (NodeKind::Image, "img"),
+            (NodeKind::TextField, "input"),
+            (NodeKind::NumberField, "input"),
+            (NodeKind::Slider, "input"),
+            (NodeKind::Toggle, "input"),
+            (NodeKind::RadioButton, "input"),
+            (NodeKind::TextArea, "textarea"),
+            (NodeKind::Dropdown, "select"),
+            (NodeKind::OptionItem, "option"),
+            (NodeKind::ProgressBar, "progress"),
+            (NodeKind::ListView, "ul"),
+            (NodeKind::ListItem, "li"),
+            (NodeKind::Slot, "slot"),
+            (NodeKind::CustomElement, "custom"),
+            (NodeKind::Template, "template"),
+            (NodeKind::TabList, "div"),
+            (NodeKind::Tab, "button"),
+            (NodeKind::Link, "a"),
+        ];
+        for (k, tag) in expected {
+            assert_eq!(kind_to_html_tag(*k), *tag);
+        }
+        assert_eq!(
+            ALL_NODE_KINDS.len(),
+            expected.len(),
+            "ALL_NODE_KINDS 与逐变体断言表同长（漏登 = tag-map 导出缺行）"
+        );
+        for k in ALL_NODE_KINDS {
+            assert!(
+                expected.iter().any(|(ek, _)| ek == k),
+                "ALL_NODE_KINDS 含未断言变体 {k:?}"
+            );
+        }
     }
 
     /// #85：文本节点附 resolved 块（font/行高乘数/行宽），滚动容器附几何块。

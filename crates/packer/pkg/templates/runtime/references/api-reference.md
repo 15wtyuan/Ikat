@@ -235,16 +235,17 @@ arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
 | div role=switch | Toggle : Node | IsChecked, Disabled, CheckedChanged |
 | div role=radio | RadioButton : Node | IsChecked, Name (readonly), Disabled, CheckedChanged |
 | div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
-| div role=progressbar | ProgressBar : Node | Value, Max (float, 0-based), IsIndeterminate, AnimateValue |
+| div role=progressbar | ProgressBar : Node | Value, Min, Max (float), IsIndeterminate, AnimateValue |
 | div role=tablist | TabList : Container | SelectedIndex, SelectionChanged (arrow keys/click; panels linked via `aria-controls`) |
 | div role=tab | Tab : Container | (`aria-selected` synthesized from TabList.SelectedIndex) |
 | a (inside rich text) | Link : Container | Href (readonly), Clicked |
 
 - Numeric control values are `float`.
-- **ProgressBar value domain**: `Value` is raw in `[0, Max]` — NOT
-  normalized 0..1. `Max` defaults to the HTML `aria-valuemax`
-  attribute (fallback 100). The fill width is `Value / Max`
-  internally; write `Value = 70` with `Max = 100` for a 70% bar.
+- **ProgressBar value domain**: `Value` is raw in `[Min, Max]` — NOT
+  normalized 0..1. `Min`/`Max` default to the HTML `aria-valuemin`/
+  `aria-valuemax` attributes (fallback 0 / 100). The fill width is
+  `(Value - Min) / (Max - Min)` internally (ARIA semantics); with the
+  default `Min = 0` write `Value = 70` with `Max = 100` for a 70% bar.
 - **ProgressBar.AnimateValue(target, durationSec = 0.4)** —
   presentation sugar: eases the fill to `target` (easeOut) instead of
   snapping. `Value` reads back the target during the animation (the

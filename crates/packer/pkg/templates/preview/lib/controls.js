@@ -5,15 +5,16 @@
 // 这里只负责驱动。
 
 // role=progressbar → 按 aria-valuenow 驱动 [data-slot=fill] 宽度。口径 = core
-// sync_control_visuals 的 (value/max).clamp(0,1)——min 不参与（core 侧行为；
-// min≠0 的 ARIA 标准数学分歧另立 issue，预览跟 core 不跟标准）。
+// sync_control_visuals 的 (value-min)/(max-min).clamp(0,1)（ARIA 语义，#97；
+// min 缺省 0 时与 value/max 等价——预览镜像 core）。
 export function wireProgressbars() {
   document.querySelectorAll('[role="progressbar"]').forEach((pb) => {
     const fill = pb.querySelector('[data-slot="fill"]');
     if (!fill) return;
+    const min = parseFloat(pb.getAttribute('aria-valuemin')) || 0;
     const max = parseFloat(pb.getAttribute('aria-valuemax')) || 100;
     const val = parseFloat(pb.getAttribute('aria-valuenow')) || 0;
-    const pct = max > 0 ? Math.min(1, Math.max(0, val / max)) * 100 : 0;
+    const pct = max > min ? Math.min(1, Math.max(0, (val - min) / (max - min))) * 100 : 0;
     fill.style.width = pct + '%';
   });
 }

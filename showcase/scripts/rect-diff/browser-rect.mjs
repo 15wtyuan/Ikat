@@ -92,7 +92,20 @@ try {
   await page.addStyleTag({ content: reset });
   await page.waitForTimeout(100); // let reset reflow settle
 
-  const rects = await page.evaluate(() => {
+  // Core dump reports each node's NodeKind via `kind_to_html_tag`, which maps
+  // role-driven controls to their semantic element (role=listitem -> li,
+  // progressbar -> progress, spinbutton -> input, ...). The literal DOM tag
+  // for those is a plain div, so without this normalization every role-driven
+  // node lands in a different tag+classes bucket and pairs with nothing.
+  // role→tag 表来自 Rust 单源导出（semantic-tags.json，ikat_pkg 测试钉新鲜度，
+  // 真相源链 = fence ROLE_TO_SEMANTIC → bridge semantic_to_kind → core
+  // kind_to_html_tag）。textbox 的 aria-multiline→textarea 分流留在浏览器侧
+  // （只有这里能看到该属性），经 evaluate 参数传进去。
+  const roleTags = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'semantic-tags.json'), 'utf8'),
+  ).role;
+
+  const rects = await page.evaluate((roleTags) => {
     document.body.style.zoom = '';
     // Undo demo fill: remove cloned (non-template) children of data-fill
     // lists so the browser shows the same empty list core laid out.
@@ -101,6 +114,16 @@ try {
         if (ch.tagName !== 'TEMPLATE') ch.remove();
       });
     });
+    function semanticTag(el) {
+      const role = el.getAttribute('role');
+      if (role) {
+        if (role === 'textbox' && el.getAttribute('aria-multiline') === 'true') return 'textarea';
+        if (roleTags[role]) return roleTags[role];
+      }
+      // Hyphenated custom elements: core's dump emits the custom_tag literal
+      // (pkg v35), so the browser side pairs on the literal tagName too.
+      return el.tagName.toLowerCase();
+    }
     const els = document.querySelectorAll('body *');
     return Array.from(els).map((el, i) => {
       const r = el.getBoundingClientRect();
@@ -115,38 +138,7 @@ try {
         h: r.height,
       };
     });
-
-    // Core dump reports each node's NodeKind via `kind_to_html_tag`, which maps
-    // role-driven controls to their semantic element (role=listitem -> li,
-    // progressbar -> progress, spinbutton -> input, ...). The literal DOM tag
-    // for those is a plain div, so without this normalization every role-driven
-    // node lands in a different tag+classes bucket and pairs with nothing.
-    // Table mirrors core's NodeKind mapping (crates/core/src/dump.rs).
-    function semanticTag(el) {
-      const role = el.getAttribute('role');
-      if (role) {
-        if (role === 'textbox' && el.getAttribute('aria-multiline') === 'true') return 'textarea';
-        const roleTags = {
-          listitem: 'li',
-          list: 'ul',
-          progressbar: 'progress',
-          spinbutton: 'input',
-          slider: 'input',
-          switch: 'input',
-          radio: 'input',
-          textbox: 'input',
-          combobox: 'select',
-          option: 'option',
-          tab: 'button',
-        };
-        if (roleTags[role]) return roleTags[role];
-      }
-      const t = el.tagName.toLowerCase();
-      // Hyphenated custom elements: core's dump emits the custom_tag literal
-      // (pkg v35), so the browser side pairs on the literal tagName too.
-      return t;
-    }
-  });
+  }, roleTags);
 
   writeFileSync(outPath, JSON.stringify(rects, null, 2));
   console.log(`wrote ${rects.length} elements -> ${outPath}`);

@@ -444,6 +444,7 @@ fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
 /// - `aria-checked`：Toggle / Radio 的 `checked`（"true"/"false"）。
 /// - `aria-expanded`：Dropdown 的 `open`。
 /// - `aria-valuenow`：Progress / Slider 的 `value`（f32）或 NumberField 的数值文本。
+/// - `aria-valuemin`：Progress / Slider 的 `min`（f32；运行时改 min 后属性选择器同拍镜像）。
 /// - `aria-indeterminate`：Progress 的 `indeterminate`（"true"/"false"；入口 = 打包期
 ///   `aria-valuenow` 缺席的 ARIA 语义，运行时 API 可翻转）。
 /// - `aria-multiline`：**静态**，按 NodeKind（TextArea="true"），不查 ControlState——TextArea
@@ -507,6 +508,9 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             value.to_string()
         }
         ("valuenow", ControlState::NumberField { edit, .. }) => edit.value.clone(),
+        ("valuemin", ControlState::Progress { min, .. } | ControlState::Slider { min, .. }) => {
+            min.to_string()
+        }
         // indeterminate 的入口 = 打包期 aria-valuenow 缺席（ARIA 规范语义）；运行时
         // C# set_is_indeterminate 后由此合成镜像，作者用 [aria-indeterminate="true"] 定样式。
         ("indeterminate", ControlState::Progress { indeterminate, .. }) => {
@@ -2197,6 +2201,7 @@ mod tests {
             NodeKind::ProgressBar,
             ControlState::Progress {
                 value: 50.0,
+                min: 0.0,
                 max: 100.0,
                 indeterminate: false,
             },
@@ -2209,6 +2214,25 @@ mod tests {
     }
 
     #[test]
+    fn attr_matches_aria_valuemin_from_progress() {
+        // Progress{min:50.0} → [aria-valuemin="50"] 命中（运行时改 min 后属性选择器同拍镜像）。
+        let (s, id) = control_scene(
+            NodeKind::ProgressBar,
+            ControlState::Progress {
+                value: 75.0,
+                min: 50.0,
+                max: 100.0,
+                indeterminate: false,
+            },
+        );
+        let sel = hand_selector(r#"[aria-valuemin="50"]"#);
+        assert!(
+            compound_matches_node(&sel.compound[0], id, &s),
+            "Progress min=50.0 → [aria-valuemin=\"50\"] 命中"
+        );
+    }
+
+    #[test]
     fn attr_matches_aria_indeterminate_from_progress() {
         // indeterminate=true → [aria-indeterminate="true"] 命中。入口 = 打包期
         // aria-valuenow 缺席（ARIA 语义）；运行时 C# set_is_indeterminate 后靠本合成
@@ -2217,6 +2241,7 @@ mod tests {
             NodeKind::ProgressBar,
             ControlState::Progress {
                 value: 0.0,
+                min: 0.0,
                 max: 100.0,
                 indeterminate: true,
             },

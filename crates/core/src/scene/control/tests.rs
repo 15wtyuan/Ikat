@@ -116,6 +116,7 @@ fn make_progress(scene: &mut Scene, value: f32, max: f32) -> NodeId {
         ResolvedStyle::default(),
         Some(ControlInit::Progress {
             value,
+            min: 0.0,
             max,
             indeterminate: false,
         }),
@@ -174,6 +175,38 @@ fn progress_fill_width_reflects_value() {
         scene.get(fill).unwrap().inline_set.0 & INLINE_WIDTH,
         0,
         "width bit set in inline_set"
+    );
+}
+
+#[test]
+fn progress_fill_width_uses_aria_min_domain() {
+    // min≠0 → ARIA 填充比例 (value-min)/(max-min)：min=50/max=100/value=75 → 50%，
+    // 不是 value/max 的 75%（#97 语义裁决：core 对齐 ARIA 标准）。
+    let mut scene = Scene::default();
+    let id = create_node_from_template(
+        &mut scene,
+        NodeKind::ProgressBar,
+        ResolvedStyle::default(),
+        Some(ControlInit::Progress {
+            value: 75.0,
+            min: 50.0,
+            max: 100.0,
+            indeterminate: false,
+        }),
+    );
+    make_slot_child(&mut scene, id, SLOT_FILL);
+    sync_control_visuals(&mut scene, id, 0.0);
+    let fill = find_child_by_slot(&scene, id, SLOT_FILL).expect("progress has fill child");
+    assert_eq!(
+        scene
+            .get(fill)
+            .unwrap()
+            .inline_override
+            .taffy_style
+            .size
+            .width,
+        Dimension::percent(0.5),
+        "(75-50)/(100-50) → width:50%"
     );
 }
 
@@ -1355,8 +1388,9 @@ fn malformed_slider_min_gt_max_does_not_panic_on_interaction() {
 
 #[test]
 fn malformed_progress_negative_max_sanitized() {
-    // <progress max="-5">：instantiate sanitize max 到 0（≥0），value clamp 进 [0,0]=0。
-    // 下游 sync_control_visuals 的 (value/max).clamp 不 panic（max>0 守卫已生效）。
+    // <progress min="-10" max="-5">：instantiate sanitize 到 max≥min（-5 ≥ -10 成立，
+    // 不再强制 max≥0——min≠0 域合法），value clamp 进 [min,max]=[-10,-5]。
+    // 下游 sync_control_visuals 的 (value-min)/(max-min) 不 panic（max>min 守卫）。
     let mut scene = Scene::default();
     let id = create_node_from_template(
         &mut scene,
@@ -1364,16 +1398,18 @@ fn malformed_progress_negative_max_sanitized() {
         ResolvedStyle::default(),
         Some(ControlInit::Progress {
             value: 30.0,
+            min: -10.0,
             max: -5.0,
             indeterminate: false,
         }),
     );
-    // sync 不 panic（max=0 时 pct=0.0 走 max>0 else 臂）。
     sync_control_visuals(&mut scene, id, 0.0);
     match scene.controls.get(id) {
-        Some(ControlState::Progress { value, max, .. }) => {
-            assert!(*max >= 0.0, "max sanitized to >=0, got {max}");
-            assert!((value - 0.0).abs() < 1e-6, "value clamped into [0,0]");
+        Some(ControlState::Progress {
+            value, min, max, ..
+        }) => {
+            assert!(*max >= *min, "max sanitized to >=min, got {min}..{max}");
+            assert!((value - -5.0).abs() < 1e-6, "value clamped into [-10,-5]");
         }
         _ => panic!("progress state exists"),
     }
