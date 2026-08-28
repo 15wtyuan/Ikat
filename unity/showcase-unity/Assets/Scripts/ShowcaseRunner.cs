@@ -905,6 +905,26 @@ public class ShowcaseRunner : MonoBehaviour
                     expVal.TextContent = $"{Mathf.RoundToInt(exp.Value)}%";
                 };
             }
+
+            // #97 min≠0 验收用例：RAGE 条 min=200/max=1000/now=600 → ARIA 填充 50%
+            // （旧公式 value/max 会画 60%——半宽 vs 过半一眼可辨）。按钮运行时切
+            // ProgressBar.Min（FFI set_control_min → fill 重算 + value clamp）：
+            // 200↔600 往返，条在「半满」与「空」间跳，读数标签同步翻转。
+            ProgressBar rage = null;
+            TextElement rageVal = null;
+            if (page.TryGet<CustomElement>("rage-bar", out var rageBar))
+            {
+                rageBar.TryGet<ProgressBar>("stat-rage", out rage);
+                rageBar.TryGet<TextElement>("stat-rage-val", out rageVal);
+            }
+            if (page.TryGet<Button>("btn-rage", out var rageBtn) && rage != null && rageVal != null)
+            {
+                rageBtn.Clicked += () =>
+                {
+                    rage.Min = rage.Min >= 600f ? 200f : 600f;
+                    rageVal.TextContent = $"{Mathf.RoundToInt(rage.Value)}/{Mathf.RoundToInt(rage.Max)} min{Mathf.RoundToInt(rage.Min)}";
+                };
+            }
         }
 
         // form 页（角色创建表单）= 控件束 P2/P3 typed 事件主力验收页：文本框全家 + Dropdown。
