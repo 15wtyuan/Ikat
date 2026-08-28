@@ -54,7 +54,7 @@ cargo test -p ikat_fence                              # ← 围栏契约门
 
 ### Rust → Unity .dll 闭环（Windows 本机是唯一的编码机）
 
-按记忆/工作流：**任何** Rust 改动后必须重编 + commit `.dll`，否则测不了——日常一条命令 `cargo run -p xtask -- reout`（重编 dll + ikat.exe + ikat_gui.exe 全家桶 → 拷贝 → sync-bindings → showcase bundle + HeadlessTests fixture 包无条件重打 + 字节对比幂等——pkg 格式 bump 后的 fixture 陈货会在 dirty 清单自动现身；只报告待提交路径不自动提交；dll 锁先探测，Unity 开着会先报错）。产物 staleness 由 release-check / CI 硬门兜底。
+按记忆/工作流：**任何** Rust 改动（含 `crates/packer/pkg/templates/` 下的文档——scaffold/skill 内容编进 exe 字节，纯「文档批」也会触发 staleness 门）后必须重编 + commit `.dll`，否则测不了——日常一条命令 `cargo run -p xtask -- reout`（重编 dll + ikat.exe + ikat_gui.exe 全家桶 → 拷贝 → sync-bindings → showcase bundle + HeadlessTests fixture 包无条件重打 + 字节对比幂等——pkg 格式 bump 后的 fixture 陈货会在 dirty 清单自动现身；只报告待提交路径不自动提交；dll 锁先探测，Unity 开着会先报错）。产物 staleness 由 release-check / CI 硬门兜底。
 
 ```bash
 cargo build -p ikat_ffi_c --release
