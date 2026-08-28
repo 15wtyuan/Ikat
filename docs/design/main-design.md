@@ -601,7 +601,7 @@ anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不
 
 **rect mask**：核心给 clip_box；后端自选实现。`mask_context` 是批合边界。嵌套 `overflow:hidden`：clip 区域取祖先 clip 链的交集。裁剪框是轴对齐的：clipper 自身 `border-radius` 非全零时裁剪框带四角半径（圆角裁子内容），但**祖先链圆角不传播**；transform 旋转不旋转裁剪框（作者可见限制）。soft clip/shape mask 未做（deferred）。
 
-**浮层机制**（通用模式，open dropdown 的 `role=listbox` 子树与 scrollbar thumb 共用）：跳出正常 DFS，render 末尾追加独立 DFS、sort_key 续 post-merge 最大值、mask 重赋脱离祖先裁剪链；命中层对应前置。z-index 生效点三处必须同步（render DFS 兄弟迭代 / 浮层末尾追加 / hit 逆等效序），漏一处 = 绘制与命中不一致。
+**浮层机制**（通用模式，open dropdown 的 `role=listbox` 子树与 scrollbar thumb 共用）：跳出正常 DFS，render 末尾追加独立 DFS、sort_key 续 post-merge 最大值、mask 重赋脱离祖先裁剪链；命中层对应前置。画序单源 `scene::stacking::paint_order`（stacking context 全局分层，CSS Appendix E 语义：static 子树里的 opacity<1/transform/filter/定位+声明 z 后代会上提到所属 SC 的对应层，#96/#100）——主 DFS、浮层追加、hit 逆序三消费点共用同一份序，绘制与命中一致性由构造保证，无「多处手抄同步」面。
 
 ### 12.6 RenderNode 契约
 

@@ -90,8 +90,11 @@ trust the build message.
     that CSS file. A missing file is a build error, never a silent drop.
 12. `transform` pivots around the element's **center** only
     (`transform-origin` does not exist).
-13. `z-index` reorders siblings for drawing and hit-testing only; it never
-    affects flex order — that is `order`.
+13. Painting follows CSS stacking layers: positioned elements — and any
+    element with `opacity < 1`, `transform`, or `filter` — paint above plain
+    static siblings regardless of DOM order. Lift overlaid content explicitly
+    with `position: relative` + `z-index`. `z-index` never affects flex
+    order — that is `order`.
 14. **Ids are the game-code API** (see `ikat-runtime`): keep interactive
     ids stable and semantic (`btn-start`, `hp-fill`). Renaming an id
     silently breaks C#. Ids must be unique per template scope;
