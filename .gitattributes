@@ -1,0 +1,4 @@
+# 机器生成且逐字节比对/消费的文件——检出必须保持 LF，否则 Windows CI 的
+# autocrlf 会在检出时转 CRLF，rectdiff_tag_map_fresh 逐字节比对必红
+# （2026-08-28 实锤，#98 引入）。字节即契约的生成物逐个登记在此，不做仓库级 eol 政策。
+showcase/scripts/rect-diff/semantic-tags.json text eol=lf
