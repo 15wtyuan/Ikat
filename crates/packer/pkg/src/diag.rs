@@ -34,6 +34,8 @@ pub mod code {
     /// 页面有 `data-fill`（运行时填充标记）但缺按页预览模拟脚本——人类预览
     /// 将看到空列表。见 ikat-preview skill。
     pub const PREVIEW_DATA_FILL_WITHOUT_SIM: &str = "PreviewDataFillWithoutSim";
+    /// 工作区 CLI 与 Unity 包（com.ikat.unity）版本漂移（warning，双向都报）。
+    pub const IKAT_VERSION_DRIFT: &str = "IkatVersionDrift";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

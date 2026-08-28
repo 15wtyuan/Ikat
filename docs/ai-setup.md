@@ -148,9 +148,11 @@ C# API 查 ikat-runtime，它们是权威操作手册）。
 ## 日常版本升级
 
 升级是使用期操作，权威指引已落进工作区的 **ikat skill「Version sync」节**（随包分发）。
-要点：比对 `.ikat/scaffold.version` 与 packages-lock.json 的包版本发现漂移 → 用新
-exe 覆盖 `.ikat/ikat.exe`（来源：PackageCache 拷出，或按新 tag 重新走第 2 步下载）→
-跑 `ikat scaffold` 刷新 skills 与版本戳。
+发现漂移已是产品信号：工作区带 `unity_root` 时 `ikat check` 自动比对 CLI 与
+packages-lock.json 的包版本，双向漂移都报 `IkatVersionDrift` warning（本地模式无
+lock 可比，仍按 skill 里的手动仪式比对）。修复：用新 exe 覆盖 `.ikat/ikat.exe`
+（来源：PackageCache 拷出，或按新 tag 重新走第 2 步下载）→ 跑 `ikat scaffold`
+刷新 skills 与版本戳。
 
 ## 人类手动路径（GUI）
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **CLI ↔ Unity 包版本漂移自动检测（#80）**：`ikat check` 顺 config 的
+  `unity_root` 读 `Packages/packages-lock.json`，`com.ikat.unity` 版本与
+  CLI 版本不一致时告 `IkatVersionDrift` warning（双向：CLI 落后指向刷新
+  `.ikat/` 的 exe，CLI 超前指向更新 Unity 包——`format_version` 只增）。
+  支持三种 lock 形态：裸 semver / `file:` 本地引用（顺路径读目标
+  package.json）/ git URL（取 `#v` 片段，裸 commit hash 无法离线定版则
+  跳过）。无 `unity_root`（本地模式）或 lock 无条目（未装包）不检。
+
 ### Fixed
 - **progressbar 填充比例 ARIA 语义化（#97）**：`aria-valuemin` 此前不参与填充
   数学（core 按 `value/max`，ARIA 标准是 `(value-min)/(max-min)`，min≠0 时

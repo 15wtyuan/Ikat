@@ -439,6 +439,16 @@ fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
                     msg,
                 ));
             }
+            // CLI ↔ Unity 包版本漂移（双向）：exe 与 Unity 插件跨边界配对，漂移
+            // 原先只能靠 skill 仪式发现（AI 会忘），check 是唯一必经门。
+            if let Some(msg) = ikat_pkg::config::version_drift_warning(&ui) {
+                warnings.push(ikat_pkg::diag::PackDiagnostic::synthetic_warning(
+                    ikat_pkg::diag::code::IKAT_VERSION_DRIFT,
+                    "workspace",
+                    "Packages/packages-lock.json",
+                    msg,
+                ));
+            }
             match format {
                 Format::Human => {
                     for w in &warnings {

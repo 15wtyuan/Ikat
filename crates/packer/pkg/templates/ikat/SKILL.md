@@ -202,9 +202,13 @@ Two version sources must stay in lockstep; each can only see itself:
 
 The bundled `.ikat/ikat.exe` reports ITS OWN version — an old exe
 never flags itself, and `StaleScaffold` only compares the stamp
-against the *running* CLI. Drift is only visible by comparing the two
-sides directly. Do that compare whenever the Unity package version
-changes and before builds that follow a Unity-side upgrade.
+against the *running* CLI. The cross-boundary compare is automated:
+when the workspace config has `unity_root`, `ikat check` reads
+`packages-lock.json` and warns `IkatVersionDrift` on any mismatch
+(both directions; `file:`-style local installs resolve the target
+package.json). No `unity_root` (local-output mode) = no lock to
+compare — only then compare the two sides manually, and before
+builds that follow a Unity-side upgrade.
 
 **Workspace older than Unity** (the common drift — user bumped the
 manifest tag):
@@ -219,9 +223,9 @@ manifest tag):
 3. Run `.ikat/ikat(.exe) scaffold` — refreshes skills + version stamp
    (self-copy skips, same path).
 
-Verify: `ikat check` reports no `StaleScaffold`, and the three
-versions (manifest tag ↔ lock `version` ↔ `.ikat/scaffold.version`)
-agree.
+Verify: `ikat check` reports no `StaleScaffold` and no
+`IkatVersionDrift`, and the three versions (manifest tag ↔ lock
+`version` ↔ `.ikat/scaffold.version`) agree.
 
 **Workspace newer than Unity**: the exe may emit `.pkg.bin` the old
 in-package `.dll` cannot read (`format_version` only grows). Tell the

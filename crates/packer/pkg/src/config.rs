@@ -141,6 +141,105 @@ fn resolve_pointer(base: &Path, stored: &str) -> PathBuf {
     }
 }
 
+/// Unity 侧运行时包名（`packages-lock.json` 里做版本漂移比对的条目）。
+pub const UNITY_PACKAGE: &str = "com.ikat.unity";
+
+/// lock 文件里单个包条目的最小投影（其余字段忽略）。
+#[derive(Deserialize)]
+struct LockEntry {
+    version: String,
+}
+
+#[derive(Deserialize)]
+struct PackagesLock {
+    dependencies: std::collections::HashMap<String, LockEntry>,
+}
+
+/// UPM 包 manifest 的最小投影。
+#[derive(Deserialize)]
+struct PackageManifest {
+    version: String,
+}
+
+/// 工作区 CLI 与 Unity 包版本漂移告警（check 的 warning 级信号）：顺 config 的
+/// `unity_root` 读 `<unity>/Packages/packages-lock.json` 里 [`UNITY_PACKAGE`] 的
+/// 版本，与本 CLI 版本比对，双向漂移都报。lock 记的是 `file:` 本地引用时（仓库
+/// dogfood / 本地装包形态），版本号在被引目录的 package.json 里，顺路径解析。
+/// 跳过条件全是环境态而非漂移：无 config / 无 `unity_root`（本地模式）/ unity
+/// 目录失联 / 无 lock / lock 无条目 / `file:` 目标解析失败——那是安装期状态，
+/// 不是版本漂移，不告警。
+pub fn version_drift_warning(ui_workspace: &Path) -> Option<String> {
+    let (base, cfg) = find_config(ui_workspace).ok()??;
+    let unity_stored = cfg.unity_root?;
+    let root = resolve_pointer(&base, &unity_stored);
+    if !root.is_dir() {
+        return None;
+    }
+    let lock_text =
+        std::fs::read_to_string(root.join("Packages").join("packages-lock.json")).ok()?;
+    let lock: PackagesLock = serde_json::from_str(&lock_text).ok()?;
+    let entry = lock.dependencies.get(UNITY_PACKAGE)?;
+    let pkg_version = extract_package_version(&entry.version, &root)?;
+    let cli_version = crate::scaffold::IKAT_VERSION;
+    Some(match compare_versions(&pkg_version, cli_version) {
+        // 数值相等（含 `0.0.17.0` vs `0.0.17` 这类零填充形态）= 无漂移。
+        Some(std::cmp::Ordering::Equal) => return None,
+        Some(std::cmp::Ordering::Greater) => format!(
+            "Unity package {UNITY_PACKAGE} {pkg_version} is newer than this ikat CLI \
+             {cli_version} — the workspace CLI is behind the Unity side; copy the matching \
+             ikat(.exe) over .ikat/ and run `ikat scaffold`"
+        ),
+        Some(std::cmp::Ordering::Less) => format!(
+            "Unity package {UNITY_PACKAGE} {pkg_version} is older than this ikat CLI \
+             {cli_version} — a newer CLI can write pkg.bin the older Unity plugin cannot \
+             read (format_version only grows); update the Unity package to match (reinstall \
+             from the newer tag)"
+        ),
+        None => format!(
+            "Unity package {UNITY_PACKAGE} version {pkg_version} differs from this ikat CLI \
+             {cli_version}; align both sides (copy the matching exe / update the Unity package)"
+        ),
+    })
+}
+
+/// 从 lock 条目的 `version` 字段取可比对的语义版本。lock 记录三种形态：
+/// - 裸 semver（registry / 本地缓存安装）——原样；
+/// - `file:<相对 Packages 的路径>`（本地装包）——顺路径读目标 package.json；
+/// - git URL（`https://…#v0.0.17`）——取 `#` 片段剥 `v` 前缀；片段是裸 commit
+///   hash（无 tag 锁定）时离线无从定版 → None（不猜）。
+fn extract_package_version(raw: &str, unity_root: &Path) -> Option<String> {
+    if let Some(rel) = raw.strip_prefix("file:") {
+        let manifest = unity_root.join("Packages").join(rel).join("package.json");
+        let m: PackageManifest =
+            serde_json::from_str(&std::fs::read_to_string(manifest).ok()?).ok()?;
+        return Some(m.version);
+    }
+    if raw.contains("://") {
+        let fragment = raw.rsplit('#').next()?;
+        let tag = fragment.strip_prefix('v').unwrap_or(fragment);
+        // 裸 commit hash 长度 40 的十六进制，无 tag 语义。
+        if tag.len() == 40 && tag.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        return Some(tag.to_string());
+    }
+    Some(raw.to_string())
+}
+
+/// x.y.z 数值逐段比较（段数不同补零，`0.0.17` vs `0.0.17.1` 仍可序）。出现
+/// 非数值段（预发布等）→ None：只报「不同」，不猜方向。
+fn compare_versions(a: &str, b: &str) -> Option<std::cmp::Ordering> {
+    let parse =
+        |v: &str| -> Option<Vec<u64>> { v.split('.').map(|s| s.parse::<u64>().ok()).collect() };
+    let (a, b) = (parse(a)?, parse(b)?);
+    let n = a.len().max(b.len());
+    let pad = |mut v: Vec<u64>| {
+        v.resize(n, 0);
+        v
+    };
+    Some(pad(a).cmp(&pad(b)))
+}
+
 /// 写 config（覆盖式——重复 init / GUI 重建即刷新）。指针优先相对化（相对根目录，
 /// 正斜杠）；跨盘符等无法相对化时写绝对原样（机器绑定）。`ui == root` 时 ui_root
 /// 落 `"."`（单目录形态的规范形态）。
@@ -322,5 +421,134 @@ mod tests {
         assert!(resolve_output_base(&ui).unwrap().is_none());
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// 版本漂移告警矩阵：三种 lock 状态 × 有无 `unity_root`，外加 `file:` 本地
+    /// 引用与目录失联的跳过语义。
+    #[test]
+    fn version_drift_matrix() {
+        let tmp = std::env::temp_dir().join("ikat_config_drift_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let ui = tmp.join("ui");
+        let unity = tmp.join("unity");
+        std::fs::create_dir_all(ui.join(".ikat")).unwrap();
+        std::fs::create_dir_all(unity.join("Packages")).unwrap();
+        std::fs::write(ui.join(WORKSPACE_FILE), "{}").unwrap();
+
+        let set_lock = |entry: Option<&str>| {
+            let deps = match entry {
+                Some(v) => format!(r#"{{"{UNITY_PACKAGE}": {{"version": "{v}"}}}}"#),
+                None => "{}".to_string(),
+            };
+            std::fs::write(
+                unity.join("Packages").join("packages-lock.json"),
+                format!(r#"{{"dependencies": {deps}}}"#),
+            )
+            .unwrap();
+        };
+        let set_config = |unity_root: bool| {
+            let json = if unity_root {
+                r#"{ "ui_root": "..", "unity_root": "../unity" }"#
+            } else {
+                r#"{ "ui_root": ".." }"#
+            };
+            std::fs::write(ui.join(".ikat").join("config.json"), json).unwrap();
+        };
+        let cli = crate::scaffold::IKAT_VERSION;
+
+        // 无 unity_root（本地模式）——即便 lock 有漂移也不检。
+        set_config(false);
+        set_lock(Some("0.0.1"));
+        assert!(version_drift_warning(&ui).is_none());
+
+        set_config(true);
+        // lock 缺 com.ikat.unity 条目（未装包）→ 安装期状态，不告警。
+        set_lock(None);
+        assert!(version_drift_warning(&ui).is_none());
+        // 无 lock 文件同理。
+        let _ = std::fs::remove_file(unity.join("Packages").join("packages-lock.json"));
+        assert!(version_drift_warning(&ui).is_none());
+        set_lock(Some("0.0.1"));
+
+        // 同版本 → 无告警。
+        set_lock(Some(cli));
+        assert!(version_drift_warning(&ui).is_none());
+
+        // Unity 包旧于 CLI → 告警，指向 pkg.bin 前向兼容风险。
+        set_lock(Some("0.0.1"));
+        let msg = version_drift_warning(&ui).expect("older package warns");
+        assert!(msg.contains("older than this ikat CLI"), "{msg}");
+
+        // Unity 包新于 CLI → 告警，指向刷新 .ikat/ 里的 exe。
+        set_lock(Some("99.0.0"));
+        let msg = version_drift_warning(&ui).expect("newer package warns");
+        assert!(msg.contains("newer than this ikat CLI"), "{msg}");
+
+        // 非数值版本段 → 只报不同，不猜方向。
+        set_lock(Some("0.0.18-rc.1"));
+        let msg = version_drift_warning(&ui).expect("odd version still warns");
+        assert!(msg.contains("differs from this ikat CLI"), "{msg}");
+
+        // file: 本地引用 → 顺路径读目标 package.json 的版本。
+        let local_pkg = tmp.join("localpkg");
+        std::fs::create_dir_all(&local_pkg).unwrap();
+        std::fs::write(
+            local_pkg.join("package.json"),
+            format!(r#"{{"name": "{UNITY_PACKAGE}", "version": "0.0.1"}}"#),
+        )
+        .unwrap();
+        set_lock(Some("file:../../localpkg"));
+        let msg = version_drift_warning(&ui).expect("file: ref resolves target manifest");
+        assert!(msg.contains("older than this ikat CLI"), "{msg}");
+        std::fs::write(
+            local_pkg.join("package.json"),
+            format!(r#"{{"name": "{UNITY_PACKAGE}", "version": "{cli}"}}"#),
+        )
+        .unwrap();
+        assert!(version_drift_warning(&ui).is_none());
+        // file: 目标失联 → 安装期状态，不告警。
+        set_lock(Some("file:../../gone"));
+        assert!(version_drift_warning(&ui).is_none());
+
+        // git URL 形态（消费侧 git-URL 装包）：版本取 #v 片段。
+        set_lock(Some(&format!(
+            "https://github.com/15wtyuan/Ikat.git?path=/unity/package#v{cli}"
+        )));
+        assert!(version_drift_warning(&ui).is_none());
+        set_lock(Some(
+            "https://github.com/15wtyuan/Ikat.git?path=/unity/package#v0.0.1",
+        ));
+        let msg = version_drift_warning(&ui).expect("git-URL ref warns on drift");
+        assert!(msg.contains("older than this ikat CLI"), "{msg}");
+        // 裸 commit hash（无 tag）→ 离线无从定版，不猜。
+        set_lock(Some(
+            "https://github.com/15wtyuan/Ikat.git?path=/unity/package#88b47c5e7076a1b2c3d4e5f60718293a4b5c6d7e",
+        ));
+        assert!(version_drift_warning(&ui).is_none());
+
+        // unity_root 目录失联 → 跳过（build 路径的 exit 2 语义不在此重复）。
+        std::fs::write(
+            ui.join(".ikat").join("config.json"),
+            r#"{ "ui_root": "..", "unity_root": "../gone" }"#,
+        )
+        .unwrap();
+        assert!(version_drift_warning(&ui).is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn compare_versions_segments() {
+        use std::cmp::Ordering;
+        assert_eq!(compare_versions("0.0.17", "0.0.17"), Some(Ordering::Equal));
+        assert_eq!(compare_versions("0.0.17", "0.1.0"), Some(Ordering::Less));
+        assert_eq!(compare_versions("1.0", "0.99.99"), Some(Ordering::Greater));
+        // 段数不同补零：0.0.17.1 > 0.0.17。
+        assert_eq!(
+            compare_versions("0.0.17.1", "0.0.17"),
+            Some(Ordering::Greater)
+        );
+        // 预发布段非数值 → 无法定向。
+        assert_eq!(compare_versions("0.0.18-rc.1", "0.0.18"), None);
     }
 }
