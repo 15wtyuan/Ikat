@@ -69,7 +69,7 @@ fn usage() {
         "                             worktree artifact build + verify + commit + tag + push"
     );
     eprintln!(
-        "  reout [--dry-run]          Daily artifact re-out after Rust changes (dll/exe/bindings/"
+        "  reout [--dry-run]          Daily artifact re-out after Rust changes (dll/exe/bindings/bundle/fixtures)"
     );
     eprintln!("                             showcase bundle) — reports dirty paths, never commits");
 }

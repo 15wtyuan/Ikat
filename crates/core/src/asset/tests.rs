@@ -1293,3 +1293,15 @@ fn pkg_v35_rejects_v34() {
         "v34 pkg must be rejected as TooOld after v35 bump, got {err:?}"
     );
 }
+
+/// MIN_VERSION 必须钉在当前格式版本：每次 bump 都改 bincode 布局（旧包解不动），
+/// MIN 落后会让旧版包漏过版本门、以 Bincode 结构错配炸成无指引的「malformed」
+/// （v48 bump 漏拍 MIN 的实证——0.0.16 起 HeadlessTests 全挂两天才定位）。
+#[test]
+fn min_version_tracks_current() {
+    assert_eq!(
+        MIN_VERSION, PKG_FORMAT_VERSION,
+        "format bump 忘拍 MIN_VERSION：旧布局包会漏过版本门炸成 malformed"
+    );
+    assert_eq!(MAX_VERSION, PKG_FORMAT_VERSION);
+}

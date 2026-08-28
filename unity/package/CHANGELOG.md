@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **pkg 版本门修复：MIN_VERSION 漏拍 v48（0.0.16 起 CI 红的真因之一）**：v48
+  bump 只抬了 MAX、MIN 停在 47——v47 旧包漏过版本门，以 Bincode 结构错配炸成
+  无指引的「malformed pkg.bin」（rc -1），而非 rc 1 的「Unity 包与 ikat.exe
+  同版本重打」专属文案。MIN 已钉回 48 并加护栏测试（`min_version_tracks_current`
+  ：MIN/MAX 必须恒等于当前版本——历史不变量：每版 bump 都改 bincode 布局）。
+  同批把 HeadlessTests 的 13 个 fixture 包重打到 v48（此前是 v47 陈货，
+  `dotnet headless` CI 门自 0.0.16 起全挂）。流程堵漏：`xtask reout` 新增
+  fixture 重打步骤（`<name>.workspace` → `ikat build` → 拷回 `.pkg.bin` →
+  清构建现场），与 showcase bundle 同一「无条件重打 + 字节对比幂等」纪律。
 - **core 画序升级为 stacking context 全局分层（#100 分歧粒度修复）**：0.0.16 的
   画序分层是**逐父兄弟排序**——嵌套在 static 子树里的 opacity<1 / transform /
   filter / 定位+声明 z 后代不会上提，整棵 static 子树（含半透明图标）沉在
