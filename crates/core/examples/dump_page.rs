@@ -345,6 +345,8 @@ fn disp_str(n: &Node) -> &'static str {
         taffy::style::Display::Flex => "flex",
         taffy::style::Display::Block => "block",
         taffy::style::Display::Grid => "grid",
+        // 0.14 新变体：ikat 不产出（围栏不放 flow-root），诊断输出兜底。
+        taffy::style::Display::FlowRoot => "flow-root",
     }
 }
 

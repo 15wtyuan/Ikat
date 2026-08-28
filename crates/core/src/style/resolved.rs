@@ -352,30 +352,31 @@ impl ViewportStyle {
     pub fn apply(&self, style: &mut TaffyStyle, root: (f32, f32)) {
         let dim =
             |v: &Option<ViewportLen>| v.map(|v| taffy::style::Dimension::length(v.resolve(root)));
+        // min/max 槽是 LengthPercentageAuto（taffy 0.14 起分型），同 inset/margin 走 lpa。
+        let lpa = |v: &Option<ViewportLen>| {
+            v.map(|v| taffy::style::LengthPercentageAuto::length(v.resolve(root)))
+        };
         if let Some(v) = dim(&self.width) {
             style.size.width = v;
         }
         if let Some(v) = dim(&self.height) {
             style.size.height = v;
         }
-        if let Some(v) = dim(&self.min_width) {
+        if let Some(v) = lpa(&self.min_width) {
             style.min_size.width = v;
         }
-        if let Some(v) = dim(&self.min_height) {
+        if let Some(v) = lpa(&self.min_height) {
             style.min_size.height = v;
         }
-        if let Some(v) = dim(&self.max_width) {
+        if let Some(v) = lpa(&self.max_width) {
             style.max_size.width = v;
         }
-        if let Some(v) = dim(&self.max_height) {
+        if let Some(v) = lpa(&self.max_height) {
             style.max_size.height = v;
         }
         if let Some(v) = dim(&self.flex_basis) {
             style.flex_basis = v;
         }
-        let lpa = |v: &Option<ViewportLen>| {
-            v.map(|v| taffy::style::LengthPercentageAuto::length(v.resolve(root)))
-        };
         if let Some(v) = lpa(&self.inset[0]) {
             style.inset.top = v;
         }

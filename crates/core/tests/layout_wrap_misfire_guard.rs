@@ -4,11 +4,18 @@
 //! 拿到的 Definite 主轴可用空间被当作换行约束（`collect_flex_lines` 不区分「容器主
 //! 尺寸显式 definite」与「祖先测量轮传来的 Definite」），换列测量结果经节点缓存复用
 //! 污染终态布局——同输入不同帧出不同终态（showcase layout-anim 页实拍：37 帧里 1 帧
-//! 面板被排到按钮右侧、列宽 320→386 闪一帧；浏览器同结构 0 异常）。taffy 0.14 的
-//! `collect_flex_lines` 新增「主尺寸不 definite 则不换行」门控，机制层消灭本缺陷。
+//! 面板被排到按钮右侧、列宽 320→386 闪一帧；浏览器同结构 0 异常）。
 //!
-//! 本测试锁定的是**最终布局不得闪烁**：内容宽度全程恒定、面板始终贴列左缘。0.12 上
-//! 必须能红（防永真守卫），0.14 上转绿后入库防回归。
+//! **taffy 0.14 升级（2026-08-28）未修掉本缺陷**——0.14 的 `collect_flex_lines` 门控
+//! （主尺寸不 definite 则单行）对本路径空洞放行：误换列轮里 `known_dimensions=None`，
+//! 而 definiteness 归一化是 `is_definite || known.is_none()`（known 缺席视为 definite）；
+//! 且容器无 max-height 时换列约束直接取 available 的 Definite——该值恰等于内容总高
+//! （30.34+10+194.6779=235.0179 > 235.01788，超 2 ulp）触发换列。auto 主尺寸 wrap
+//! 容器按 CSS 不应对 available 换列（Chrome 同结构 0 异常）。危害已收窄：面板位置
+//! 正确（0.12 是面板跳到按钮右侧），仅容器宽 386 污染一帧（后续兄弟右移 66px 一帧）。
+//!
+//! 本测试锁定的是**最终布局不得闪烁**：内容宽度全程恒定、面板始终贴列左缘。
+//! 在 0.12 与 0.14 上均红（#[ignore] 挂账），上游修复或围栏规避后转绿入库防回归。
 //!
 //! 复现条件刻意保持与现场一致、不做任何「干净化」：
 //! - 走完整管线（fence → pkg → Stage → 逐帧 tick）——独立 taffy mini-repro 不复现，
@@ -52,7 +59,7 @@ const REPRO_HTML: &str = r#"<style>
 const DUR: f32 = 0.4;
 
 #[test]
-#[ignore = "taffy 0.12 wrap-misfire 复现锚点（#82）：0.12 上红、0.14 升级摘 ignore 转绿"]
+#[ignore = "复现锚点在 taffy 0.12 与 0.14 上都红（#82）：0.14 残留缺陷——auto 主尺寸 wrap 容器对 available Definite 换列（collect_flex_lines 无 max-size 回退路径 + known=None 时 known_main_size_is_definite 空洞为 true），待上游修复/围栏规避后转绿"]
 fn column_wrap_height_anim_no_flicker() {
     let pkg = pack_components(&[Component {
         name: "wraprepro".to_owned(),

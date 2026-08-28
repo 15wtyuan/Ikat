@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-taffy = { version = "0.12", features = ["serde"] }
+taffy = { version = "0.14", features = ["serde"] }
 bitflags = { version = "2", features = ["serde"] }
 ttf-parser = "0.20"
 ab_glyph_rasterizer = "0.1"

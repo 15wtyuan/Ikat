@@ -4,20 +4,25 @@
 //! 测量上下文（Text/Image），solve 后把 taffy 的 `Layout.location`/`size`
 //! 回写进 `Node.layout_rect`/`clip_rect`。
 //!
-//! # taffy 0.12 API 边界
+//! # taffy 0.14 测量契约
 //!
-//! taffy 0.12 用 trait 对象模式（无 `MeasureFunc` 枚举）：
 //! - `TaffyTree<NodeContext>`：节点上下文是泛型，叶子节点用
 //!   `new_leaf_with_context(style, ctx)` 存一个 owned `NodeContext`。
-//! - 单个 `compute_layout_with_measure(root, avail, FnMut(...))` 闭包负责按
-//!   `Option<&mut NodeContext>` 分派到 Text/Image 测量。
+//! - 单个 `compute_layout_with_measure(root, avail, FnMut(LayoutInput, NodeId,
+//!   Option<&mut NodeContext>, &Style) -> LayoutOutput)` 闭包负责一切**无 children
+//!   节点**的布局——不只 context 节点（0.12 期只调 context 节点）。闭包即叶子布局
+//!   算法：padding/border/min/max/box-sizing 合成自理，故各分支委托
+//!   `taffy::compute_leaf_layout`（= 0.12 期 taffy 内部叶子路径），内层闭包只测
+//!   content 尺寸（Image 分支返回 outer size——ctx 无 padding，契约等价）。
+//! - 内层测量契约：ComputeSize 轮 known 原样是 border-box；avail 的 Definite 已被
+//!   `compute_leaf_layout` 扣过 content_box_inset（content 域）——见 solve 闭包内注释。
 //!
 //! 测量是单个 `FnMut`（非 'static），生命周期与 `compute_layout_with_measure`
 //! 调用同界——闭包内借 `fonts: &FontTable` 合法。每个叶子的文本参数（content/font_size +
 //! family 等）已 owned 进 `NodeContext::Text`（不含 Font 实例），font 在闭包内按 family
 //! 查 FontTable 取得。`solve` 签名收 `fonts: &FontTable`（不破下游 stage 契约）。
 //!
-//! taffy 0.12 的 `Style` 无 `order`，不做 flex order 排序（render 层按 DOM 顺序 /
+//! taffy 的 `Style` 无 `order`，不做 flex order 排序（render 层按 DOM 顺序 /
 //! layout 输出的 `Layout.order` 渲染）。
 //!
 //! 核心知图尺寸（打包期 PNG IHDR 静态，Stage 持 path→(w,h) 尺寸表）+ 不知图集
@@ -29,6 +34,7 @@ use crate::style::resolved::{OverflowMode, TextAlign};
 use crate::text::layout::{measure_text, FontTable, TextLayout};
 use std::collections::HashMap;
 use taffy::prelude::*;
+use taffy::tree::{LayoutInput, LayoutOutput};
 
 /// 图尺寸表类型别名：归一化 path → (w, h) 像素（打包期 PNG IHDR 静态）。
 /// `solve`/`build_render_nodes` 接 `&HashMap<String, (u32, u32)>` 查 Image intrinsic 尺寸。
@@ -249,14 +255,16 @@ pub fn solve(
         // 溢出行按比例挤扁）；taffy 的 auto-min 走裸 min-content（空容器=0）→ 固定
         // 尺寸兄弟被挤扁、预览（真浏览器）不缩——#64 弹性视口修开后必现的连带偏差。
         // 只对 min 仍为 Auto 的通道生效（作者显式 min 声明永远赢）；percent/viewport
-        // 形不碰（viewport 占位 Length(0) 地板=0 无害）。
-        let len_tag = taffy::style::CompactLength::LENGTH_TAG;
+        // 形不碰（viewport 占位 Length(0) 地板=0 无害）。size 槽是 Dimension、min 槽是
+        // LengthPercentageAuto（taffy 0.14 起分型），Length 地板经 expand 取值换型落位。
         for (size_slot, min_slot) in [
-            (&style.size.width, &mut style.min_size.width),
-            (&style.size.height, &mut style.min_size.height),
+            (style.size.width, &mut style.min_size.width),
+            (style.size.height, &mut style.min_size.height),
         ] {
-            if size_slot.tag() == len_tag && min_slot.is_auto() {
-                *min_slot = *size_slot;
+            if let taffy::style::ExpandedDimension::Length(v) = size_slot.expand() {
+                if min_slot.is_auto() {
+                    *min_slot = LengthPercentageAuto::length(v);
+                }
             }
         }
         // 叶子：Text/Image/文本控件装 MeasureContext。
@@ -394,8 +402,8 @@ pub fn solve(
         // 未声明（Auto）时才放开 shrink。
         // 复用路径同享（measure 叶子统一应用）：增量与全重建的期望态必须逐字节同源，
         // 漏一处即差分漂移。
-        if ctx.is_some() && style.min_size.width == taffy::style::Dimension::AUTO {
-            style.min_size.width = taffy::style::Dimension::length(0.0);
+        if ctx.is_some() && style.min_size.width.is_auto() {
+            style.min_size.width = LengthPercentageAuto::length(0.0);
         }
         // 递归子节点（后序：子先同步，父随后挂期望子列表）。
         // 过滤纯空白 TextNode（HTML tag 间换行+缩进）——它们不应成 flex item 撑开父容器
@@ -563,28 +571,20 @@ pub fn solve(
         .compute_layout_with_measure(
             root_tid,
             Size::MAX_CONTENT,
-            |known: Size<Option<f32>>,
-             avail: Size<AvailableSpace>,
+            |input: LayoutInput,
              nid: taffy::NodeId,
              node_ctx: Option<&mut MeasureContext>,
              _style: &Style|
-             -> Size<f32> {
-                // 定宽容器里 auto 宽文本子（flex column 的 span 等）：taffy 传
-                // known=None + avail=Definite(容器内容宽)。只用 known 会按 max-content
-                // 量出单行超框（浏览器按可用宽换行）。known 缺席时回退 avail 的 Definite 宽
-                // 作换行约束；MaxContent/MinContent 保持 None（走 intrinsic 测量）。
-                // Definite(0)（taffy 某些 sizing 轮次会传）与 known=Some(0) 一律视作
-                // 无约束：0 宽盒内浏览器文本横向溢出而非逐字竖排，且首个 Some(0) 测量
-                // 会经 render 槽 Some-优先策略钉死成多行布局。
-                let wrap_width = known
-                    .width
-                    .or(match avail.width {
-                        AvailableSpace::Definite(w) => Some(w),
-                        _ => None,
-                    })
-                    .filter(|w| *w > f32::EPSILON);
+             -> LayoutOutput {
+                let known = input.known_dimensions;
                 match node_ctx {
-                    None => Size::ZERO,
+                    // 无测量上下文的叶子（0.14 起闭包对一切无 children 节点调用，不只
+                    // context 节点）：按 style 布局（同 taffy 内置默认）。0.12 期这里
+                    // 返 ZERO 无害（闭包不会被调到）；0.14 空容器叶子实走此路，ZERO 会
+                    // 把显式尺寸的空容器解成 0×0。
+                    None => {
+                        taffy::compute_leaf_layout(input, _style, |_, _| 0.0, |_, _| Size::ZERO)
+                    }
                     Some(MeasureContext::Image {
                         iw,
                         ih,
@@ -592,8 +592,8 @@ pub fn solve(
                         h_dim,
                     }) => {
                         let (iw, ih, wd, hd) = (*iw, *ih, *w_dim, *h_dim);
-                        // taffy 0.12：Dimension 是 pub struct(CompactLength) tagged pointer，
-                        // 内字段私有无法 match 变体。先取 tag/value 再用 if-else 分派。
+                        // Dimension 是 compact tagged pointer，变体判定走 tag/value（0.14
+                        // 另有 expand() 枚举口，这里 tag 判定足够）。
                         // width：known.width（Percent/fit 解析后，taffy 传）> css Length > 等比 height > intrinsic。
                         //   Percent width：taffy 第二次传 known.width=Some(解析宽)。
                         //
@@ -619,10 +619,10 @@ pub fn solve(
                         } else {
                             w * ih / iw
                         };
-                        Size {
+                        LayoutOutput::from_outer_size(Size {
                             width: w,
                             height: h,
-                        }
+                        })
                     }
                     Some(MeasureContext::Text {
                         content,
@@ -636,84 +636,112 @@ pub fn solve(
                         font_weight,
                         h_inset,
                     }) => {
+                        // 0.14：measure 闭包即叶子布局算法（0.12 期 padding/min/max 合成
+                        // 在 taffy 内部），委托 compute_leaf_layout 干 border-box 合成，
+                        // 内层只测 content 尺寸。
                         let stack = fonts.stack_for(family.as_deref());
-                        // taffy 传 known.width = 节点 border-box 宽（含 padding/border）；
-                        // 文字在 content area（wrap 宽 - h_inset）内换行 + 对齐，否则吃到 padding 超框。
-                        let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
-                        let sid_opt = taffy_to_scene.get(&nid).copied();
-                        if let Some(sid) = sid_opt {
-                            if !std::mem::replace(&mut remeasured[sid.index()], true) {
-                                text_layouts[sid.index()] = None;
-                            }
-                        }
-                        // measure memo：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
-                        // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
-                        // fingerprint 含 content hash → set_text / slot 换内容自动 miss。
-                        let fp = crate::text::layout::text_fingerprint(
-                            content,
-                            *font_size,
-                            *line_height,
-                            *letter_spacing,
-                            *align,
-                            *wrap,
-                            *font_weight,
-                            family.as_deref(),
-                            mw,
-                        );
-                        let layout = if let Some(sid) = sid_opt {
-                            let entry = measure_cache[sid.index()]
-                                .get_or_insert_with(crate::text::layout::TextMeasureCache::default);
-                            let slot = if mw.is_none() {
-                                &mut entry.intrinsic
-                            } else {
-                                &mut entry.constrained
-                            };
-                            if slot.as_ref().is_some_and(|(f, _)| *f == fp) {
-                                slot.as_ref().unwrap().1.clone()
-                            } else {
-                                let l = measure_text(
+                        taffy::compute_leaf_layout(
+                            input,
+                            _style,
+                            |_, _| 0.0,
+                            |known_in: Size<Option<f32>>, avail_in: Size<AvailableSpace>| {
+                                // 换行约束宽（content 域）：ComputeSize 轮 known_in 原样是
+                                // border-box（扣 h_inset）；avail_in 的 Definite 已被
+                                // compute_leaf_layout 扣过 content_box_inset（不重复扣）。
+                                // known 缺席回退 avail 的 Definite 宽——定宽容器里 auto 宽
+                                // 文本子（flex column 的 span 等），只用 known 会按
+                                // max-content 量出单行超框（浏览器按可用宽换行）；
+                                // MaxContent/MinContent 保持 None（走 intrinsic 测量）。
+                                // ≤0（含 taffy sizing 轮的 Definite(0)/known=Some(0)）一律
+                                // 视作无约束：0 宽盒内浏览器文本横向溢出而非逐字竖排，且
+                                // 首个 Some(0) 测量会经 render 槽 Some-优先策略钉死成多行。
+                                let mw = known_in
+                                    .width
+                                    .map(|w| (w - *h_inset).max(0.0))
+                                    .or(match avail_in.width {
+                                        AvailableSpace::Definite(w) => Some(w),
+                                        _ => None,
+                                    })
+                                    .filter(|w| *w > f32::EPSILON);
+                                let sid_opt = taffy_to_scene.get(&nid).copied();
+                                if let Some(sid) = sid_opt {
+                                    if !std::mem::replace(&mut remeasured[sid.index()], true) {
+                                        text_layouts[sid.index()] = None;
+                                    }
+                                }
+                                // measure memo：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
+                                // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
+                                // fingerprint 含 content hash → set_text / slot 换内容自动 miss。
+                                let fp = crate::text::layout::text_fingerprint(
                                     content,
                                     *font_size,
                                     *line_height,
                                     *letter_spacing,
                                     *align,
                                     *wrap,
+                                    *font_weight,
+                                    family.as_deref(),
                                     mw,
-                                    &stack,
-                                    *color,
-                                    crate::text::rich::weight_from_font_weight(*font_weight),
                                 );
-                                *slot = Some((fp, l.clone()));
-                                l
-                            }
-                        } else {
-                            // 无 scene 节点映射（文本过滤/边角）：不缓存。
-                            measure_text(
-                                content,
-                                *font_size,
-                                *line_height,
-                                *letter_spacing,
-                                *align,
-                                *wrap,
-                                mw,
-                                &stack,
-                                *color,
-                                crate::text::rich::weight_from_font_weight(*font_weight),
-                            )
-                        };
-                        // render 槽：存 TextLayout 供 render 复用。Some（available 测量）优先——
-                        // 短文本 taffy 只传 None（max-content ≤ available，不换行），长文本传
-                        // Some(available)（换行）。一旦存了 Some，后续 None 不覆盖。
-                        if let Some(sid) = sid_opt {
-                            let rslot = &mut text_layouts[sid.index()];
-                            if rslot.is_none() || known.width.is_some() {
-                                *rslot = Some(layout.clone());
-                            }
-                        }
-                        Size {
-                            width: layout.text_width,
-                            height: layout.text_height,
-                        }
+                                let layout = if let Some(sid) = sid_opt {
+                                    let entry = measure_cache[sid.index()].get_or_insert_with(
+                                        crate::text::layout::TextMeasureCache::default,
+                                    );
+                                    let slot = if mw.is_none() {
+                                        &mut entry.intrinsic
+                                    } else {
+                                        &mut entry.constrained
+                                    };
+                                    if slot.as_ref().is_some_and(|(f, _)| *f == fp) {
+                                        slot.as_ref().unwrap().1.clone()
+                                    } else {
+                                        let l = measure_text(
+                                            content,
+                                            *font_size,
+                                            *line_height,
+                                            *letter_spacing,
+                                            *align,
+                                            *wrap,
+                                            mw,
+                                            &stack,
+                                            *color,
+                                            crate::text::rich::weight_from_font_weight(
+                                                *font_weight,
+                                            ),
+                                        );
+                                        *slot = Some((fp, l.clone()));
+                                        l
+                                    }
+                                } else {
+                                    // 无 scene 节点映射（文本过滤/边角）：不缓存。
+                                    measure_text(
+                                        content,
+                                        *font_size,
+                                        *line_height,
+                                        *letter_spacing,
+                                        *align,
+                                        *wrap,
+                                        mw,
+                                        &stack,
+                                        *color,
+                                        crate::text::rich::weight_from_font_weight(*font_weight),
+                                    )
+                                };
+                                // render 槽：存 TextLayout 供 render 复用。Some（available 测量）优先——
+                                // 短文本 taffy 只传 None（max-content ≤ available，不换行），长文本传
+                                // Some(available)（换行）。一旦存了 Some，后续 None 不覆盖。
+                                if let Some(sid) = sid_opt {
+                                    let rslot = &mut text_layouts[sid.index()];
+                                    if rslot.is_none() || known_in.width.is_some() {
+                                        *rslot = Some(layout.clone());
+                                    }
+                                }
+                                Size {
+                                    width: layout.text_width,
+                                    height: layout.text_height,
+                                }
+                            },
+                        )
                     }
                     Some(MeasureContext::RichText {
                         runs,
@@ -727,76 +755,93 @@ pub fn solve(
                     }) => {
                         // RichText 走 measure_rich_text（简化 inline flow）。
                         // 回退走 FontStack（per-glyph 选字体）；run.font_id 仍是主字体 id。
+                        // 委托结构同 Text（0.14 闭包即叶子算法，内层只测 content）。
                         let stack = fonts.stack_for(family.as_deref());
-                        // 同 Text：content area = wrap 宽（border-box）- h_inset。
-                        let mw = wrap_width.map(|w| (w - *h_inset).max(0.0));
-                        let sid_opt = taffy_to_scene.get(&nid).copied();
-                        if let Some(sid) = sid_opt {
-                            if !std::mem::replace(&mut remeasured[sid.index()], true) {
-                                text_layouts[sid.index()] = None;
-                            }
-                        }
-                        // 指纹 memo：runs 每帧现编译（便宜，O(inline 子)），
-                        // 算指纹命中缓存跳过贵的 measure_rich_text（shaping）。span 换色/换内容
-                        // → runs 变 → fp 变 → 自动 miss 重测（不依赖 dirty_text 传播）。
-                        // 两槽 intrinsic/constrained（同 Text）：mw=None 走 intrinsic，
-                        // mw=Some 走 constrained；约束宽量化进 fp 避亚像素抖动 thrash。
-                        let fp = crate::text::layout::rich_text_fingerprint(
-                            runs,
-                            *line_height,
-                            *letter_spacing,
-                            *align,
-                            *wrap,
-                            family.as_deref(),
-                            mw,
-                        );
-                        let layout = if let Some(sid) = sid_opt {
-                            let entry = measure_cache[sid.index()]
-                                .get_or_insert_with(crate::text::layout::TextMeasureCache::default);
-                            let slot = if mw.is_none() {
-                                &mut entry.intrinsic
-                            } else {
-                                &mut entry.constrained
-                            };
-                            if slot.as_ref().is_some_and(|(f, _)| *f == fp) {
-                                slot.as_ref().unwrap().1.clone()
-                            } else {
-                                let l = crate::text::layout::measure_rich_text(
+                        taffy::compute_leaf_layout(
+                            input,
+                            _style,
+                            |_, _| 0.0,
+                            |known_in: Size<Option<f32>>, avail_in: Size<AvailableSpace>| {
+                                // 同 Text：known_in 是 border-box 扣 h_inset，avail_in 的
+                                // Definite 已是 content 域（不重复扣）。
+                                let mw = known_in
+                                    .width
+                                    .map(|w| (w - *h_inset).max(0.0))
+                                    .or(match avail_in.width {
+                                        AvailableSpace::Definite(w) => Some(w),
+                                        _ => None,
+                                    })
+                                    .filter(|w| *w > f32::EPSILON);
+                                let sid_opt = taffy_to_scene.get(&nid).copied();
+                                if let Some(sid) = sid_opt {
+                                    if !std::mem::replace(&mut remeasured[sid.index()], true) {
+                                        text_layouts[sid.index()] = None;
+                                    }
+                                }
+                                // 指纹 memo：runs 每帧现编译（便宜，O(inline 子)），
+                                // 算指纹命中缓存跳过贵的 measure_rich_text（shaping）。span 换色/换内容
+                                // → runs 变 → fp 变 → 自动 miss 重测（不依赖 dirty_text 传播）。
+                                // 两槽 intrinsic/constrained（同 Text）：mw=None 走 intrinsic，
+                                // mw=Some 走 constrained；约束宽量化进 fp 避亚像素抖动 thrash。
+                                let fp = crate::text::layout::rich_text_fingerprint(
                                     runs,
-                                    mw,
                                     *line_height,
                                     *letter_spacing,
                                     *align,
                                     *wrap,
-                                    &stack,
+                                    family.as_deref(),
+                                    mw,
                                 );
-                                *slot = Some((fp, l.clone()));
-                                l
-                            }
-                        } else {
-                            // 无 scene 节点映射（边角）：不缓存，直接测。
-                            crate::text::layout::measure_rich_text(
-                                runs,
-                                mw,
-                                *line_height,
-                                *letter_spacing,
-                                *align,
-                                *wrap,
-                                &stack,
-                            )
-                        };
-                        // render 槽：存 TextLayout 供 render 复用（同 Text 的 Some 优先策略：
-                        // 已存 Some 且本次 None 不覆盖；本次 Some 则覆盖）。
-                        if let Some(sid) = sid_opt {
-                            let slot = &mut text_layouts[sid.index()];
-                            if slot.is_none() || known.width.is_some() {
-                                *slot = Some(layout.clone());
-                            }
-                        }
-                        Size {
-                            width: layout.text_width,
-                            height: layout.text_height,
-                        }
+                                let layout = if let Some(sid) = sid_opt {
+                                    let entry = measure_cache[sid.index()].get_or_insert_with(
+                                        crate::text::layout::TextMeasureCache::default,
+                                    );
+                                    let slot = if mw.is_none() {
+                                        &mut entry.intrinsic
+                                    } else {
+                                        &mut entry.constrained
+                                    };
+                                    if slot.as_ref().is_some_and(|(f, _)| *f == fp) {
+                                        slot.as_ref().unwrap().1.clone()
+                                    } else {
+                                        let l = crate::text::layout::measure_rich_text(
+                                            runs,
+                                            mw,
+                                            *line_height,
+                                            *letter_spacing,
+                                            *align,
+                                            *wrap,
+                                            &stack,
+                                        );
+                                        *slot = Some((fp, l.clone()));
+                                        l
+                                    }
+                                } else {
+                                    // 无 scene 节点映射（边角）：不缓存，直接测。
+                                    crate::text::layout::measure_rich_text(
+                                        runs,
+                                        mw,
+                                        *line_height,
+                                        *letter_spacing,
+                                        *align,
+                                        *wrap,
+                                        &stack,
+                                    )
+                                };
+                                // render 槽：存 TextLayout 供 render 复用（同 Text 的 Some 优先策略：
+                                // 已存 Some 且本次 None 不覆盖；本次 Some 则覆盖）。
+                                if let Some(sid) = sid_opt {
+                                    let slot = &mut text_layouts[sid.index()];
+                                    if slot.is_none() || known_in.width.is_some() {
+                                        *slot = Some(layout.clone());
+                                    }
+                                }
+                                Size {
+                                    width: layout.text_width,
+                                    height: layout.text_height,
+                                }
+                            },
+                        )
                     }
                 }
             },
@@ -1777,11 +1822,11 @@ mod tests {
 
         let mut area = ResolvedStyle::default(); // .map-area：grow + min-height:0
         area.taffy_style.flex_grow = 1.0;
-        area.taffy_style.min_size.height = Dimension::length(0.0);
+        area.taffy_style.min_size.height = LengthPercentageAuto::length(0.0);
 
         let mut scroll = ResolvedStyle::default(); // .map-scroll：grow + min-height:0 + auto
         scroll.taffy_style.flex_grow = 1.0;
-        scroll.taffy_style.min_size.height = Dimension::length(0.0);
+        scroll.taffy_style.min_size.height = LengthPercentageAuto::length(0.0);
         scroll.overflow_y = crate::style::resolved::OverflowMode::Auto;
 
         let mut layer = ResolvedStyle::default(); // .map-layer：显式内容尺寸

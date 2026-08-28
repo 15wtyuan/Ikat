@@ -44,13 +44,12 @@ pub fn parse_dimension(s: &str) -> Dimension {
     if s == "auto" {
         return Dimension::auto();
     }
-    // taffy 0.12：LengthPercentage 是 pub struct(CompactLength) tagged pointer，
-    // 内字段私有无法 match 变体——用 into_raw + tag 解构（length/percent 二选一）。
-    let lp = parse_lp(s);
-    let cl = lp.into_raw();
-    match cl.tag() {
-        taffy::style::CompactLength::LENGTH_TAG => Dimension::length(cl.value()),
-        taffy::style::CompactLength::PERCENT_TAG => Dimension::percent(cl.value()),
+    // LengthPercentage 是 compact tagged pointer，变体匹配走 expand（taffy 0.14 正规 API，
+    // 替代 0.12 期 into_raw+tag 手解）。calc 变体来自默认 feature 面，parse_lp 产不出，
+    // 落 Length(0) 与旧兜底同义。
+    match parse_lp(s).expand() {
+        taffy::style::ExpandedLengthPercentage::Length(v) => Dimension::length(v),
+        taffy::style::ExpandedLengthPercentage::Percent(v) => Dimension::percent(v),
         _ => Dimension::length(0.0),
     }
 }
@@ -86,6 +85,23 @@ fn apply_size_decl(vp: &mut Option<ViewportLen>, ts_slot: &mut Dimension, value:
         *vp = None;
         *ts_slot = parse_dimension(value);
     }
+}
+
+/// min/max 槽专用：taffy 0.14 起 `Style.min_size/max_size` 分型为 LengthPercentageAuto
+/// （size 槽仍是 Dimension）。复用 apply_size_decl 的视口/级联语义后换型落位——
+/// Length/Percent 直映，auto 落 AUTO（min-width:auto / max-width:auto = 无约束）。
+fn apply_minmax_decl(
+    vp: &mut Option<ViewportLen>,
+    ts_slot: &mut LengthPercentageAuto,
+    value: &str,
+) {
+    let mut d = Dimension::auto();
+    apply_size_decl(vp, &mut d, value);
+    *ts_slot = match d.expand() {
+        taffy::style::ExpandedDimension::Length(v) => LengthPercentageAuto::length(v),
+        taffy::style::ExpandedDimension::Percent(v) => LengthPercentageAuto::percent(v),
+        _ => LengthPercentageAuto::auto(),
+    };
 }
 
 /// 1~4 值展开四向（top right bottom left）
@@ -1156,11 +1172,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "min-width" => {
-            apply_size_decl(&mut style.viewport.min_width, &mut ts.min_size.width, value);
+            apply_minmax_decl(&mut style.viewport.min_width, &mut ts.min_size.width, value);
             true
         }
         "min-height" => {
-            apply_size_decl(
+            apply_minmax_decl(
                 &mut style.viewport.min_height,
                 &mut ts.min_size.height,
                 value,
@@ -1168,11 +1184,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "max-width" => {
-            apply_size_decl(&mut style.viewport.max_width, &mut ts.max_size.width, value);
+            apply_minmax_decl(&mut style.viewport.max_width, &mut ts.max_size.width, value);
             true
         }
         "max-height" => {
-            apply_size_decl(
+            apply_minmax_decl(
                 &mut style.viewport.max_height,
                 &mut ts.max_size.height,
                 value,
