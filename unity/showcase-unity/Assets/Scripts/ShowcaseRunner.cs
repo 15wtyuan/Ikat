@@ -906,23 +906,24 @@ public class ShowcaseRunner : MonoBehaviour
                 };
             }
 
-            // #97 min≠0 验收用例：RAGE 条 min=200/max=1000/now=600 → ARIA 填充 50%
-            // （旧公式 value/max 会画 60%——半宽 vs 过半一眼可辨）。按钮运行时切
-            // ProgressBar.Min（FFI set_control_min → fill 重算 + value clamp）：
-            // 200↔600 往返，条在「半满」与「空」间跳，读数标签同步翻转。
-            ProgressBar rage = null;
-            TextElement rageVal = null;
-            if (page.TryGet<CustomElement>("rage-bar", out var rageBar))
+            // #97 min≠0 验收用例（对照式，肉眼可辨）：两条条数值相同（600/1000）——
+            // 「总经验」无下限 → 60% 填充；「本级」从 500 起算（aria-valuemin）→ 只走
+            // 500~1000 这一段，即 20%。按钮把「本级」的起点归零（运行时写 ProgressBar.Min，
+            // 走新开放的 FFI set_control_min）：两条填充立刻对齐成同宽——同一数值、
+            // 不同起点、不同填充，min 参与数学这件事一眼可读。
+            ProgressBar lvl = null;
+            TextElement lvlVal = null;
+            if (page.TryGet<CustomElement>("min-bar2", out var lvlBar))
             {
-                rageBar.TryGet<ProgressBar>("stat-rage", out rage);
-                rageBar.TryGet<TextElement>("stat-rage-val", out rageVal);
+                lvlBar.TryGet<ProgressBar>("stat-min", out lvl);
+                lvlBar.TryGet<TextElement>("stat-min-val", out lvlVal);
             }
-            if (page.TryGet<Button>("btn-rage", out var rageBtn) && rage != null && rageVal != null)
+            if (page.TryGet<Button>("btn-rage", out var minBtn) && lvl != null && lvlVal != null)
             {
-                rageBtn.Clicked += () =>
+                minBtn.Clicked += () =>
                 {
-                    rage.Min = rage.Min >= 600f ? 200f : 600f;
-                    rageVal.TextContent = $"{Mathf.RoundToInt(rage.Value)}/{Mathf.RoundToInt(rage.Max)} min{Mathf.RoundToInt(rage.Min)}";
+                    lvl.Min = 0f;
+                    lvlVal.TextContent = $"{Mathf.RoundToInt(lvl.Value)}/{Mathf.RoundToInt(lvl.Max)} 起点0";
                 };
             }
         }
