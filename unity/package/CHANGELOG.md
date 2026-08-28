@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.17] - 2026-08-28
+
 ### Fixed
 - **pkg 版本门修复：MIN_VERSION 漏拍 v48（0.0.16 起 CI 红的真因之一）**：v48
   bump 只抬了 MAX、MIN 停在 47——v47 旧包漏过版本门，以 Bincode 结构错配炸成
