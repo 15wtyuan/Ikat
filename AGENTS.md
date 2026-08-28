@@ -146,7 +146,7 @@ cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 **subagent 协作（多 agent 分工的教训）**：
 - 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。
 - **同一工作树上 subagent 串行派发**：全仓库所有 crate 依赖 ikat_core，并行 agent 的半成品编辑会互相打爆对方的 `cargo test`（整 crate 编译含他人在途改动）——机械活串行排队才是真并行省时。
-- **并行用户会话共享工作树**（非 subagent，用户自己开了多个 agent 会话）：先 `git status` 归因——不属于本批的在途改动（~千行级）别碰也别修；提交只 stage 本批文件；整包 `cargo test` 编译被挡（如 E0063）≠ 本批问题，改用窄 target（`--lib` + 测试名过滤）隔离验证。
+- **并行用户会话共享工作树**（非 subagent，用户自己开了多个 agent 会话）：先 `git status` 归因——不属于本批的在途改动（~千行级）别碰也别修；提交只 stage 本批文件，且**手工 `git commit` 必须带 `-- <paths>` pathspec**——只控制 `git add` 不够，并行会话可能已往 index 塞了东西，裸 commit 连 index 一起提（实锤：10 文件混入批）；整包 `cargo test` 编译被挡（如 E0063）≠ 本批问题，改用窄 target（`--lib` + 测试名过滤）隔离验证；debug 构建报「拒绝访问 os error 5」= 别人长跑 preview server 锁了 `target/debug/ikat.exe`，用私有 `CARGO_TARGET_DIR` 隔离（见 pitfalls）。
 - task 切分别太细：强耦合重构（删共享字段类）的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 - 分支上并行有用户 commit 时，review BASE 用 task commit 的实际 parent（`git rev-parse <taskhead>^`），否则 review 范围混入用户 commit。
 - long-running 分支防 main 漂移：反向 merge（`git merge main` 进 feature 分支），合超集签名，用对方分支的测试当合并验收标准。

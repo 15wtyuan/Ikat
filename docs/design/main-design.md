@@ -432,6 +432,8 @@ node.On<PointerDownEvent>(OnPointerDown);
 
 命中按等效绘制顺序逆序（后画的先命中）。命中几何：**点**经 world matrix 逆变换投到节点本地轴对齐 box 判定（transform 生效，旋转节点命中精确，非宽松 AABB）。`pointer-events:none` 跳过自身但继续测子（CSS 语义，不屏蔽子树）。disabled 节点仍参与命中与 hover diff（`:disabled` 需要 hover 反馈），但 Down/Up/Click/drag/longpress 全抑制；命中落在 disabled 子节点时祖先链 active 同步截断。优先级序：scrollbar grip > open dropdown popup > 正常内容。
 
+**软件指针形态（#93）**：鼠标主指槽每帧命中 → `Stage::cursor_intent`（箭头/手型/隐藏三态），宿主订阅 `CursorIntentChanged` 驱动 `Cursor.SetCursor`（去抖缓存，纹理消费侧注册）。判定沿命中节点祖先链叶→根单遍（rich 内联命中细化到 source 后上溯宿主控件——浏览器模型里「指针下的元素」是宿主而非文字节点）：先遇到的作者 `cursor` 声明（围栏定为不继承，最近者生效）或 pressable 控件定型；disabled/不可命中宿主给箭头并截断。HTML 布尔属性 `disabled`（button）经 pkg 烘入、instantiate 映射 `NodeFlags::DISABLED`——与运行时 disabled API 同一语义源。
+
 ### 9.4 拖拽与滚动仲裁
 
 拖拽与滚动通过阈值赛跑仲裁，先达者赢（同指针位互斥清除另一方候选）。轴锁让出：单轴滚动容器遇主轴正交的更大手势时让出，并把候选提升到下一个可滚祖先。scroll 启动即取消待决 click/longpress。
