@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **画序声明完整性双门（#101）**：E1（error）= z-index 声明在非定位、非
+  flex item 元素上直接拒绝——浏览器对该声明视而不见而运行时恒生效，预览
+  会说谎；围栏里写不出来的分歧够不着，运行时 API 直改 z 不受影响。
+  W1（warning）= 同父兄弟 static 与 positioned（或声明 z）混排、static 侧
+  无显式 z——positioned 元素恒画在 static 之上（与树序无关），漏声明靠
+  「碰巧画对」正是 #96/#100 的成因；补 `position:relative; z-index:0`
+  （同视觉、显式意图）消警。两门同看 inline + 结构匹配 class 规则
+  （`.overlay{position:absolute}` 类写法计入，运行时可变属性选择器规则
+  跳过防误报）。存量内容影响：真实工作区 0 error（class 规则视野消除了
+  最常见误报形态），showcase 存量 28 处 W1 warning（不拦构建，债可见化）。
+
+### Added
 - **CLI ↔ Unity 包版本漂移自动检测（#80）**：`ikat check` 顺 config 的
   `unity_root` 读 `Packages/packages-lock.json`，`com.ikat.unity` 版本与
   CLI 版本不一致时告 `IkatVersionDrift` warning（双向：CLI 落后指向刷新

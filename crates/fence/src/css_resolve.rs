@@ -536,11 +536,12 @@ mod tests {
     }
 
     /// z-index 合法入栏：整数值（含负）通过；auto/垃圾值报 FenceBadCssValue
-    /// （apply_decl 宽松降 0，围栏不静默降级）。
+    /// （apply_decl 宽松降 0，围栏不静默降级）。夹具带 position:relative——
+    /// 非 static 声明位才是 z-index 的合法落点（#101 E1 门）。
     #[test]
     fn z_index_integer_accepted_and_auto_rejected() {
         let ok = crate::parse_template(
-            r#"<div style="z-index:5"></div><div style="z-index:-3"></div>"#,
+            r#"<div style="position:relative;z-index:5"></div><div style="position:relative;z-index:-3"></div>"#,
             "t.html",
         );
         assert!(
@@ -548,7 +549,10 @@ mod tests {
             "integer z-index should pass: {:?}",
             ok.diagnostics
         );
-        let bad = crate::parse_template(r#"<div style="z-index:auto"></div>"#, "t.html");
+        let bad = crate::parse_template(
+            r#"<div style="position:relative;z-index:auto"></div>"#,
+            "t.html",
+        );
         assert!(
             bad.diagnostics.iter().any(
                 |d| d.code == DiagnosticCode::FenceBadCssValue && d.message.contains("z-index")

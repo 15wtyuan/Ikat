@@ -123,6 +123,18 @@ pub enum DiagnosticCode {
     /// 链接：`<a><a>`（嵌套链接）与 `<a><img>`（图链接）都不支持——命中归 a 节点
     /// 的模型只对文本 run 定义。修复：链接文字只写文本与 `<span>`。
     FenceLinkInvalidChild,
+    /// z-index 声明在非定位、非 flex item 的元素上（error，#101）。浏览器对该
+    /// 声明视而不见（元素留在 static 绘制层），Ikat 运行时却恒生效（运行时直改
+    /// z 的 fgui 血统语义）——同一份 HTML 预览（浏览器）与运行时画序不同，预览
+    /// 在说谎。围栏硬拒使分歧在构造上够不着；运行时 API 直改 z 不受影响（API
+    /// 层非围栏层）。
+    FenceZIndexOnStatic,
+    /// 同父兄弟 static 与 positioned（或声明 z）混排，static 侧无显式 z
+    /// （warning，#101）。CSS painting order 里 positioned 元素恒画在 static
+    /// 内容之上（与树序无关）——漏声明靠「碰巧画对」是 #96/#100 两连发的成因。
+    /// 纯结构判定零内容猜测；装饰 overlay 的合法修复是显式声明画序意图
+    /// （`position:relative; z-index:0`，同视觉）。
+    FenceMixedPaintOrder,
 }
 
 #[derive(Debug, Clone)]

@@ -301,6 +301,8 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
     },
     // z-index：层叠序——只改同级兄弟绘制/命中顺序（z 升序绘制、子树整体移动），
     // 不改 flex 排列（那是 order）。整数值域（负数合法），auto 不收（缺省即 0）。
+    // 声明位由 paint_order_check（#101 E1）把门：只许定位元素或 flex item——
+    // 浏览器在别处忽略该声明、core 恒生效，预览会与运行时画序分歧。
     CssPropSpec {
         name: "z-index",
         default: "0",

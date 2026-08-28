@@ -156,6 +156,19 @@ pub fn parse_template_with_css(
     // 只提醒作者补全声明。必须在 Stage 4（styles 已 cascade）之后。
     diagnostics.extend(check_consistency(&tree, &styles, file, &line_map));
 
+    // Stage 6.6b: 画序声明完整性（#101）。E1 = 非定位非 flex item 声明 z-index
+    // （error——浏览器忽略/运行时恒生效的口径分歧，围栏硬拒使预览不再说谎）；
+    // W1 = static/positioned 兄弟混排 static 侧无显式 z（warning——#96/#100
+    // 「碰巧画对」成因，显式声明画序意图消警）。须在 Stage 4（styles 已 cascade，
+    // z_declared/position_declared 可用）之后。
+    diagnostics.extend(crate::paint_order_check::check_paint_order(
+        &tree,
+        &styles,
+        &dynamic_rules,
+        file,
+        &line_map,
+    ));
+
     // Stage 6.7: 控件必须被 CSS 命中。Ikat 控件不带 UA 默认样式——写了控件标签却
     // 无匹配 CSS 规则 = 运行时空白（浏览器预览却看着正常，因为浏览器套自己的 UA 表）。
     // 必须在 Annotate 之后（需 IrElement.semantic）+ Stage 4.5 之后（需 dynamic_rules）。

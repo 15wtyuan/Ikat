@@ -9,7 +9,8 @@ error):
 - `flex-direction` / `flex-wrap` / `flex-grow` / `flex-shrink` / `flex-basis`
 - `gap` / `row-gap` / `column-gap`
 - `justify-content` / `align-items` / `align-content` / `align-self`
-- `order` / `aspect-ratio` / `z-index` — integer, no `auto`
+- `order` / `aspect-ratio` — integer
+- `z-index` — integer, no `auto`; declared only on positioned elements or flex items (build error elsewhere — see the z-index bullet under Positioning)
 - `position` — absolute / relative / static (initial value `static`); with `top` / `right` / `bottom` / `left` (px / % / auto / viewport units; `%` resolves against the containing block — browser semantics)
 - **Containing block of an `absolute` element = nearest ancestor with `position: relative` or `absolute`** (browser semantics); if none, the viewport. Known limits: an `absolute` element with all four insets `auto` keeps its direct-parent static position (browser hypothetical-box semantics not implemented); overflow clipping still follows DOM ancestors.
 - `padding-top` / `padding-right` / `padding-bottom` / `padding-left`
@@ -100,7 +101,18 @@ Shorthands (expand to the properties above):
   punctuation / line-end opening brackets) automatically.
 - `position`: `absolute` / `relative` / `static` — `fixed` and `sticky` are build
   errors.
-- `z-index`: integer only, no `auto`.
+- `z-index`: integer only, no `auto`. **Declaration site is checked (build
+  error)**: z-index is only valid on a positioned element
+  (`position:relative/absolute`) or on a flex item (child of a
+  `display:flex` container) — anywhere else browsers ignore the declaration
+  while the runtime honors it, so the fence rejects it. Pair every z-index
+  with `position` (or a flex parent).
+- **Paint-order lint (warning)**: when static and positioned (or z-declaring)
+  siblings share a parent and the static side declares no z-index, `ikat
+  check` warns — positioned elements always paint above static content
+  regardless of DOM order, so an undeclared order only works by luck. To
+  silence it when overlap is intended, declare the intent explicitly:
+  `position:relative; z-index:0` on the static element (same visual).
 
 ## Selectors
 
