@@ -1095,6 +1095,58 @@ fn paint_order_children_sorts_by_z_stable() {
 }
 
 #[test]
+fn paint_order_css_tiers_positioned_above_static() {
+    // #96 终局形状：absolute 底图（positioned, z=0）+ static 内容——CSS painting
+    // order 把 positioned 画在 static 之上、无视 DOM 序（旧实现纯 DOM 序，与
+    // 浏览器相反：Tripawd battle 页顶栏被宣纸底图盖住）。
+    use crate::style::resolved::PositionDeclared;
+    let root = Node::default();
+    let mut paper = Node::default();
+    paper.style.position_declared = PositionDeclared::Absolute; // z=0 未声明
+    let content = Node::default(); // static
+    let scene = Scene::from_nodes(vec![root, paper, content], vec![(0, 1), (0, 2)]);
+    let root_id = scene.roots[0];
+    let order = paint_order_children(&scene, root_id);
+    let kids: Vec<NodeId> = scene.get(root_id).unwrap().children.clone();
+    assert_eq!(
+        order,
+        vec![kids[1], kids[0]],
+        "static 内容先画，positioned 底图最后画（盖住 static = 浏览器语义）"
+    );
+
+    // 声明了 z-index:0 的 flex item（未定位）同样抬层（CSS：z on flex item
+    // applies even when static）。
+    let root2 = Node::default();
+    let mut declared0 = Node::default();
+    declared0.style.z_declared = true; // z-index: 0
+    let plain = Node::default();
+    let scene2 = Scene::from_nodes(vec![root2, declared0, plain], vec![(0, 1), (0, 2)]);
+    let root2 = scene2.roots[0];
+    let kids2: Vec<NodeId> = scene2.get(root2).unwrap().children.clone();
+    assert_eq!(
+        paint_order_children(&scene2, root2),
+        vec![kids2[1], kids2[0]],
+        "声明 z:0 抬到 static 之上"
+    );
+
+    // static 内容之间仍按 DOM 序；负 z positioned 沉到 static 之下。
+    let root3 = Node::default();
+    let mut neg = Node::default();
+    neg.style.position_declared = PositionDeclared::Relative;
+    neg.style.z_index = -1;
+    let s1 = Node::default();
+    let s2 = Node::default();
+    let scene3 = Scene::from_nodes(vec![root3, s1, neg, s2], vec![(0, 1), (0, 2), (0, 3)]);
+    let root3 = scene3.roots[0];
+    let kids3: Vec<NodeId> = scene3.get(root3).unwrap().children.clone();
+    assert_eq!(
+        paint_order_children(&scene3, root3),
+        vec![kids3[1], kids3[0], kids3[2]],
+        "负 z 沉底，static 按 DOM 序"
+    );
+}
+
+#[test]
 #[should_panic(expected = "NodeId generation overflow")]
 fn node_id_gen_overflow_panics_instead_of_aliasing() {
     // 烧穿 12-bit generation：同槽 insert/remove 循环到版本回卷点，from_key 必须

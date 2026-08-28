@@ -246,7 +246,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 - `flex-direction`（默认 `row`——标准 CSS 默认），`flex-wrap`（`wrap`/`nowrap`；`wrap-reverse` 围栏拒绝），`flex-grow`, `flex-shrink`, `flex-basis`, `gap`, `row-gap`, `column-gap`
 - `justify-content`, `align-items`, `align-content`, `align-self`
 - `order`, `aspect-ratio`
-- `z-index`（层叠序，整数 / 负数合法 / 默认 0，`auto` 不收——缺省即 0）：只改**同级兄弟的绘制与命中顺序**（z 升序绘制、大者盖上），**子树整体移动**（父的 z 决定整棵子树所在层，子树内部再按自身 z 排）；**不改 flex 排列**（那是 `order`，两者正交）。无嵌套 stacking context——每个父节点天然是排序边界，兄弟排序可局部推理
+- `z-index`（层叠序，整数 / 负数合法 / 默认 0，`auto` 不收——缺省即 0）：改**同级兄弟的绘制与命中顺序**，**子树整体移动**（父的层决定整棵子树所在层，子树内部再按自身层排）；**不改 flex 排列**（那是 `order`，两者正交）。无嵌套 stacking context——每个父节点天然是排序边界，兄弟排序可局部推理。**画序 = CSS painting order 分层语义（#96 修齐，两端一致）**：负 z 的定位元素沉底 → **非 positioned 且未声明 z 的 static 内容**（DOM 序）→ **z=0 的定位元素 / 声明了 z-index 的 flex item**（DOM 序，画在 static 之上）→ 正 z（升序）。即 `position:absolute` 的整页底图 + 未抬升的 static 内容 = **底图盖内容**（与任何浏览器一致——依赖「DOM 序隐式压住定位底图」的写法在浏览器里本来就失效）；要内容压底图，给内容 `position:relative` + `z-index`（或底图负 z）。
 
 **定位**
 

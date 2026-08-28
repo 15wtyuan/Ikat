@@ -786,8 +786,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 47,
-        "pkg format version must be 47 after v47 cursor bump (#93; v29 aria_controls feature persists)"
+        PKG_FORMAT_VERSION, 48,
+        "pkg format version must be 48 after v48 z_declared bump (#96 paint-order CSS tiers; v47 cursor persists)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -848,8 +848,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 47,
-        "pkg format version must be 47 after v47 cursor bump (#93)"
+        PKG_FORMAT_VERSION, 48,
+        "pkg format version must be 48 after v48 z_declared bump (#96)"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -996,8 +996,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v46_roundtrip_preserves_link_href() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 47,
-        "pkg format version must be 47 after v47 cursor bump (#93)"
+        PKG_FORMAT_VERSION, 48,
+        "pkg format version must be 48 after v48 z_declared bump (#96)"
     );
     let mut root = tn(NodeKind::Container);
     root.rich_text_block = true;
@@ -1084,8 +1084,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 47,
-        "pkg format version must be 47 after v47 cursor bump (#93)"
+        PKG_FORMAT_VERSION, 48,
+        "pkg format version must be 48 after v48 z_declared bump (#96)"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

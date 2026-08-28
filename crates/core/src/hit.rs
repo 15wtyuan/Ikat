@@ -14,8 +14,10 @@ pub(crate) fn point_in_rect(point: (f32, f32), r: Rect) -> bool {
 /// （CSS flexbox `order` 语义：默认 order=0，DOM 序 = 绘制序，后者绘 = 顶层）。
 /// 实现：先反转 children（让后者靠前），再按 `-order` 稳定排——stable 保反转后序，
 /// 即同 order 下后者先测，与 hit_test"顶层优先"一致。
-/// z-index 为主键（后一次稳定排 `-z_index`）：镜像 render DFS 的 (z 升, DOM 升)
-/// 绘制序之逆。等 z 时保持既有 order 行为（本函数的历史近似，render 侧不排 order）。
+/// paint_key 为最终主键（末次稳定排，tier/z 皆降序）：镜像 render DFS 的
+/// `paint_order_children`（(tier, z) 升, DOM 升）绘制序之逆——分层语义与浏览器
+/// painting order 对齐（#96）。等键时保持既有 order 行为（历史近似，render 侧
+/// 不排 order）。
 fn effective_draw_order(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
     let mut kids: Vec<NodeId> = scene
         .get_live(parent, "hit/effective_draw_order:parent")
@@ -29,10 +31,11 @@ fn effective_draw_order(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
             .order
     });
     kids.sort_by_key(|&c| {
-        -scene
-            .get_live(c, "hit/effective_draw_order:z")
+        let key = scene
+            .get_live(c, "hit/effective_draw_order:paintkey")
             .style
-            .z_index
+            .paint_key();
+        (std::cmp::Reverse(key.0), std::cmp::Reverse(key.1))
     });
     kids
 }

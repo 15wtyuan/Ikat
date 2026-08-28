@@ -47,14 +47,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   不在围栏（core `parse_px` 不收、浏览器收的反向分歧同样拦）——showcase
   home 页 4 处 `letter-spacing` em 已按 font-size 换算 px（此前预览有字距、
   运行时无的活分歧）。
-
-- **preview 静态资产 revalidate 化（#96 二轮归因）**：`/ws/` 静态资产（字体/图/
+- **preview 静态资产 revalidate 化**：`/ws/` 静态资产（字体/图/
   CSS/JS）从无差别 `no-store` 改为 `no-cache` + `Last-Modified` + 304 再验证——
   活文件语义不变（每次导航校验 mtime、改动即刻 200 新字节），但不再重传。
   背景：工作区 25MB 级字体在 no-store 下每次导航全量重传，把 @font-face
   `font-display: block` 的隐形文字窗（布局占位在、字形不画、`!important` 无效
   ——非级联问题）拉成每次刷新必现；HTML 恒 no-store（注入产物依赖外部脚本
   存在性）。recipes.md 补消费侧指引（超大字体首载窗建议 `swap`）。
+  （#96 排查途中修的独立缺陷——非 #96 根因，见下条。）
+- **core 画序改采 CSS painting order 分层语义（#96 终局根因修复）**：Tripawd
+  battle 页顶栏文字与圆钮底「预览不画、运行时画」的真因——`.paper-bg`
+  （`position:absolute; z-index:0`）+ static 的 `.topbar`：旧 core 画序只按 z
+  数值稳定排序（全员缺省 0 → 纯 DOM 序，内容在上）；浏览器把 positioned 元素
+  与声明了 z-index 的 flex item 整体画在 static 内容之上（底图盖内容）。core
+  现按分层键 `(tier, z)` 绘制/命中（`ResolvedStyle::paint_key`）：负 z 定位
+  沉底 → static 内容 → z=0 定位/声明 flex item → 正 z；render
+  `paint_order_children` 与 hit `effective_draw_order` 同键镜像。**迁移注意**：
+  依赖「DOM 序隐式压住 absolute 底图」的页面运行时观感会翻转为浏览器语义
+  （本来在浏览器/预览里就是被盖的）——要内容压底图给内容 `position:relative`
+  + `z-index`（Tripawd `.topbar` 已按此修）。pkg 格式 v48（ResolvedStyle 加
+  `z_declared` 位，旧包拒绝）；`z_declared` 与 z_index 同进同出（mapping 置位、
+  dynamic 双字段覆写），非 0 的 z 本身即视为声明（运行时直改路径兼容）。
 - **消费侧文档漂移门 + 补漏**：新增 `consumer_doc_sync` 测试把 fence 的
   doc↔schema 交叉校验延伸到随 scaffold 分发的模板文档（fence-schema.md 标签表
   双向精确集 + css-reference.md 属性全量覆盖）。首跑抓到两处存量漂移并已修：

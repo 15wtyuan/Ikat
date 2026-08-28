@@ -602,6 +602,11 @@ pub struct ResolvedStyle {
     /// 子树整体移动），不改 flex 排列（那是 `order`）。默认 0。消费点：render
     /// DFS 子迭代 + open popup 追加循环 + hit `effective_draw_order`（三处同步）。
     pub z_index: i32,
+    /// z-index 是否作者声明过（区别于缺省 0）。CSS 画序里「声明的 z」把 flex item
+    /// 提到 positioned 层（z-index on flex items applies even when static）——
+    /// [`paint_key`] 分层消费。与 z_index 同进同出：mapping 的 z-index 臂置位、
+    /// dynamic 覆写双字段拷贝（INLINE_Z_INDEX，同 INLINE_POSITION 先例）。
+    pub z_declared: bool,
     /// pointer-events:auto=true / none=false（命中门控）。默认 true。
     pub touchable: bool,
     /// CSS transform 解析产物（Affine2 矩阵，含多函数复合剪切）。默认 identity。
@@ -743,6 +748,7 @@ impl Default for ResolvedStyle {
             cursor: CursorStyle::Auto,
             order: 0,
             z_index: 0,
+            z_declared: false,
             touchable: true,
             transform: LocalTransform::default(),
             transform_origin: TransformOrigin::default(),
@@ -779,6 +785,34 @@ impl ResolvedStyle {
             overflow_wrap: self.overflow_wrap,
             word_break: self.word_break,
             text_wrap: self.text_wrap,
+        }
+    }
+
+    /// CSS 画序分层键（浏览器 painting order 语义，#96 终局修复）：同级兄弟升序
+    /// 绘制 = `(tier, z)` 升序、等键保持 DOM 序。分层：负 z 的定位元素沉底（tier
+    /// 0）→ 非 positioned 且未声明 z 的 static 内容（tier 1）→ z=0 的定位元素/
+    /// 声明了 z-index 的 flex item（tier 2——CSS 把 positioned 元素与声明 z 的
+    /// flex item 画在 static 内容之上、无视 DOM 序）→ 正 z（tier 3）。旧实现只按
+    /// z 数值排序、全员缺省 0 → 纯 DOM 序，与浏览器对「absolute 底图 + static
+    /// 内容」的裁决相反（Tripawd battle 页实证：预览底图盖住顶栏、运行时反之
+    /// ——两端一致性破裂）。消费点：`paint_order_children`（render 侧）与 hit
+    /// `effective_draw_order`（逆序镜像）——两处必须同键。
+    pub fn paint_key(&self) -> (u8, i32) {
+        // 非 0 的 z 本身即「声明过」的证据（缺省恒 0）——运行时直改 z 的路径
+        // （测试/逃生舱 API）不经过 mapping 的置位也保持分层正确；z_declared
+        // 只补「声明了 z-index: 0」的抬层场景（CSS：flex item 上声明的 z 即使
+        // 0 也进 positioned 层）。
+        let positioned = self.z_declared
+            || self.z_index != 0
+            || self.position_declared != PositionDeclared::Static;
+        if !positioned {
+            (1, 0)
+        } else if self.z_index < 0 {
+            (0, self.z_index)
+        } else if self.z_index == 0 {
+            (2, 0)
+        } else {
+            (3, self.z_index)
         }
     }
 }

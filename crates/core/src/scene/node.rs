@@ -1142,12 +1142,16 @@ pub fn is_whitespace_only_text(scene: &Scene, id: NodeId) -> bool {
     }
 }
 
-/// 兄弟绘制序：children 稳定按 `z_index` 升序排（等 z 保持 DOM 序——z 全 0 时
-/// 逐位等于原 children 顺序）。子树整体移动：父的 z 决定整棵子树所在层，子树
-/// 内部再按自身 z 排（DFS 先访问 = 先绘制 = 底层）。
+/// 兄弟绘制序：children 稳定按 [`crate::style::resolved::ResolvedStyle::paint_key`]
+/// （CSS 画序分层键 `(tier, z)` 升序）排——等键保持 DOM 序。分层语义见 paint_key
+/// 文档：positioned（声明的 absolute/relative）与声明了 z-index 的 flex item 画在
+/// static 内容之上（tier 2/3），负 z 沉底（tier 0）——对齐浏览器 painting order
+/// （#96：absolute 整页底图 + static 内容的叠放在两端裁决相反曾是活分歧）。
+/// 子树整体移动：父的层决定整棵子树所在层，子树内部再按自身键排
+/// （DFS 先访问 = 先绘制 = 底层）。
 ///
 /// render 主 DFS（batch.rs）与 open popup 末尾追加循环共用，保证两路一致；
-/// hit 侧走 hit.rs `effective_draw_order`（逆序遍历，z 为主键）。
+/// hit 侧走 hit.rs `effective_draw_order`（逆序遍历，paint_key 为主键）。
 pub fn paint_order_children(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
     let mut kids: Vec<NodeId> = match scene.nodes.get(parent.to_key()) {
         Some(n) => n.children.clone(),
@@ -1157,8 +1161,8 @@ pub fn paint_order_children(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
         scene
             .nodes
             .get(c.to_key())
-            .map(|n| n.style.z_index)
-            .unwrap_or(0)
+            .map(|n| n.style.paint_key())
+            .unwrap_or((1, 0))
     });
     kids
 }

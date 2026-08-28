@@ -64,6 +64,11 @@ const REPRESENTATION_DIFF_PROPS: &[&str] = &[
     "animation-iteration-count",
     "animation-direction",
     "animation-fill-mode",
+    // z-index（#96 画序 CSS 语义化）：apply schema default `0` 会置 z_declared=true
+    // ——「显式声明 z-index:0」按 CSS 抬进 positioned 层，与未声明（struct 默认
+    // z_declared=false，留 static 层）是**有意的语义区分**，非表示差异遗祸。
+    "z-index",
+    "animation-fill-mode",
     "animation-play-state",
 ];
 
