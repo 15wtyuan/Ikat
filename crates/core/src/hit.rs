@@ -10,35 +10,10 @@ pub(crate) fn point_in_rect(point: (f32, f32), r: Rect) -> bool {
     point.0 >= r.x && point.0 <= r.x + r.w && point.1 >= r.y && point.1 <= r.y + r.h
 }
 
-/// children 按 style.order 降序排（大值=顶层在前）；同 order 时后出现的子在前
-/// （CSS flexbox `order` 语义：默认 order=0，DOM 序 = 绘制序，后者绘 = 顶层）。
-/// 实现：先反转 children（让后者靠前），再按 `-order` 稳定排——stable 保反转后序，
-/// 即同 order 下后者先测，与 hit_test"顶层优先"一致。
-/// paint_key 为最终主键（末次稳定排，tier/z 皆降序）：镜像 render DFS 的
-/// `paint_order_children`（(tier, z) 升, DOM 升）绘制序之逆——分层语义与浏览器
-/// painting order 对齐（#96）。等键时保持既有 order 行为（历史近似，render 侧
-/// 不排 order）。
-fn effective_draw_order(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
-    let mut kids: Vec<NodeId> = scene
-        .get_live(parent, "hit/effective_draw_order:parent")
-        .children
-        .clone();
-    kids.reverse();
-    kids.sort_by_key(|&c| {
-        -scene
-            .get_live(c, "hit/effective_draw_order:order")
-            .style
-            .order
-    });
-    kids.sort_by_key(|&c| {
-        let key = scene
-            .get_live(c, "hit/effective_draw_order:paintkey")
-            .style
-            .paint_key();
-        (std::cmp::Reverse(key.0), std::cmp::Reverse(key.1))
-    });
-    kids
-}
+// 绘制序不再本地推导：hit 与 render 共用 crate::scene::stacking::paint_order
+//（stacking context 全局分层，#100——嵌套 static 子树里的 opacity/transform/
+// 定位+声明 z 后代会上提层，逆序遍历即顶层优先，语义单一真相源）。flex `order`
+// 的兄弟序也由该走查统一（order-modified tree order）。
 
 /// 命中合成 scrollbar thumb → (container_id, axis: 0=v 1=h)。None 不命中。
 /// scrollbar 最上层——遍历所有容器 check v/h thumb rect。
@@ -111,8 +86,8 @@ pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
     if let Some(hit) = hit_open_popups(scene, point) {
         return Some(hit);
     }
-    // 多个 root 按顺序，后 root 顶层（与渲染序一致）。
-    for &root in &scene.roots {
+    // 多 root：渲染序后 root 画在上层（roots 序追加 = 顶层）→ 命中先测后 root。
+    for &root in scene.roots.iter().rev() {
         if let Some(hit) = hit_subtree(scene, root, point) {
             return Some(hit);
         }
@@ -120,31 +95,87 @@ pub fn hit_test(scene: &Scene, point: (f32, f32)) -> Option<NodeId> {
     None
 }
 
-/// 递归测某子树。先测子（逆等效序，顶层先），子命中返回子的；子都不命中→自身 fallback。
+/// 测某子树：绘制序取 [`crate::scene::stacking::paint_order`]（render 同源，
+/// #100：嵌套 static 子树里的 opacity/transform/定位+声明 z 后代会上提层），逆序
+/// 遍历 = 顶层优先。父恒先于子绘制 → 逆序子先测，父自然成为子的 fallback。
+/// 逐节点独立检查：box/clip 门/touchable 在 [`hit_node`]；clip 门沿祖先链求值
+/// （见 [`clip_gate_passed`]），与逐父递归时代的「祖先 gate 失败剪整子树」等价。
 fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
-    let node = scene.get_live(id, "hit/hit_subtree");
-    // bounds guard：world_transforms 可能未对齐（结构变更帧新增节点本帧 world_transforms
-    // 未算，或首帧 world_transforms 空）→ 越界返 None（1 帧延迟语义：本帧未命中）。
-    // sentinel id（thumb flag）不会进 hit_subtree（hit_test 在 hit_scrollbar_grip 命中后
-    // 早 return），故此处 id 必为 live 节点 NodeId，index() 不会因 flag bit 失真。
+    // include = world_transforms 缺席守卫（bounds guard 的子树粒度版：结构变更帧
+    // 新增节点本帧 transforms 未算 / 首帧空 → 整子树不进画序，1 帧延迟语义）。
+    let order = crate::scene::stacking::paint_order(scene, id, &|n| {
+        scene.world_transforms.get(n.index()).is_some()
+    });
+    // clipper 祖先门求值缓存：同一次命中查询内，同一点对同一 clipper 只算一次
+    //（多后代共享祖先 gate；逆逆变换不便宜）。
+    let mut gate_cache: std::collections::HashMap<NodeId, bool> = std::collections::HashMap::new();
+    for nid in order.iter().rev() {
+        if let Some(hit) = hit_node(scene, *nid, point, &mut gate_cache) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+/// clip 门控：节点未被任何 clipper 祖先（含自身 `clip_rect`）挡住。
+///
+/// gate(A) = 点在 A 的页面坐标里落进 A.clip_rect。页面点 = 逆世界变换（已含
+/// 滚动逆变换）回 A 本地 + A.layout_rect 偏移——与 clip 同空间（页面绝对坐标、
+/// 不含滚动；拿屏幕点直接比会在祖先滚动下失配，嵌套滚动整树穿透）。递归时代的
+/// 语义是「A 的 gate 失败 → A 整棵子树跳过」；扁平序下等价于「后代逐个沿祖先
+/// 链问 gate」，结果一致但顺序无关。
+fn clip_gate_passed(
+    scene: &Scene,
+    id: NodeId,
+    point: (f32, f32),
+    cache: &mut std::collections::HashMap<NodeId, bool>,
+) -> bool {
+    let node = match scene.get(id) {
+        Some(n) => n,
+        None => return true, // 死 id 防御：无 gate 可挡
+    };
+    if let Some(&passed) = cache.get(&id) {
+        return passed;
+    }
+    let mut passed = true;
+    if let Some(clip) = node.clip_rect {
+        // world_transforms 缺席 → bounds guard 语义：本 gate 挡下（paint_order 的
+        // include 已按子树剪过，这里到不了；防御分支）。
+        if let Some(wm) = scene.world_transforms.get(id.index()) {
+            let inv = crate::transform::inverse(wm);
+            let (lx, ly) = crate::transform::apply_point(&inv, point.0, point.1);
+            let lr = node.layout_rect;
+            passed = point_in_rect((lx + lr.x, ly + lr.y), clip);
+        }
+    }
+    // 自身 gate 过了还要过祖先的（祖先 gate 挡 = 整子树不可命中）。
+    if passed {
+        if let Some(p) = node.parent {
+            passed = clip_gate_passed(scene, p, point, cache);
+        }
+    }
+    cache.insert(id, passed);
+    passed
+}
+
+/// 单节点命中检查：world 逆变换 → 本地 box → clip 门（祖先链）→ touchable。
+/// rich-text-block 命中细化到 inline 流 source（span 事件归属契约）。
+fn hit_node(
+    scene: &Scene,
+    id: NodeId,
+    point: (f32, f32),
+    gate_cache: &mut std::collections::HashMap<NodeId, bool>,
+) -> Option<NodeId> {
+    let node = scene.get_live(id, "hit/hit_node");
+    // bounds guard（子树版已在 paint_order include 剪掉；此处防御）。
     let wm = scene.world_transforms.get(id.index())?;
     let inv = crate::transform::inverse(wm);
     // 点逆投到节点本地空间（box 判定的 (0,0,w,h) 系）。
     let (lx, ly) = crate::transform::apply_point(&inv, point.0, point.1);
     let lr = node.layout_rect;
-    // clip 门控：clip_rect 是页面绝对坐标矩形（渲染侧同语义：clip−scroll 与屏幕点比）。
-    // 本地点 + layout_rect 偏移 = 补回祖先滚动后的页面坐标（wm 的 inv 已含滚动逆变换）
-    // ——与 clip 同空间比较。拿屏幕点直接比页面 clip 会在祖先滚动下失配（嵌套滚动场景
-    // 整棵子树不可命中，滚轮/点击穿透到外层）。
-    if let Some(clip) = node.clip_rect {
-        if !point_in_rect((lx + lr.x, ly + lr.y), clip) {
-            return None;
-        }
-    }
-    for &c in &effective_draw_order(scene, id) {
-        if let Some(hit) = hit_subtree(scene, c, point) {
-            return Some(hit);
-        }
+    // clip 门控：自身 + 祖先链（见 [`clip_gate_passed`]）。
+    if !clip_gate_passed(scene, id, point, gate_cache) {
+        return None;
     }
     if node.interaction.touchable && lx >= 0.0 && lx <= lr.w && ly >= 0.0 && ly <= lr.h {
         // rich-text-block：命中容器后细化到 inline 流的 source 节点（span / TextNode /

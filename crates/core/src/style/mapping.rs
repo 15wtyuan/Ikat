@@ -1786,11 +1786,11 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "z-index" => {
-            // 层叠序：绘制/命中层（render DFS + effective_draw_order 消费），
+            // 层叠序：绘制/命中分层（scene::stacking::paint_order 消费），
             // 不进 layout。与 order 正交：order 管 flex 排列，z-index 管盖上关系。
             // 非法值降级 0（fence 打包期已拦；运行时 StyleSheet 逃生舱宽松，同 order 策略）。
-            // z_declared 同步置位：CSS 画序里「声明的 z」把元素提进 positioned 层
-            // （flex item 上 z-index 即使 static 也生效）——paint_key 分层消费。
+            // z_declared 同步置位：CSS 画序里「声明的 z」创建 stacking context
+            // （flex item 上 z-index 即使 static 也生效）——stacking::classify 消费。
             style.z_index = value.trim().parse::<i32>().unwrap_or(0);
             style.z_declared = true;
             true

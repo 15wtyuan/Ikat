@@ -1142,30 +1142,13 @@ pub fn is_whitespace_only_text(scene: &Scene, id: NodeId) -> bool {
     }
 }
 
-/// 兄弟绘制序：children 稳定按 [`crate::style::resolved::ResolvedStyle::paint_key`]
-/// （CSS 画序分层键 `(tier, z)` 升序）排——等键保持 DOM 序。分层语义见 paint_key
-/// 文档：positioned（声明的 absolute/relative）与声明了 z-index 的 flex item 画在
-/// static 内容之上（tier 2/3），负 z 沉底（tier 0）——对齐浏览器 painting order
-/// （#96：absolute 整页底图 + static 内容的叠放在两端裁决相反曾是活分歧）。
-/// 子树整体移动：父的层决定整棵子树所在层，子树内部再按自身键排
-/// （DFS 先访问 = 先绘制 = 底层）。
-///
-/// render 主 DFS（batch.rs）与 open popup 末尾追加循环共用，保证两路一致；
-/// hit 侧走 hit.rs `effective_draw_order`（逆序遍历，paint_key 为主键）。
-pub fn paint_order_children(scene: &Scene, parent: NodeId) -> Vec<NodeId> {
-    let mut kids: Vec<NodeId> = match scene.nodes.get(parent.to_key()) {
-        Some(n) => n.children.clone(),
-        None => return Vec::new(),
-    };
-    kids.sort_by_key(|&c| {
-        scene
-            .nodes
-            .get(c.to_key())
-            .map(|n| n.style.paint_key())
-            .unwrap_or((1, 0))
-    });
-    kids
-}
+// 兄弟绘制序已收编至 crate::scene::stacking::paint_order（stacking context
+// 全局分层，CSS Appendix E 语义，#100）：画序不再是逐父兄弟排序，而是每个 SC
+// 内「负 z SC → static 树序 → z0 层 → 正 z SC」的全局分层，嵌套在 static 子树
+// 里的 opacity/transform/filter/定位+声明 z 后代会上提到所属 SC 的对应层
+// （#100：static 顶栏里的半透明图标在浏览器浮在 absolute z0 底图上、逐父排序
+// 的旧实现整树沉底）。render 主 DFS（batch.rs）、open popup 追加循环、hit
+// （逆序遍历）三消费点共用同一份序。
 
 #[cfg(test)]
 mod tests;

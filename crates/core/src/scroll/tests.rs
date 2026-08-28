@@ -99,8 +99,10 @@ fn build_scroll_scene() -> Scene {
         h: 30.0,
     };
     s.get_mut(root1).unwrap().layout_rect = Rect {
-        x: 0.0,
-        y: 0.0,
+        // root1 是「非 scroll root」对照位，挪出 root0 区域——多 root 命中序 = 渲染序
+        // 后 root 顶层（hit 与 paint 同向），重叠会让 wheel 点先命中 root1 而非容器子。
+        x: 200.0,
+        y: 200.0,
         w: 50.0,
         h: 50.0,
     };

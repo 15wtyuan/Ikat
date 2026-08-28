@@ -120,10 +120,13 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
 /// 给所有 RenderNode 填 sort_key + mask_context，并产 clip 表（context_id → 祖先
 /// clip 链交集的绝对 design rect）。
 ///
-/// 单遍 DFS，按 scene.roots 起遍历，DFS 树序即绘制序。`nodes` 不含 display:none 子树
-/// （由 `build_render_nodes` 剪掉）；`id_to_pos` 只映射存活的 NodeId → nodes vec 位置，
-/// DFS 遇 `id_to_pos` 没有的节点（pruned）即跳过该子树。返回的 `Vec<ClipEntry>` 含且仅含
-/// mask_context>0 的层级（context==0 = 无 clip，不入表）。
+/// 两 pass：①结构 pass（DOM DFS）算 mask_context + clip 表——树结构性质，与画序
+/// 无关（被上提的节点仍按其**树祖先链**取 clip：CSS 里 overflow 裁剪不因画序分层
+/// 失效）；②画序 pass 按 [`crate::scene::stacking::paint_order`]（stacking context
+/// 全局分层，#100）赋 sort_key。`nodes` 不含 display:none 子树（由
+/// `build_render_nodes` 剪掉）；`id_to_pos` 只映射存活 NodeId → nodes vec 位置，
+/// 画序 pass 的 include 即 `id_to_pos` 含有性，剪掉整棵子树。返回的
+/// `Vec<ClipEntry>` 含且仅含 mask_context>0 的层级（context==0 = 无 clip，不入表）。
 ///
 /// 交集语义：进入 overflow:hidden 节点（`clip_rect.is_some()`）时，把本节点 clip 与
 /// 祖先 clip 链的累乘交 (`accumulated`) 求交，得 `intersected`；新 context 记
@@ -135,21 +138,20 @@ pub fn assign_sort_keys(
     id_to_pos: &std::collections::HashMap<NodeId, usize>,
     sort_keys: &mut [u32],
 ) -> Vec<ClipEntry> {
-    let mut counter: u32 = 0;
     let mut clips: Vec<ClipEntry> = Vec::new();
-    fn dfs(
+    let mut ctx_counter: u32 = 0;
+    fn dfs_mask(
         scene: &Scene,
         nodes: &mut [RenderNode],
         id_to_pos: &std::collections::HashMap<NodeId, usize>,
-        sort_keys: &mut [u32],
         id: NodeId,
-        counter: &mut u32,
+        ctx_counter: &mut u32,
         clips: &mut Vec<ClipEntry>,
         parent_mask: MaskContext,
         accumulated: Option<Rect>,
         scroll_offset: (f32, f32),
     ) {
-        // pruned（display:none 子树）节点不在 id_to_pos → 不 assign sort_key，不递归子树。
+        // pruned（display:none 子树）节点不在 id_to_pos → 不赋 mask，不递归子树。
         if !id_to_pos.contains_key(&id) {
             return;
         }
@@ -172,7 +174,8 @@ pub fn assign_sort_keys(
                 None => own_scrolled,
                 Some(a) => rect_intersect(a, own_scrolled),
             };
-            let ctx = *counter + 1;
+            let ctx = *ctx_counter + 1;
+            *ctx_counter = ctx;
             // 圆角裁剪：clipper 节点自身 border_radius 非全零时，把四角半径随 clip entry
             // 透传到后端（shader CLIPPED_ROUNDED 变体走 SDF）。半径按 clipper 自身 box
             // 尺寸解析（own.w/own.h，不受 scroll/ancestor 交集影响）——交集后 rect 可能更小，
@@ -200,11 +203,7 @@ pub fn assign_sort_keys(
             // nodes 0 基位置：用 id_to_pos 映射（slotmap 删节点后有空洞，idx-1 ≠ 位置）。
             // remove_node 后 slotmap idx 不连续，须用 build_render_nodes 算的 id_to_pos。
             let pos = *id_to_pos.get(&id).expect("live node 在 id_to_pos 中");
-            let rn = &mut nodes[pos];
-            rn.sort_key = *counter;
-            rn.mask_context = mask;
-            sort_keys[id.index()] = *counter;
-            *counter += 1;
+            nodes[pos].mask_context = mask;
         }
         // 子树 scroll_offset：本节点是 scroll 容器时子吃其 scroll_pos（transform.rs 同约定）。
         // accumulated 不减 scroll——祖先 clip（如 scroll 容器 viewport）在 world 固定（容器自身
@@ -219,17 +218,13 @@ pub fn assign_sort_keys(
             scroll_offset
         };
         let child_accumulated = intersected_for_kids;
-        // clone 避免与 nodes 的 &mut 冲突借（scene 与 nodes 是独立借用）。
-        // z-index 层叠：兄弟稳定按 z 升序访问（等 z 保 DOM 序）。
-        let kids = crate::scene::node::paint_order_children(scene, id);
-        for c in kids {
-            dfs(
+        for c in node.children.clone() {
+            dfs_mask(
                 scene,
                 nodes,
                 id_to_pos,
-                sort_keys,
                 c,
-                counter,
+                ctx_counter,
                 clips,
                 mask,
                 child_accumulated,
@@ -238,18 +233,32 @@ pub fn assign_sort_keys(
         }
     }
     for root in &scene.roots {
-        dfs(
+        dfs_mask(
             scene,
             nodes,
             id_to_pos,
-            sort_keys,
             *root,
-            &mut counter,
+            &mut ctx_counter,
             &mut clips,
             MaskContext(0),
             None,
             (0.0, 0.0),
         );
+    }
+    // 画序 pass：stacking context 全局分层序 → sort_key（#100：嵌套在 static 子树
+    // 里的 opacity/transform/filter/定位+声明 z 后代上提到所属 SC 的层，浏览器同序）。
+    let mut key: u32 = 0;
+    for root in &scene.roots {
+        let order =
+            crate::scene::stacking::paint_order(scene, *root, &|id| id_to_pos.contains_key(&id));
+        for id in order {
+            let pos = *id_to_pos
+                .get(&id)
+                .expect("paint_order 只发 include 过的节点");
+            nodes[pos].sort_key = key;
+            sort_keys[id.index()] = key;
+            key += 1;
+        }
     }
     clips
 }

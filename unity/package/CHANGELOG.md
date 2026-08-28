@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **core 画序升级为 stacking context 全局分层（#100 分歧粒度修复）**：0.0.16 的
+  画序分层是**逐父兄弟排序**——嵌套在 static 子树里的 opacity<1 / transform /
+  filter / 定位+声明 z 后代不会上提，整棵 static 子树（含半透明图标）沉在
+  absolute z0 底图之下；浏览器按 CSS Color 规范把 opacity<1 的 static 元素
+  「当作 z-index:0 的 positioned 元素」绘制（Chrome 像素取证：static 顶栏中
+  opacity .65 图标浮在底图上、同位置的文本 span 被盖——Tripawd 实测的混合
+  结果）。core 现按 CSS Appendix E 语义做 **SC 全局分层遍历**（新
+  `scene::stacking::paint_order`）：每个 stacking context 内「负 z SC → static
+  树序 → z0 层（positioned z:auto + opacity/transform/filter SC）→ 正 z」，
+  SC 后代从任意深度上提、SC 内部递归分层（子树整体移动不变量保持）；render
+  主 DFS（`assign_sort_keys` 拆结构/画序双 pass）、open popup 追加、hit 逆序
+  遍历三消费点共用同一份序。同批语义对齐：flex `order` 现在也改**画序**
+  （order-modified tree order，浏览器同序；此前 render 侧不排 order）；多 root
+  命中序改为后 root 优先（与渲染序「后画在上」同向，修掉 hit 与自己注释矛盾
+  的旧顺序）。已知口径分歧（一处，fence.md 记档）：非定位、非 flex item 元素
+  上的声明 z-index，浏览器忽略、core 恒生效（运行时直改 z 的 fgui 血统语义）。
+
 ## [0.0.16] - 2026-08-28
 
 ### Fixed

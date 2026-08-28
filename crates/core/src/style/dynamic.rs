@@ -843,9 +843,9 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     // 非继承属性——视觉/渲染字段
     cpy!(background_color, INLINE_BACKGROUND_COLOR);
     cpy!(opacity, INLINE_OPACITY);
-    // INLINE_Z_INDEX：apply_decl 同时设 z_index + z_declared（画序分层键的组成
-    // 对，同 INLINE_POSITION 双字段先例）——单拷 z_index 会让回退时 z_declared
-    // 残留、paint_key 把已回退 static 的节点错抬进 positioned 层。
+    // INLINE_Z_INDEX：apply_decl 同时设 z_index + z_declared（stacking 分类的
+    // 组成对，同 INLINE_POSITION 双字段先例）——单拷 z_index 会让回退时 z_declared
+    // 残留、stacking::classify 把已回退 static 的节点错判成 stacking context。
     if s & INLINE_Z_INDEX != 0 {
         style.z_index = inline.z_index;
         style.z_declared = inline.z_declared;

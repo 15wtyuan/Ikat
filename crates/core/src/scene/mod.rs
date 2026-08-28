@@ -6,6 +6,7 @@ pub mod animation;
 pub mod control;
 pub mod dynamic;
 pub mod node;
+pub mod stacking;
 pub mod text_cursor;
 pub mod transform;
 

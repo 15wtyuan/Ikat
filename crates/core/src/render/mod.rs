@@ -724,16 +724,15 @@ pub fn build_render_nodes(
     // id_to_pos（已在 assign_sort_keys 之后，id_to_pos 不再使用）。
     let mut popup_counter = nodes.iter().map(|n| n.sort_key).max().unwrap_or(0) + 1;
     for &popup_root in &open_popup_roots {
-        // DFS 子树（先序=绘制序）。跳过空白 text（同主遍历）。
-        let mut stack: Vec<NodeId> = vec![popup_root];
-        while let Some(nid) = stack.pop() {
-            // 子节点逆序入栈 → 出栈保跨子树先序（同 assign_sort_keys dfs 风格）。
-            // 但 popup 先序只影响同 popup 内的绘制序（父子 / 前后兄弟），不跨 popup。
+        // 子树绘制序 = stacking context 分层序（主 DFS 同源，popup 内 z/opacity 分层
+        // 与 hit 侧一致）。跳过空白 text / rich 折叠子（同主遍历）。
+        let order = crate::scene::stacking::paint_order(scene, popup_root, &|_| true);
+        for nid in order {
             let Some(node) = scene.get(nid) else {
                 continue;
             };
             if crate::scene::node::is_whitespace_only_text(scene, nid) {
-                // 仍需递归子节点（空白 text 无子，此分支实际不进）。
+                // 空白 text 无子，跳过即可。
                 continue;
             }
             // rich-text-block inline 子同样跳过（同主 DFS：已折进父 mesh，独立画=原点垃圾）。
@@ -759,12 +758,6 @@ pub fn build_render_nodes(
                 rn.sort_key = popup_counter;
                 rn.mask_context = MaskContext(0);
                 popup_counter += 1;
-            }
-            // 逆序 push 子节点（stack LIFO → 先序出栈）。z-index 层叠与主 DFS 同序
-            //（paint_order_children，等 z 保 DOM 序）——popup 内 z 与 hit 侧一致。
-            let kids = crate::scene::node::paint_order_children(scene, nid);
-            for c in kids.into_iter().rev() {
-                stack.push(c);
             }
         }
     }

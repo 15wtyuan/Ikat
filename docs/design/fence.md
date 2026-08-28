@@ -246,7 +246,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 - `flex-direction`（默认 `row`——标准 CSS 默认），`flex-wrap`（`wrap`/`nowrap`；`wrap-reverse` 围栏拒绝），`flex-grow`, `flex-shrink`, `flex-basis`, `gap`, `row-gap`, `column-gap`
 - `justify-content`, `align-items`, `align-content`, `align-self`
 - `order`, `aspect-ratio`
-- `z-index`（层叠序，整数 / 负数合法 / 默认 0，`auto` 不收——缺省即 0）：改**同级兄弟的绘制与命中顺序**，**子树整体移动**（父的层决定整棵子树所在层，子树内部再按自身层排）；**不改 flex 排列**（那是 `order`，两者正交）。无嵌套 stacking context——每个父节点天然是排序边界，兄弟排序可局部推理。**画序 = CSS painting order 分层语义（#96 修齐，两端一致）**：负 z 的定位元素沉底 → **非 positioned 且未声明 z 的 static 内容**（DOM 序）→ **z=0 的定位元素 / 声明了 z-index 的 flex item**（DOM 序，画在 static 之上）→ 正 z（升序）。即 `position:absolute` 的整页底图 + 未抬升的 static 内容 = **底图盖内容**（与任何浏览器一致——依赖「DOM 序隐式压住定位底图」的写法在浏览器里本来就失效）；要内容压底图，给内容 `position:relative` + `z-index`（或底图负 z）。
+- `z-index`（层叠序，整数 / 负数合法 / 默认 0，`auto` 不收——缺省即 0）：管盖上关系，**不改 flex 排列**（那是 `order`，两者正交）。**画序 = CSS painting order 的 stacking context 全局分层（#96/#100 修齐，两端一致）**：画序不是逐父兄弟排序，而是每个 stacking context 内部四段——负 z 的 SC 沉底 → static 内容（树序）→ z0 层（树序：`position:relative/absolute` 未声明 z 的元素 + **opacity<1 / transform / filter 的元素**，后者按 CSS Color 规范「当作 z-index:0 的 positioned 元素」绘制）→ 正 z（升序、同值树序）。关键推论：**嵌套深度不设层**——static 子树里的 opacity/transform/filter/定位+声明 z 后代会被上提到所属 SC 的对应层（static 顶栏里的半透明图标浮在 absolute z0 底图之上、同顶栏的纯文本沉在底下——浏览器正是这么画的，#100 实证）；SC 内部再按同算法递归（「子树整体移动」：opacity 组里的 z:5 子不越过组边界）。已知口径分歧（一处）：**非定位、非 flex item 的元素上声明 z-index**，浏览器视而不见、core 恒生效（运行时直改 z 的 fgui 血统语义）——围栏侧避免该写法（声明 z 请配合 `position` 或 flex 父）。跨端安全的叠放写法不变：非底图内容显式 `position:relative` + `z-index`。
 
 **定位**
 
