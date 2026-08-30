@@ -212,13 +212,19 @@ namespace Ikat
 
             // manifest 先读（纯文本 IO，无 Unity 资源依赖）——设计分辨率/适配模式的正主在
             // workspace（design/match_mode 透传），Inspector 字段是 manifest 缺项时的 fallback。
-            // 解析失败不阻断启动（warning + Inspector 值兜底，行为同旧版）。
             RuntimeManifest runtime = null;
             string runtimeJson = LoadTextFile("ikat.runtime.json");
             if (!string.IsNullOrEmpty(runtimeJson))
             {
                 try { runtime = RuntimeManifest.ParseRuntime(runtimeJson); }
-                catch (Exception e) { Debug.LogWarning($"[IkatStageDriver] Failed to parse ikat.runtime.json: {e.Message}"); }
+                catch (Exception e)
+                {
+                    // 解析失败 = 产物契约破裂，阻断启动（_host 留 null，后续静默跳过）。
+                    // manifest 整体作废意味着 packages 列表随之丢失——warning + 继续
+                    // 只会让下游（Instantiate 等）报出离根因数层的笼统错误，误导排查。
+                    Debug.LogError($"[IkatStageDriver] Failed to parse ikat.runtime.json — UI install aborted. Re-run `ikat build` to regenerate: {e.Message}");
+                    return;
+                }
             }
             ResolveAdaptation(runtime, applyToStage: false);
 
