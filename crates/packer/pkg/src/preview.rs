@@ -77,10 +77,12 @@ pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     };
     write_info(&located.root, &info);
 
+    let fonts_css = build_fonts_css(ui, &ws.fonts);
     let shared = Arc::new(Shared {
         ui: ui.clone(),
         ws,
         token: info.token.clone(),
+        fonts_css,
         last_request: Mutex::new(Instant::now()),
         shutdown: AtomicBool::new(false),
     });
@@ -360,6 +362,9 @@ struct Shared {
     ui: PathBuf,
     ws: Workspace,
     token: String,
+    /// 启动时按 ws.fonts 生成的字体样式（#104，快照语义与 ws 一致：改 fonts
+    /// 段重启 preview 生效）。空 = 工作区无可注入字体。
+    fonts_css: String,
     last_request: Mutex<Instant>,
     shutdown: AtomicBool,
 }
@@ -601,7 +606,7 @@ fn route(req: &Request, shared: &Shared) -> Response {
             if m != "GET" && m != "HEAD" {
                 return Response::text(405, "Method Not Allowed", "GET/HEAD only");
             }
-            serve_workspace_file(&shared.ui, &p[4..], req)
+            serve_workspace_file(&shared.ui, &p[4..], &shared.fonts_css, req)
         }
         ("GET", "/favicon.ico") | ("HEAD", "/favicon.ico") => {
             Response::new(204, "No Content", "image/x-icon", [])
@@ -731,7 +736,7 @@ fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
 /// `If-Modified-Since` 命中即 304。活文件语义不变（每次导航都校验 mtime，改动
 /// 即刻 200 新字节），但免重传——工作区 25MB 级字体在 no-store 下每次导航全量
 /// 重传，把 @font-face `font-display: block` 的隐形文字窗拉成常态。
-fn serve_workspace_file(ui: &Path, rel: &str, req: &Request) -> Response {
+fn serve_workspace_file(ui: &Path, rel: &str, fonts_css: &str, req: &Request) -> Response {
     let Some(safe_rel) = normalize_rel(rel) else {
         return Response::text(403, "Forbidden", "path escapes workspace");
     };
@@ -768,7 +773,7 @@ fn serve_workspace_file(ui: &Path, rel: &str, req: &Request) -> Response {
             .unwrap_or_default()
             .to_string();
         let html = String::from_utf8_lossy(&body).into_owned();
-        body = inject_preview_scripts(&html, &dir, &stem).into_bytes();
+        body = inject_preview_scripts(&html, &dir, &stem, fonts_css).into_bytes();
         return Response::new(200, "OK", mime, body);
     }
     // revalidate：浏览器回传的 If-Modified-Since 与我们发出的 Last-Modified 同源
@@ -888,13 +893,76 @@ fn mime_for(path: &Path) -> String {
     .to_string()
 }
 
+/// 按工作区 fonts 段生成注入页面的字体样式（#104）。每字体一条 `@font-face`，
+/// URL 用 `/ws/` 绝对路径——fonts[].file 是工作区根相对路径，任意页面目录深度
+/// 下都解析到同一文件。`default=true` 的 family 追加一条 `body` 规则：core 里
+/// default 的语义是「未声明 font-family 的文本兜底」，浏览器 UA 默认是系统
+/// serif，不镜像则在「无 font-family 文本」上预览与运行时分叉。
+///
+/// 浏览器吃不了的格式跳过并告警（stderr 进度通道）：`.ttc` 无浏览器支持；
+/// file 缺失（json 与磁盘脱节）同样跳过 + 告警——静默回落系统字体正是 #104
+/// 报的「排版失真且无提示」。
+fn build_fonts_css(ui: &Path, fonts: &[workspace::FontCfg]) -> String {
+    let mut css = String::new();
+    let mut default_family: Option<String> = None;
+    for f in fonts {
+        let full = ui.join(&f.file);
+        if !full.is_file() {
+            eprintln!(
+                "preview: font '{}' file missing: {} (skipped)",
+                f.family, f.file
+            );
+            continue;
+        }
+        let ext = full
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        let fmt = match ext.as_deref() {
+            Some("ttf") => "truetype",
+            Some("otf") => "opentype",
+            Some("woff") => "woff",
+            Some("woff2") => "woff2",
+            Some("ttc") => {
+                eprintln!(
+                    "preview: font '{}' is .ttc — browsers cannot load TrueType Collections (skipped)",
+                    f.family
+                );
+                continue;
+            }
+            _ => {
+                eprintln!(
+                    "preview: font '{}' has non-web extension: {} (skipped)",
+                    f.family, f.file
+                );
+                continue;
+            }
+        };
+        let url = format!("/ws/{}", f.file.replace(' ', "%20"));
+        let fam = f.family.replace('\\', "\\\\").replace('\'', "\\'");
+        css.push_str(&format!(
+            "@font-face {{ font-family: '{fam}'; src: url({url}) format('{fmt}'); font-display: block; }}\n"
+        ));
+        if f.default && default_family.is_none() {
+            default_family = Some(fam);
+        }
+    }
+    if let Some(fam) = default_family {
+        css.push_str(&format!("body {{ font-family: '{fam}'; }}\n"));
+    }
+    css
+}
+
 /// HTML 注入（#92 分层后的注入约定）：A 层 boot（`/ikat-preview/lib/boot.js`，
 /// 组件展开 + 控件语义 + base polyfill）**恒注入**；工作区 B 层
 /// `<包目录>/preview/main.js`（全页）与 `preview/pages/<页stem>.js`（按页）
 /// 存在才追加。module 自带 defer 语义、按注入序执行——boot 先跑（A 层就绪后
 /// B 层才动 DOM）。src 用绝对路径（boot 落 server 根路由）；工作区脚本仍用相对
 /// 路径（浏览器按页面 URL 解析 → 落回本 server 的 /ws/ 下同一目录）。
-pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str) -> String {
+/// 字体样式（#104）先插到 `<head>` 开标签后——在页面自身 `<style>`/`<link>`
+/// 之前，页面 CSS 想覆盖默认 family 仍能赢（工作区手写是真相源）。
+pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str, fonts_css: &str) -> String {
+    let html = insert_fonts_style(html, fonts_css);
     let mut tags = String::new();
     tags.push_str(r#"<script type="module" src="/ikat-preview/lib/boot.js"></script>"#);
     if page_dir.join("preview/main.js").is_file() {
@@ -916,6 +984,38 @@ pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str) -> String
     } else {
         format!("{tags}{html}")
     }
+}
+
+/// 字体样式插到 `<head>` 开标签之后。注意 `<head` 前缀也匹配 `<header>`——
+/// 须校验后一个字符是 tag 终结（`>` 或空白）。无 head 的退化 HTML 直接前置
+///（CSS 位置无关紧要，只有优先级受文档序影响）。
+fn insert_fonts_style(html: &str, fonts_css: &str) -> String {
+    if fonts_css.is_empty() {
+        return html.to_string();
+    }
+    let style = format!("<style id=\"ikat-preview-fonts\">\n{fonts_css}</style>");
+    let lower = html.to_ascii_lowercase();
+    let mut search_from = 0;
+    while let Some(pos) = lower[search_from..].find("<head") {
+        let at = search_from + pos;
+        match lower[at + 5..].chars().next() {
+            Some('>') | Some(' ') | Some('\t') | Some('\r') | Some('\n') => {
+                // 开标签内首个 '>' 是其终点（属性值里出现 '>' 在合法 HTML 里
+                // 须转义，不做引号感知）。
+                if let Some(gt) = lower[at..].find('>') {
+                    let insert_at = at + gt + 1;
+                    let mut out = String::with_capacity(html.len() + style.len());
+                    out.push_str(&html[..insert_at]);
+                    out.push_str(&style);
+                    out.push_str(&html[insert_at..]);
+                    return out;
+                }
+            }
+            _ => {} // <header> 等：继续找下一个 <head 前缀
+        }
+        search_from = at + 5;
+    }
+    format!("{style}{html}")
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,7 +1152,7 @@ mod tests {
         std::fs::write(tmp.join("preview/pages/home.js"), "// page").unwrap();
 
         let html = "<html><head><style>x{}</style></head><body></body></html>";
-        let out = inject_preview_scripts(html, &tmp, "home");
+        let out = inject_preview_scripts(html, &tmp, "home", "");
         // A 层 boot 恒注入（#92）+ 工作区两入口存在才追加。
         assert!(out.contains(r#"src="/ikat-preview/lib/boot.js""#));
         assert!(out.contains(r#"<script type="module" src="preview/main.js"></script>"#));
@@ -1064,7 +1164,7 @@ mod tests {
         assert!(style_pos < boot_pos && boot_pos < head_pos);
 
         // 无按页脚本的页：boot + main。
-        let out2 = inject_preview_scripts(html, &tmp, "other");
+        let out2 = inject_preview_scripts(html, &tmp, "other", "");
         assert!(out2.contains("/ikat-preview/lib/boot.js"));
         assert!(out2.contains("preview/main.js"));
         assert!(!out2.contains("pages/"));
@@ -1073,9 +1173,85 @@ mod tests {
         // 控件语义，消费侧零脚本成本是 #92 的目标之一）。
         std::fs::remove_dir_all(&tmp).unwrap();
         std::fs::create_dir_all(&tmp).unwrap();
-        let out3 = inject_preview_scripts(html, &tmp, "home");
+        let out3 = inject_preview_scripts(html, &tmp, "home", "");
         assert!(out3.contains(r#"src="/ikat-preview/lib/boot.js""#));
         assert!(!out3.contains("preview/main.js"));
+    }
+
+    #[test]
+    fn fonts_css_builds_faces_and_default_body_rule() {
+        let tmp = std::env::temp_dir().join(format!("ikat_preview_fonts_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("res/fonts")).unwrap();
+        std::fs::write(tmp.join("res/fonts/a.ttf"), b"ttf").unwrap();
+        std::fs::write(tmp.join("res/fonts/b.otf"), b"otf").unwrap();
+        std::fs::write(tmp.join("res/fonts/c.ttc"), b"ttc").unwrap();
+
+        let fonts = vec![
+            cfg_font("Pixel", "res/fonts/missing.ttf", false),
+            cfg_font("Main", "res/fonts/a.ttf", true),
+            cfg_font("Mono", "res/fonts/b.otf", false),
+            cfg_font("CJK", "res/fonts/c.ttc", false),
+        ];
+        let css = build_fonts_css(&tmp, &fonts);
+        // 缺失文件与 .ttc 跳过（告警走 stderr，不在断言面）；其余两条注入，
+        // URL 是 /ws/ 绝对路径。
+        assert!(css.contains(
+            "@font-face { font-family: 'Main'; src: url(/ws/res/fonts/a.ttf) format('truetype');"
+        ));
+        assert!(css.contains(
+            "@font-face { font-family: 'Mono'; src: url(/ws/res/fonts/b.otf) format('opentype');"
+        ));
+        assert!(!css.contains("missing.ttf"));
+        assert!(!css.contains(".ttc"));
+        // default family → body 规则（core 的「未声明 font-family 兜底」镜像）。
+        assert!(css.contains("body { font-family: 'Main'; }"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fonts_css_no_default_means_no_body_rule() {
+        let tmp = std::env::temp_dir().join(format!("ikat_preview_fonts2_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("fonts")).unwrap();
+        std::fs::write(tmp.join("fonts/x.ttf"), b"x").unwrap();
+        let css = build_fonts_css(&tmp, &[cfg_font("X", "fonts/x.ttf", false)]);
+        assert!(css.contains("@font-face"));
+        assert!(!css.contains("body"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn fonts_style_inserts_after_head_and_before_page_styles() {
+        let html = r#"<html><head lang="en"><link rel="stylesheet" href="a.css"><style>x{}</style></head><body></body></html>"#;
+        let css = "@font-face { font-family: 'M'; }\nbody { font-family: 'M'; }\n";
+        let out = inject_preview_scripts(html, Path::new("."), "home", css);
+        let style_pos = out.find(r#"<style id="ikat-preview-fonts">"#).unwrap();
+        let link_pos = out.find(r#"<link rel="stylesheet""#).unwrap();
+        let page_style_pos = out.rfind("<style>x{}").unwrap();
+        // 字体样式在 <head lang="en"> 之后、页面 <link>/<style> 之前——页面
+        // CSS 可覆盖默认 family。
+        assert!(style_pos < link_pos && link_pos < page_style_pos);
+
+        // <header> 不是 <head>：不得误插（前缀碰撞回归）。
+        let html2 = "<html><header>nav</header><body><style>x{}</style></body></html>";
+        let out2 = insert_fonts_style(html2, css);
+        assert!(
+            out2.starts_with("<style id=\"ikat-preview-fonts\">"),
+            "no <head> -> prepend"
+        );
+
+        // 空 css = 原样返回（无字体的工作区零扰动）。
+        assert_eq!(insert_fonts_style(html, ""), html);
+    }
+
+    fn cfg_font(family: &str, file: &str, default: bool) -> workspace::FontCfg {
+        workspace::FontCfg {
+            family: family.to_string(),
+            file: file.to_string(),
+            default,
+            fallback: false,
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1103,12 +1279,14 @@ mod tests {
 
         fn spawn_server(ui: &Path) -> (u16, Arc<Shared>) {
             let ws = workspace::load_workspace(ui).expect("workspace");
+            let fonts_css = build_fonts_css(ui, &ws.fonts);
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
             let shared = Arc::new(Shared {
                 ui: ui.to_path_buf(),
                 ws,
                 token: "t0".into(),
+                fonts_css,
                 last_request: Mutex::new(Instant::now()),
                 shutdown: AtomicBool::new(false),
             });
@@ -1180,6 +1358,8 @@ mod tests {
             assert!(body2.contains("/ikat-preview/lib/boot.js"));
             assert!(body2.contains("preview/main.js"));
             assert!(!body2.contains("pages/"));
+            // 该工作区无 fonts 段：零字体扰动（负向——无字体的工作区行为不变）。
+            assert!(!body2.contains("ikat-preview-fonts"));
 
             // A 层库路由：内容嵌在二进制、charset 齐全（#92）。
             for p in [
@@ -1224,6 +1404,41 @@ mod tests {
             let (st10, body10) = get(port, "/");
             assert_eq!(st10, 200);
             assert!(body10.contains("ikat preview"));
+            let _ = std::fs::remove_dir_all(&ui);
+        }
+
+        #[test]
+        fn serves_pages_with_font_injection() {
+            let ws_json = r#"{"version":1,"output_dir":"../out","design":{"w":1920,"h":1080},
+                "match_mode":"letterbox","packages":[{"name":"game","dirs":["ui"]}],
+                "fonts":[{"family":"Pixel","file":"res/fonts/p.ttf","default":true}]}"#;
+            let ui = write_ws(
+                "serve_fonts",
+                &[
+                    ("ikat.workspace.json", ws_json),
+                    ("res/fonts/p.ttf", "fake-ttf"),
+                    (
+                        "ui/home.html",
+                        "<html><head><style>body{}</style></head><body>hi</body></html>",
+                    ),
+                ],
+            );
+            let (port, _shared) = spawn_server(&ui);
+
+            // fonts 段 → 页面里出现 @font-face（/ws/ 绝对路径）+ 默认 family 的
+            // body 规则，且在页面自身 <style> 之前（#104）。
+            let (st, body) = get(port, "/ws/ui/home.html");
+            assert_eq!(st, 200);
+            assert!(body.contains("@font-face { font-family: 'Pixel'; src: url(/ws/res/fonts/p.ttf) format('truetype');"));
+            assert!(body.contains("body { font-family: 'Pixel'; }"));
+            let font_style_pos = body.find(r#"<style id="ikat-preview-fonts">"#).unwrap();
+            let page_style_pos = body.rfind("<style>body{}").unwrap();
+            assert!(font_style_pos < page_style_pos, "注入字体样式先于页面样式");
+
+            // 字体文件本体经 /ws/ 可达（@font-face 的 src 解析闭环）。
+            let (stf, bodyf) = get(port, "/ws/res/fonts/p.ttf");
+            assert_eq!(stf, 200);
+            assert_eq!(bodyf, "fake-ttf");
             let _ = std::fs::remove_dir_all(&ui);
         }
 

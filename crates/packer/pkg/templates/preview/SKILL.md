@@ -29,9 +29,12 @@ there. The preview server closes that gap in **two layers** (#92):
   second source of truth (this happened in dogfooding; it is now a design
   error, not a recipe).
 - **B layer — yours.** Demo data, page navigation, page-specific
-  interactions, theming/fonts. These live in `preview/main.js`
+  interactions, theming. These live in `preview/main.js`
   (per-package, optional) and `preview/pages/<page>.js` (per-page); the
-  server injects them after boot when the files exist.
+  server injects them after boot when the files exist. Fonts are NOT
+  your layer: the server auto-injects `@font-face` from the workspace
+  font registry (see below), so preview and Unity runtime resolve the
+  same families from the same files.
 
 Rendering parity between browser and runtime is a framework guarantee;
 your scripts restore **consumer behavior**, never re-layout.
@@ -60,6 +63,24 @@ HTML sources stay clean (zero `<script>` references); the `preview/`
 directory never enters the build. Modules are deferred — the DOM is parsed
 when they run. Server restarts reuse a stable port, so an open tab
 survives (human just refreshes).
+
+## Font injection (automatic — #104)
+
+Every served page also gets a `<style id="ikat-preview-fonts">` right
+after `<head>`, generated from the workspace font registry
+(`ikat.workspace.json` → `fonts`):
+
+- one `@font-face` per registered font (`src: url(/ws/<file>)` — works
+  from any page depth);
+- a `body { font-family: '<default-family>' }` rule mirroring the
+  runtime's "no font-family declared → default font" semantics;
+- injected **before** the page's own `<style>`/`<link>`, so workspace
+  CSS always overrides the default-family rule.
+
+Limits the server warns about on stderr (and skips the entry): `.ttc`
+(browsers cannot load TrueType Collections) and registry files missing
+on disk. If a page falls back to system fonts, check the server output
+first.
 
 ## When you MUST write a script
 
