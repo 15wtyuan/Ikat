@@ -52,8 +52,19 @@ namespace Ikat
         [Tooltip("适配模式。Letterbox=contain 黑边；FitWidth/FitHeight=拆黑边重排。runtime.json 带 match_mode 时以 manifest 为准（本字段是 fallback）。")]
         [SerializeField] AdaptMode _adaptMode = AdaptMode.Letterbox;
 
-        [Tooltip("UI 相机（独立 GO，渲染 IkatUILayer）。留空时 Awake 自建。")]
+        [Tooltip("UI 相机（独立 GO，渲染内置 UI layer(5)）。留空时 Awake 自建（自建物不进场景序列化，见 #108）。")]
         [SerializeField] Camera _uiCamera;
+
+        /// <summary>
+        /// Awake 自建的相机（#108）。与用户指派的 <see cref="_uiCamera"/> 分开存：序列化字段
+        /// 只承载用户意图，自建的走 NonSerialized——编辑态保存场景烤不进引用，杜绝「保存时机
+        /// 决定场景里留不留幽灵」（旧值缩放/跨场景悬空引用）。自管生命周期同
+        /// NativeHostManager 的 DontSaveInEditor 先例：Unity 不回收，<see cref="OnDestroy"/> 主动销毁。
+        /// </summary>
+        [NonSerialized] Camera _selfCamera;
+
+        /// <summary>生效 UI 相机：用户指派优先，否则自建。可能为 null（Awake 未跑/失败）。</summary>
+        Camera UiCamera => _uiCamera != null ? _uiCamera : _selfCamera;
 
         [Tooltip("显示 on-screen FPS 读数（调试用）。")]
         [SerializeField] bool _showFps;
@@ -90,8 +101,12 @@ namespace Ikat
         float _adaptOffX;
         float _adaptOffYTopDown;
 
-        // UI 节点 + 相机 + NativeHost wrapper 都用此 layer；cullingMask = 1<<6 让 UI 相机只渲 UI。
-        const int IkatUILayer = 6;
+        // UI 节点 + 相机 + NativeHost wrapper 都用此 layer；cullingMask = 1<<layer 让 UI 相机只渲 UI。
+        // 必须是内置锁定 layer（Unity 内置名 0–5 用户改不了名）："UI"(5)。用户可命名层是
+        // 6–31——占任何一个都会与宿主工程撞名（#105：layer 6 被宿主命名成 FloatingText 双影）。
+        // 内置层从结构上消灭冲突类，与 FairyGUI 同选（其 StageCamera 用 LayerName "UI"）。
+        // 宿主 3D 相机按 Unity 惯例排除本层（cullingMask 抠掉 1<<5），否则 UI 四边形被画两遍。
+        const int IkatUILayer = 5;
 
         /// <summary>
         /// 持有的 <see cref="IkatHost"/>（Awake 构造）。引擎无关 stage 宿主——
@@ -603,6 +618,15 @@ namespace Ikat
             }
             _backend?.Dispose();
             _backend = null;
+            // 自建相机 DontSaveInEditor = Unity 不接管回收：不主动销毁会跨场景泄漏（#108）。
+            // IsPlaying/Destroy 分流同 NativeHostManager 销毁先例。
+            if (_selfCamera != null)
+            {
+                var cgo = _selfCamera.gameObject;
+                _selfCamera = null;
+                if (Application.isPlaying) UnityEngine.Object.Destroy(cgo);
+                else UnityEngine.Object.DestroyImmediate(cgo);
+            }
             // 软件光标还原系统箭头（#93）：SetCursor 的纹理是进程级状态，Play 结束/对象销毁
             // 后残留会把箭头替换带出 UI 会话。先还原再销毁纹理——顺序反了会有一帧
             // SetCursor 指向已销毁纹理。
@@ -687,26 +711,29 @@ namespace Ikat
 
         /// <summary>
         /// 建/取 UI 相机。独立 GO（非根的子节点）——避免被根的 (sf,-sf,sf) scale 影响。
-        /// 用户在 Inspector 指定优先；否则现场建一个。配 URP UniversalAdditionalCameraData（若类型可寻，
+        /// 用户在 Inspector 指定优先；否则现场建一个（DontSaveInEditor + NonSerialized 引用，
+        /// 不进场景文件——#108）。配 URP UniversalAdditionalCameraData（若类型可寻，
         /// 反射避免硬引用 URP 程序集；缺失则跳过，用户可手挂）。
         /// </summary>
         void EnsureCamera()
         {
-            if (_uiCamera == null)
+            if (_uiCamera == null && _selfCamera == null)
             {
-                var cgo = new GameObject("IkatUICamera");
-                _uiCamera = cgo.AddComponent<Camera>();
+                var cgo = new GameObject("IkatUICamera") { hideFlags = HideFlags.DontSaveInEditor };
+                _selfCamera = cgo.AddComponent<Camera>();
                 // URP：附加 UniversalAdditionalCameraData（若有该类型）。反射避免硬引用 URP 程序集；
                 // 缺失则跳过（用户可手挂）。
                 try
                 {
                     var t = Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
-                    if (t != null && _uiCamera.GetComponent(t) == null)
-                        _uiCamera.gameObject.AddComponent(t);
+                    if (t != null && _selfCamera.GetComponent(t) == null)
+                        _selfCamera.gameObject.AddComponent(t);
                 }
                 catch { /* URP 缺失：忽略 */ }
             }
-            _uiCamera.gameObject.layer = IkatUILayer;
+            var cam = UiCamera;
+            if (cam != null)
+                cam.gameObject.layer = IkatUILayer;
         }
 
         /// <summary>
@@ -727,18 +754,19 @@ namespace Ikat
             transform.localScale = new Vector3(sf, -sf, sf);
             transform.localPosition = rootPos;
 
-            if (_uiCamera != null)
+            var cam = UiCamera;
+            if (cam != null)
             {
-                _uiCamera.orthographic = true;
-                _uiCamera.orthographicSize = sh / 2f;   // 不变（覆盖全屏，root 映射进 safe 区）
-                _uiCamera.cullingMask = 1 << IkatUILayer;
-                _uiCamera.clearFlags = CameraClearFlags.Depth;
-                _uiCamera.nearClipPlane = 0.1f;   // Unity 要求 near>0；相机 z=-10 看向 z=0 内容
-                _uiCamera.farClipPlane = 100f;
+                cam.orthographic = true;
+                cam.orthographicSize = sh / 2f;   // 不变（覆盖全屏，root 映射进 safe 区）
+                cam.cullingMask = 1 << IkatUILayer;
+                cam.clearFlags = CameraClearFlags.Depth;
+                cam.nearClipPlane = 0.1f;   // Unity 要求 near>0；相机 z=-10 看向 z=0 内容
+                cam.farClipPlane = 100f;
                 // 相机独立于根（不 SetParent）：放世界 (0,0,-10) 看向 +z，content 在 z=0。
-                _uiCamera.transform.SetParent(null, false);
-                _uiCamera.transform.localPosition = new Vector3(0f, 0f, -10f);
-                _uiCamera.transform.localRotation = Quaternion.identity;
+                cam.transform.SetParent(null, false);
+                cam.transform.localPosition = new Vector3(0f, 0f, -10f);
+                cam.transform.localRotation = Quaternion.identity;
             }
         }
 

@@ -48,8 +48,13 @@ with 3D. The design side (HTML/CSS fence authoring) is the
    the fallback when the manifest omits them. UI Camera empty (driver
    creates `IkatUICamera`) or your own; Safe Area for notch-safe
    letterboxing. Your main 3D camera renders first; the UI camera after
-   (higher depth, clear flags = Depth only). Layer 6 is reserved by
-   Ikat.
+   (higher depth, clear flags = Depth only). Ikat renders on Unity's
+   **built-in `UI` layer (5)** — a fixed, non-renameable layer, so it can
+   never collide with your project's user layers (layers 6–31 are
+   user-definable; a framework squatting on one of those is a design
+   bug). Standard Unity practice applies: exclude
+   the `UI` layer from your 3D cameras' culling masks, or UI quads get
+   drawn twice.
 2. **Verify loading.** On startup the driver reads `ikat.runtime.json`
    from the product root and loads everything it lists; missing pieces
    log Console warnings naming the file. Product root: Inspector value →

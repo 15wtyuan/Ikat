@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **UI layer 改用内置 "UI"(5)，杜绝宿主 layer 冲突（#105）**：此前 Driver
+  硬编码 layer 6——6–31 是用户可命名层，宿主工程把它命名成自己的用途
+  （如 FloatingText）完全合法，后果是语义混用 + Everything 掩码主相机把
+  UI 再画一遍（双影）。改用 Unity 内置锁定层 "UI"(5)（0–5 不可改名，
+  冲突类结构性消灭；与 FairyGUI StageCamera 同选）。宿主侧只需标准 Unity
+  惯例：3D 相机 cullingMask 排除 UI 层。曾手工排除 layer 6 的工程改为
+  排除 layer 5 即可。
+- **编辑态自建 UI 相机不再序列化进场景（#108）**：`[ExecuteAlways]` 下
+  Awake 自建的 IkatUICamera 无 DontSave 标记、且把引用写进序列化字段
+  `_uiCamera`——编辑态保存场景把相机 GO 烤进场景文件，换设计分辨率后
+  场景里残留旧适配缩放 + 跨场景悬空引用。自建相机改走 `[NonSerialized]`
+  独立字段（序列化字段只承载用户指派意图）+ `HideFlags.DontSaveInEditor`
+  （对齐 NativeHostManager 先例），`OnDestroy` 主动销毁（DontSave 物
+  Unity 不接管回收）。存量场景里已烤入的 IkatUICamera GO 删一次即净。
 - **`ikat build` 省键化可选 manifest 字段（#103）**：`design` / `match_mode`
   未设置时 `ikat.runtime.json` 此前写出字面 `null`，Unity 侧手写 reader
   （`IkatManifests.cs`）对 null 直接抛解析错——manifest 整体作废，包列表随之
@@ -22,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   containing block 语义与运行时 stage 对齐（与外壳 shell 自身写法一致）。
 
 ### Added
+- **preview 按工作区字体注册自动注入（#104）**：server 给每个服务页在
+  `<head>` 开标签后注入 `<style id="ikat-preview-fonts">`——fonts 段每字体
+  一条 `@font-face`（`src: url(/ws/<file>)` 绝对路径，任意页面目录深度可解
+  析）+ `default` family 一条 `body` 规则（镜像 core「未声明 font-family →
+  默认字体兜底」语义——此前浏览器 UA 默认 serif，无 font-family 文本在预览
+  与运行时分叉）。注入先于页面自身样式，工作区 CSS 恒可覆盖默认规则。
+  `.ttc`（浏览器不支持 TrueType Collection）与磁盘缺失的注册字体跳过 +
+  stderr 告警——排版失真不再无提示。recipes.md 的手写 `@font-face` 教程
+  降级为「仅覆盖时需要」（不同源文件 / 超大字体换 `font-display: swap`）。
 - **字体管理命令闭环 + 单一默认契约（#106）**：`ikat font remove <family>`
   （摘注册；`fonts/` 下源文件保留——文件可能由人手管理，摘除后成孤儿由人清）
   与 `ikat font default <family>`（设为唯一默认）。`--default` 语义改为互斥
