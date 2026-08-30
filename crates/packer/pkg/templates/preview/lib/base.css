@@ -8,6 +8,10 @@
 /* iframe 视口 = 设计视口：body 零包装——core 页面根从 (0,0) 起，浏览器默认
    margin:8px 会整体平移出 rect-diff 系统性偏移。 */
 body { margin: 0; }
+/* 运行时 stage 的文档根天然满高（页面根 height:100% = 设计视口高）；浏览器
+   文档的 html/body 默认高度 auto，根容器 height:100% 会塌成内容高（预览与
+   运行时行为分叉）。补满高对齐 containing block 语义。 */
+html, body { height: 100%; }
 /* button 的 UA 外观（灰底/边框/字体链）与 core 自绘 Button 不符 → 裸化；
    cursor:pointer 对齐 #93 的运行时手型意图（浏览器原生渲染手型；Unity 侧
    渲染取决于消费侧是否经 SetCursorTexture 注册贴图）。 */
