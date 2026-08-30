@@ -56,6 +56,8 @@ ikat new    <name>                            create ui/<name>/main.html + regis
 ikat list   pkg|atlas|font [--format json]    summary per entity (one line each)
 ikat show   <pkg> [--format json]             one package's pages + custom components
 ikat font add <file> --family <f> [--default] [--fallback]
+ikat font remove <family>                  deregister a font (source file stays in fonts/)
+ikat font default <family>                 set the single default family (transfers from the old default)
 ikat atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
 ikat design [WxH] [--match letterbox|fit-width|fit-height] [--clear]
 ikat scaffold [--agent claude|agents]...      refresh workspace generated artifacts (skills + .ikat CLI + version stamp)
@@ -166,15 +168,22 @@ one run. Fix them ALL in one editing pass, then re-run `check`.
    package's pages/components. Never bulk-scan the workspace yourself.
 2. New UI package: `ikat new <name>` — creates a minimal legal page,
    check passes immediately.
-3. **No fonts yet? Ask the user for a font file first** (rendering needs
+3. **Design resolution unset? Ask the user for the target resolution**
+   (portrait vs landscape matters), then `ikat design <WxH>
+   [--match letterbox|fit-width|fit-height]` — one-time per workspace.
+   Skipping it leaves adaptation to the engine-side fallback (Unity:
+   Driver Inspector) and preview falls back to its built-in 1920x1080.
+4. **No fonts yet? Ask the user for a font file first** (rendering needs
    one), then `ikat font add <file> --family <name> --default`.
-4. Put PNG assets under a directory (e.g. `assets/icons/`), then
+   Swapping the default later: `ikat font default <family>`; removing a
+   font: `ikat font remove <family>` (file stays in `fonts/`).
+5. Put PNG assets under a directory (e.g. `assets/icons/`), then
    `ikat atlas add assets/icons`. An `<img src>` is covered when its file
    lives under some atlas dir — the packer cross-validates.
-5. Write HTML/CSS per the ikat-editor skill (the fence rulebook).
-6. `ikat check --format json` → fix ALL diagnostics in one pass → repeat
+6. Write HTML/CSS per the ikat-editor skill (the fence rulebook).
+7. `ikat check --format json` → fix ALL diagnostics in one pass → repeat
    until exit 0.
-7. Ask the user whether to publish; on approval run `ikat build --format
+8. Ask the user whether to publish; on approval run `ikat build --format
    json` and report the artifact paths from `report`.
 
 Warnings do not block the build, but handle them: W1/W2
@@ -265,7 +274,7 @@ Written by the commands above; documented here for reading.
 |---|---|---|
 | `version` | u32 | Config format version (currently `1`) |
 | `output_dir` | string | Path (relative to the output base — see topology) where build artifacts go |
-| `design` | {w, h}? | Design resolution (design px). `ikat build` passes it through to `ikat.runtime.json`; the engine integration layer consumes it as the source of truth for resolution adaptation. Absent = engine-side fallback (Driver Inspector field) |
+| `design` | {w, h}? | Design resolution (design px). `ikat build` passes it through to `ikat.runtime.json`; the engine integration layer consumes it as the source of truth for resolution adaptation. Absent = engine-side fallback (Unity: Driver Inspector field) and preview renders at its built-in 1920x1080 default — set it before the first real `ikat build` (`ikat design <WxH>`) |
 | `match_mode` | string? | Adaptation mode: `letterbox` (contain, pillar/letter bars — default) / `fit-width` / `fit-height` (lock one axis to the design, reflow the other — `vw`/`vh`/`%` flow with the canvas). Absent = `letterbox` |
 
 | `packages` | PackageCfg[] | UI packages to build (one `.pkg.bin` per package) |
@@ -299,5 +308,5 @@ All paths are relative to the workspace root and use forward slashes.
 |---|---|---|---|
 | `family` | string | (required) | Font family name (matches CSS `font-family`) |
 | `file` | string | (required) | Path to font file relative to workspace root |
-| `default` | bool | `false` | Whether this is the default font (used when no family is specified) |
+| `default` | bool | `false` | Whether this is the default font (used when no family is specified). Mutually exclusive — at most one default; `font add --default` and `font default` transfer it (the old default is demoted automatically). `font remove` only deregisters the entry; the file under `fonts/` stays |
 | `fallback` | bool | `false` | Whether this font is used as a fallback (for missing glyphs) |

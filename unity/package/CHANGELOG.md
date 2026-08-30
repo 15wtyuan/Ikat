@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **`ikat build` 省键化可选 manifest 字段（#103）**：`design` / `match_mode`
+  未设置时 `ikat.runtime.json` 此前写出字面 `null`，Unity 侧手写 reader
+  （`IkatManifests.cs`）对 null 直接抛解析错——manifest 整体作废，包列表随之
+  丢失，下游报出离根因三层的笼统 `instantiate failed`。现在 None 一律省键
+  （字节级测试锁定），兑现「缺项 = 引擎侧兜底」的既有契约。同时 manifest
+  解析失败升级为阻断错误：`LogError` + 中止装 UI（此前 warning + 继续，
+  包加载不到还往下跑只会产出更糊涂的下游报错）。
+- **preview 文档根满高（#107）**：preview 注入的 `base.css` 补
+  `html, body { height: 100% }`。浏览器文档的 html/body 默认高度 auto，页面
+  根容器写 `height:100%`（浏览器习惯写法）会塌成内容高——预览纵向溢出、
+  底部错位，check 零警告，预览与运行时行为分叉。补满高后预览的
+  containing block 语义与运行时 stage 对齐（与外壳 shell 自身写法一致）。
+
 ### Added
+- **字体管理命令闭环 + 单一默认契约（#106）**：`ikat font remove <family>`
+  （摘注册；`fonts/` 下源文件保留——文件可能由人手管理，摘除后成孤儿由人清）
+  与 `ikat font default <family>`（设为唯一默认）。`--default` 语义改为互斥
+  转移：新设默认自动摘除旧默认，不再产生双默认 workspace（运行时取哪个未
+  定义）。未注册 family 报数据错（exit 1）。
 - **`ikat verify`：Unity batchmode 导入冒烟（#99）**：build 重打 → 拉起工程绑定的
   Unity 编辑器（batchmode）→ 包内 `Ikat.Editor.IkatVerifySmoke.Run` 做 Refresh +
   逐文件正向加载（png → Texture2D、其余 → 非空 Object）→ 解析报告。把「产物可

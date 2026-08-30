@@ -47,9 +47,11 @@ document.head.insertBefore(link, document.head.firstChild);
 `preview-theme.css` (name it anything) holds workspace-owned styling:
 
 - `@font-face` for every font `ikat.workspace.json` declares
-  (`../../res/fonts/<file>.ttf` relative to `preview/`). Without these the
-  browser silently falls back to system fonts and rect-diff baselines
-  diverge from core's real-font measurements.
+  (`src: url(/ws/fonts/<file>)` — the preview server serves workspace
+  files under `/ws/`, and `ikat font add` places sources in `fonts/` at
+  the workspace root). Without these the browser silently falls back to
+  system fonts and rect-diff baselines diverge from core's real-font
+  measurements.
 - Theme colors/backgrounds/decoration. Do **not** re-declare structural
   resets already owned by `/ikat-preview/lib/base.css` (`box-sizing`,
   button reset, placeholder line) — same-name rules here would fight the

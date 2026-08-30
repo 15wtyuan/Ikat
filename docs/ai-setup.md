@@ -144,6 +144,9 @@ git URL 的仓库/path/tag 拼写；网络慢就再等，不要无限轮询。
 （skills 已就位——写 UI 前读 ikat-editor（围栏规则）与 ikat（CLI 操作），运行时
 C# API 查 ikat-runtime，它们是权威操作手册）。
 顺带告知：偏好 GUI 的队友可走 Unity 菜单 `Ikat > Open Packer`。
+另提醒一句：写第一个正式 UI 前先问用户设计分辨率并 `ikat design <WxH>`——不设的话
+Unity 侧分辨率适配落到 Driver Inspector 兜底、preview 按内置 1920x1080 渲染，竖屏
+项目两端都是错的。
 
 ## 日常版本升级
 
