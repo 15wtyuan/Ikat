@@ -219,6 +219,13 @@ pub fn add_font(
         std::fs::copy(src, &dst).map_err(|e| format!("copy font {}: {e}", src.display()))?;
     }
     let file = format!("fonts/{basename}");
+    // default 互斥（单一默认字体契约）：新设 default 先摘旧——否则 manifest 出现
+    // 双 default，运行时取哪个未定义。转移语义：最新声明的默认生效。
+    if default {
+        for f in ws.fonts.iter_mut() {
+            f.default = false;
+        }
+    }
     ws.fonts.push(crate::workspace::FontCfg {
         family: family.to_string(),
         file: file.clone(),
@@ -231,6 +238,55 @@ pub fn add_font(
         file,
         default,
         fallback,
+    })
+}
+
+/// `font remove <family>`：摘除注册。`fonts/` 下源文件保留——文件可能由人手
+/// 管理（add 的跳拷贝路径即为该场景），删文件会误删用户资产；摘除后成孤儿
+/// 文件，由调用方提示自行清理。
+pub fn remove_font(root: &Path, family: &str) -> Result<FontSummary, BuildFailure> {
+    let mut ws = load_workspace(root)?;
+    let idx = ws
+        .fonts
+        .iter()
+        .position(|f| f.family == family)
+        .ok_or_else(|| {
+            BuildFailure::validation(format!("font family `{family}` not registered"), vec![])
+        })?;
+    let removed = ws.fonts.remove(idx);
+    save_workspace(root, &ws)?;
+    Ok(FontSummary {
+        family: removed.family,
+        file: removed.file,
+        default: removed.default,
+        fallback: removed.fallback,
+    })
+}
+
+/// `font default <family>`：把已注册 family 设为唯一默认（转移语义同
+/// `add --default`）。
+pub fn set_default_font(root: &Path, family: &str) -> Result<FontSummary, BuildFailure> {
+    let mut ws = load_workspace(root)?;
+    if !ws.fonts.iter().any(|f| f.family == family) {
+        return Err(BuildFailure::validation(
+            format!("font family `{family}` not registered"),
+            vec![],
+        ));
+    }
+    for f in ws.fonts.iter_mut() {
+        f.default = f.family == family;
+    }
+    save_workspace(root, &ws)?;
+    let f = ws
+        .fonts
+        .iter()
+        .find(|f| f.family == family)
+        .expect("existence checked above");
+    Ok(FontSummary {
+        family: f.family.clone(),
+        file: f.file.clone(),
+        default: f.default,
+        fallback: f.fallback,
     })
 }
 
@@ -540,6 +596,50 @@ mod tests {
         assert_eq!(s.file, "fonts/WenKai.ttf");
         let ws = load_workspace(&tmp).unwrap();
         assert_eq!(ws.fonts.len(), 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn font_default_is_exclusive_and_manageable() {
+        let tmp = tmpdir("font_default");
+        make_ws(&tmp);
+        std::fs::create_dir_all(tmp.join("fonts")).unwrap();
+        std::fs::write(tmp.join("fonts/a.ttf"), b"stub a").unwrap();
+        std::fs::write(tmp.join("fonts/b.ttf"), b"stub b").unwrap();
+
+        // 连续两次 --default：后设摘前（转移语义），workspace 里永远至多一个默认。
+        add_font(&tmp, &tmp.join("fonts/a.ttf"), "a", true, false).unwrap();
+        add_font(&tmp, &tmp.join("fonts/b.ttf"), "b", true, false).unwrap();
+        let ws = load_workspace(&tmp).unwrap();
+        let defaults: Vec<&str> = ws
+            .fonts
+            .iter()
+            .filter(|f| f.default)
+            .map(|f| f.family.as_str())
+            .collect();
+        assert_eq!(defaults, vec!["b"], "--default must transfer, not stack");
+
+        // font default：转移语义 + 未注册报数据错。
+        set_default_font(&tmp, "a").unwrap();
+        let ws = load_workspace(&tmp).unwrap();
+        let defaults: Vec<&str> = ws
+            .fonts
+            .iter()
+            .filter(|f| f.default)
+            .map(|f| f.family.as_str())
+            .collect();
+        assert_eq!(defaults, vec!["a"]);
+        let err = set_default_font(&tmp, "ghost").unwrap_err();
+        assert_eq!(err.exit_code, 1);
+
+        // font remove：摘注册、fonts/ 源文件保留（人管资产不误删）。
+        let removed = remove_font(&tmp, "a").unwrap();
+        assert!(removed.default);
+        assert!(tmp.join("fonts/a.ttf").exists(), "source file must stay");
+        let ws = load_workspace(&tmp).unwrap();
+        assert!(!ws.fonts.iter().any(|f| f.family == "a"));
+        let err = remove_font(&tmp, "ghost").unwrap_err();
+        assert_eq!(err.exit_code, 1);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

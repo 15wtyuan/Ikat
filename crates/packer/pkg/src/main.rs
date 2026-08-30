@@ -9,6 +9,8 @@
 //!   ikat list pkg|atlas|font [--format json]
 //!   ikat show <pkg> [--format json]
 //!   ikat font add <file> --family <f> [--default] [--fallback]
+//!   ikat font remove <family>
+//!   ikat font default <family>
 //!   ikat atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
 //!   ikat scaffold [--agent claude|agents]...
 //!   ikat version [--format json]
@@ -76,6 +78,12 @@ enum Cmd {
         default: bool,
         fallback: bool,
     },
+    FontRemove {
+        family: String,
+    },
+    FontDefault {
+        family: String,
+    },
     AtlasAdd {
         dir: String,
         name: Option<String>,
@@ -142,6 +150,10 @@ fn usage() -> ! {
     eprintln!("  {bin} list pkg|atlas|font [--format json]   summary of workspace entities");
     eprintln!("  {bin} show <pkg> [--format json]            package detail (pages + components)");
     eprintln!("  {bin} font add <file> --family <f> [--default] [--fallback]");
+    eprintln!(
+        "  {bin} font remove <family>                deregister (source file stays in fonts/)"
+    );
+    eprintln!("  {bin} font default <family>               set as the single default family");
     eprintln!("  {bin} design [WxH] [--match letterbox|fit-width|fit-height] [--clear]");
     eprintln!(
         "  {bin} atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]"
@@ -329,15 +341,22 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
         }
         "font" => {
             // font add <file> --family <f> [--default] [--fallback]
-            if scan.positional()?.as_str() != "add" {
-                return None;
+            // font remove <family> / font default <family>
+            match scan.positional()?.as_str() {
+                "add" => Some(Cmd::FontAdd {
+                    file: PathBuf::from(scan.positional()?),
+                    family: scan.flag_value("--family"),
+                    default: scan.has("--default"),
+                    fallback: scan.has("--fallback"),
+                }),
+                "remove" => Some(Cmd::FontRemove {
+                    family: scan.positional()?.to_string(),
+                }),
+                "default" => Some(Cmd::FontDefault {
+                    family: scan.positional()?.to_string(),
+                }),
+                _ => None,
             }
-            Some(Cmd::FontAdd {
-                file: PathBuf::from(scan.positional()?),
-                family: scan.flag_value("--family"),
-                default: scan.has("--default"),
-                fallback: scan.has("--fallback"),
-            })
         }
         "atlas" => {
             // atlas add <dir> [--name] [--max-size] [--padding] [--standalone]
@@ -414,6 +433,8 @@ fn main() -> ExitCode {
             default,
             fallback,
         } => run_font_add(file, family, default, fallback),
+        Cmd::FontRemove { family } => run_font_remove(family),
+        Cmd::FontDefault { family } => run_font_default(family),
         Cmd::AtlasAdd {
             dir,
             name,
@@ -889,6 +910,44 @@ fn run_font_add(file: PathBuf, family: Option<String>, default: bool, fallback: 
             ExitCode::SUCCESS
         }
         Err(f) => failure_exit("font add", &f, Format::Human),
+    }
+}
+
+fn run_font_remove(family: String) -> ExitCode {
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
+        Err(f) => return failure_exit("font remove", &f, Format::Human),
+    };
+    match ikat_pkg::workspace_cmd::remove_font(&root, &family) {
+        Ok(s) => {
+            println!("{}", serde_json::to_string(&s).unwrap());
+            eprintln!(
+                "removed font family `{}`; source file `{}` left in fonts/ (workspace-owned) — delete it manually if orphaned",
+                s.family, s.file
+            );
+            if s.default {
+                eprintln!(
+                    "note: no default font family remains; set one with `ikat font default <family>`"
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(f) => failure_exit("font remove", &f, Format::Human),
+    }
+}
+
+fn run_font_default(family: String) -> ExitCode {
+    let root = match locate_cwd() {
+        Ok(l) => l.ui,
+        Err(f) => return failure_exit("font default", &f, Format::Human),
+    };
+    match ikat_pkg::workspace_cmd::set_default_font(&root, &family) {
+        Ok(s) => {
+            println!("{}", serde_json::to_string(&s).unwrap());
+            eprintln!("`{}` is now the single default font family", s.family);
+            ExitCode::SUCCESS
+        }
+        Err(f) => failure_exit("font default", &f, Format::Human),
     }
 }
 
