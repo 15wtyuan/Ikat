@@ -142,11 +142,8 @@ namespace Ikat.Bindings
         ///  故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
         ///  此处自动成为清理入口，无需再改 C# 接线。
         ///
-        ///  **注意：Font 的 `Box::leak`（`text/layout.rs`）是真泄漏**——`bytes.clone()` 后 leak 取
-        ///  `'static` 切片喂 ttf-parser Face，原 Vec 虽被 `_bytes` 持有但与 leaked 切片不是同一份，
-        ///  Stage drop 时 `_bytes` 释放的是 clone 来源而非 leaked 副本。每次 Stage 创建都 leak 一份字体字节，
-        ///  不可由 shutdown 回收（leak 切片无 handle 跟踪）。若未来域重载内存观测触发阈值，
-        ///  再考虑字体缓存化为进程单例。
+        ///  字体字节不泄漏（宿主分离后已修）：`Font` 持回收哨兵，drop 时收回 `Box::leak`
+        ///  的字节；FontTable 归属 ResourceHost（`ikat_host_free` / 最后一个挂接 Stage 释放）。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_shutdown", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void ikat_shutdown();

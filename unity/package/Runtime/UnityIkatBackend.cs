@@ -42,6 +42,16 @@ namespace Ikat
             _resourceHost = resourceHost;
         }
 
+        /// <summary>A4 输入路由门：Driver 每帧下发（hub 独占路由结果）。false = CollectInput no-op。</summary>
+        public bool InputEnabled = true;
+
+        /// <summary>A4 排序基址下发：MirrorPool 与 NativeHost 的 sortingOrder 同源偏移。</summary>
+        internal void SetSortBase(int sortBase)
+        {
+            _pool.SortBase = sortBase;
+            _nhm.SortBase = sortBase;
+        }
+
         /// <summary>
         /// Driver Awake 注入：渲染根（MirrorPool / NativeHost 镜像 GO 挂此 root）+ 输入采集器。
         /// 必须在第一次 <see cref="SyncFrame"/> 前调——SyncFrame 读 _renderRoot，null 时跳过镜像。
@@ -78,7 +88,9 @@ namespace Ikat
         /// </summary>
         public override void CollectInput(IntPtr stage)
         {
-            if (stage == IntPtr.Zero || _inputCollector == null) return;
+            // A4 多 Stage 输入隔离：非本帧路由所有者的 Driver 整体跳过采集
+            // （hub 按层序 Pick 独占路由；单 Driver 恒 true = 零行为变化）。
+            if (stage == IntPtr.Zero || _inputCollector == null || !InputEnabled) return;
             _inputCollector.Collect(stage);
             _inputCollector.CollectKeys(stage);
             // CollectComposition 须在 CollectText 前：先设/清 IME 预编辑串，CollectText 再

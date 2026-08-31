@@ -79,6 +79,51 @@ namespace Ikat
                  "on 时本 Driver 挂 IkatResourceHost.Shared（首个开启者懒建）；同宿主的 Driver 须用同一份字体清单（首个注册生效）。")]
         [SerializeField] bool _useSharedHost;
 
+        [Tooltip("Stage 层序（小 = 底层，大 = 顶层；决定跨 Stage 渲染序与输入路由优先级）。同序按启用先后。")]
+        [SerializeField] int _stageOrder;
+
+        [Tooltip("参与输入路由（off = 本 Stage 不收任何指针/键盘事件——world-space 舞台等纯展示 Stage 用）。")]
+        [SerializeField] bool _inputEnabled = true;
+
+        /// <summary>hub 输入路由面：本 Driver 是否参与输入（inspector _inputEnabled）。</summary>
+        internal bool InputEnabled => _inputEnabled && isActiveAndEnabled;
+
+        /// <summary>
+        /// hub 输入路由探测：当前屏幕指针落点映射进本 stage design 系后是否命中可交互
+        /// 内容（Context.Pick）。画布外（letterbox 黑边）不算命中。读上帧变换（与 tick
+        /// 内 hit 同源、同 1 帧延迟语义）。
+        /// </summary>
+        internal bool PointerHitProbe()
+        {
+            if (_host == null || _inputCollector == null) return false;
+            Vector2? screen = CurrentPointerScreen();
+            if (screen == null) return false;
+            var design = IkatInputCollector.ScreenToDesign(
+                screen.Value, _adaptScale, _adaptOffX, _adaptOffYTopDown, Screen.height);
+            if (design.x < 0f || design.y < 0f || design.x > _canvas.x || design.y > _canvas.y)
+                return false;
+            return _host.Context.Pick(new IkatVector2(design.x, design.y)) != null;
+        }
+
+        Vector2? CurrentPointerScreen()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var m = UnityEngine.InputSystem.Mouse.current;
+            if (m != null) return m.position.ReadValue();
+            var t = UnityEngine.InputSystem.Touchscreen.current;
+            if (t != null) return t.primaryTouch.position.ReadValue();
+            return null;
+#else
+            return new Vector2?(UnityEngine.Input.mousePosition);
+#endif
+        }
+
+        /// <summary>sortingOrder 基址（hub 按层序分配；MirrorPool/NativeHost 消费）。</summary>
+        int _sortBase;
+
+        /// <summary>自建相机是否来自 hub 共享池（OnDestroy 走 Release 而非直接销毁）。</summary>
+        bool _cameraFromHub;
+
         /// <summary>生效共享宿主（Awake 解析）。null = 自建独占宿主（单 Stage 行为）。</summary>
         IkatResourceHost _sharedHost;
 
@@ -268,6 +313,9 @@ namespace Ikat
                 return;
             }
             _mm = new MaterialManager(shader);
+
+            // A4 多 Stage 合成：注册层序（排序基址）+ 共享相机（EnsureCamera 经 hub 认领/新建）。
+            _sortBase = IkatStageHub.Register(this, _stageOrder);
 
             // 引擎分层：backend（Unity 特定）+ host（引擎无关驱动序）。
             // IkatHost 构造 ikat_stage_new（共享宿主版走 ikat_stage_new_bound）→ 建 UIContext → 接 backend。
@@ -569,6 +617,12 @@ namespace Ikat
                 RecomputeAdaptation();
             }
 
+            // A4 多 Stage 输入隔离：多 Driver 并存时按层序独占路由（首个 Pick 命中者得
+            // 本帧全部输入——渲染次序即输入次序）；单 Driver 零开销直通。
+            _backend.InputEnabled = IkatStageHub.DriverCount <= 1
+                || IkatStageHub.RouteInput(this) == this;
+            _backend.SetSortBase(_sortBase);
+
             // host.Step 内含：backend.CollectInput → tick → borrow_frame → backend.SyncFrame
             // → borrow_events → demuxer.Pump。输入采集不再 Driver 直调 InputCollector——
             // backend.CollectInput 走 UnityIkatBackend._inputCollector 路径（与 host 引擎无关性兼容）。
@@ -633,14 +687,19 @@ namespace Ikat
             _backend?.Dispose();
             _backend = null;
             // 自建相机 DontSaveInEditor = Unity 不接管回收：不主动销毁会跨场景泄漏（#108）。
-            // IsPlaying/Destroy 分流同 NativeHostManager 销毁先例。
+            // hub 共享相机走引用计数 Release（最后一个引用者释放）；IsPlaying/Destroy 分流在 hub。
             if (_selfCamera != null)
             {
-                var cgo = _selfCamera.gameObject;
+                if (_cameraFromHub) IkatStageHub.ReleaseCamera(this);
+                else
+                {
+                    var cgo = _selfCamera.gameObject;
+                    if (Application.isPlaying) UnityEngine.Object.Destroy(cgo);
+                    else UnityEngine.Object.DestroyImmediate(cgo);
+                }
                 _selfCamera = null;
-                if (Application.isPlaying) UnityEngine.Object.Destroy(cgo);
-                else UnityEngine.Object.DestroyImmediate(cgo);
             }
+            IkatStageHub.Unregister(this);
             // 软件光标还原系统箭头（#93）：SetCursor 的纹理是进程级状态，Play 结束/对象销毁
             // 后残留会把箭头替换带出 UI 会话。先还原再销毁纹理——顺序反了会有一帧
             // SetCursor 指向已销毁纹理。
@@ -721,7 +780,12 @@ namespace Ikat
         // native 全局态当前为空（Stage per-handle，stage_free drop），但 hook 必须接——引入
         // global texture/font registry 时此处自动清，无需再改接线。
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { Native.ikat_shutdown(); IkatResourceHost.Shared = null; }
+        static void ResetStatics()
+        {
+            Native.ikat_shutdown();
+            IkatResourceHost.Shared = null;
+            IkatStageHub.ResetStatics();
+        }
 
         /// <summary>
         /// 建/取 UI 相机。独立 GO（非根的子节点）——避免被根的 (sf,-sf,sf) scale 影响。
@@ -731,19 +795,14 @@ namespace Ikat
         /// </summary>
         void EnsureCamera()
         {
+            // A4：无用户相机时经 hub 取共享相机（per-Scene 引用计数 + 按名认领存量——
+            // 编辑器重编译不跑 OnDestroy、DontSave 相机幸存，不认领会积累重复相机）。
+            // 相机配置全由屏幕推导（ConfigureTransforms），多 Driver 共享一台 = 消灭
+            // layer 5 互画（每台相机的 cullingMask 都含 UI 层）。
             if (_uiCamera == null && _selfCamera == null)
             {
-                var cgo = new GameObject("IkatUICamera") { hideFlags = HideFlags.DontSaveInEditor };
-                _selfCamera = cgo.AddComponent<Camera>();
-                // URP：附加 UniversalAdditionalCameraData（若有该类型）。反射避免硬引用 URP 程序集；
-                // 缺失则跳过（用户可手挂）。
-                try
-                {
-                    var t = Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
-                    if (t != null && _selfCamera.GetComponent(t) == null)
-                        _selfCamera.gameObject.AddComponent(t);
-                }
-                catch { /* URP 缺失：忽略 */ }
+                _selfCamera = IkatStageHub.AcquireCamera(this);
+                _cameraFromHub = true;
             }
             var cam = UiCamera;
             if (cam != null)

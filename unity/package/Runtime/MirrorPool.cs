@@ -45,6 +45,10 @@ namespace Ikat
         // reuse_key=0 的普通节点按 node_id keying（v1 行为不变）。
         // v14：node_id u64（#26）。_poolByReuse 的 key 是 reuse_key（u32 ordinal），
         // 拓宽到 ulong 统一两 dict 类型（同一 pool 变量交替引用）；两 dict 分立，key 无碰撞面。
+        /// <summary>A4 跨 Stage 排序基址（hub 按 stage 层序分配；同相机下各 stage 的
+        /// sort_key 都从 0 起编，不偏移会互相穿插）。Driver 每帧经 backend.SetSortBase 下发。</summary>
+        internal int SortBase;
+
         readonly Dictionary<ulong, RenderObj> _poolByNodeId = new();
         readonly Dictionary<ulong, RenderObj> _poolByReuse = new();
         // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
@@ -172,7 +176,7 @@ namespace Ikat
             ro.Go.transform.localRotation = Quaternion.identity;
             ro.Go.transform.localScale = Vector3.one;
 
-            ro.Mr.sortingOrder = (int)blob.SortKey(i);
+            ro.Mr.sortingOrder = (int)blob.SortKey(i) + SortBase;
 
             uint maskCtx = blob.MaskContext(i);
 

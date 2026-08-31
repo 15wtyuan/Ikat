@@ -20,6 +20,9 @@ namespace Ikat
     /// </summary>
     internal sealed class NativeHostManager
     {
+        /// <summary>A4 跨 Stage 排序基址（与 MirrorPool 同源，Driver 经 backend 下发）。</summary>
+        internal int SortBase;
+
         /// GO sortingOrder 在节点 sort_key 之上的抬升量。UI mesh 经 merge_meshes 合并后
         /// blob 的 sort_key 是合并期重编号、不再是 node DFS 序——宿主节点区域上层的合并
         /// 背景块 key 可远超宿主 key，严格按 sort_key 排序会把 GO 整个压在底下（Unity 跨
@@ -222,7 +225,7 @@ namespace Ikat
                 // includeInactive=true：刚恢复显示那帧 go.activeSelf 仍为 false（下一行才 SetActive(true)），
                 // 不含 inactive 子节点则其 Renderer sortingOrder 漏更新一帧。
                 foreach (var r in go.GetComponentsInChildren<Renderer>(true))
-                    if (r != null) r.sortingOrder = (int)sk + HostSortOrderLift;
+                    if (r != null) r.sortingOrder = (int)sk + SortBase + HostSortOrderLift;
                 if (!go.activeSelf) go.SetActive(true);
             }
         }
