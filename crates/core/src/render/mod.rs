@@ -255,6 +255,7 @@ fn thumb_render_node(node_id: u64, rect: Rect, sort_key: u32) -> RenderNode {
     let (v, uvc, col, idx) =
         crate::render::mesh::quad(&rect, [0.6, 0.6, 0.6, 0.6], [0.0, 0.0], [1.0, 1.0]);
     RenderNode {
+        mount_root_id: 0,
         node_id,
         parent_id: None,
         visible: true,
@@ -515,6 +516,7 @@ fn build_container_mesh(
         0u32
     };
     RenderNode {
+        mount_root_id: 0,
         node_id,
         parent_id,
         visible,
@@ -622,6 +624,63 @@ fn hidden_rec(
     }
 }
 
+/// 累积 world-space 挂载归属（#109 C8）：roots_at[i] = 覆盖节点 i 的挂载根 NodeId raw
+///（0 = 屏幕空间）。挂载根自身命中 scene.mounts 表；后代继承最近挂载祖先（嵌套挂载取
+/// 最内层）。返回表同 accumulate_alpha 形态（capacity+1，1 基索引；孤儿兜底 = 自身登记）。
+fn accumulate_mount_roots(scene: &Scene) -> Vec<u64> {
+    let cap = scene.nodes.capacity();
+    let mut roots_at: Vec<u64> = vec![0; cap + 1];
+    let mut visited: Vec<bool> = vec![false; cap + 1];
+    for root in scene.roots.clone() {
+        mount_rec(scene, root, 0, &mut roots_at, &mut visited);
+    }
+    for n in scene.nodes.values() {
+        if !visited[n.id.index()] {
+            roots_at[n.id.index()] = u64::from(scene.mounts.contains_key(&n.id)) * n.id.0;
+        }
+    }
+    roots_at
+}
+
+fn mount_rec(
+    scene: &Scene,
+    id: NodeId,
+    parent_mount: u64,
+    roots_at: &mut [u64],
+    visited: &mut [bool],
+) {
+    let node = scene.get_live(id, "render/mount_rec");
+    let acc = if scene.mounts.contains_key(&id) {
+        id.0
+    } else {
+        parent_mount
+    };
+    roots_at[id.index()] = acc;
+    visited[id.index()] = true;
+    for c in node.children.clone() {
+        mount_rec(scene, c, acc, roots_at, visited);
+    }
+}
+
+/// 挂载行 re-base：把挂载根世界原点 o 从行坐标系剥离——wm 前乘 T(-o)；纯平移行顶点同减
+///（与 blob 侧既有纯平移 re-base 合流后语义不变：本地顶点 + 剥离后矩阵）。mask 重置 0
+///（v1 挂载内禁 overflow clip——clip 平面定义在屏幕系，挂到 3D 容器后无意义，围栏约束）。
+fn mount_rebase(rn: &mut RenderNode, slot: u32, ox: f32, oy: f32) {
+    rn.mount_root_id = slot;
+    rn.mask_context = MaskContext(0);
+    rn.world_matrix = crate::transform::mul(
+        &crate::transform::from_translate(-ox, -oy),
+        &rn.world_matrix,
+    );
+    if crate::transform::is_pure_translation(&rn.world_matrix) {
+        let NodePayload::Mesh { verts, .. } = &mut rn.payload;
+        for v in verts.iter_mut() {
+            v[0] -= ox;
+            v[1] -= oy;
+        }
+    }
+}
+
 pub fn build_render_nodes(
     scene: &Scene,
     fonts: &FontTable,
@@ -675,6 +734,8 @@ pub fn build_render_nodes_cached(
     let alphas = accumulate_alpha(scene);
     // 累积渲染隐藏同款预计算（继承语义，见 accumulate_render_hidden）。
     let hiddens = accumulate_render_hidden(scene);
+    // world-space 挂载归属预计算（#109 C8，见 accumulate_mount_roots）。
+    let mount_roots = accumulate_mount_roots(scene);
     // box-shadow outer 阴影合成 RenderNode 追踪：(primary node_id, outer 阴影合成 node_id)。
     // inset 阴影不经此表——由 propagate_text_sub_page_sort_keys 按 tag 字节自动收集。
     let mut back_layer_pairs: Vec<(u64, u64)> = Vec::new();
@@ -723,10 +784,27 @@ pub fn build_render_nodes_cached(
         }
         let alpha = alphas[n.id.index()];
         let visible = !hiddens[n.id.index()];
+        let mount_root = mount_roots[n.id.index()];
+        // 挂载根原点（世界平移）+ 槽位：re-base 与指纹共用——挂载翻转/根移动必须失效
+        // 该子树全部缓存行（顶点/矩阵已按根原点改写）。
+        let (mount_slot, mount_ox, mount_oy) = if mount_root != 0 {
+            let root_id = NodeId(mount_root);
+            let slot = scene.mounts.get(&root_id).copied().unwrap_or(0);
+            let wt = scene
+                .world_transforms
+                .get(root_id.index())
+                .copied()
+                .unwrap_or(crate::transform::IDENTITY);
+            (slot, wt[4], wt[5])
+        } else {
+            (0, 0.0, 0.0)
+        };
         // —— A2 增量：输入指纹命中 → 整段复用上帧产物（含合成层与配对追踪）。
         // 指纹输入枚举见 dirty::render_input_fp；跳过 atlas ensure（atlas 只增不重排，
         // 缓存帧已 ensure 过，字形槽永不过期）。
-        let fp = dirty::render_input_fp(n, scene, alpha, visible, res_gen, frame_no);
+        let fp = dirty::render_input_fp(
+            n, scene, alpha, visible, mount_root, mount_ox, mount_oy, res_gen, frame_no,
+        );
         if let Some(entry) = cache.entries.get(&n.id) {
             if entry.input_fp == fp {
                 cache.hits += 1;
@@ -763,6 +841,12 @@ pub fn build_render_nodes_cached(
             alpha,
             visible,
         );
+        // 挂载子树行 re-base 到挂载根局部系（缓存存 re-base 后形态——命中路径直推）。
+        if mount_root != 0 {
+            for rn in &mut nodes[before..] {
+                mount_rebase(rn, mount_slot, mount_ox, mount_oy);
+            }
+        }
         // 产物入缓存：该节点产出的全部 RenderNode（含合成层）+ 配对追踪 + primary 下标。
         let emitted = nodes[before..].to_vec();
         let primary_idx = emitted
@@ -1705,6 +1789,7 @@ fn push_text_meshes(
             id_to_pos.insert(n.id, nodes.len());
         }
         nodes.push(RenderNode {
+            mount_root_id: 0,
             node_id: text_primary_id,
             parent_id,
             visible,
@@ -1747,6 +1832,7 @@ fn push_text_meshes(
             id_to_pos.insert(n.id, nodes.len());
         }
         nodes.push(RenderNode {
+            mount_root_id: 0,
             node_id: text_primary_id,
             parent_id,
             visible,
@@ -1785,6 +1871,7 @@ fn push_text_meshes(
         let sub_id = synth_text_node_id(node_id, (pi + 1) as u64);
         let sub_path = font_atlas_path(*page as usize);
         nodes.push(RenderNode {
+            mount_root_id: 0,
             node_id: sub_id,
             parent_id,
             visible,
@@ -1869,6 +1956,7 @@ fn push_solid_mesh(
     indices: Vec<u32>,
 ) {
     nodes.push(RenderNode {
+        mount_root_id: 0,
         node_id,
         parent_id,
         visible,
@@ -2155,6 +2243,7 @@ fn render_one_node(
                 ),
             };
             RenderNode {
+                mount_root_id: 0,
                 node_id,
                 parent_id,
                 visible,
@@ -2547,6 +2636,7 @@ fn render_one_node(
             return;
         }
         _ => RenderNode {
+            mount_root_id: 0,
             node_id,
             parent_id,
             visible,
@@ -2648,6 +2738,7 @@ fn push_container_shadows(
         }
         back_layer_pairs.push((node_id, sid));
         nodes.push(RenderNode {
+            mount_root_id: 0,
             node_id: sid,
             parent_id,
             visible,
@@ -2693,6 +2784,7 @@ fn push_container_shadows(
         // front 层不经 back_layer_pairs——由 propagate_text_sub_page_sort_keys 按
         // is_front_shadow_synth 自动收集并赋 sort_key（嵌入 primary 之后、下一真节点之前）。
         nodes.push(RenderNode {
+            mount_root_id: 0,
             node_id: sid,
             parent_id,
             visible,

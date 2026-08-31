@@ -245,3 +245,57 @@ fn render_hidden_is_inherited_down_the_subtree() {
     let j3 = inc.render_json();
     assert!(j3.contains("\"visible\": true"), "恢复后子树重新可见");
 }
+
+/// world-space 挂载（#109 C8）：挂载子树行顶点/矩阵 re-base 到挂载根局部系 + blob
+/// mount_id 标注。A/B 双路全等（增量缓存行存 re-base 后形态）；挂载翻转改变输出
+///（≠挂载前），解除回屏幕空间 = 逐字节回到挂载前（往返闭合）。
+#[test]
+fn world_mount_rebases_subtree_rows_round_trip() {
+    let mut inc = make_stage();
+    let mut full = make_stage();
+    full.incremental_render = false;
+    let _ = inc.render_json();
+    let _ = full.render_json();
+    let j_before = inc.render_json();
+
+    let body = {
+        let s = inc.scene.as_ref().unwrap();
+        let root = s.roots[0];
+        s.get(root).unwrap().children[1]
+    };
+    inc.set_node_mount(body, 7).unwrap();
+    full.set_node_mount(body, 7).unwrap();
+
+    let j1 = inc.render_json();
+    let j2 = full.render_json();
+    assert_eq!(j1, j2, "挂载帧 A/B 全等（re-base 进指纹与缓存形态）");
+    assert_ne!(j1, j_before, "挂载必须改写行坐标（re-base 生效）");
+    assert!(
+        j1.contains("\"mount_root_id\": 7"),
+        "挂载子树行带 mount_root_id 标注"
+    );
+
+    // 挂载根移动（inline override 高度变化 → 根 layout 位变 → 原点变）后 A/B 仍全等。
+    inc.set_inline_override(body, "height:460px").unwrap();
+    full.set_inline_override(body, "height:460px").unwrap();
+    assert_eq!(inc.render_json(), full.render_json(), "根移动帧 A/B 全等");
+    inc.unset_inline_override(body, "height").unwrap();
+    full.unset_inline_override(body, "height").unwrap();
+
+    inc.set_node_mount(body, 0).unwrap();
+    full.set_node_mount(body, 0).unwrap();
+    let j_after = inc.render_json();
+    // change_level/reuse_key 是帧相对定级（挂载周期后行重建 → Full/新 key），几何往返
+    // 比较须剥离这两个字段行，其余逐行全等。
+    let strip = |j: &str| -> String {
+        j.lines()
+            .filter(|l| !l.contains("\"change_level\"") && !l.contains("\"reuse_key\""))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        strip(&j_after),
+        strip(&j_before),
+        "解除挂载 = 回到屏幕空间形态（几何往返闭合）"
+    );
+}

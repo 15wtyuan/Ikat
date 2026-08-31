@@ -41,11 +41,16 @@ fn never_cache_kind(kind: NodeKind) -> bool {
 /// - `image_srcs`：Image intrinsic 几何源（set_src 也 bump version，双保险）。
 /// - `visible`（累积渲染隐藏，祖先任一 render_hidden 即真）：visibility 继承语义下
 ///   后代行的 visible 位随祖先翻转，必须进键防缓存陈旧。
+/// - 挂载归属（mount_root + 0.25px 量化原点）：挂载行顶点/矩阵已按挂载根世界原点
+///   re-base——挂载翻转或根布局位移动必须失效该子树全部缓存行。
 pub fn render_input_fp(
     n: &Node,
     scene: &Scene,
     alpha: f32,
     visible: bool,
+    mount_root: u64,
+    mount_ox: f32,
+    mount_oy: f32,
     res_gen: u64,
     frame_no: u64,
 ) -> u64 {
@@ -58,6 +63,9 @@ pub fn render_input_fp(
     }
     n.render_input_version.hash(&mut h);
     visible.hash(&mut h);
+    mount_root.hash(&mut h);
+    ((mount_ox * 4.0).round() as i64).hash(&mut h);
+    ((mount_oy * 4.0).round() as i64).hash(&mut h);
     ((n.layout_rect.w * 4.0).round() as i64).hash(&mut h);
     ((n.layout_rect.h * 4.0).round() as i64).hash(&mut h);
     n.rich_text_block.hash(&mut h);
@@ -249,6 +257,7 @@ mod tests {
     /// mesh_rn：构造带 image_path 的 Mesh RenderNode（None=纯色，Some=图 path）。
     fn mesh_rn(path: Option<&str>, alpha: f32, color0: [f32; 4]) -> RenderNode {
         RenderNode {
+            mount_root_id: 0,
             node_id: 0,
             parent_id: None,
             visible: true,

@@ -891,6 +891,24 @@ impl Stage {
         )
     }
 
+    /// world-space 挂载登记（#109 C8）：把 node 子树标记为挂载到业务摆放的 3D 容器。
+    /// slot 由 driver 分配保证唯一（0 = 解除挂载回屏幕空间）；挂载子树渲染行顶点 re-base
+    /// 到挂载根局部系（见 render::mount_rebase），blob mount_id 列写 slot 供后端路由。
+    /// v1 约束（对外文档）：挂载根须成 stacking context（声明 z）；挂载内禁 dropdown /
+    /// 滚动容器 / 外阴影根 / overflow clip。node 不 live / 无 scene → Err。
+    pub fn set_node_mount(&mut self, node: NodeId, slot: u32) -> Result<(), String> {
+        let scene = self.scene.as_mut().ok_or("no scene")?;
+        if scene.get(node).is_none() {
+            return Err("node not live".into());
+        }
+        if slot == 0 {
+            scene.mounts.remove(&node);
+        } else {
+            scene.mounts.insert(node, slot);
+        }
+        Ok(())
+    }
+
     /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。node 不 live / 无 scene → Err。
     pub fn set_inline_override(&mut self, node: NodeId, css: &str) -> Result<(), String> {
         crate::scene::dynamic::set_inline_override(

@@ -129,6 +129,10 @@ impl EffectBlock {
 pub struct RenderNode {
     pub node_id: u64,
     pub parent_id: Option<u64>,
+    /// world-space 挂载槽位（#109 C8）：0 = 屏幕空间（常规 UI 相机路径）；
+    /// 非 0 = 该行属于挂载子树，顶点已 re-base 到挂载根局部系（挂载根世界平移已从前乘
+    /// 矩阵剥离），后端按槽位路由到业务摆放的 3D 挂载容器。槽位由 driver 分配保证唯一。
+    pub mount_root_id: u32,
     pub visible: bool,
     pub alpha: f32,
     pub color_tint: [f32; 4],
@@ -159,6 +163,7 @@ mod serde_smoke_tests {
         // 契约：RenderNode 必须能 serde_json::to_string。
         let rn = RenderNode {
             node_id: 0,
+            mount_root_id: 0,
             parent_id: None,
             visible: true,
             alpha: 1.0,

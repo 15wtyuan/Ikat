@@ -19,18 +19,19 @@ fn hash_color_matrix(m: &[f32; 20]) -> u64 {
     h.finish()
 }
 
-/// DrawState 键（image_path, program, mask_context, alpha_bits, color_matrix_hash, visible）。
-/// program=0/1 Mesh 才参与合并。含 color_matrix 哈希——不同 color filter（如 grayscale vs sepia）
-/// 不能合批，否则 filter 数据在 merge_batch 中被清零丢失。含 visible——隐藏行（世界锚点
-/// 出屏）不得与可见行合批：merged 行按 visible 整体 park/显示，混批会让可见行陪隐或
-/// 隐藏行漏出。
+/// DrawState 键（image_path, program, mask_context, alpha_bits, color_matrix_hash, visible,
+/// mount_root_id）。program=0/1 Mesh 才参与合并。含 color_matrix 哈希——不同 color filter
+/// （如 grayscale vs sepia）不能合批，否则 filter 数据在 merge_batch 中被清零丢失。含
+/// visible——隐藏行（世界锚点出屏）不得与可见行合批：merged 行按 visible 整体 park/显示，
+/// 混批会让可见行陪隐或隐藏行漏出。含 mount 槽位——不同挂载的行最终父到不同 3D 容器，
+/// 合批会绑架路由。
 ///
 /// 控件 node_id（control_ids）强制返回 None：merge 会把被合并者的 node_id 吞成 anchor，
 /// 控件必须保留独立 node_id 供 Unity 后端建交互实体（hit test / 状态 / 镜像 GameObject）。
 fn mesh_key(
     control_ids: &std::collections::HashSet<u64>,
     rn: &RenderNode,
-) -> Option<(Option<String>, u32, u32, u32, u64, bool)> {
+) -> Option<(Option<String>, u32, u32, u32, u64, bool, u32)> {
     if control_ids.contains(&rn.node_id) {
         return None; // 控件保留独立 node_id，不参与合并
     }
@@ -61,6 +62,7 @@ fn mesh_key(
                 rn.alpha.to_bits(),
                 hash_color_matrix(color_matrix),
                 rn.visible,
+                rn.mount_root_id,
             ))
         }
         _ => None,
@@ -134,6 +136,7 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         }
     }
     RenderNode {
+        mount_root_id: last.mount_root_id,
         node_id: anchor,
         parent_id: None,
         // 同批 visible 一致（mesh_key 含该维）——整批同显隐，随批保留。
@@ -184,6 +187,7 @@ mod tests {
         rect_off: f32,
     ) -> RenderNode {
         RenderNode {
+            mount_root_id: 0,
             node_id: id,
             parent_id: None,
             visible: true,
@@ -418,6 +422,7 @@ mod tests {
         ];
 
         let make_node = |id: u64, cm: [f32; 20]| RenderNode {
+            mount_root_id: 0,
             node_id: id,
             parent_id: None,
             visible: true,
@@ -460,6 +465,7 @@ mod tests {
         ];
 
         let make_node = |id: u64, sk: u32| RenderNode {
+            mount_root_id: 0,
             node_id: id,
             parent_id: None,
             visible: true,

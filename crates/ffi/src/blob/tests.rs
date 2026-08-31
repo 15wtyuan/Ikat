@@ -19,6 +19,7 @@ fn frame(nodes: &[RenderNode]) -> FrameData {
 
 fn mesh_node(id: u64, parent: Option<u64>, x: f32, y: f32, w: f32, h: f32) -> RenderNode {
     RenderNode {
+        mount_root_id: 0,
         node_id: id,
         parent_id: parent,
         visible: true,
@@ -68,6 +69,7 @@ fn mesh_node_with_program(id: u64, program: u32) -> RenderNode {
 /// 同 mesh_node 但可指定 color_tint / alpha / vertex colors（用于 alpha 不烘焙测试，alpha 走 _Alpha uniform）。
 fn mesh_node_tinted(id: u64, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> RenderNode {
     RenderNode {
+        mount_root_id: 0,
         node_id: id,
         parent_id: None,
         visible: true,
@@ -98,6 +100,7 @@ fn mesh_node_tinted(id: u64, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> Render
 fn mesh_node_raw(verts: Vec<[f32; 2]>, indices: Vec<u32>, tx: f32, ty: f32) -> RenderNode {
     let n = verts.len();
     RenderNode {
+        mount_root_id: 0,
         node_id: 0,
         parent_id: None,
         visible: true,
@@ -1051,6 +1054,7 @@ fn clip_table_radii_round_trip() {
 fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
     // 构造一个 merged 节点：8 verts（2 quad 拼接）、transform=0、alpha=1。
     let merged = RenderNode {
+        mount_root_id: 0,
         node_id: 1,
         parent_id: None,
         visible: true,
@@ -1125,6 +1129,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
 #[test]
 fn blob_world_matrix_roundtrip() {
     let mk = |wm: transform::Affine2| RenderNode {
+        mount_root_id: 0,
         node_id: 0,
         parent_id: None,
         visible: true,
@@ -1196,6 +1201,7 @@ fn blob_color_matrix_column_round_trips() {
         0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
     ];
     let nodes = vec![RenderNode {
+        mount_root_id: 0,
         node_id: 1,
         parent_id: None,
         visible: true,
@@ -1266,6 +1272,7 @@ fn change_level_column_round_trips() {
 #[test]
 fn blob_v9_round_trips_reuse_key() {
     let rn = RenderNode {
+        mount_root_id: 0,
         node_id: 7,
         parent_id: None,
         visible: true,
@@ -1501,7 +1508,7 @@ fn v15_header_row_lean_stride_is_eighty_four_bytes() {
     );
 }
 
-/// v15 mount_id 列存在性锚点（C8 world-space 子树锚的行标记；render 接线前恒 0）。
+/// v15 mount_id 列存在性锚点（C8 world-space 子树锚的行标记；未挂载行恒 0）。
 #[test]
 fn v15_mount_id_column_defaults_zero() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
@@ -1510,7 +1517,25 @@ fn v15_mount_id_column_defaults_zero() {
     assert_eq!(
         u64::from_le_bytes(view.buf[o..o + 8].try_into().unwrap()),
         0,
-        "mount_id 列在 v15 落位（render 侧接线前恒 0）"
+        "mount_id 列在 v15 落位（未挂载行恒 0）"
     );
     assert_eq!(view.node_id(0), 0, "lean node_id 访问器仍按列序读");
+}
+
+/// C8 接线：RenderNode.mount_root_id（driver 分配槽位）零扩进 u64 mount_id 列——
+/// C# MirrorPool 按此路由 SetParent 到对应 3D 挂载容器。
+#[test]
+fn v15_mount_id_column_carries_row_slot() {
+    let mut mounted = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
+    mounted.mount_root_id = 7;
+    let mut screen = mesh_node(1, None, 2.0, 0.0, 1.0, 1.0);
+    screen.mount_root_id = 0;
+    let blob = build_blob(&frame(&[mounted, screen]));
+    let view = TestView::parse(&blob);
+    let read_mount = |row: usize| -> u64 {
+        let o = view.col_off[COL_MOUNT_ID] + row * 8;
+        u64::from_le_bytes(view.buf[o..o + 8].try_into().unwrap())
+    };
+    assert_eq!(read_mount(0), 7, "挂载行写槽位");
+    assert_eq!(read_mount(1), 0, "屏幕空间行恒 0（同帧混排）");
 }

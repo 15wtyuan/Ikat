@@ -544,3 +544,22 @@ pub extern "C" fn ikat_stage_set_node_visible(
         }
     })
 }
+
+/// world-space 挂载登记（#109 C8）：node 子树挂到业务摆放的 3D 容器——渲染行顶点
+/// re-base 到挂载根局部系 + blob mount_id 列写 slot（后端按槽位路由 SetParent）。
+/// slot：driver 分配保证唯一；0 = 解除挂载回屏幕空间。
+/// 返回 0=成功，-1=null 句柄 / 无场景 / 节点不 live。
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_node_mount(h: *mut StageHandle, node_id: u64, slot: u32) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let node = ikat_core::scene::node::NodeId(node_id);
+        match sh.stage.set_node_mount(node, slot) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}

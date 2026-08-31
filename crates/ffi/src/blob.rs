@@ -253,8 +253,9 @@ fn emit_render_node(
     c[COL_M_TY].extend_from_slice(&rn.world_matrix[5].to_le_bytes());
     c[COL_CHANGE_LEVEL].push(level as u8);
     c[COL_REUSE_KEY].extend_from_slice(&rn.reuse_key.to_le_bytes());
-    // v15：mount_id（world-space 子树锚，0=screen）。render 侧接线前恒 0。
-    c[COL_MOUNT_ID].extend_from_slice(&0u64.to_le_bytes());
+    // v15→C8 接线：mount_id（world-space 子树锚槽位，0=screen；RenderNode.mount_root_id
+    // 由 driver 分配的 u32 槽位零扩进 u64 列）。C# MirrorPool 按此路由 SetParent。
+    c[COL_MOUNT_ID].extend_from_slice(&(rn.mount_root_id as u64).to_le_bytes());
 
     let NodePayload::Mesh {
         verts,

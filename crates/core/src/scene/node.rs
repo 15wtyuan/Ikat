@@ -747,6 +747,11 @@ pub struct Scene {
     /// `<a>` href（opaque 标识符，#74）。仅 Link 节点有条目；打包期从 href 属性烘入，
     /// C# `Link.Href` 经 FFI 读此表。围栏保证非空（缺失/空 href 打包期 error）。
     pub link_hrefs: std::collections::HashMap<NodeId, String>,
+    /// world-space 挂载登记（#109 C8）：键 = 挂载根 NodeId，值 = 挂载槽位（driver 分配
+    /// 保证唯一，0 保留 = 屏幕空间；blob mount_id 列直写）。稀疏：仅挂载根入表。
+    /// 挂载子树渲染行顶点 re-base 到挂载根局部系，后端按槽位路由到业务摆放的 3D 容器。
+    /// 运行态，不进 pkg。
+    pub mounts: std::collections::HashMap<NodeId, u32>,
     /// 本帧 transition 请求（rematch 检测 data-page 通道变化时推入；Stage tick drain 后
     /// kill 旧 tween + 提交新 tween）。运行时态，不进 pkg。
     pub pending_transitions: Vec<crate::tween::TransitionRequest>,
@@ -855,6 +860,7 @@ impl Scene {
         self.text_contents.remove(&id);
         self.image_srcs.remove(&id);
         self.link_hrefs.remove(&id);
+        self.mounts.remove(&id);
     }
 
     /// 从扁平 entries（DFS 先序）建 Node 树。`parent_idx` 指向 entries 下标，`None` = 根。

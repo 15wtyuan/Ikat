@@ -312,6 +312,7 @@ mod tests {
 
     fn placeholder_rn(i: usize) -> RenderNode {
         RenderNode {
+            mount_root_id: 0,
             node_id: i as u64,
             parent_id: if i == 0 { None } else { Some(0) },
             visible: true,
@@ -688,6 +689,7 @@ mod tests {
     /// image_path（None=纯色，Some=图片 path）。
     fn mesh_rn(path: Option<&str>, rect: Rect, mask: u32) -> RenderNode {
         RenderNode {
+            mount_root_id: 0,
             node_id: 0,
             parent_id: None,
             visible: true,

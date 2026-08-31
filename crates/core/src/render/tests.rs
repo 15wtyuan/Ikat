@@ -2907,6 +2907,7 @@ fn propagate_text_sub_page_sort_keys_cumulative_shift_no_ties() {
     };
 
     let mk_rn = |node_id: u64, sort_key: u32| RenderNode {
+        mount_root_id: 0,
         node_id,
         parent_id: None,
         visible: true,
@@ -2989,6 +2990,7 @@ fn propagate_inline_image_sort_keys_stacks_above_text_layers() {
         color_matrix: [0.0; 20],
     };
     let mk_rn = |node_id: u64, sort_key: u32| RenderNode {
+        mount_root_id: 0,
         node_id,
         parent_id: None,
         visible: true,
