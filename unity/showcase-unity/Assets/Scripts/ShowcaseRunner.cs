@@ -31,6 +31,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-anim", "m2-animation"),
         ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
+        ("nav-fx", "effects"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -54,6 +55,24 @@ public class ShowcaseRunner : MonoBehaviour
     GameObject _characterModel;    // NativeHost 持位根（挂 wrapper 下）
     Transform _figureSpin;         // 旋转体（模型本体）
     const float FigureSpinDegPerSec = 40f;
+
+    // ── effects 页：Kenney 粒子 × NativeHost 混染验证 ──
+    // 每个 UI 槽位绑一个 Kenney Particle Pack 特效。ParticleSystemRenderer 走
+    // ConfigureTransparentMaterials 同一透明通道（renderQueue=3000 与 UI 同队列，
+    // sortingOrder = 槽位 sort_key + Lift），验证引擎粒子与自绘 UI 同屏插序渲染。
+    static readonly (string slotId, string prefab, float scale, float sink)[] FX_SLOTS =
+    {
+        ("fx-fire", "Fire", 30f, 90f),
+        ("fx-sparks", "Sparks", 70f, 0f),
+        ("fx-magic", "Magic", 160f, 0f),
+        ("fx-electricity", "Electricity", 150f, 0f),
+        ("fx-hearts", "Hearts", 110f, 30f),
+        ("fx-smoke", "Smoke", 30f, 90f),
+    };
+    // wrapper 原点 = 槽位左上角，y 翻转同 character（.fx-slot 460×300，中心 = (230,-150)）。
+    // sink：上升型羽流（fire/smoke）把发射器沉到槽位下部，羽流主体落在槽内。
+    readonly System.Collections.Generic.List<(Container slot, GameObject go)> _fxBindings = new();
+    bool _fxPaused;
 
     void Update()
     {
@@ -89,6 +108,7 @@ public class ShowcaseRunner : MonoBehaviour
     {
         if (_shown == page) return;
         TeardownCharacterStage();   // 上一页若是 character：解绑 NativeHost + 销毁模型
+        TeardownEffectsStage();     // 上一页若是 effects：解绑全部粒子槽 + 销毁实例
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -106,6 +126,7 @@ public class ShowcaseRunner : MonoBehaviour
         WireSettingsTabs(_current, page);
         WireListViews(_current, page);
         WireCharacterStage(_current, page);
+        WireEffectsStage(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -464,8 +485,8 @@ public class ShowcaseRunner : MonoBehaviour
     // 验证目标：UI（自绘 mesh）与引擎原生渲染（3D 模型 + 光照）同屏 interleaved——
     // 模型 sortingOrder = native-slot 节点 sort_key（NativeHostManager.Sync 每帧写），
     // 与 UI 同 Transparent 队列按 UI 绘制序穿插；模型跟随节点 world transform。
-    // 模型用基元拼装（无外部资产依赖）：机甲 + 剑 + 自发光基座 + 点光（ shading 证明
-    // 走的是引擎光照而非 UI 自绘）。尺寸按 design px：holder scale 100 → 1 unit = 100px。
+    // 模型 = Stylized Astronaut（prefab 自带 Idle/Run 动画机）+ 双平行光（shading 证明
+    // 走的是引擎光照而非 UI 自绘）。尺寸按 design px 归一化到 ~520 高（见 BuildCharacterModel）。
 
     void WireCharacterStage(Container page, string pageName)
     {
@@ -474,42 +495,9 @@ public class ShowcaseRunner : MonoBehaviour
         _nativeSlot = slot;
         _characterModel = BuildCharacterModel(out _figureSpin);
         _driver.BindNativeHost(slot, _characterModel);
-        // 帧延迟对齐：build 时（Animator 未评估）的 bounds 与真实播放 pose 有偏差（曾整体高出
-        // 展位数百 px）——等动画跑 2 帧后按世界包围盒重新归一：高 520、中心对齐展位中心。
-        StartCoroutine(AlignModelAfterAnimEval(_characterModel.transform));
         Debug.Log("[Showcase] character native-slot bound to 3D model (NativeHost)");
     }
 
-    /// 帧延迟对齐：build 时（Animator 未评估）的 bounds 与真实播放 pose 有偏差——模型
-    /// 曾整体高出展位数百万至更多 px（脚底钉在展位中心、身高向上溢出展位顶）。
-    /// 等 2 帧动画真实评估后按世界包围盒重新归一：高 520、中心对齐展位中心（持位原点）。
-    System.Collections.IEnumerator AlignModelAfterAnimEval(Transform modelRoot)
-    {
-        yield return null;
-        yield return null;
-        var rends = modelRoot.GetComponentsInChildren<Renderer>();
-        if (rends.Length == 0) yield break;
-        var b = rends[0].bounds;
-        foreach (var r in rends) b.Encapsulate(r.bounds);
-        if (b.size.y < 0.001f || b.size.y > 10000f) yield break;
-        float s = 520f / b.size.y;
-        modelRoot.localScale *= s;
-        // 缩放后包围盒随 localScale 变化——重测一次再对齐（两步收敛）。
-        b = rends[0].bounds;
-        foreach (var r in rends) b.Encapsulate(r.bounds);
-        // 中心对齐到 modelRoot（holder）自身位置 = 展位中心（不是 wrapper 原点 = slot 左上）。
-        Vector3 worldOffset = modelRoot.position - b.center;
-        modelRoot.position += worldOffset;
-        // 观察向（z）压扁 + 抬到 UI 平面前：模型原生 z 深 ~±135px，超出 UI 相机视景
-        // （near z=-9.9 / far z=90）会被远近裁剪面各切一刀（视觉"被 UI 平面切成两半，
-        // 只剩后半"）。holder（不随自转）压 z 至 ~1/4 并整体 z+=20 → z∈[20..87]，
-        // 全程在裁剪区间内、位于 UI 平面（z=0）之前。
-        Vector3 ls = modelRoot.localScale;
-        modelRoot.localScale = new Vector3(ls.x, ls.y, ls.z * 0.25f);
-        Vector3 pos = modelRoot.position;
-        modelRoot.position = new Vector3(pos.x, pos.y, pos.z + 20f);
-        Debug.Log($"[Showcase] model aligned: size={b.size} center={b.center} rootPos={modelRoot.position}");
-    }
 
     void TeardownCharacterStage()
     {
@@ -526,174 +514,195 @@ public class ShowcaseRunner : MonoBehaviour
         _figureSpin = null;
     }
 
-    /// 展位模型：优先 FBX 资产（Animated Human prefab，含 Animator controller 自动播
-    /// 骨骼动画——验证 NativeHost 带真实 SkinnedMeshRenderer + 动画同屏渲染）；资产缺失
-    /// （built player / 路径变动）回落程序化基元机甲。两者都做归一化：骨架/渲染包围盒
-    /// 缩放到 ~520 design px、脚底对齐持位点、水平居中，模型细节与资产原始尺寸解耦。
+    void WireEffectsStage(Container page, string pageName)
+    {
+        if (pageName != "effects") return;
+#if UNITY_EDITOR
+        foreach (var (slotId, prefabName, scale, sink) in FX_SLOTS)
+        {
+            if (!page.TryGet<Container>(slotId, out var slot))
+            {
+                Debug.LogWarning($"[Showcase] fx slot missing in HTML: {slotId}");
+                continue;
+            }
+            var prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/Kenney/Particle samples/Prefabs/" + prefabName + ".prefab");
+            if (prefab == null)
+            {
+                Debug.LogWarning($"[Showcase] fx prefab missing: {prefabName}");
+                continue;
+            }
+            var go = Instantiate(prefab);
+            go.transform.localScale = Vector3.one * scale;
+            go.transform.localPosition = new Vector3(230f, -150f - sink, 0f);
+            _driver.BindNativeHost(slot, go);
+            _fxBindings.Add((slot, go));
+        }
+        Debug.Log($"[Showcase] effects page bound {_fxBindings.Count}/{FX_SLOTS.Length} kenney particle systems");
+#endif
+    }
+
+    void TeardownEffectsStage()
+    {
+        foreach (var (slot, go) in _fxBindings)
+        {
+            _driver.UnbindNativeHost(slot);
+            if (go != null) Destroy(go);
+        }
+        _fxBindings.Clear();
+        _fxPaused = false;
+    }
+
+    /// 克隆源 controller 的 Idle 态 clip、剥掉根 path（""）的 position/rotation 曲线，
+    /// 内存重建单态 controller。剥离的曲线只影响根 transform 摆位（由归一化逻辑接管），
+    /// 骨骼动画曲线原样保留。
+    static UnityEditor.Animations.AnimatorController BuildRootStrippedController(
+        UnityEditor.Animations.AnimatorController src)
+    {
+        var ctrl = new UnityEditor.Animations.AnimatorController();
+        ctrl.AddLayer("Base");
+        if (src == null) return ctrl;
+        foreach (var layer in src.layers)
+            foreach (var st in layer.stateMachine.states)
+                if (st.state.motion is AnimationClip clip && st.state.name == "Idle")
+                {
+                    var cleaned = Instantiate(clip);
+                    foreach (var b in UnityEditor.AnimationUtility.GetCurveBindings(cleaned))
+                    {
+                        if (b.path != "") continue;
+                        if (b.propertyName.StartsWith("m_LocalPosition", System.StringComparison.Ordinal)
+                            || b.propertyName.StartsWith("m_LocalRotation", System.StringComparison.Ordinal))
+                            UnityEditor.AnimationUtility.SetEditorCurve(cleaned, b, null);
+                    }
+                    var state = ctrl.layers[0].stateMachine.AddState("Idle");
+                    state.motion = cleaned;
+                    return ctrl;
+                }
+        return ctrl;
+    }
+
+    /// 展位模型：Stylized Astronaut（prefab 自带 Animator + AstronautCharacterController，
+    /// Idle 态自动播——验证 NativeHost 带真实骨骼动画与自绘 UI 同屏）。归一化：摆好首帧
+    /// pose 后按 renderer 世界包围盒缩放到 ~520 design px、脚底对齐持位点、水平居中，
+    /// 与资产原始尺寸解耦。mesh.bounds 对全骨骼驱动的蒙皮网格常读零/极小，不可作基准。
     static GameObject BuildCharacterModel(out Transform spin)
     {
 #if UNITY_EDITOR
-        var prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
-            "Assets/Models/quaternius_animatedman/Animated Human.prefab");
-        if (prefab != null)
+        const string ModelPath = "Assets/Stylized_Astronaut/Stylized Astronaut.prefab";
+        var prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(ModelPath);
+        if (prefab == null)
         {
-            // 归一化期间 holder 必须留在原点：bounds 是世界系读数，holder 若已带 slot 偏移
-            // （360,-340），偏移会被当几何中心反向"归位"——模型被甩出数万单位（曾现）。
-            // 量完再挪到展位中心。
-            var holder = new GameObject("NativeCharacter");
-
-            var inst = Instantiate(prefab, holder.transform);
-            inst.transform.localPosition = Vector3.zero;
-            inst.transform.localRotation = Quaternion.identity;
-            inst.transform.localScale = Vector3.one;
-            // 骨骼动画 pose 决定 skinned bounds——先评估首帧再量。骨架 AABB 一并封装
-            //（蒙皮渲染的真值；SMR.bounds 在 skinning 首评估前可能是陈旧的小盒）。
-            var animator = inst.GetComponentInChildren<Animator>();
-            if (animator != null)
-            {
-                animator.applyRootMotion = false;
-                animator.Rebind();
-                animator.Update(0f);
-            }
-            var rends = inst.GetComponentsInChildren<Renderer>();
-            bool have = false;
-            var b = new Bounds();
-            foreach (var r in rends)
-            {
-                if (!have) { b = r.bounds; have = true; }
-                else b.Encapsulate(r.bounds);
-            }
-            foreach (var smr in inst.GetComponentsInChildren<SkinnedMeshRenderer>())
-            {
-                smr.updateWhenOffscreen = true;   // 骨架驱动世界 bounds，杜绝误剔除
-                foreach (var bone in smr.bones)
-                    if (bone != null)
-                    {
-                        if (!have) { b = new Bounds(bone.position, Vector3.zero); have = true; }
-                        else b.Encapsulate(bone.position);
-                    }
-            }
-            if (have && b.size.y > 0.001f && b.size.y < 10000f)
-            {
-                float s = 520f / b.size.y;
-                inst.transform.localScale = Vector3.one * s;
-                // 脚底对齐 + 水平/纵深居中（旋转 pivot = 脚底中心）。
-                inst.transform.localPosition = new Vector3(
-                    -b.center.x * s, -b.min.y * s, -b.center.z * s);
-                // z 微前：与 slot 自身底色同 sort_key 时以距离赢 tiebreak（近者后画）。
-                inst.transform.localPosition += new Vector3(0f, 0f, 0.5f);
-            }
-            // wrapper 原点 = native-slot 左上角（design 坐标 y 下 → container y-up 空间取负）。
-            // slot 720x680 → 持位居中、脚底落在中心点。
-            holder.transform.localPosition = new Vector3(360f, -340f, 0f);
-
-
-            var lightGo = new GameObject("rimLight");
-            lightGo.transform.SetParent(holder.transform, false);
-            lightGo.transform.localPosition = Vector3.zero;
-            // 平行光（无距离衰减；design px 尺度的模型下点光衰减到近黑）+ 暖色斜照。
-            var pl = lightGo.AddComponent<Light>();
-            pl.type = LightType.Directional;
-            pl.transform.localRotation = Quaternion.Euler(50f, -30f, 0f);
-            pl.color = new UnityEngine.Color(1f, 0.94f, 0.85f);
-            pl.intensity = 2.2f;
-            // 正面补光（贴图深色系，纯侧逆光太暗）：从相机方向低强度补。
-            var fillGo = new GameObject("fillLight");
-            fillGo.transform.SetParent(holder.transform, false);
-            var fl = fillGo.AddComponent<Light>();
-            fl.type = LightType.Directional;
-            fl.transform.localRotation = Quaternion.Euler(10f, 190f, 0f);
-            fl.color = new UnityEngine.Color(0.85f, 0.92f, 1f);
-            fl.intensity = 0.9f;
-            Debug.Log($"[Showcase] native-slot model = FBX prefab（Animator={animator != null}）");
-            spin = inst.transform;
-            return holder;
+            Debug.LogError($"[Showcase] character model missing: {ModelPath} — 展位空置");
+            spin = null;
+            return new GameObject("NativeCharacter");
         }
-        Debug.LogWarning("[Showcase] Animated Human.prefab not found — fallback to primitive mech");
-#endif
-        return BuildPrimitiveMech(out spin);
-    }
-
-    /// 程序化机甲（FBX 缺失时的 fallback）：躯干/头/肩/臂 capsule+cube，右手发光剑，
-    /// 脚下发光基座环，一点光。
-    static GameObject BuildPrimitiveMech(out Transform spin)
-    {
+        // 归一化期间 holder 必须留在原点：bounds 是世界系读数，holder 若已带 slot 偏移
+        // （360,-340），偏移会被当几何中心反向"归位"——模型被甩出数万单位（曾现）。
+        // 量完再挪到展位中心。
         var holder = new GameObject("NativeCharacter");
+
+        var inst = Instantiate(prefab, holder.transform);
+        inst.transform.localPosition = Vector3.zero;
+        inst.transform.localRotation = Quaternion.identity;
+        inst.transform.localScale = Vector3.one;
+
+        // 剥资产自带的游戏层组件：Rigidbody/Collider（重力会整体掉落）、AstronautPlayer
+        // /AstronautThirdPersonCamera（第三人称控制，无输入源）、内嵌 Camera（叠渲染，
+        // 且自带 AudioListener → 场景双 listener 报错）。删 Camera 前先剥其依赖组件
+        //（FlareLayer 挂着时 DestroyImmediate(Camera) 会被拒绝、相机残留）。
+        // 展位是 UI 层静态展示，NativeHost 只消费 Transform + Renderer。
+        foreach (var rb in inst.GetComponentsInChildren<Rigidbody>(true)) DestroyImmediate(rb);
+        foreach (var col in inst.GetComponentsInChildren<Collider>(true)) DestroyImmediate(col);
+        foreach (var al in inst.GetComponentsInChildren<AudioListener>(true)) DestroyImmediate(al);
+        foreach (var cam in inst.GetComponentsInChildren<Camera>(true))
+        {
+            foreach (var flare in cam.GetComponents<FlareLayer>()) DestroyImmediate(flare);
+            DestroyImmediate(cam);
+        }
+        foreach (var mb in inst.GetComponentsInChildren<MonoBehaviour>(true))
+            if (mb != null && (mb.GetType().Name == "AstronautPlayer"
+                || mb.GetType().Name == "AstronautThirdPersonCamera"))
+                DestroyImmediate(mb);
+
+        var animator = inst.GetComponentInChildren<Animator>();
+        if (animator != null && animator.runtimeAnimatorController != null)
+        {
+            animator.applyRootMotion = false;
+            // 资产 clip 在 FBX 根上烤了位置关键帧（Generic rig 未声明 root-motion 节点，
+            // applyRootMotion=false 拦不住普通曲线），播放数秒后把根写飞十多万单位。
+            // 克隆 clip 剥掉根 path 的 TR 曲线 + 内存重建 controller——动画只驱动骨骼，
+            // 根 transform 归归一化逻辑所有（缩放/摆位/figureSpin 自转）。
+            animator.runtimeAnimatorController = BuildRootStrippedController(
+                animator.runtimeAnimatorController as UnityEditor.Animations.AnimatorController);
+            animator.Rebind();
+            animator.Update(0f);   // 评估首帧 pose 再量 bounds
+        }
+        var rends = inst.GetComponentsInChildren<Renderer>();
+        if (rends.Length == 0)
+        {
+            // prefab != null 只保证序列化壳存在——导入器导不出内容时实例是裸 Transform，
+            // 静默黑屏。响报并空置展位（资产侧问题应在导入验收期暴露）。
+            Debug.LogError($"[Showcase] {ModelPath} instantiated with 0 Renderers（导入产物为空场景）— 展位空置");
+            Destroy(holder);
+            spin = null;
+            return new GameObject("NativeCharacter");
+        }
+        foreach (var smr in inst.GetComponentsInChildren<SkinnedMeshRenderer>())
+            smr.updateWhenOffscreen = true;   // 骨架驱动世界 bounds，杜绝误剔除
+        bool have = false;
+        var b = new Bounds();
+        foreach (var r in rends)
+        {
+            if (!have) { b = r.bounds; have = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        if (!have || b.size.y < 0.001f || b.size.y > 10000f)
+        {
+            Debug.LogError($"[Showcase] {ModelPath} posed bounds 退化（{(have ? b.size.ToString() : "无 renderer")}）— 展位空置");
+            Destroy(holder);
+            spin = null;
+            return new GameObject("NativeCharacter");
+        }
+        float s = 520f / b.size.y;
+        inst.transform.localScale = Vector3.one * s;
+        // 脚底对齐 + 水平/纵深居中（旋转 pivot = 脚底中心）；z 前移 20：位于 UI 平面
+        // （z=0）之前，与 slot 底色同 sort_key 时以距离赢 tiebreak（近者后画）。
+        inst.transform.localPosition = new Vector3(
+            -b.center.x * s, -b.min.y * s, -b.center.z * s + 20f);
         // wrapper 原点 = native-slot 左上角（design 坐标 y 下 → container y-up 空间取负）。
-        // slot 720x680 → 持位居中。figure z +0.01：与 slot 自身底色同 sort_key 时以 z
-        // 近者后画赢 tiebreak，保证模型画在底色之上。
-        holder.transform.localPosition = new Vector3(360f, -340f, 0f);
-        holder.transform.localScale = Vector3.one * 100f;
+        // 模型归一化后高 ~520px，脚底落在展位底部、留 24px 边距（design y = 680-24 →
+        // local -656）：模型整体落在槽内偏下，居中摆法（y=-340）会让头冒出槽顶 180px。
+        holder.transform.localPosition = new Vector3(360f, -656f, 0f);
 
-        var figure = new GameObject("figure");
-        figure.transform.SetParent(holder.transform, false);
-        figure.transform.localPosition = new Vector3(0f, 0f, 0.01f);
-
-        var steel = new UnityEngine.Color(0.55f, 0.62f, 0.70f);
-        var armor = new UnityEngine.Color(0.16f, 0.30f, 0.42f);
-
-        Prim(figure.transform, PrimitiveType.Capsule, "torso",
-            new Vector3(0f, 1.05f, 0f), new Vector3(0.55f, 0.50f, 0.42f), armor);
-        Prim(figure.transform, PrimitiveType.Sphere, "head",
-            new Vector3(0f, 1.74f, 0f), new Vector3(0.34f, 0.32f, 0.34f), steel);
-        // 面甲：自发光青条（朝相机面 z+）。
-        Prim(figure.transform, PrimitiveType.Cube, "visor",
-            new Vector3(0f, 1.78f, 0.30f), new Vector3(0.26f, 0.07f, 0.05f),
-            new UnityEngine.Color(0f, 0f, 0f), new UnityEngine.Color(0.37f, 0.71f, 0.83f) * 3f);
-        Prim(figure.transform, PrimitiveType.Cube, "shoulderL",
-            new Vector3(-0.44f, 1.42f, 0f), new Vector3(0.26f, 0.18f, 0.30f), armor);
-        Prim(figure.transform, PrimitiveType.Cube, "shoulderR",
-            new Vector3(0.44f, 1.42f, 0f), new Vector3(0.26f, 0.18f, 0.30f), armor);
-        Prim(figure.transform, PrimitiveType.Capsule, "armL",
-            new Vector3(-0.46f, 1.02f, 0f), new Vector3(0.13f, 0.32f, 0.13f), steel);
-        Prim(figure.transform, PrimitiveType.Capsule, "armR",
-            new Vector3(0.46f, 1.02f, 0f), new Vector3(0.13f, 0.32f, 0.13f), steel);
-        // 剑：右手竖持，自发光金刃 + 小幅倾斜。
-        var sword = Prim(figure.transform, PrimitiveType.Cube, "sword",
-            new Vector3(0.62f, 1.25f, 0.08f), new Vector3(0.07f, 1.15f, 0.13f),
-            new UnityEngine.Color(0f, 0f, 0f), new UnityEngine.Color(0.83f, 0.64f, 0.31f) * 2.5f);
-        sword.transform.localRotation = Quaternion.Euler(0f, 0f, 10f);
-        // 基座环：自发光青（对称体，随 figure 旋转不可见）。
-        Prim(figure.transform, PrimitiveType.Cylinder, "baseRing",
-            new Vector3(0f, 0.02f, 0f), new Vector3(1.0f, 0.015f, 1.0f),
-            new UnityEngine.Color(0f, 0f, 0f), new UnityEngine.Color(0.37f, 0.71f, 0.83f) * 1.6f);
 
         var lightGo = new GameObject("rimLight");
-        lightGo.transform.SetParent(figure.transform, false);
-        lightGo.transform.localPosition = new Vector3(0.8f, 2.3f, 1.4f);
+        lightGo.transform.SetParent(holder.transform, false);
+        lightGo.transform.localPosition = Vector3.zero;
+        // 平行光（无距离衰减；design px 尺度的模型下点光衰减到近黑）+ 暖色斜照。
         var pl = lightGo.AddComponent<Light>();
-        pl.type = LightType.Point;
-        pl.color = new UnityEngine.Color(1f, 0.9f, 0.75f);
-        pl.intensity = 1.6f;
-        pl.range = 4f;
-
-        spin = figure.transform;
+        pl.type = LightType.Directional;
+        pl.transform.localRotation = Quaternion.Euler(50f, -30f, 0f);
+        pl.color = new UnityEngine.Color(1f, 0.94f, 0.85f);
+        pl.intensity = 2.2f;
+        // 正面补光（贴图深色系，纯侧逆光太暗）：从相机方向低强度补。
+        var fillGo = new GameObject("fillLight");
+        fillGo.transform.SetParent(holder.transform, false);
+        var fl = fillGo.AddComponent<Light>();
+        fl.type = LightType.Directional;
+        fl.transform.localRotation = Quaternion.Euler(10f, 190f, 0f);
+        fl.color = new UnityEngine.Color(0.85f, 0.92f, 1f);
+        fl.intensity = 0.9f;
+        Debug.Log($"[Showcase] native-slot model = Stylized Astronaut（animator={animator != null}, boundsH={b.size.y:F2}）");
+        spin = inst.transform;
         return holder;
+#else
+        Debug.LogError("[Showcase] BuildCharacterModel 依赖 AssetDatabase（editor-only）——built player 无展位模型");
+        spin = null;
+        return new GameObject("NativeCharacter");
+#endif
     }
 
-    /// 基元快捷构造：挂父、定位、缩放、赋 lit 材质（可选自发光），剥 Collider（UI 层无物理）。
-    static GameObject Prim(Transform parent, PrimitiveType type, string name,
-        Vector3 localPos, Vector3 localScale, UnityEngine.Color color, UnityEngine.Color? emission = null)
-    {
-        var go = GameObject.CreatePrimitive(type);
-        go.name = name;
-        var col = go.GetComponent<Collider>();
-        if (col != null) Destroy(col);
-        go.transform.SetParent(parent, false);
-        go.transform.localPosition = localPos;
-        go.transform.localScale = localScale;
-        var shader = Shader.Find("Universal Render Pipeline/Lit");
-        if (shader == null) shader = Shader.Find("Standard");
-        var m = new Material(shader);
-        m.color = color;
-        if (emission.HasValue)
-        {
-            m.EnableKeyword("_EMISSION");
-            m.SetColor("_EmissionColor", emission.Value);
-        }
-        go.GetComponent<Renderer>().sharedMaterial = m;
-        return go;
-    }
+
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，
     /// Ikat 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
@@ -738,6 +747,26 @@ public class ShowcaseRunner : MonoBehaviour
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
     void WireControls(Container page, string pageName)
     {
+        if (pageName == "effects")
+        {
+            // 特效全局暂停/继续：读数翻转 = 事件路由证据，同时验 ParticleSystem 暂停态。
+            if (page.TryGet<Button>("btn-fx-toggle", out var fxBtn)
+                && page.TryGet<TextElement>("fx-toggle-val", out var fxRead))
+            {
+                fxBtn.Clicked += () =>
+                {
+                    _fxPaused = !_fxPaused;
+                    foreach (var (_, go) in _fxBindings)
+                    {
+                        var ps = go != null ? go.GetComponent<ParticleSystem>() : null;
+                        if (ps == null) continue;
+                        if (_fxPaused) ps.Pause(); else ps.Play();
+                    }
+                    fxRead.TextContent = _fxPaused ? "已暂停" : "播放中";
+                    Debug.Log($"[Showcase] fx toggle -> {_fxBindings.Count} systems, paused={_fxPaused}");
+                };
+            }
+        }
         if (pageName == "lab")
         {
             // lab #14 运行时 ZIndex：按钮把 B 片在 4（置顶）/ 0（回落 DOM 序）间切换——

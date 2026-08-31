@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat 靶子冻结 Showcase · 特效混染</title>
+  <style>
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .panel {display:flex;flex-direction:column; width:320px; gap:14px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:24px; align-self:flex-start; }
+  .panel-title { color:#8ec5d8; font-size:16px; font-weight:700; }
+  .panel-desc { color:#9aa0b4; font-size:13px; }
+  .fx-btn { background-color:#d4a44e; color:#0e1620; font-size:14px; font-weight:700; padding:6px 16px; border-radius:8px; }
+  .fx-read { color:#5fb4d4; font-size:13px; }
+  .fx-grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:20px; flex-grow:1; align-content:flex-start; }
+  .fx-cell {display:flex;flex-direction:column; gap:8px; }
+  .fx-slot { width:460px; height:300px; background-color:#0a121b; border-radius:10px; border-width:2px; border-style:solid; border-color:#2a5a75; }
+  .fx-label { color:#e0e6ec; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <page-top id="page-top"><span slot="title" class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">特效混染</span></page-top>
+    <div class="body">
+      <div class="panel">
+        <span class="panel-title">Kenney 粒子 × NativeHost</span>
+        <span class="panel-desc">六个 Kenney Particle Pack 特效各绑一个 UI 槽位：NativeHost 让引擎粒子跟随节点 transform，按节点 sort_key 插进自绘 UI 的绘制序——同屏混染验证。</span>
+        <button id="btn-fx-toggle" class="fx-btn">特效暂停 / 继续</button>
+        <span id="fx-toggle-val" class="fx-read">播放中</span>
+      </div>
+      <div class="fx-grid">
+        <div class="fx-cell"><div class="fx-slot" id="fx-fire"></div><span class="fx-label">Fire</span></div>
+        <div class="fx-cell"><div class="fx-slot" id="fx-sparks"></div><span class="fx-label">Sparks</span></div>
+        <div class="fx-cell"><div class="fx-slot" id="fx-magic"></div><span class="fx-label">Magic</span></div>
+        <div class="fx-cell"><div class="fx-slot" id="fx-electricity"></div><span class="fx-label">Electricity</span></div>
+        <div class="fx-cell"><div class="fx-slot" id="fx-hearts"></div><span class="fx-label">Hearts</span></div>
+        <div class="fx-cell"><div class="fx-slot" id="fx-smoke"></div><span class="fx-label">Smoke</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
