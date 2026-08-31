@@ -74,52 +74,36 @@ namespace Ikat
             _clipsAppliedThisFrame.Clear();
             _roundedCtxsThisFrame.Clear();
 
-            // ② 遍历节点：v8 三分支 SKIP / HEADER / FULL；v9 双 dict keying
-            int n = blob.NodeCount;
+            // ② v15 skip 段先走：Skip 行 = 「对象还在，清 stale」；parked keepalive =
+            //    保留 GO 并隐藏。这行不进 SOA（16B/条）——后端不读 header/mesh。
+            //    parked 条目可能是 slot 根（reuse_key>0）或其后代（reuse_key=0 按
+            //    node_id 池化）——两者都要保留：park 剪整子树，若只保根，后代 GO 被
+            //    stale 销毁，reactivate 重建（每帧滚动 churn）。无先验 GO → no-op。
+            for (int s = 0; s < blob.SkipCount; s++)
+            {
+                bool parked = blob.SkipParked(s);
+                uint rk = blob.SkipReuseKey(s);
+                ulong poolKey = rk != 0 ? rk : blob.SkipNodeId(s);
+                Dictionary<ulong, RenderObj> pool = rk != 0 ? _poolByReuse : _poolByNodeId;
+                if (pool.TryGetValue(poolKey, out var roK))
+                {
+                    roK.Stale = false;
+                    if (parked && roK.Go.activeSelf) roK.Go.SetActive(false);
+                }
+            }
+
+            // ③ lean 段遍历（Header/Full 行；v8 三分支的 Skip 分支已被 skip 段接管）。
+            int n = blob.LeanCount;
             for (int i = 0; i < n; i++)
             {
-                // parked keepalive: preserve GO but hide it (SetActive false).
-                // Must be before visible check AND before level==0 early-out,
-                // because parked entries carry visible=0 and change_level=0.
-                // Lazy: no prior GO → skip, don't create.
-                // 条目可能是 slot 根（reuse_key>0）或其后代（reuse_key=0，按 node_id 池化）
-                // ——两者都要保留：park 剪整子树，若只保根，后代 GO（文本 mesh 等）被 stale
-                // 销毁，reactivate 重建，每帧滚动 churn（item 闪没 + 掉帧）。
-                bool parked = blob.Parked(i);
-                if (parked)
-                {
-                    uint pkKey = blob.ReuseKey(i);
-                    if (pkKey != 0 && _poolByReuse.TryGetValue(pkKey, out var roP))
-                    {
-                        roP.Stale = false;
-                        if (roP.Go.activeSelf) roP.Go.SetActive(false);
-                    }
-                    else
-                    {
-                        ulong nid = blob.NodeId(i);
-                        if (_poolByNodeId.TryGetValue(nid, out var roC))
-                        {
-                            roC.Stale = false;
-                            if (roC.Go.activeSelf) roC.Go.SetActive(false);
-                        }
-                    }
-                    continue;
-                }
-
                 if (!blob.Visible(i)) continue;
                 byte kind = blob.PayloadKind(i);
-                byte level = blob.ChangeLevel(i);   // 0=Skip 1=Header 2=Full
+                byte level = blob.ChangeLevel(i);   // 1=Header 2=Full（Skip 不在此）
                 ulong id = blob.NodeId(i);
                 uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
                 ulong poolKey = reuseKey != 0 ? reuseKey : id;
                 Dictionary<ulong, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
 
-                // SKIP：本帧无变化，保留上帧 GO，清 stale。
-                if (level == 0)
-                {
-                    if (pool.TryGetValue(poolKey, out var ro0)) ro0.Stale = false;
-                    continue;
-                }
                 // v10：kind 只有 1=Mesh（文本核心自产 atlas 走同路径）。
                 if (kind != 1) continue;
 

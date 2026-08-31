@@ -212,35 +212,26 @@ fn blob_emits_parked_keepalive_entries() {
         2 + 2,
         "node_count = render 条目 2 + parked keepalive 2"
     );
-    assert_eq!(
-        view.version(),
-        VERSION,
-        "parked 复用 visible 字节 bit1（v14 前不 bump；现版本随 #26 拓宽 bump 到 14）"
-    );
+    assert_eq!(view.lean_count(), 2, "lean 行 = 2 个 active render 节点");
+    assert_eq!(view.version(), VERSION, "VERSION 同步");
 
-    let parked: Vec<usize> = (0..view.node_count() as usize)
-        .filter(|&i| view.parked(i))
+    // v15：parked keepalive 在 skip 段（16B/条，flags bit1=parked）。
+    let parked: Vec<usize> = (0..view.skip_entry_count())
+        .filter(|&s| view.skip_entry(s).2 & 0x02 != 0)
         .collect();
     assert_eq!(parked.len(), 2, "恰 2 条 parked keepalive");
-    for &i in &parked {
-        assert!(!view.visible(i), "parked 条目 bit0 必清（不渲染）");
-        assert!(
-            view.reuse_key(i) > 0,
-            "parked 条目带非零 reuse_key（后端据此认镜像对象）"
-        );
-        assert_eq!(view.mesh_len_col(i), 0, "parked 无 mesh");
-        assert_eq!(view.payload_kind(i), 0, "parked payload_kind=0");
-        assert_eq!(view.change_level(i), 0, "parked change_level=Skip");
-        assert_eq!(view.parent_id(i), -1, "parked 不参与父子渲染关系");
+    for &s in &parked {
+        let (_id, rk, flags) = view.skip_entry(s);
+        assert_eq!(flags, 0b10, "parked 条目 flags = bit1 置位、bit0 清");
+        assert!(rk > 0, "parked 条目带非零 reuse_key（后端据此认镜像对象）");
     }
-    let mut got: Vec<u64> = parked.iter().map(|&i| view.node_id(i)).collect();
+    let mut got: Vec<u64> = parked.iter().map(|&s| view.skip_entry(s).0).collect();
     got.sort_unstable();
     assert_eq!(got, want, "keepalive 条目的 node_id 即 parked slot 节点");
 
-    // active 条目（前 2 条）不受影响：bit0 置位、bit1 清。
+    // active 条目（lean 前 2 行）不受影响：bit0 置位。
     for i in 0..2 {
         assert!(view.visible(i), "render 条目 bit0 置位");
-        assert!(!view.parked(i), "render 条目 bit1 必清");
     }
 }
 
@@ -278,27 +269,17 @@ fn blob_emits_parked_keepalive_for_slot_subtree() {
     let blob = super::build_blob(&frame(&[]), &scene); // 无 active render 节点
     let view = TestView::parse(&blob);
 
-    let mut parked_ids: Vec<u64> = (0..view.node_count() as usize)
-        .filter(|&i| view.parked(i))
-        .map(|i| view.node_id(i))
-        .collect();
-    parked_ids.sort_unstable();
+    // v15：parked keepalive 全在 skip 段。
+    let mut got: Vec<u64> = view.skip_parked_ids();
+    got.sort_unstable();
     let mut want = [slot.0, dot.0, body.0];
     want.sort_unstable();
-    assert_eq!(
-        parked_ids.len(),
-        3,
-        "keepalive 覆盖整子树（根 + 2 后代），不止根"
-    );
-    assert_eq!(parked_ids, want, "根 + 两后代都发 keepalive");
+    assert_eq!(got.len(), 3, "keepalive 覆盖整子树（根 + 2 后代），不止根");
+    assert_eq!(got, want, "根 + 两后代都发 keepalive");
 
     // 根带 reuse_key，后代 reuse_key=0（后端按 node_id 保留）
-    for i in 0..view.node_count() as usize {
-        if !view.parked(i) {
-            continue;
-        }
-        let nid = view.node_id(i);
-        let rk = view.reuse_key(i);
+    for s in 0..view.skip_entry_count() {
+        let (nid, rk, _flags) = view.skip_entry(s);
         if nid == slot.0 {
             assert_eq!(rk, 0x0001_0000, "slot 根带永久 reuse_key");
         } else {
@@ -333,7 +314,11 @@ fn blob_no_keepalive_when_all_slots_active() {
     let blob = super::build_blob(&frame(&[mesh_node(1, None, 0.0, 0.0, 5.0, 5.0)]), &scene);
     let view = TestView::parse(&blob);
     assert_eq!(view.node_count(), 1, "无 parked slot → 零追加");
-    assert!(!view.parked(0));
+    assert_eq!(
+        view.skip_entry_count(),
+        0,
+        "skip 段空（无 Skip 行无 keepalive）"
+    );
     assert!(view.visible(0));
 }
 
@@ -343,7 +328,7 @@ fn build_blob_has_magic_and_count() {
     assert_eq!(&blob[0..4], &MAGIC.to_le_bytes());
     let v = u32::from_le_bytes(blob[4..8].try_into().unwrap());
     assert_eq!(v, VERSION);
-    assert_eq!(v, 14, "blob 版本应为 14（v14：node_id/parent_id u64 拓宽）");
+    assert_eq!(v, 15, "blob 版本应为 15（v15：列级增量）");
     let n = u32::from_le_bytes(blob[8..12].try_into().unwrap());
     assert_eq!(n, 1);
 }
@@ -373,16 +358,15 @@ fn grad_params_column_round_trips() {
 
     let blob = build_blob(&frame(&[grad_node, plain]));
     let view = TestView::parse(&blob);
-    // 渐变节点：208B 列 round-trip 全保真（from_bytes 对照）。
-    let off = view.col_off[22];
-    let back = ikat_core::render::gradient::GradientParams::from_bytes(&view.buf[off..off + 208]);
-    assert_eq!(back, grad, "grad_params 208B 列 round-trip");
-    // 非渐变节点：列偏移 + stride 后仍全零（default 序列化 = 全零字节）。
-    let off1 = view.col_off[22] + 208;
-    assert!(
-        view.buf[off1..off1 + 208].iter().all(|&b| b == 0),
-        "非渐变节点 grad_params 恒全零"
-    );
+    // v15：渐变参数进 fat arena（mask bit3）。全零（非渐变）= 不写。
+    // frame 顺序 [grad_node, plain] → lean 行 0=渐变、行 1=纯色。
+    assert!(view.fat_off(0) > 0, "渐变节点有 fat 引用");
+    assert_eq!(view.fat_mask(0) & 0b1000, 0b1000, "fat mask 含 grad 位");
+    let bytes = view.grad_bytes(0).expect("grad 块存在");
+    let back = ikat_core::render::gradient::GradientParams::from_bytes(bytes);
+    assert_eq!(back, grad, "grad_params 208B fat 块 round-trip");
+    assert_eq!(view.fat_off(1), 0, "纯色节点无胖块（全零不写，省 208B）");
+    assert!(view.grad_bytes(1).is_none(), "非渐变节点无 grad 块");
 }
 
 /// path_idx 列（第 18 列，u32，v7）round-trip。
@@ -417,11 +401,7 @@ fn program_column_round_trips() {
         mesh_node_with_program(2, 0),           // 无图 Container / Image
     ]));
     let view = TestView::parse(&blob);
-    assert_eq!(
-        view.version(),
-        14,
-        "VERSION=14（v14：node_id/parent_id u64 拓宽）"
-    );
+    assert_eq!(view.version(), 15, "VERSION=15（v15：列级增量）");
     assert_eq!(view.program(0), 2, "Mesh program=2 round-trip");
     assert_eq!(view.program(1), 0, "Mesh program=0 占位");
     assert_eq!(view.program(2), 0, "Mesh program=0 round-trip");
@@ -437,15 +417,21 @@ fn blob_header_has_text_and_clip_arena_fields() {
     assert_eq!(u32::from_le_bytes(blob[0..4].try_into().unwrap()), MAGIC);
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        14,
-        "version=14"
+        15,
+        "version=15"
+    );
+    // v15：skip_count @ [12..16)。
+    assert_eq!(
+        u32::from_le_bytes(blob[12..16].try_into().unwrap()),
+        0,
+        "无 Skip 行：skip_count=0"
     );
 
-    // 23 col offset @ [12 .. 12+23*4)。每 col_offset 非零且单调递增。
-    let header_len = 12 + 23 * 4; // = 104
+    // 21 col offset @ [16 .. 16+21*4)。每 col_offset 非零且单调不降。
+    let header_len = 16 + 21 * 4 + 4 * 8; // = 132
     let mut prev = header_len;
-    for i in 0..23usize {
-        let o = 12 + i * 4;
+    for i in 0..21usize {
+        let o = 16 + i * 4;
         let off = u32::from_le_bytes(blob[o..o + 4].try_into().unwrap()) as usize;
         assert!(
             off >= prev,
@@ -457,14 +443,14 @@ fn blob_header_has_text_and_clip_arena_fields() {
         prev = off;
     }
 
-    // mesh_arena header @ [104..112)：off/len（mesh 节点有内容，len>0）。
-    let mesh_arena_off = u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize;
-    let mesh_arena_len = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
+    // mesh_arena pair @ [100..108)（mesh 节点有内容，len>0）。
+    let mesh_arena_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
+    let mesh_arena_len = u32::from_le_bytes(blob[104..108].try_into().unwrap()) as usize;
     assert!(mesh_arena_len > 0, "单 mesh 节点：mesh_arena_len 应 > 0");
 
-    // clip_table header @ [112..120)：clip 紧跟 mesh。无 clip 时仅 4B clip_count=0。
-    let clip_table_off = u32::from_le_bytes(blob[112..116].try_into().unwrap()) as usize;
-    let clip_table_len = u32::from_le_bytes(blob[116..120].try_into().unwrap());
+    // clip_table pair @ [108..116)：无 clip 时仅 4B clip_count=0。
+    let clip_table_off = u32::from_le_bytes(blob[108..112].try_into().unwrap()) as usize;
+    let clip_table_len = u32::from_le_bytes(blob[112..116].try_into().unwrap());
     assert_eq!(
         clip_table_len, 4,
         "clip 表至少含 clip_count(u32)=0，故 len=4"
@@ -478,9 +464,9 @@ fn blob_header_has_text_and_clip_arena_fields() {
         u32::from_le_bytes(blob[clip_table_off..clip_table_off + 4].try_into().unwrap());
     assert_eq!(clip_count, 0, "clip_count=0");
 
-    // v7 path_table header @ [120..128)：无 image_path 时仅 4B path_count=0。
-    let path_table_off = u32::from_le_bytes(blob[120..124].try_into().unwrap()) as usize;
-    let path_table_len = u32::from_le_bytes(blob[124..128].try_into().unwrap());
+    // path_table pair @ [116..124)：无 image_path 时仅 4B path_count=0。
+    let path_table_off = u32::from_le_bytes(blob[116..120].try_into().unwrap()) as usize;
+    let path_table_len = u32::from_le_bytes(blob[120..124].try_into().unwrap());
     assert_eq!(
         path_table_len, 4,
         "无 image_path：path table 仅 path_count=0，len=4"
@@ -493,10 +479,20 @@ fn blob_header_has_text_and_clip_arena_fields() {
     let path_count =
         u32::from_le_bytes(blob[path_table_off..path_table_off + 4].try_into().unwrap());
     assert_eq!(path_count, 0, "path_count=0");
+
+    // v15：fat_arena pair @ [124..132)（无胖块 → len=0），skip 段紧随其后（空 = blob 末）。
+    let fat_arena_off = u32::from_le_bytes(blob[124..128].try_into().unwrap()) as usize;
+    let fat_arena_len = u32::from_le_bytes(blob[128..132].try_into().unwrap()) as usize;
+    assert_eq!(fat_arena_len, 0, "无胖块：fat_arena_len=0");
     assert_eq!(
+        fat_arena_off,
         path_table_off + path_table_len as usize,
+        "fat_arena 紧跟 path_table"
+    );
+    assert_eq!(
+        fat_arena_off + fat_arena_len,
         blob.len(),
-        "path_table 应是 blob 末段"
+        "空 skip 段后 fat_arena 末即 blob 末"
     );
 }
 
@@ -507,7 +503,7 @@ fn test_view_parses_layout_and_text_placeholders() {
     let view = TestView::parse(&blob);
     assert_eq!(view.clip_count(), 0, "clip_count=0");
     assert_eq!(view.payload_kind(0), 1, "Mesh payload_kind=1");
-    assert_eq!(view.version(), 14, "VERSION=14");
+    assert_eq!(view.version(), 15, "VERSION=15");
 }
 
 #[test]
@@ -569,36 +565,39 @@ fn mesh_colors_no_longer_bake_alpha() {
     );
 }
 
-// col_off 索引：0=node_id 1=parent_id 2=visible 3=alpha 4=sort_key
-//              5=mask_context 6=m_a 7=m_b 8=m_c 9=m_d 10=m_tx 11=m_ty
-//              12=payload_kind 13=mesh_off 14=mesh_len
-//              15=path_idx (v7) 16=program (v5) 17=color_matrix (v6)
-//              18=change_level (v8) 19=reuse_key (v9) 20=effect_block (v11)
-//              21=shadow_params (v12) 22=grad_params (v13)
-// v14：node_id/parent_id 列 4B→8B（NodeId u64 拓宽，#26）。
+// v15 lean 列下标（镜像 blob.rs LEAN_COLUMNS 序）：
+//   0=node_id 1=parent_id 2=visible 3=alpha 4=sort_key 5=mask_context
+//   6..=11=m_a..m_ty 12=payload_kind 13=mesh_off 14=mesh_len 15=path_idx
+//   16=program 17=change_level 18=reuse_key 19=mount_id 20=fat_off
+// Skip 行（含 parked keepalive）不进 SOA——在段末 skip 段（16B/条：id+reuse+flags+pad）。
+// 胖参数（color_matrix/effect/shadow/grad）不在列里——fat_off 引用 fat arena entry。
 struct TestView<'a> {
     buf: &'a [u8],
-    col_off: [usize; 23],
+    col_off: [usize; 21],
     mesh_arena_off: usize,
     clip_table_off: usize,
     clip_table_len: u32,
-    path_table_off: usize, // v7
-    path_table_len: u32,   // v7
+    path_table_off: usize,
+    path_table_len: u32,
+    fat_arena_off: usize,
+    fat_arena_len: u32,
+    skip_count: u32,
 }
 impl<'a> TestView<'a> {
     fn parse(buf: &'a [u8]) -> Self {
         assert_eq!(&buf[0..4], &MAGIC.to_le_bytes());
-        let mut col_off = [0usize; 23];
-        let mut h = 12;
-        for i in 0..23 {
+        let skip_count = u32::from_le_bytes(buf[12..16].try_into().unwrap());
+        let mut col_off = [0usize; 21];
+        let mut h = 16;
+        for i in 0..21 {
             col_off[i] = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
             h += 4;
         }
+        // 四 arena pair：mesh / clip / path / fat（skip 段 = fat 末尾，off 不入 header）。
         let mesh_arena_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
         h += 4;
         let _mesh_arena_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
         h += 4;
-        // v10：text_arena 已删 → 跳过
         let clip_table_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
         h += 4;
         let clip_table_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
@@ -606,6 +605,10 @@ impl<'a> TestView<'a> {
         let path_table_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
         h += 4;
         let path_table_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
+        h += 4;
+        let fat_arena_off = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap()) as usize;
+        h += 4;
+        let fat_arena_len = u32::from_le_bytes(buf[h..h + 4].try_into().unwrap());
         TestView {
             buf,
             col_off,
@@ -614,26 +617,42 @@ impl<'a> TestView<'a> {
             clip_table_len,
             path_table_off,
             path_table_len,
+            fat_arena_off,
+            fat_arena_len,
+            skip_count,
         }
     }
     fn parent_id(&self, i: usize) -> i64 {
-        let o = self.col_off[1] + i * 8;
+        let o = self.col_off[COL_PARENT_ID] + i * 8;
         i64::from_le_bytes(self.buf[o..o + 8].try_into().unwrap())
     }
-    /// 第 1 列 node_id（u64，#26 拓宽）。
+    /// lean 行 i 的 node_id（u64）。lean 行序 = 非 Skip render 节点序。
     fn node_id(&self, i: usize) -> u64 {
-        let o = self.col_off[0] + i * 8;
+        let o = self.col_off[COL_NODE_ID] + i * 8;
         u64::from_le_bytes(self.buf[o..o + 8].try_into().unwrap())
     }
-    /// 第 3 列 visible 字节 bit0：本帧要渲染（镐 C# FrameBlob.Visible）。
     fn visible(&self, i: usize) -> bool {
-        self.buf[self.col_off[2] + i] & 0x01 != 0
+        self.buf[self.col_off[COL_VISIBLE] + i] & 0x01 != 0
     }
-    /// 第 3 列 visible 字节 bit1：parked keepalive（留镜像对象、不渲染，镐 C# FrameBlob.Parked）。
-    fn parked(&self, i: usize) -> bool {
-        self.buf[self.col_off[2] + i] & 0x02 != 0
+    // —— skip 段（Skip 行 + parked keepalive）——
+    fn skip_entry_count(&self) -> usize {
+        self.skip_count as usize
     }
-    /// 读节点 i 的 mesh 顶点（arena 段：vert_count, idx_count, verts[], uvs[], colors[], indices[]）。
+    /// skip 段第 s 条：(node_id, reuse_key, flags)。flags bit1=parked。
+    fn skip_entry(&self, s: usize) -> (u64, u32, u8) {
+        let o = self.fat_arena_off + self.fat_arena_len as usize + s * SKIP_ENTRY_SIZE;
+        let id = u64::from_le_bytes(self.buf[o..o + 8].try_into().unwrap());
+        let rk = u32::from_le_bytes(self.buf[o + 8..o + 12].try_into().unwrap());
+        let flags = self.buf[o + 12];
+        (id, rk, flags)
+    }
+    fn skip_parked_ids(&self) -> Vec<u64> {
+        (0..self.skip_entry_count())
+            .filter(|&s| self.skip_entry(s).2 & 0x02 != 0)
+            .map(|s| self.skip_entry(s).0)
+            .collect()
+    }
+    // —— lean 行 mesh ——
     fn mesh_verts(&self, i: usize) -> Vec<[f32; 2]> {
         let (seg, vc) = self.mesh_seg(i);
         let mut p = seg + 8; // 跳 vert_count + idx_count，直接读 verts[]
@@ -647,7 +666,6 @@ impl<'a> TestView<'a> {
             })
             .collect()
     }
-    /// 读节点 i 的 mesh 顶点色（alpha 剥离：不乘节点 alpha，alpha 走 _Alpha uniform）。
     fn mesh_colors(&self, i: usize) -> Vec<[f32; 4]> {
         let (seg, vc) = self.mesh_seg(i);
         let mut p = seg + 8;
@@ -667,26 +685,23 @@ impl<'a> TestView<'a> {
             })
             .collect()
     }
-    /// 返回节点 i 的 mesh 段起始偏移 + vert_count。
     fn mesh_seg(&self, i: usize) -> (usize, usize) {
         let seg = self.mesh_arena_off
             + u32::from_le_bytes(
-                self.buf[self.col_off[13] + i * 4..][0..4]
+                self.buf[self.col_off[COL_MESH_OFF] + i * 4..][0..4]
                     .try_into()
                     .unwrap(),
             ) as usize; // mesh_off
         let vc = u32::from_le_bytes(self.buf[seg..seg + 4].try_into().unwrap()) as usize;
         (seg, vc)
     }
-    /// v7：第 15 列 path_idx（u32，v10 删 text_off/text_len 后从第 17→15）。Mesh→path 表 1-based 索引（0=纯色无图）。
     fn path_idx(&self, i: usize) -> u32 {
         u32::from_le_bytes(
-            self.buf[self.col_off[15] + i * 4..][0..4]
+            self.buf[self.col_off[COL_PATH_IDX] + i * 4..][0..4]
                 .try_into()
                 .unwrap(),
         )
     }
-    /// v7：path string table 的 path_count（path table 首 4B）。
     fn path_count(&self) -> u32 {
         if self.path_table_len >= 4 {
             u32::from_le_bytes(
@@ -698,9 +713,6 @@ impl<'a> TestView<'a> {
             0
         }
     }
-    /// v7：读 path string table 第 idx（1-based）条 path。
-    ///   idx=0 → None（纯色无图）；idx>0 → 读 path_table 内第 idx 条 length-prefixed UTF-8。
-    ///   table layout：path_count:u32 后跟 count × {path_len:u32, path_bytes:u8[path_len]}。
     fn read_path(&self, idx: u32) -> Option<String> {
         if idx == 0 {
             return None;
@@ -708,7 +720,6 @@ impl<'a> TestView<'a> {
         let count = self.path_count();
         assert!(idx <= count, "path_idx {} 超出 path_count {}", idx, count);
         let mut p = self.path_table_off + 4; // 跳 path_count
-                                             // 顺序扫到第 idx 条（1-based）。
         for n in 1..=idx {
             let len = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
             p += 4;
@@ -720,83 +731,140 @@ impl<'a> TestView<'a> {
         }
         None
     }
-    /// v5：第 16 列 program（u8，v10 删 text_off/text_len 后从第 18→16）。0=img/无图 Container，1=Text，2=Container+bg-image，3=filter无bg-image，4=filter+bg-image。
     fn program(&self, i: usize) -> u8 {
-        self.buf[self.col_off[16] + i]
+        self.buf[self.col_off[COL_PROGRAM] + i]
     }
-    /// v6：第 17 列 color_matrix（[f32;20]，col_off[17] + i*80）。program≠3/4 全零。
-    fn color_matrix(&self, i: usize) -> [f32; 20] {
-        let off = self.col_off[17] + i * 80;
-        let mut m = [0.0; 20];
-        for j in 0..20 {
-            m[j] = f32::from_le_bytes(self.buf[off + j * 4..off + j * 4 + 4].try_into().unwrap());
-        }
-        m
-    }
-    /// v8：第 18 列 change_level（u8，col_off[18] + i，v10 删 text_off/text_len 后从第 20→18）。
-    fn change_level(&self, i: usize) -> u8 {
-        self.buf[self.col_off[18] + i]
-    }
-    /// v9：第 19 列 reuse_key（u32，col_off[19] + i*4，v10 删 text_off/text_len 后从第 21→19）。
-    fn reuse_key(&self, i: usize) -> u32 {
-        let o = self.col_off[19] + i * 4;
-        u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
-    }
-    /// v11：第 20 列 effect_block（[u8;128]，col_off[20] + i*128）。读节点 i 第 j 个 f32
-    /// （小端）。字段顺序见 EffectBlock::to_bytes：outline_width / outline_color[4] /
-    /// underlay[3]×{ox,oy,softness,color[4]} / glow_power / glow_color[4] / blur_width。
-    fn effect_block_f32(&self, i: usize, j: usize) -> f32 {
-        let off = self.col_off[20] + i * EffectBlock::SIZE + j * 4;
-        f32::from_le_bytes(self.buf[off..off + 4].try_into().unwrap())
-    }
-    /// v12：第 21 列 shadow_params（[f32;6]，col_off[21] + i*24 + j*4）。box-shadow SDF 参数
-    /// （halfSize.xy,radius,σ,inset,_pad）。非 shadow 节点 = [0.0;6]（全零占位）。
-    fn shadow_params_f32(&self, i: usize, j: usize) -> f32 {
-        let off = self.col_off[21] + i * 24 + j * 4;
-        f32::from_le_bytes(self.buf[off..off + 4].try_into().unwrap())
-    }
-    /// v8：读 mesh_len 列（u32 @ col_off[14] + i*4），SKIP/HEADER 节点 =0。
-    fn mesh_len_col(&self, i: usize) -> u32 {
+    // —— fat arena（胖参数块；全零块不写）——
+    /// lean 行 i 的 fat 引用（1-based；0=无胖块）。
+    fn fat_off(&self, i: usize) -> u32 {
         u32::from_le_bytes(
-            self.buf[self.col_off[14] + i * 4..][0..4]
+            self.buf[self.col_off[COL_FAT_OFF] + i * 4..][0..4]
                 .try_into()
                 .unwrap(),
         )
     }
-    /// blob VERSION（u32 @ offset 4）。
+    /// fat entry 的 sub-mask（bit0=color_matrix bit1=effect bit2=shadow bit3=grad）。
+    /// 无 fat 引用 → 0。
+    fn fat_mask(&self, i: usize) -> u8 {
+        let off = self.fat_off(i);
+        if off == 0 {
+            return 0;
+        }
+        self.buf[self.fat_arena_off + (off - 1) as usize]
+    }
+    /// fat entry 内某块的字节切片（mask 命中时 Some）。
+    fn fat_block(&self, i: usize, bit: u8) -> Option<&'a [u8]> {
+        const CM: u8 = 0b0001;
+        const EFFECT: u8 = 0b0010;
+        const SHADOW: u8 = 0b0100;
+        let off = self.fat_off(i);
+        if off == 0 {
+            return None;
+        }
+        let mask = self.buf[self.fat_arena_off + (off - 1) as usize];
+        if mask & bit == 0 {
+            return None;
+        }
+        let mut p = self.fat_arena_off + off as usize; // 跳 mask 字节
+        if mask & CM != 0 {
+            if bit == CM {
+                return Some(&self.buf[p..p + 80]);
+            }
+            p += 80;
+        }
+        if mask & EFFECT != 0 {
+            if bit == EFFECT {
+                return Some(&self.buf[p..p + EffectBlock::SIZE]);
+            }
+            p += EffectBlock::SIZE;
+        }
+        if mask & SHADOW != 0 {
+            if bit == SHADOW {
+                return Some(&self.buf[p..p + 24]);
+            }
+            p += 24;
+        }
+        Some(&self.buf[p..p + 208]) // grad（唯一剩余 bit3）
+    }
+    /// color_matrix（[f32;20]）。无 fat 块（全零）→ [0.0;20]。
+    fn color_matrix(&self, i: usize) -> [f32; 20] {
+        let mut m = [0.0; 20];
+        if let Some(b) = self.fat_block(i, 0b0001) {
+            for j in 0..20 {
+                m[j] = f32::from_le_bytes(b[j * 4..j * 4 + 4].try_into().unwrap());
+            }
+        }
+        m
+    }
+    /// effect_block 第 j 个 f32。无 fat 块 → 0.0。
+    fn effect_block_f32(&self, i: usize, j: usize) -> f32 {
+        self.fat_block(i, 0b0010)
+            .map(|b| f32::from_le_bytes(b[j * 4..j * 4 + 4].try_into().unwrap()))
+            .unwrap_or(0.0)
+    }
+    /// shadow_params 第 j 个 f32。无 fat 块 → 0.0。
+    fn shadow_params_f32(&self, i: usize, j: usize) -> f32 {
+        self.fat_block(i, 0b0100)
+            .map(|b| f32::from_le_bytes(b[j * 4..j * 4 + 4].try_into().unwrap()))
+            .unwrap_or(0.0)
+    }
+    /// grad_params 原始 208B（from_bytes 对照用）。无 fat 块 → None。
+    fn grad_bytes(&self, i: usize) -> Option<&'a [u8]> {
+        self.fat_block(i, 0b1000)
+    }
+    fn change_level(&self, i: usize) -> u8 {
+        self.buf[self.col_off[COL_CHANGE_LEVEL] + i]
+    }
+    fn reuse_key(&self, i: usize) -> u32 {
+        let o = self.col_off[COL_REUSE_KEY] + i * 4;
+        u32::from_le_bytes(self.buf[o..o + 4].try_into().unwrap())
+    }
+    fn mesh_len_col(&self, i: usize) -> u32 {
+        u32::from_le_bytes(
+            self.buf[self.col_off[COL_MESH_LEN] + i * 4..][0..4]
+                .try_into()
+                .unwrap(),
+        )
+    }
     fn version(&self) -> u32 {
         u32::from_le_bytes(self.buf[4..8].try_into().unwrap())
     }
-    /// 节点数（从 header 读 n:u32 @ offset 8）。
+    /// 总条目数（lean + skip，header node_count）。
     fn node_count(&self) -> u32 {
         u32::from_le_bytes(self.buf[8..12].try_into().unwrap())
     }
-    /// 节点 i 的 payload_kind（u8 列，col_off[12] + i*1）。
-    fn payload_kind(&self, i: usize) -> u8 {
-        self.buf[self.col_off[12] + i]
+    /// lean 行数（非 Skip 的 render 节点数；由 node_id 列长换算）。
+    fn lean_count(&self) -> u32 {
+        (self.col_off_len(COL_NODE_ID) / 8) as u32
     }
-    /// 节点 i 的 mesh segment vert_count + idx_count（segment 首 8B）。
+    fn col_off_len(&self, col: usize) -> usize {
+        let start = self.col_off[col];
+        let end = if col + 1 < 21 {
+            self.col_off[col + 1]
+        } else {
+            self.mesh_arena_off
+        };
+        end - start
+    }
+    fn payload_kind(&self, i: usize) -> u8 {
+        self.buf[self.col_off[COL_KIND] + i]
+    }
     fn mesh_vert_count(&self, i: usize) -> (u32, u32) {
         let (seg, _vc) = self.mesh_seg(i);
         let vc = u32::from_le_bytes(self.buf[seg..seg + 4].try_into().unwrap());
         let ic = u32::from_le_bytes(self.buf[seg + 4..seg + 8].try_into().unwrap());
         (vc, ic)
     }
-    /// 节点 i 的第 vi 个 mesh 顶点 (vx, vy)（已 re-base 后的本地坐标）。
     fn mesh_vert(&self, i: usize, vi: usize) -> (f32, f32) {
         let (seg, _vc) = self.mesh_seg(i);
-        // seg+8 起为 verts[vc×2 f32]；第 vi 顶点位于 seg+8 + vi*2*4。
         let p = seg + 8 + vi * 2 * 4;
         let vx = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
         let vy = f32::from_le_bytes(self.buf[p + 4..p + 8].try_into().unwrap());
         (vx, vy)
     }
-    /// 节点 i 的第 vi 个 mesh 顶点色的 alpha 分量（alpha 剥离后为原始值，不乘节点 alpha，走 _Alpha uniform）。
     fn mesh_color_alpha(&self, i: usize, vi: usize) -> f32 {
         let (seg, vc) = self.mesh_seg(i);
-        // seg+8 起 verts[vc×2] + uvs[vc×2] 各 vc*2*4 = vc*2*4*2，colors 起。
         let colors_off = seg + 8 + vc * 2 * 4 * 2;
-        // 每色 f32×4 = 16B；第 vi 顶点的 alpha 在 colors_off + vi*16 + 12。
         let a_off = colors_off + vi * 16 + 12;
         f32::from_le_bytes(self.buf[a_off..a_off + 4].try_into().unwrap())
     }
@@ -811,9 +879,6 @@ impl<'a> TestView<'a> {
             0
         }
     }
-    /// 读 clip 表 entries：Vec<(context_id, Rect, Option<[(f32,f32);4]>)>（§4.1 / §4.4）。
-    /// layout: clip_count:u32 后跟 count × {context_id:u32, x,y,w,h:f32, radii: 4×(rx,ry):f32}（52B/entry）。
-    /// radii 全零 → None（直角 clip）；非全零 → Some（圆角 SDF clip）。
     fn read_clips(&self) -> Vec<(u32, Rect, Option<[(f32, f32); 4]>)> {
         let count = self.clip_count() as usize;
         let mut p = self.clip_table_off + 4;
@@ -1092,11 +1157,10 @@ fn blob_world_matrix_roundtrip() {
         nodes: vec![pure, skew],
         clips: vec![],
     });
-    // version=14（v14：node_id/parent_id 列 u64 拓宽；23 列自 v13 起）
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        14,
-        "VERSION=14"
+        15,
+        "VERSION=15"
     );
     assert!(blob.len() > 100);
 }
@@ -1119,8 +1183,8 @@ fn blob_pure_mesh_kind_is_one() {
     assert_eq!(view.program(0), 0, "纯色 mesh program=0");
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        14,
-        "VERSION=14"
+        15,
+        "VERSION=15"
     );
 }
 
@@ -1161,11 +1225,7 @@ fn blob_color_matrix_column_round_trips() {
         clips: vec![],
     });
     let view = TestView::parse(&blob);
-    assert_eq!(
-        view.version(),
-        14,
-        "VERSION=14（v14：node_id/parent_id u64 拓宽）"
-    );
+    assert_eq!(view.version(), 15, "VERSION=15（v15：列级增量）");
     assert_eq!(view.program(0), 3, "program=3 round-trip");
     let m = view.color_matrix(0);
     for i in 0..20 {
@@ -1189,14 +1249,17 @@ fn change_level_column_round_trips() {
     full.change_level = ChangeLevel::Full;
     let blob = build_blob(&frame(&[skip, header, full]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 14, "VERSION=14");
-    assert_eq!(view.change_level(0), 0, "Skip=0");
-    assert_eq!(view.change_level(1), 1, "Header=1");
-    assert_eq!(view.change_level(2), 2, "Full=2");
-    // SKIP/HEADER 不写 arena → mesh_len=0；FULL 写 arena → mesh_len>0。
-    assert_eq!(view.mesh_len_col(0), 0, "Skip 不写 arena");
-    assert_eq!(view.mesh_len_col(1), 0, "Header 不写 arena");
-    assert!(view.mesh_len_col(2) > 0, "Full 写 arena");
+    assert_eq!(view.version(), 15, "VERSION=15");
+    // v15：Skip 行不进 SOA（skip 段 16B/条）——lean 行序 = [header, full]。
+    assert_eq!(view.node_count(), 3, "总条目数 = lean 2 + skip 1");
+    assert_eq!(view.lean_count(), 2, "Skip 行出 SOA");
+    assert_eq!(view.skip_entry_count(), 1, "Skip 行进 skip 段");
+    assert_eq!(view.skip_entry(0).0, 0, "skip 条目 node_id=0");
+    assert_eq!(view.change_level(0), 1, "lean[0]=Header=1");
+    assert_eq!(view.change_level(1), 2, "lean[1]=Full=2");
+    // HEADER 不写 arena → mesh_len=0；FULL 写 arena → mesh_len>0。
+    assert_eq!(view.mesh_len_col(0), 0, "Header 不写 arena");
+    assert!(view.mesh_len_col(1) > 0, "Full 写 arena");
 }
 
 /// v10：reuse_key 列（第 19 列，0-indexed；v10 删 text_off/text_len 后从第 21→19）round-trip。
@@ -1229,7 +1292,7 @@ fn blob_v9_round_trips_reuse_key() {
     };
     let blob = build_blob(&frame(&[rn]));
     let view = TestView::parse(&blob);
-    assert_eq!(view.version(), 14, "blob VERSION=14");
+    assert_eq!(view.version(), 15, "blob VERSION=15");
     assert_eq!(view.reuse_key(0), 42, "reuse_key round-trip");
 }
 
@@ -1322,41 +1385,41 @@ fn blob_writes_shadow_params_column() {
     }
 }
 
-/// v13：blob SOA 列数 = 23（加 grad_params 列）。读 header 的 col_offset 表长度断言。
-/// header layout：magic(4)+version(4)+node_count(4) + N×col_offset(4) + 3 arena pair。
-/// mesh_arena_off 字段位于 header offset `12 + N*4`。对 N=23 → offset 104。
+/// v15：blob SOA lean 列数 = 21（Skip 段 + fat arena 接管原 23 列中的胖列）。
+/// header layout：magic(4)+version(4)+node_count(4)+skip_count(4) + N×col_offset(4) + 4 arena pair。
+/// mesh_arena_off 字段位于 header offset `16 + N*4`。对 N=21 → offset 100。
 #[test]
-fn blob_column_count_is_23() {
+fn blob_column_count_is_21() {
     let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
-        14,
-        "VERSION=14（v14：node_id/parent_id u64 拓宽；23 列自 v13 起）"
+        15,
+        "VERSION=15（v15：列级增量；21 lean 列）"
     );
-    // mesh_arena_off 字段位置 = 12 + N*4。N=23 → offset 104（读出一个 >= header_len 的值）。
-    // 反推列数 N = (mesh_arena_off_field_position - 12) / 4 = (104 - 12) / 4 = 23。
-    let mesh_arena_off_field_at = 12 + 23 * 4;
+    // mesh_arena_off 字段位置 = 16 + N*4。N=21 → offset 100。
+    let mesh_arena_off_field_at = 16 + 21 * 4;
     assert_eq!(
-        mesh_arena_off_field_at, 104,
-        "v13 header：N=23 列 → mesh_arena_off @ 104"
+        mesh_arena_off_field_at, 100,
+        "v15 header：N=21 列 → mesh_arena_off @ 100"
     );
     let mesh_arena_off = u32::from_le_bytes(
         blob[mesh_arena_off_field_at..mesh_arena_off_field_at + 4]
             .try_into()
             .unwrap(),
     ) as usize;
-    // mesh_arena_off 必须 >= header_len（12 + 22*4 + 3*8 = 124），证明 22 列都正确布局。
+    // mesh_arena_off 必须 >= header_len（16 + 21*4 + 4*8 = 132）。
     assert!(
-        mesh_arena_off >= 12 + 22 * 4 + 24,
-        "22 列布局后 mesh_arena_off({}) >= header_len(124)",
+        mesh_arena_off >= 132,
+        "21 列布局后 mesh_arena_off({}) >= header_len(132)",
         mesh_arena_off
     );
 }
 
-/// v12：每列的字节长度 = node_count × stride[k]（22 列）。
-/// 读到 col_off[k+1] - col_off[k] 或 (first arena offset) - col_off[21] 断言等于预期。
+/// v15：每 lean 列的字节长度 = lean_rows × stride[k]（21 列；全 Full 帧 lean_rows = 节点数）。
+/// 读到 col_off[k+1] - col_off[k] 或 (first arena offset) - col_off[20] 断言等于预期。
+/// 列语义对调防护：stride 表按 v15 列序硬编码——列序对调会在此炸（golden 抓不住语义对调）。
 #[test]
-fn blob_column_lengths_match_node_count_times_stride() {
+fn blob_column_lengths_match_lean_rows_times_stride() {
     let blob = build_blob(&frame(&[
         mesh_node(0, None, 0.0, 0.0, 1.0, 1.0),
         mesh_node(1, None, 2.0, 2.0, 3.0, 3.0),
@@ -1364,20 +1427,24 @@ fn blob_column_lengths_match_node_count_times_stride() {
     let node_count = u32::from_le_bytes(blob[8..12].try_into().unwrap()) as usize;
     assert_eq!(node_count, 2, "2 render nodes");
 
-    let strides: [usize; 22] = [
-        8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24,
+    // v15 lean 列 stride（序 = LEAN_COLUMNS）：
+    //   node_id 8, parent_id 8, visible 1, alpha 4, sort_key 4, mask 4,
+    //   m_a..m_ty 4×6, payload_kind 1, mesh_off 4, mesh_len 4, path_idx 4,
+    //   program 1, change_level 1, reuse_key 4, mount_id 8, fat_off 4
+    let strides: [usize; 21] = [
+        8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 1, 4, 8, 4,
     ];
-    // column offsets 从 header byte 12 开始
-    let mut col_off = [0usize; 22];
-    for k in 0..22 {
+    // column offsets 从 header byte 16 开始（magic/version/node_count/skip_count 之后）
+    let mut col_off = [0usize; 21];
+    for k in 0..21 {
         col_off[k] =
-            u32::from_le_bytes(blob[12 + k * 4..12 + k * 4 + 4].try_into().unwrap()) as usize;
+            u32::from_le_bytes(blob[16 + k * 4..16 + k * 4 + 4].try_into().unwrap()) as usize;
     }
     let arena_off = u32::from_le_bytes(blob[100..104].try_into().unwrap()) as usize;
 
-    for k in 0..22 {
+    for k in 0..21 {
         let start = col_off[k];
-        let end = if k < 21 { col_off[k + 1] } else { arena_off };
+        let end = if k < 20 { col_off[k + 1] } else { arena_off };
         let actual_len = end - start;
         let expected = node_count * strides[k];
         assert_eq!(
@@ -1386,4 +1453,64 @@ fn blob_column_lengths_match_node_count_times_stride() {
             k, actual_len, expected, node_count, strides[k]
         );
     }
+}
+
+/// v15 带宽断言（列级增量的核心收益）：全 Skip 稳态帧每行只花 16B——
+/// blob 总长 = header(132) + clip(4) + path(4) + fat(0) + 16×n。
+/// v14 同场景是 128B header + 512B×n（其中 440B 是恒零胖列）。
+#[test]
+fn v15_all_skip_frame_costs_sixteen_bytes_per_row() {
+    let mk = |id: u64| {
+        let mut n = mesh_node(id, None, 0.0, 0.0, 5.0, 5.0);
+        n.change_level = ChangeLevel::Skip;
+        n
+    };
+    const N: usize = 100;
+    let nodes: Vec<_> = (0..N as u64).map(mk).collect();
+    let blob = build_blob(&frame(&nodes));
+    assert_eq!(
+        blob.len(),
+        132 + 4 + 4 + N * SKIP_ENTRY_SIZE,
+        "全 Skip 帧字节预算（132 header + 8 空 arena 表 + 16×{N}）"
+    );
+    let view = TestView::parse(&blob);
+    assert_eq!(view.skip_entry_count(), N, "全部行进 skip 段");
+    assert_eq!(view.lean_count(), 0, "SOA 零行");
+    for s in 0..N {
+        let (id, _rk, flags) = view.skip_entry(s);
+        assert_eq!(id, s as u64);
+        assert_eq!(flags, 0, "render Skip 行 flags=0（非 parked）");
+    }
+}
+
+/// v15 Header 行带宽：21 lean 列 stride 合计 84B/行（无 mesh arena、无胖块时）。
+#[test]
+fn v15_header_row_lean_stride_is_eighty_four_bytes() {
+    let mut h = mesh_node(0, None, 0.0, 0.0, 5.0, 5.0);
+    h.change_level = ChangeLevel::Header;
+    let blob = build_blob(&frame(&[h]));
+    let view = TestView::parse(&blob);
+    assert_eq!(view.lean_count(), 1);
+    // lean 段 = mesh_arena_off - col_off[0] = 84B（Header 无 mesh，arena 空）。
+    let lean_bytes = view.mesh_arena_off - view.col_off[COL_NODE_ID];
+    assert_eq!(lean_bytes, 84, "lean 21 列 stride 合计 84B/行");
+    assert_eq!(
+        blob.len(),
+        132 + 84 + 4 + 4,
+        "Header 单行帧 = header 132 + lean 84 + clip 4 + path 4"
+    );
+}
+
+/// v15 mount_id 列存在性锚点（C8 world-space 子树锚的行标记；render 接线前恒 0）。
+#[test]
+fn v15_mount_id_column_defaults_zero() {
+    let blob = build_blob(&frame(&[mesh_node(0, None, 0.0, 0.0, 1.0, 1.0)]));
+    let view = TestView::parse(&blob);
+    let o = view.col_off[COL_MOUNT_ID];
+    assert_eq!(
+        u64::from_le_bytes(view.buf[o..o + 8].try_into().unwrap()),
+        0,
+        "mount_id 列在 v15 落位（render 侧接线前恒 0）"
+    );
+    assert_eq!(view.node_id(0), 0, "lean node_id 访问器仍按列序读");
 }

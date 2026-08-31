@@ -202,18 +202,18 @@ namespace Ikat
             // FrameBlob 只解析 _frameBuf 前 _lastFrameLen 字节；Rent 超长部分是垃圾。
             var blob = new FrameBlob(_frameBuf);
             if (!blob.IsValid) { sb.AppendLine($"(blob invalid magic/version, len={_lastFrameLen})"); return sb.ToString(); }
-            sb.AppendLine($"[Blob] nodes={blob.NodeCount}");
+            sb.AppendLine($"[Blob] nodes={blob.NodeCount} (lean={blob.LeanCount} skip={blob.SkipCount})");
             sb.AppendLine("  i    nodeId   mask  pure  Mtx    Mty    program  meshBBox");
-            for (int i = 0; i < blob.NodeCount; i++)
+            for (int i = 0; i < blob.LeanCount; i++)
             {
                 if (!blob.Visible(i)) continue;
                 // 只 dump 有 mesh 的节点（PayloadKind=1），减少噪音
                 if (blob.PayloadKind(i) != 1) continue;
                 float mtx = blob.Mtx(i), mty = blob.Mty(i);
                 bool pure = blob.IsPureTranslation(i);
-                byte level = blob.ChangeLevel(i);  // 0=Skip 1=Header 2=Full
+                byte level = blob.ChangeLevel(i);  // 1=Header 2=Full（Skip 在 skip 段）
                 uint mask = blob.MaskContext(i);
-                // 读 mesh bbox：仅 Full 节点 mesh_off/len>0（Skip/Header 占位 0，读 arena 开头是垃圾）
+                // 读 mesh bbox：仅 Full 节点 mesh_off/len>0（Header 占位 0，读 arena 开头是垃圾）
                 string bbox;
                 uint meshLen = blob.ReadMeshLenRaw(i);
                 if (meshLen == 0)
@@ -233,6 +233,10 @@ namespace Ikat
                 }
                 sb.AppendLine($"  {i,3} {blob.NodeId(i),8} m={mask,3} {(pure?"P":"T")} ({mtx,6:F0},{mty,6:F0}) prog={blob.Program(i)} lv={level} mb={bbox}");
             }
+            // skip 段摘要（v15：Skip 行 + parked keepalive）。
+            int parkedCount = 0;
+            for (int s = 0; s < blob.SkipCount; s++) if (blob.SkipParked(s)) parkedCount++;
+            sb.AppendLine($"  [skip segment] count={blob.SkipCount} (parked={parkedCount})");
             // clip 表：overflow:auto 容器的 mask_context 是否进表（Unity 据此设 _ClipBox）
             sb.AppendLine($"  [clip table] count={blob.ClipCount}");
             for (int c = 0; c < blob.ClipCount; c++)
