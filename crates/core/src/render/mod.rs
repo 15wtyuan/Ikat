@@ -587,6 +587,41 @@ fn own_opacity(scene: &Scene, n: &crate::scene::node::Node) -> f32 {
         .unwrap_or(n.style.opacity)
 }
 
+/// 累积渲染隐藏（世界锚点出屏）：hidden = 祖先任一 render_hidden 或自身——CSS
+/// `visibility:hidden` 的继承语义。世界锚点隐藏的是整棵锚定子树（血条=容器+fill+文字），
+/// 只看自身标志会留下「容器背景没了、子节点裸奔」的半隐状态。返回表同 accumulate_alpha
+/// （capacity+1，1 基索引；孤儿兜底 = 自身标志）。
+fn accumulate_render_hidden(scene: &Scene) -> Vec<bool> {
+    let cap = scene.nodes.capacity();
+    let mut hidden: Vec<bool> = vec![false; cap + 1];
+    let mut visited: Vec<bool> = vec![false; cap + 1];
+    for root in scene.roots.clone() {
+        hidden_rec(scene, root, false, &mut hidden, &mut visited);
+    }
+    for n in scene.nodes.values() {
+        if !visited[n.id.index()] {
+            hidden[n.id.index()] = n.render_hidden;
+        }
+    }
+    hidden
+}
+
+fn hidden_rec(
+    scene: &Scene,
+    id: NodeId,
+    parent_hidden: bool,
+    hidden: &mut [bool],
+    visited: &mut [bool],
+) {
+    let node = scene.get_live(id, "render/hidden_rec");
+    let acc = parent_hidden || node.render_hidden;
+    hidden[id.index()] = acc;
+    visited[id.index()] = true;
+    for c in node.children.clone() {
+        hidden_rec(scene, c, acc, hidden, visited);
+    }
+}
+
 pub fn build_render_nodes(
     scene: &Scene,
     fonts: &FontTable,
@@ -638,6 +673,8 @@ pub fn build_render_nodes_cached(
     // 累积 alpha 预计算（父 opacity 逐层乘入子）：RenderNode.alpha 存累积值，后端画时直接用。
     // 主循环是平铺遍历（slotmap 序），父未必先于子，故单独 DFS 一遍把每节点累积值算好。
     let alphas = accumulate_alpha(scene);
+    // 累积渲染隐藏同款预计算（继承语义，见 accumulate_render_hidden）。
+    let hiddens = accumulate_render_hidden(scene);
     // box-shadow outer 阴影合成 RenderNode 追踪：(primary node_id, outer 阴影合成 node_id)。
     // inset 阴影不经此表——由 propagate_text_sub_page_sort_keys 按 tag 字节自动收集。
     let mut back_layer_pairs: Vec<(u64, u64)> = Vec::new();
@@ -685,10 +722,11 @@ pub fn build_render_nodes_cached(
             continue;
         }
         let alpha = alphas[n.id.index()];
+        let visible = !hiddens[n.id.index()];
         // —— A2 增量：输入指纹命中 → 整段复用上帧产物（含合成层与配对追踪）。
         // 指纹输入枚举见 dirty::render_input_fp；跳过 atlas ensure（atlas 只增不重排，
         // 缓存帧已 ensure 过，字形槽永不过期）。
-        let fp = dirty::render_input_fp(n, scene, alpha, res_gen, frame_no);
+        let fp = dirty::render_input_fp(n, scene, alpha, visible, res_gen, frame_no);
         if let Some(entry) = cache.entries.get(&n.id) {
             if entry.input_fp == fp {
                 cache.hits += 1;
@@ -723,6 +761,7 @@ pub fn build_render_nodes_cached(
             &mut back_layer_pairs,
             true,
             alpha,
+            visible,
         );
         // 产物入缓存：该节点产出的全部 RenderNode（含合成层）+ 配对追踪 + primary 下标。
         let emitted = nodes[before..].to_vec();
@@ -800,13 +839,18 @@ pub fn build_render_nodes_cached(
             if crate::scroll::effective(n.style.overflow_y, s.content_size.1, s.viewport_size.1) {
                 if let Some(r) = crate::scroll::v_thumb_rect(scene, nid) {
                     let thumb_id = nid.0 | crate::scroll::V_THUMB_FLAG;
-                    nodes.push(thumb_render_node(thumb_id, r, max_sort + 1));
+                    let mut tn = thumb_render_node(thumb_id, r, max_sort + 1);
+                    // 滚动容器继承隐藏（visibility 语义）→ thumb 一并隐藏。
+                    tn.visible &= !hiddens[nid.index()];
+                    nodes.push(tn);
                 }
             }
             if crate::scroll::effective(n.style.overflow_x, s.content_size.0, s.viewport_size.0) {
                 if let Some(r) = crate::scroll::h_thumb_rect(scene, nid) {
                     let thumb_id = nid.0 | crate::scroll::H_THUMB_FLAG;
-                    nodes.push(thumb_render_node(thumb_id, r, max_sort + 1));
+                    let mut tn = thumb_render_node(thumb_id, r, max_sort + 1);
+                    tn.visible &= !hiddens[nid.index()];
+                    nodes.push(tn);
                 }
             }
         }
@@ -849,6 +893,7 @@ pub fn build_render_nodes_cached(
                 &mut back_layer_pairs,
                 false,
                 alphas[nid.index()],
+                !hiddens[nid.index()],
             );
             for rn in &mut nodes[start..] {
                 rn.sort_key = popup_counter;
@@ -1897,10 +1942,12 @@ fn render_one_node(
     back_layer_pairs: &mut Vec<(u64, u64)>,
     register_id_map: bool,
     alpha: f32,
+    visible: bool,
 ) {
     let anim = scene.anim.get(n.id);
     // 运行时渲染隐藏（世界锚点出屏）：本节点全部渲染行 visible=0（后端保留 GO 隐藏）。
-    let visible = !n.render_hidden;
+    // visible 是累积值（祖先任一 render_hidden 即整子树隐藏，visibility:hidden 继承语义），
+    // 由调用方从 accumulate_render_hidden 表取。
     let wm = scene
         .world_transforms
         .get(n.id.index())

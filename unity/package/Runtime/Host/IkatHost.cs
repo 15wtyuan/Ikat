@@ -98,6 +98,17 @@ namespace Ikat
         /// <summary>Stage 原始句柄（internal——同程序集 backend / Driver / InputCollector 可见）。</summary>
         internal IntPtr StagePtr => (IntPtr)_stage;
 
+        /// <summary>
+        /// 运行时渲染隐藏开关（世界锚点出屏/相机背后自动隐藏）。与 display:none 正交——
+        /// 不动布局/命中/子树；visible=false 后端保留镜像对象仅隐藏（MirrorPool SetActive(false)，
+        /// 不销毁）。返回 0=成功；-1=stage 已释放或节点不 live（调用方可据此清理锚点登记）。
+        /// </summary>
+        internal int SetNodeRenderVisible(ulong nodeId, bool visible)
+        {
+            if (_stage == null) return -1;
+            return Native.ikat_stage_set_node_visible(_stage, nodeId, visible ? (byte)1 : (byte)0);
+        }
+
         /// <summary>注入的引擎后端（Driver 可拿回去调引擎特定方法，如 UnityIkatBackend.NativeHost）。</summary>
         public IkatBackend Backend => _backend;
 

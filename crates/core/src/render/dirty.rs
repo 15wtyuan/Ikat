@@ -39,7 +39,16 @@ fn never_cache_kind(kind: NodeKind) -> bool {
 /// - `res_gen`（宿主资源代数）：image_sizes / 字体注册表变更全局失效。
 /// - `rich_text_block` 位：容器臂选择（折 inline flow vs 常规子树）。
 /// - `image_srcs`：Image intrinsic 几何源（set_src 也 bump version，双保险）。
-pub fn render_input_fp(n: &Node, scene: &Scene, alpha: f32, res_gen: u64, frame_no: u64) -> u64 {
+/// - `visible`（累积渲染隐藏，祖先任一 render_hidden 即真）：visibility 继承语义下
+///   后代行的 visible 位随祖先翻转，必须进键防缓存陈旧。
+pub fn render_input_fp(
+    n: &Node,
+    scene: &Scene,
+    alpha: f32,
+    visible: bool,
+    res_gen: u64,
+    frame_no: u64,
+) -> u64 {
     let mut h = DefaultHasher::new();
     if never_cache_kind(n.kind) {
         // 控件壳：每帧唯一值（frame_no 单调）→ 永不命中。
@@ -48,7 +57,7 @@ pub fn render_input_fp(n: &Node, scene: &Scene, alpha: f32, res_gen: u64, frame_
         return h.finish();
     }
     n.render_input_version.hash(&mut h);
-    n.render_hidden.hash(&mut h);
+    visible.hash(&mut h);
     ((n.layout_rect.w * 4.0).round() as i64).hash(&mut h);
     ((n.layout_rect.h * 4.0).round() as i64).hash(&mut h);
     n.rich_text_block.hash(&mut h);

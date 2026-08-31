@@ -603,6 +603,89 @@ namespace Ikat
         /// </summary>
         public string DumpMirrorPoolState() => _backend != null ? _backend.DumpMirrorState() : "backend null";
 
+        // ── 世界锚点（投影路世界 UI）────────────────────────────────────────────
+        // 业务持 3D 世界点 + 观察相机，Driver 每帧 Step 前把 worldPos 投影到屏幕 →
+        // ScreenToDesign 换算设计坐标写 node.Transform.Position（Step 前写当帧生效——
+        // flush seam 在 Step 内）。出屏/相机背后自动隐藏（渲染层开关，与 display:none
+        // 正交：布局/命中不动）。锚点按 NodeId 登记：重复 Set 同一节点 = 原位更新
+        // （跟随移动实体：每帧重设 worldPos 即可）。
+        struct WorldAnchor
+        {
+            public Node Node;
+            public Camera Cam;       // null = 每帧取 Camera.main
+            public Vector3 WorldPos;
+            public Vector2 OffsetPx; // 设计 px，叠加在投影点右上（y-down 坐标系 → 负 y = 上移）
+        }
+
+        readonly Dictionary<ulong, WorldAnchor> _worldAnchors = new();
+
+        /// <summary>
+        /// 把节点锚到一个 3D 世界点：每帧（Step 前）经 camera 把 worldPos 投到屏幕 →
+        /// 换算设计坐标写入 node.Transform.Position + 叠加 offsetPx。节点出屏或位于
+        /// 相机背后时自动隐藏（纯渲染，不动布局/命中），回屏自动恢复显示。
+        /// Position 是局部坐标——节点须直挂 stage 根（或业务自行补偿父链偏移）。
+        /// camera null = Camera.main。节点已销毁时锚点自动除名。
+        /// </summary>
+        public void SetWorldAnchor(Node node, Camera camera, Vector3 worldPos, Vector2 offsetPx)
+        {
+            if (node == null) throw new ArgumentNullException(nameof(node));
+            _worldAnchors[node._id] = new WorldAnchor
+            {
+                Node = node, Cam = camera, WorldPos = worldPos, OffsetPx = offsetPx,
+            };
+        }
+
+        /// <summary>
+        /// 解除世界锚定（节点保持当前 transform 与显示态——隐藏态不回卷，销毁/回收路径
+        /// 自理；需要恢复显示走再次 SetWorldAnchor 或留在屏内即自动恢复）。
+        /// 未锚定节点为 no-op。
+        /// </summary>
+        public void ClearWorldAnchor(Node node)
+        {
+            if (node != null) _worldAnchors.Remove(node._id);
+        }
+
+        /// <summary>世界锚点登记数（压测/诊断读数）。</summary>
+        public int WorldAnchorCount => _worldAnchors.Count;
+
+        /// <summary>
+        /// 锚点投影遍历（LateUpdate 调，Step 前）。屏内：写 Position + 确保显示；
+        /// 屏外/背后：只切渲染隐藏（Position 冻结在最后位置，不动 transform 省 churn）。
+        /// core 节点已死（rc≠0）→ 锚点自动除名，防死登记逐帧空转。
+        /// </summary>
+        void UpdateWorldAnchors()
+        {
+            List<ulong> dead = null;
+            foreach (var kv in _worldAnchors)
+            {
+                var a = kv.Value;
+                var cam = a.Cam != null ? a.Cam : Camera.main;
+                if (cam == null) continue; // 无相机可投影：保持现状（不闪隐）
+                // WorldToViewportPoint：y-up 0..1；z>0 = 在相机前方（背后 z<0）。
+                Vector3 vp = cam.WorldToViewportPoint(a.WorldPos);
+                bool onScreen = vp.z > 0f
+                    && vp.x >= 0f && vp.x <= 1f && vp.y >= 0f && vp.y <= 1f;
+                int rc;
+                if (onScreen)
+                {
+                    // 底左原点屏幕系（ScreenToDesign 输入约定），y 不翻——vp.y 本就 y-up。
+                    var screen = new Vector2(vp.x * Screen.width, vp.y * Screen.height);
+                    var design = IkatInputCollector.ScreenToDesign(
+                        screen, _adaptScale, _adaptOffX, _adaptOffYTopDown, Screen.height);
+                    a.Node.Transform.Position = new IkatVector2(
+                        design.x + a.OffsetPx.x, design.y + a.OffsetPx.y);
+                    rc = _host.SetNodeRenderVisible(kv.Key, true);
+                }
+                else
+                {
+                    rc = _host.SetNodeRenderVisible(kv.Key, false);
+                }
+                if (rc != 0) (dead ??= new List<ulong>()).Add(kv.Key);
+            }
+            if (dead != null)
+                foreach (ulong id in dead) _worldAnchors.Remove(id);
+        }
+
         void LateUpdate()
         {
             if (_host == null) return;
@@ -622,6 +705,9 @@ namespace Ikat
             _backend.InputEnabled = IkatStageHub.DriverCount <= 1
                 || IkatStageHub.RouteInput(this) == this;
             _backend.SetSortBase(_sortBase);
+
+            // 世界锚点投影（Step 前：Transform 写在 flush seam 之前才当帧生效）。
+            if (_worldAnchors.Count > 0) UpdateWorldAnchors();
 
             // host.Step 内含：backend.CollectInput → tick → borrow_frame → backend.SyncFrame
             // → borrow_events → demuxer.Pump。输入采集不再 Driver 直调 InputCollector——

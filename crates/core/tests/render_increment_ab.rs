@@ -214,3 +214,34 @@ fn render_hidden_toggles_visibility_without_layout_change() {
     full.set_node_render_hidden(body, false).unwrap();
     assert_eq!(inc.render_json(), full.render_json(), "恢复帧 A/B 全等");
 }
+
+/// render_hidden 继承（CSS visibility:hidden 语义）：隐藏祖先 → 整子树全部渲染行
+/// visible=0（世界锚点隐藏的是整棵锚定子树——血条 = 容器 + fill + 文字，只藏容器
+/// 背景会留「子节点裸奔」半隐态）。藏 root = 全帧无任何可见行；恢复即整树复明。
+#[test]
+fn render_hidden_is_inherited_down_the_subtree() {
+    let mut inc = make_stage();
+    let mut full = make_stage();
+    full.incremental_render = false;
+    let _ = inc.render_json();
+    let _ = full.render_json();
+
+    let root = {
+        let s = inc.scene.as_ref().unwrap();
+        s.roots[0]
+    };
+    inc.set_node_render_hidden(root, true).unwrap();
+    full.set_node_render_hidden(root, true).unwrap();
+    let j1 = inc.render_json();
+    let j2 = full.render_json();
+    assert_eq!(j1, j2, "整树隐藏帧 A/B 全等（继承传播进指纹）");
+    assert!(
+        !j1.contains("\"visible\": true"),
+        "祖先隐藏必须传播整子树（增量路不得留陈旧可见行）"
+    );
+
+    inc.set_node_render_hidden(root, false).unwrap();
+    full.set_node_render_hidden(root, false).unwrap();
+    let j3 = inc.render_json();
+    assert!(j3.contains("\"visible\": true"), "恢复后子树重新可见");
+}
