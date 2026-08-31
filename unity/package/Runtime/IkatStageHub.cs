@@ -32,7 +32,11 @@ namespace Ikat
         const string CameraName = "IkatUICamera";
 
         static readonly List<(IkatStageDriver driver, int order, int seq)> s_drivers = new();
-        static readonly Dictionary<int, SharedCamera> s_cameras = new(); // scene handle → 引用计数
+        // 键 = Scene 本体（IEquatable，按内部 handle 等值比较 + GetHashCode）——不取
+        // .handle 转 int：新 Unity（6.2+）Scene.handle 返 SceneHandle 且隐式转 int 是
+        // error 级 obsolete（CS0619），其替代 GetRawData() 旧版（2021 工程）又不存在；
+        // Scene 作键全版本通用且语义同源。
+        static readonly Dictionary<UnityEngine.SceneManagement.Scene, SharedCamera> s_cameras = new();
         static int s_nextSeq; // 注册序号：order 同值时的稳定 tiebreaker（List.Sort 不稳定）
 
         /// <summary>本会话已注册的 Driver 数。</summary>
@@ -81,7 +85,7 @@ namespace Ikat
         /// </summary>
         public static Camera AcquireCamera(Component caller)
         {
-            int scene = caller.gameObject.scene.handle;
+            var scene = caller.gameObject.scene;
             if (!s_cameras.TryGetValue(scene, out var shared) || shared.Camera == null)
             {
                 Camera cam = FindExisting(caller.gameObject.scene);
@@ -96,7 +100,7 @@ namespace Ikat
         /// <summary>释放共享相机引用；本场景最后一个引用释放时销毁相机。</summary>
         public static void ReleaseCamera(Component caller)
         {
-            int scene = caller.gameObject.scene.handle;
+            var scene = caller.gameObject.scene;
             if (!s_cameras.TryGetValue(scene, out var shared)) return;
             shared.Refs--;
             if (shared.Refs <= 0)

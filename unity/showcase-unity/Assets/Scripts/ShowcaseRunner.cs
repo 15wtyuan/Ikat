@@ -792,7 +792,12 @@ public class ShowcaseRunner : MonoBehaviour
     string StageCensusText()
     {
         int cams = 0;
+#if UNITY_2023_1_OR_NEWER
+        // FindObjectsByType：FindObjectsOfType 在新 Unity 是 obsolete 警告源（2023.1+ 替代）。
+        foreach (var c in FindObjectsByType<Camera>(UnityEngine.FindObjectsSortMode.None))
+#else
         foreach (var c in FindObjectsOfType<Camera>())
+#endif
             if (c.name == "IkatUICamera") cams++;
         return "Driver " + IkatStageHub.DriverCount + " · 相机 " + cams;
     }
