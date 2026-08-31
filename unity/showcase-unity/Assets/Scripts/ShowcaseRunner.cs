@@ -32,6 +32,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
         ("nav-fx", "effects"),
+        ("nav-world", "world"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -74,10 +75,47 @@ public class ShowcaseRunner : MonoBehaviour
     readonly System.Collections.Generic.List<(Container slot, GameObject go)> _fxBindings = new();
     bool _fxPaused;
 
+    // ── world 页：世界锚点（投影路 3D 跟随 · #109 B）──
+    // 场景 Main Camera（depth -1 天幕）前轨道运行三块立方体；血条/跳字是普通 UI 节点，
+    // Driver 每帧把立方体头顶世界点投影成屏幕点 → 设计坐标写 node.Transform.Position
+    //（锚点模板根 position:absolute + left/top 0 直挂页根 → 布局位 (0,0)，transform 即
+    // 绝对坐标）。出屏/相机背后由 driver 自动切换渲染隐藏（visibility 继承语义，整子树）。
+    // 竖轨立方体周期性扫出屏幕上下缘——血条整体消失/恢复即自动隐藏证据。
+    sealed class WorldCube
+    {
+        internal Transform Tr;
+        internal Container Bar, Fill;
+        internal Vector3 Center;      // 轨道圆心（立方体局部系）
+        internal float Radius, Speed, Phase, Size;
+        internal bool Vertical;       // true = 竖直圆轨（会扫出屏），false = 水平地面轨
+    }
+    sealed class WorldDamage
+    {
+        internal Container Node;
+        internal int Cube;
+        internal float Age, DriftX;   // 上浮由锚点 offset 推进；渐隐走 TweenChannel.Opacity
+    }
+    // (圆心, 半径, 角速度, 初相, 尺寸, 竖直轨)。相机默认 (0,1,-10) 平视 +z：fov60 在
+    // z≈3 深度处半高 ≈ tan30°×13 ≈ 7.5——竖轨半径 8.5 必出上下缘，水平轨全期在屏内。
+    static readonly (Vector3 c, float r, float w, float p, float s, bool v)[] WORLD_CUBES =
+    {
+        (new Vector3(0f, 0f, 2.5f), 2.2f, 0.9f, 0.0f, 0.7f, false),
+        (new Vector3(2f, 0f, 3.5f), 3.6f, -0.6f, 2.1f, 0.9f, false),
+        (new Vector3(3f, 1.5f, 3f), 8.5f, 0.45f, 4.2f, 0.55f, true),
+    };
+    const float WorldDmgLife = 1.4f;
+    GameObject _worldStageRoot;
+    Camera _worldCam;
+    readonly System.Collections.Generic.List<WorldCube> _worldCubes = new();
+    readonly System.Collections.Generic.List<WorldDamage> _worldDmgs = new();
+    bool _worldHpLow;
+    int _worldDmgRound;
+
     void Update()
     {
         if (_figureSpin != null)
             _figureSpin.Rotate(Vector3.up, FigureSpinDegPerSec * Time.deltaTime, Space.Self);
+        UpdateWorldStage();
     }
 
     void Start()
@@ -109,6 +147,7 @@ public class ShowcaseRunner : MonoBehaviour
         if (_shown == page) return;
         TeardownCharacterStage();   // 上一页若是 character：解绑 NativeHost + 销毁模型
         TeardownEffectsStage();     // 上一页若是 effects：解绑全部粒子槽 + 销毁实例
+        TeardownWorldStage();       // 上一页若是 world：清锚点登记 + 销毁 3D 立方体舞台
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -127,6 +166,7 @@ public class ShowcaseRunner : MonoBehaviour
         WireListViews(_current, page);
         WireCharacterStage(_current, page);
         WireEffectsStage(_current, page);
+        WireWorldStage(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -551,6 +591,139 @@ public class ShowcaseRunner : MonoBehaviour
         }
         _fxBindings.Clear();
         _fxPaused = false;
+    }
+
+    // ── world 页 3D 舞台 + 世界锚点接线（#109 B）──
+    // 立方体 = GameObject.CreatePrimitive（无外部资源依赖）；观察相机 = 场景 Main Camera
+    //（depth -1 天幕层，UI 相机 clearFlags=Depth 叠上——宿主游戏的标准叠加形态）。
+    // 血条/跳字从 HTML 模板实例化、AddChild 到页根（absolute + left/top 0 → 布局位 (0,0)，
+    // 锚点写的 Transform.Position 即绝对设计坐标）。
+    void WireWorldStage(Container page, string pageName)
+    {
+        if (pageName != "world") return;
+        if (!page.TryGet<Button>("btn-wp-hp", out var hpBtn)
+            || !page.TryGet<TextElement>("wp-hp-read", out var hpRead)
+            || !page.TryGet<Button>("btn-wp-dmg", out var dmgBtn)
+            || !page.TryGet<TextElement>("wp-dmg-read", out var dmgRead)
+            || !page.TryGet<TextElement>("wp-count-read", out var countRead))
+        {
+            Debug.LogWarning("[Showcase] world page controls missing in HTML");
+            return;
+        }
+        _worldCam = Camera.main;
+        if (_worldCam == null)
+        {
+            Debug.LogWarning("[Showcase] world stage needs Camera.main (scene Main Camera)");
+            return;
+        }
+        _worldStageRoot = new GameObject("IkatWorldStage");
+        var barTpl = page.GetTemplate("wp-bar");
+        foreach (var (c, r, w, p, s, v) in WORLD_CUBES)
+        {
+            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.transform.SetParent(_worldStageRoot.transform, false);
+            cube.transform.localScale = Vector3.one * s;
+            var bar = barTpl.Instantiate();
+            page.AddChild(bar);   // 直挂页根：absolute 脱流不占布局，DOM 序最后 = 画在面板上
+            _worldCubes.Add(new WorldCube
+            {
+                Tr = cube.transform, Bar = bar, Fill = bar.Get<Container>("wp-fill"),
+                Center = c, Radius = r, Speed = w, Phase = p, Size = s, Vertical = v,
+            });
+        }
+
+        // 扣血/回血：红条 30% ↔ 100% 翻转 + 读数翻转（读数翻转 = 事件路由证据）。
+        hpBtn.Clicked += () =>
+        {
+            _worldHpLow = !_worldHpLow;
+            foreach (var cube in _worldCubes)
+                cube.Fill.Style.Width = Ikat.Length.Px(_worldHpLow ? 36f : 120f);
+            hpRead.TextContent = _worldHpLow ? "血量 30%（扣血）" : "血量 100%（回血）";
+        };
+
+        // 跳字：每块头顶一枚伤害数字——上浮由每帧锚点 offset 推进（transform 归锚点管），
+        // 渐隐走 TweenChannel.Opacity（业务侧 TweenBuilder × 锚点组合范式，票面拍板不做
+        // 框架 helper）。到期 CallLater Dispose；锚点随节点销毁自动除名（driver rc≠0 自清）。
+        dmgBtn.Clicked += () =>
+        {
+            _worldDmgRound++;
+            var dmgTpl = page.GetTemplate("wp-dmg");
+            for (int i = 0; i < _worldCubes.Count; i++)
+            {
+                var node = dmgTpl.Instantiate();
+                node.Get<TextElement>("wp-dmg-text").TextContent = "-" + UnityEngine.Random.Range(80, 999);
+                page.AddChild(node);
+                // 底层 opacity 先落 0：anim override 播放期优先（1→0），完成后 override
+                // 清除回落 style 0——防 CallLater 销毁前的一帧回弹闪现。
+                node.Style.Opacity = 0f;
+                node.Tween(TweenChannel.Opacity)
+                    .From(1f).To(0f)
+                    .Duration(WorldDmgLife)
+                    .Start();
+                var dmg = new WorldDamage { Node = node, Cube = i, DriftX = UnityEngine.Random.Range(-24f, 24f) };
+                _worldDmgs.Add(dmg);
+                Container captured = node;
+                _driver.Context.CallLater(WorldDmgLife, () => captured.Dispose());
+            }
+            dmgRead.TextContent = "已发射 " + _worldDmgRound + " 轮（上浮渐隐 " + WorldDmgLife + "s）";
+        };
+
+        countRead.TextContent = "锚点 " + _worldCubes.Count + " · 轨道跟随中";
+        Debug.Log($"[Showcase] world stage: {_worldCubes.Count} cubes orbiting, anchors wired");
+    }
+
+    void TeardownWorldStage()
+    {
+        // 血条锚点显式解除（登记不随页面树销毁自动清——登记在 driver 上）；跳字锚点靠
+        // 节点销毁自动除名（node 已随页 Dispose，rc≠0 自清路径）。3D 舞台整根销毁。
+        foreach (var cube in _worldCubes)
+            if (cube.Bar != null) _driver.ClearWorldAnchor(cube.Bar);
+        _worldCubes.Clear();
+        _worldDmgs.Clear();
+        if (_worldStageRoot != null)
+        {
+            Destroy(_worldStageRoot);
+            _worldStageRoot = null;
+        }
+        _worldCam = null;
+        _worldHpLow = false;
+        _worldDmgRound = 0;
+    }
+
+    /// 轨道推进 + 锚点重投影（Update 每帧；SetWorldAnchor 同节点 = 原位更新，跟随移动实体）。
+    void UpdateWorldStage()
+    {
+        if (_worldStageRoot == null || _worldCubes.Count == 0) return;
+        float t = Time.time;
+        for (int i = 0; i < _worldCubes.Count; i++)
+        {
+            var c = _worldCubes[i];
+            float a = c.Phase + t * c.Speed;
+            Vector3 p = c.Vertical
+                ? new Vector3(c.Center.x + Mathf.Sin(a) * c.Radius, c.Center.y + Mathf.Cos(a) * c.Radius, c.Center.z)
+                : new Vector3(c.Center.x + Mathf.Sin(a) * c.Radius, c.Center.y, c.Center.z + Mathf.Cos(a) * c.Radius);
+            c.Tr.localPosition = p;
+            // 头顶世界点 = 立方体中心 + 上抬（半高 + 间隙）。血条 120px 宽 → offset x=-60 居中；
+            // y=-26 悬在头顶上方（design y-down，负 = 上移）。
+            _driver.SetWorldAnchor(c.Bar, _worldCam, p + Vector3.up * (c.Size * 0.5f + 0.35f),
+                new Vector2(-60f, -26f));
+        }
+        // 跳字跟随各自立方体：offset y 随 age 上浮；节点到期被 CallLater 销毁 → 靠
+        // IsDisposed 短路出列（锚点已由 driver rc≠0 自动除名）。
+        for (int i = _worldDmgs.Count - 1; i >= 0; i--)
+        {
+            var d = _worldDmgs[i];
+            if (d.Node.IsDisposed)
+            {
+                _worldDmgs.RemoveAt(i);
+                continue;
+            }
+            d.Age += Time.deltaTime;
+            var c = _worldCubes[d.Cube];
+            Vector3 head = c.Tr.localPosition + Vector3.up * (c.Size * 0.5f + 0.35f);
+            _driver.SetWorldAnchor(d.Node, _worldCam, head,
+                new Vector2(-30f + d.DriftX, -80f - d.Age * 70f));
+        }
     }
 
     /// 克隆源 controller 的 Idle 态 clip、剥掉根 path（""）的 position/rotation 曲线，
