@@ -77,10 +77,12 @@ namespace Ikat
 
         [Tooltip("挂共享资源宿主（多 Stage 共享字体驻留/glyph atlas/包池——per-Stage 固定成本降回一份）。" +
                  "on 时本 Driver 挂 IkatResourceHost.Shared（首个开启者懒建）；同宿主的 Driver 须用同一份字体清单（首个注册生效）。")]
-        [SerializeField] bool _useSharedHost;
+        // 缺省 true：多 Stage 就绪默认（单 Driver 自建 Shared 自用，语义不变）；场景缺序列化
+// 值时反序列化吃此初始化值（P5 后加字段的老场景正是此态）。
+        [SerializeField] internal bool _useSharedHost = true;
 
         [Tooltip("Stage 层序（小 = 底层，大 = 顶层；决定跨 Stage 渲染序与输入路由优先级）。同序按启用先后。")]
-        [SerializeField] int _stageOrder;
+        [SerializeField] internal int _stageOrder;
 
         [Tooltip("参与输入路由（off = 本 Stage 不收任何指针/键盘事件——world-space 舞台等纯展示 Stage 用）。")]
         [SerializeField] bool _inputEnabled = true;

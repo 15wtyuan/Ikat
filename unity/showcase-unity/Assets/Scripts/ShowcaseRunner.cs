@@ -33,6 +33,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-infra", "api-infra"),
         ("nav-fx", "effects"),
         ("nav-world", "world"),
+        ("nav-stress", "stress"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -112,11 +113,38 @@ public class ShowcaseRunner : MonoBehaviour
     bool _worldHpLow;
     int _worldDmgRound;
 
+    // ── world 页补件：地面 + 遮挡墙（ZTest 对照）+ 挂载名牌（C8）+ 双 Stage（A3/A4）──
+    GameObject _worldGround, _worldWall, _plateAnchor;
+    Container _plate;               // 挂载名牌节点（首次挂载时实例化）
+    bool _plateMounted;
+    IkatStageDriver _miniDriver;    // 运行时第二 Driver（共享相机/宿主 + 输入独占）
+    Container _miniPage;
+    TextElement _miniClockText;
+    float _miniSpawnTime;
+    int _probeClicks;
+
+    // ── stress 页：500 血条压测（blob v15 + 增量渲染 + 投影跟随 + 渲染隐藏）──
+    readonly System.Collections.Generic.List<Container> _stressBars = new();
+    bool _stressFollow, _stressHidden;
+
     void Update()
     {
         if (_figureSpin != null)
             _figureSpin.Rotate(Vector3.up, FigureSpinDegPerSec * Time.deltaTime, Space.Self);
         UpdateWorldStage();
+        UpdateStressFollow();
+        UpdateMiniClock();
+    }
+
+    /// stress 页 FPS 读数（右上角，仅压测页显示——driver _showFps 是全局字段，这里页级自制）。
+    void OnGUI()
+    {
+        if (_shown != "stress") return;
+        var style = new GUIStyle(GUI.skin.label) { fontSize = 26 };
+        style.normal.textColor = new Color32(0x5f, 0xb4, 0xd4, 0xff);
+        float fps = Time.smoothDeltaTime > 0f ? 1f / Time.smoothDeltaTime : 0f;
+        GUI.Label(new Rect(Screen.width - 420f, 64f, 400f, 40f),
+            $"FPS {fps:F0} · bars {_stressBars.Count} · {(_stressFollow ? "跟随" : "静止")}", style);
     }
 
     void Start()
@@ -148,7 +176,8 @@ public class ShowcaseRunner : MonoBehaviour
         if (_shown == page) return;
         TeardownCharacterStage();   // 上一页若是 character：解绑 NativeHost + 销毁模型
         TeardownEffectsStage();     // 上一页若是 effects：解绑全部粒子槽 + 销毁实例
-        TeardownWorldStage();       // 上一页若是 world：清锚点登记 + 销毁 3D 立方体舞台
+        TeardownWorldStage();       // 上一页若是 world：清锚点登记 + 销毁 3D 舞台/小窗
+        TeardownStressPage();       // 上一页若是 stress：清 500 锚点登记
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -168,6 +197,7 @@ public class ShowcaseRunner : MonoBehaviour
         WireCharacterStage(_current, page);
         WireEffectsStage(_current, page);
         WireWorldStage(_current, page);
+        WireStressPage(_current, page);
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
@@ -618,6 +648,15 @@ public class ShowcaseRunner : MonoBehaviour
             return;
         }
         _worldStageRoot = new GameObject("IkatWorldStage");
+        // 地面 + 遮挡墙：深度线索（透视缩放可辨）+ ZTest 对照（墙后的挂载名牌被挡、
+        // 投影路血条不受影响）。墙立在 1 号轨道与相机之间，立方体周期性从墙后经过。
+        _worldGround = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        _worldGround.transform.SetParent(_worldStageRoot.transform, false);
+        var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        wall.transform.SetParent(_worldStageRoot.transform, false);
+        wall.transform.localPosition = new Vector3(-2.6f, 1.6f, 0.4f);
+        wall.transform.localScale = new Vector3(2.6f, 3.2f, 0.3f);
+        _worldWall = wall;
         var barTpl = page.GetTemplate("wp-bar");
         foreach (var (c, r, w, p, s, v) in WORLD_CUBES)
         {
@@ -632,6 +671,12 @@ public class ShowcaseRunner : MonoBehaviour
                 Center = c, Radius = r, Speed = w, Phase = p, Size = s, Vertical = v,
             });
         }
+
+        // 挂载名牌的 3D 锚点：2 号立方体头顶，scale 0.004 把 design px 缩成世界单位。
+        _plateAnchor = new GameObject("PlateAnchor");
+        _plateAnchor.transform.SetParent(_worldCubes[1].Tr, false);
+        _plateAnchor.transform.localPosition = new Vector3(0f, 0.9f, 0f);
+        _plateAnchor.transform.localScale = Vector3.one * 0.004f;
 
         // 扣血/回血：红条 30% ↔ 100% 翻转 + 读数翻转（读数翻转 = 事件路由证据）。
         hpBtn.Clicked += () =>
@@ -671,7 +716,115 @@ public class ShowcaseRunner : MonoBehaviour
 
         countRead.TextContent = "锚点 " + _worldCubes.Count + " · 轨道跟随中";
         Debug.Log($"[Showcase] world stage: {_worldCubes.Count} cubes orbiting, anchors wired");
+
+        // ── C8 挂载名牌：挂到 2 号立方体头顶的 3D 变换（lazy 实例化；锚点 scale 0.004
+        //    把 design px 缩到世界单位——名牌 ~240px ≈ 0.96 世界单位，与立方体同量级）。──
+        if (page.TryGet<Button>("btn-wp-mount", out var mountBtn)
+            && page.TryGet<TextElement>("wp-mount-read", out var mountRead))
+        {
+            mountBtn.Clicked += () =>
+            {
+                if (!_plateMounted)
+                {
+                    if (_plate == null)
+                    {
+                        _plate = page.GetTemplate("wp-plate").Instantiate();
+                        page.AddChild(_plate);
+                    }
+                    _driver.BindWorldMount(_plate, _plateAnchor.transform);
+                    _plateMounted = true;
+                    mountRead.TextContent = "已挂载 2 号立方体（随远近缩放 · 墙后遮挡）";
+                }
+                else
+                {
+                    _driver.UnbindWorldMount(_plate);
+                    _plateMounted = false;
+                    mountRead.TextContent = "已解除（名牌回屏幕中央）";
+                }
+            };
+        }
+
+        // ── A3/A4 双 Stage：运行时拉起第二 Driver（共享相机/字体宿主 + 输入独占）。──
+        if (page.TryGet<Button>("btn-wp-stage", out var stageBtn)
+            && page.TryGet<TextElement>("wp-stage-read", out var stageRead))
+        {
+            stageBtn.Clicked += () =>
+            {
+                if (_miniDriver == null) SpawnMiniStage(stageRead);
+                else TeardownMiniStage(stageRead);
+            };
+            stageRead.TextContent = StageCensusText();
+        }
+
+        // ── 底层探针：与小窗同位（左下角）。小窗开启时点击被小窗独占（本读数不动），
+        //    关闭后恢复可点——输入独占路由的正反两态证据。──
+        if (page.TryGet<Button>("btn-wp-probe", out var probeBtn)
+            && page.TryGet<TextElement>("wp-probe-read", out var probeRead))
+        {
+            probeBtn.Clicked += () =>
+            {
+                _probeClicks++;
+                probeRead.TextContent = "点击 " + _probeClicks + " 次";
+            };
+        }
     }
+
+    /// 双 Stage 普查读数：Driver 数 + 场景内 IkatUICamera 数（共享 = 恒 1）。
+    string StageCensusText()
+    {
+        int cams = 0;
+        foreach (var c in FindObjectsOfType<Camera>())
+            if (c.name == "IkatUICamera") cams++;
+        return "Driver " + IkatStageHub.DriverCount + " · 相机 " + cams;
+    }
+
+    /// 拉起第二 Driver：inactive GO 上配好共享宿主/层序再激活（Awake 在 SetActive 时跑），
+    /// 加载同一 showcase 包 + 实例化 mini-hud 小窗。字体走共享宿主（A3：注册一次复用）。
+    void SpawnMiniStage(TextElement stageRead)
+    {
+        var go = new GameObject("IkatMiniStage");
+        go.SetActive(false);
+        var d = go.AddComponent<IkatStageDriver>();
+        d._useSharedHost = true;
+        d._stageOrder = 1;   // 高序：画在主 Stage 之上，输入探测优先
+        go.SetActive(true);
+        _miniDriver = d;
+        _miniSpawnTime = Time.time;
+        _miniPage = d.Instantiate("showcase", "mini-hud");
+        if (_miniPage != null)
+        {
+            _miniPage.TryGet<TextElement>("mh-clock", out _miniClockText);
+            if (_miniPage.TryGet<Button>("btn-mh", out var mb)
+                && _miniPage.TryGet<TextElement>("mh-read", out var mr))
+            {
+                int n = 0;
+                mb.Clicked += () => mr.TextContent = "点击 " + (++n) + " 次";
+            }
+        }
+        stageRead.TextContent = StageCensusText() + "（点小窗左下角试输入独占）";
+        Debug.Log("[Showcase] mini stage spawned: " + StageCensusText());
+    }
+
+    void TeardownMiniStage(TextElement stageRead)
+    {
+        if (_miniDriver == null) return;
+        Destroy(_miniDriver.gameObject);   // OnDestroy：hub 注销 + 相机引用释放 + host 释放
+        _miniDriver = null;
+        _miniPage = null;
+        _miniClockText = null;
+        stageRead.TextContent = StageCensusText();
+    }
+
+    /// 小窗时钟（每秒走）：本 Stage 独立 tick 的可见证据。按秒去重写，免逐帧 set_text。
+    void UpdateMiniClock()
+    {
+        if (_miniClockText == null || _miniPage == null) return;
+        int sec = (int)(Time.time - _miniSpawnTime);
+        if (sec == _lastMiniSec) return;
+        _lastMiniSec = sec;
+        _miniClockText.TextContent = string.Format("{0:00}:{1:00}", sec / 60, sec % 60);
+    }
+    int _lastMiniSec = -1;
 
     void TeardownWorldStage()
     {
@@ -681,11 +834,26 @@ public class ShowcaseRunner : MonoBehaviour
             if (cube.Bar != null) _driver.ClearWorldAnchor(cube.Bar);
         _worldCubes.Clear();
         _worldDmgs.Clear();
+        // 挂载名牌先解除（容器销毁 + 行回落屏幕路径），再随页树销毁节点。
+        if (_plateMounted && _plate != null) _driver.UnbindWorldMount(_plate);
+        _plateMounted = false;
+        _plate = null;
+        _plateAnchor = null;
+        // 小窗 Driver 整体销毁（hub 注销 + 相机引用释放——主相机存活）。
+        if (_miniDriver != null)
+        {
+            Destroy(_miniDriver.gameObject);
+            _miniDriver = null;
+        }
+        _miniPage = null;
+        _miniClockText = null;
         if (_worldStageRoot != null)
         {
-            Destroy(_worldStageRoot);
+            Destroy(_worldStageRoot);   // 连带 ground/wall/立方体/PlateAnchor
             _worldStageRoot = null;
         }
+        _worldGround = null;
+        _worldWall = null;
         _worldCam = null;
         _worldHpLow = false;
         _worldDmgRound = 0;
@@ -725,6 +893,95 @@ public class ShowcaseRunner : MonoBehaviour
             _driver.SetWorldAnchor(d.Node, _worldCam, head,
                 new Vector2(-30f + d.DriftX, -80f - d.Age * 70f));
         }
+    }
+
+    // ── stress 页：500 血条压测（blob v15 + 增量渲染 + 投影跟随 + 渲染隐藏）──
+    //
+    // 血条 = absolute+left/top:0 直挂页根：静止网格 = 一次性写 Transform.Position 摆位；
+    // 投影跟随 = 每帧 SetWorldAnchor 重投影（世界点绕相机前方的波浪面运动，出屏自动
+    // 整条隐藏——继承语义 + 后端保留对象不闪重建）。
+    void WireStressPage(Container page, string pageName)
+    {
+        if (pageName != "stress") return;
+        if (!page.TryGet<Button>("btn-st-make", out var makeBtn)
+            || !page.TryGet<Button>("btn-st-follow", out var followBtn)
+            || !page.TryGet<Button>("btn-st-hide", out var hideBtn)
+            || !page.TryGet<TextElement>("st-read", out var read))
+        {
+            Debug.LogWarning("[Showcase] stress page controls missing in HTML");
+            return;
+        }
+        read.TextContent = "未生成（点「生成 500 血条」）";
+
+        makeBtn.Clicked += () =>
+        {
+            foreach (var b in _stressBars) b.Dispose();
+            _stressBars.Clear();
+            var tpl = page.GetTemplate("st-bar");
+            for (int i = 0; i < 500; i++)
+            {
+                var bar = tpl.Instantiate();
+                page.AddChild(bar);
+                // 静止网格：24 列 × 78px（宽 1872）× 21 行 × 30px（y 从 120 起）。
+                bar.Transform.Position = new IkatVector2((i % 24) * 78 + 22, (i / 24) * 30 + 120);
+                _stressBars.Add(bar);
+            }
+            _stressFollow = false;
+            _stressHidden = false;
+            read.TextContent = "500 · 静止网格（右上角 FPS 读数）";
+        };
+
+        followBtn.Clicked += () =>
+        {
+            if (_stressBars.Count == 0) return;
+            _stressFollow = !_stressFollow;
+            if (!_stressFollow)
+            {
+                // 回静止：清锚点登记 + 恢复网格摆位。
+                for (int i = 0; i < _stressBars.Count; i++)
+                {
+                    _driver.ClearWorldAnchor(_stressBars[i]);
+                    _stressBars[i].Transform.Position =
+                        new IkatVector2((i % 24) * 78 + 22, (i / 24) * 30 + 120);
+                }
+            }
+            read.TextContent = _stressFollow ? "500 · 投影跟随中（波浪 + 出屏自动隐藏）" : "500 · 静止网格";
+        };
+
+        hideBtn.Clicked += () =>
+        {
+            if (_stressBars.Count == 0) return;
+            _stressHidden = !_stressHidden;
+            for (int i = 0; i < 250; i++)
+                _driver.Host.SetNodeRenderVisible(_stressBars[i]._id, !_stressHidden);
+            read.TextContent = _stressHidden ? "250 隐藏（保留对象，恢复不闪）" : "500 · 全显";
+        };
+    }
+
+    /// 投影跟随：500 世界点绕相机前方波浪运动，每帧重锚（P6 场景的引擎侧实跑）。
+    void UpdateStressFollow()
+    {
+        if (!_stressFollow || _stressBars.Count == 0) return;
+        var cam = Camera.main;
+        if (cam == null) return;
+        float t = Time.time;
+        for (int i = 0; i < _stressBars.Count; i++)
+        {
+            Vector3 p = new Vector3(
+                Mathf.Sin(t * 0.7f + i * 0.13f) * 5.5f,
+                1.2f + Mathf.Sin(t * 1.1f + i * 0.37f) * 3.5f,
+                3f + Mathf.Cos(t * 0.5f + i * 0.13f) * 4f);
+            _driver.SetWorldAnchor(_stressBars[i], cam, p, new Vector2(-48f, -20f));
+        }
+    }
+
+    void TeardownStressPage()
+    {
+        foreach (var b in _stressBars)
+            if (b != null) _driver.ClearWorldAnchor(b);
+        _stressBars.Clear();
+        _stressFollow = false;
+        _stressHidden = false;
     }
 
     /// 克隆源 controller 的 Idle 态 clip、剥掉根 path（""）的 position/rotation 曲线，

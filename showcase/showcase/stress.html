@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat 靶子冻结 Showcase · 压测 500</title>
+  <style>
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .body {display:flex; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .panel {display:flex;flex-direction:column; width:340px; gap:14px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:24px; align-self:flex-start; }
+  .panel-title { color:#8ec5d8; font-size:16px; font-weight:700; }
+  .panel-desc { color:#9aa0b4; font-size:13px; }
+  .st-btn { background-color:#d4a44e; color:#0e1620; font-size:14px; font-weight:700; padding:6px 16px; border-radius:8px; }
+  .st-read { color:#5fb4d4; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <page-top id="page-top"><span slot="title" class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">压测 500</span></page-top>
+    <div class="body">
+      <div class="panel">
+        <span class="panel-title">500 血条压测（#109 A1/A2/A5 + P6）</span>
+        <span class="panel-desc">生成 500 条血条（1001 节点，blob v15 列级增量 + 增量渲染构建的真实负载）。判据：① 生成后 FPS 读数（右上角）仍流畅、血条网格铺满视口无闪烁；② 开「投影跟随」——500 条全部改为世界锚点每帧重投影成波浪，FPS 读数仍可玩（core 侧 ~16.7ms/帧的引擎侧体验）；③ 「隐藏 250」——半数血条瞬间消失/恢复（保留对象不闪重建）；④ 逐项操作期间无血条错位/残影（增量渲染正确性）。</span>
+        <button id="btn-st-make" class="st-btn">生成 500 血条</button>
+        <button id="btn-st-follow" class="st-btn">投影跟随 开 / 关</button>
+        <button id="btn-st-hide" class="st-btn">隐藏 250 / 全显</button>
+        <span id="st-read" class="st-read">未生成</span>
+      </div>
+    </div>
+    <!-- 压测血条模板：根 absolute + left/top 0 直挂页根——静止网格与投影跟随都经
+         Transform.Position 写绝对设计坐标（网格 = 一次性摆放；跟随 = 锚点每帧重投影）。 -->
+    <template id="st-bar">
+      <div role="listitem" style="position:absolute;left:0;top:0;width:96px;height:8px;background-color:#1a2836;border-radius:4px">
+        <div id="st-fill" style="position:absolute;left:0;top:0;width:96px;height:100%;background-color:#5fb4d4;border-radius:4px"></div>
+      </div>
+    </template>
+  </div>
+</body>
+</html>

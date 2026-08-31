@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat 靶子冻结 Showcase · 第二 Stage 小窗</title>
+  <style>
+  /* 第二 Driver（运行时拉起）的小窗页：根透明，只有左下角一块小面板压在主 Stage 的
+     「底层探针」按钮上方——双 Stage 输入独占路由的靶面（本窗 Pick 命中即独占本帧输入，
+     底层主 Stage 按钮不得响应）。与主 Stage 同一共享 ResourceHost：字体只注册一次。 */
+  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e162000; }
+  .mh-panel {position:absolute; left:16px; bottom:16px; display:flex;flex-direction:column; width:360px; gap:12px; background-color:rgba(33,51,36,0.88); border-width:2px; border-style:solid; border-color:#5fb4d4; border-radius:10px; padding:20px 24px; z-index:0; }
+  .mh-title { color:#a8e6a0; font-size:16px; font-weight:700; }
+  .mh-desc { color:#9aa0b4; font-size:12px; }
+  .mh-btn { background-color:#5fb4d4; color:#0e1620; font-size:14px; font-weight:700; padding:6px 16px; border-radius:8px; }
+  .mh-read { color:#ffd24a; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="mh-panel">
+      <span class="mh-title">Stage 2 · 运行时小窗</span>
+      <span class="mh-desc">独立 Driver、共享 IkatUICamera 与字体宿主。本窗覆盖主 Stage 的「底层探针」——点击这里只进这里：探针读数不动、本窗读数翻转即输入独占证据。时钟每秒走 = 本 Stage 独立 tick。</span>
+      <span id="mh-clock" class="mh-read">00:00</span>
+      <button id="btn-mh" class="mh-btn">Stage 2 按钮</button>
+      <span id="mh-read" class="mh-read">点击 0 次</span>
+    </div>
+  </div>
+</body>
+</html>

@@ -4,20 +4,24 @@
   <meta charset="utf-8">
   <title>Ikat 靶子冻结 Showcase · 世界锚点</title>
   <style>
-  /* 根透明：3D 场景（场景 Main Camera 的天幕 + 立方体）从 UI 底下透出——投影路世界 UI
-     的宿主形态（3D 相机 depth -1 先画，UI 相机 clearFlags=Depth 叠上）。 */
+  /* 根透明：3D 场景（场景 Main Camera 的天幕 + 地面 + 立方体 + 遮挡墙）从 UI 底下透出——
+     投影路世界 UI 的宿主形态（3D 相机 depth -1 先画，UI 相机 clearFlags=Depth 叠上）。 */
   .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e162000; }
-  .body {display:flex; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
+  .body {display:flex; flex-direction:row; flex-grow:1; gap:24px; padding:24px; overflow:hidden; position:relative; z-index:0; }
   /* panel/frame 显式 z0：同层混有定位元素（视口框 / 锚点模板根），声明层叠意图
      （锚点实例 DOM 序最后 = 画在其上，HUD 语义）。 */
   .panel {display:flex;flex-direction:column; width:340px; gap:14px; background-color:rgba(21,36,51,0.85); border-radius:10px; padding:24px; align-self:flex-start; position:relative; z-index:0; }
   .panel-title { color:#8ec5d8; font-size:16px; font-weight:700; }
   .panel-desc { color:#9aa0b4; font-size:13px; }
+  .wp-sub { color:#e0e6ec; font-size:14px; font-weight:700; margin-top:6px; }
   .wp-btn { background-color:#d4a44e; color:#0e1620; font-size:14px; font-weight:700; padding:6px 16px; border-radius:8px; }
   .wp-read { color:#5fb4d4; font-size:13px; }
   /* 3D 视口提示框：立方体轨道大致范围（血条/跳字会贴着头出现并跟随）。 */
   .wp-frame {position:absolute; z-index:0; left:410px; top:120px; width:1460px; height:880px; border-width:2px; border-style:dashed; border-color:#2a5a75; border-radius:12px; }
   .wp-frame-label {position:absolute; left:16px; top:-14px; background-color:#0e1620; color:#8ec5d8; font-size:13px; padding:2px 10px; }
+  /* 底层探针（双 Stage 输入独占的靶子）：与 mini-hud 小窗同位（左下角）——小窗开启时
+     被压在下面，点击只能进小窗（本读数不得翻转）；小窗关闭后本按钮恢复可点。 */
+  .wp-probe {position:absolute; z-index:0; left:24px; bottom:24px; display:flex; flex-direction:row; align-items:center; gap:12px; background-color:rgba(21,36,51,0.85); border-radius:10px; padding:16px 20px; }
   </style>
 </head>
 <body>
@@ -26,16 +30,28 @@
     <div class="body">
       <div class="panel">
         <span class="panel-title">投影路世界 UI（#109 B）</span>
-        <span class="panel-desc">三块立方体在场景 3D 相机前轨道运行；每块头顶一条血条、一个伤害数字位。Driver 每帧把立方体头顶世界点投影到屏幕写 UI transform——判据：① 血条紧贴头顶平滑跟随（错位/滞后即失败）。② 外侧竖轨立方体扫出屏时血条与跳字整体消失、回屏即恢复（半隐=失败：子树必须整隐）。③ 扣血/回血读数翻转。④ 跳字上浮渐隐后消失、轨道不受影响。</span>
+        <span class="panel-desc">三块立方体在 3D 相机前轨道运行（灰墙做深度遮挡）；每块头顶一条血条、一个伤害数字位。判据：① 血条紧贴头顶平滑跟随、被墙挡住的立方体血条依然可见（屏幕空间 HUD 永不遮挡）；② 外侧竖轨立方体扫出屏时血条与跳字整体消失、回屏即恢复；③ 扣血/回血读数翻转；④ 跳字上浮渐隐后消失。</span>
         <button id="btn-wp-hp" class="wp-btn">扣血 / 回血</button>
         <span id="wp-hp-read" class="wp-read">血量 100%</span>
         <button id="btn-wp-dmg" class="wp-btn">跳字 ×3</button>
         <span id="wp-dmg-read" class="wp-read">未发射</span>
         <span id="wp-count-read" class="wp-read">锚点 0 · 待摆台</span>
+        <span class="wp-sub">world-space 挂载（#109 C8）</span>
+        <span class="panel-desc">把名牌面板挂到 2 号立方体头顶的 3D 变换上：随轨道移动且**随远近透视缩放**（投影路血条恒定尺寸——两路的可辨差异）；立方体走到灰墙后时名牌被墙挡住、血条不受影响；解除挂载回屏幕中央。</span>
+        <button id="btn-wp-mount" class="wp-btn">挂载名牌 / 解除</button>
+        <span id="wp-mount-read" class="wp-read">未挂载</span>
+        <span class="wp-sub">双 Stage 隔离（#109 A3/A4）</span>
+        <span class="panel-desc">运行时拉起第二个 Driver（左下角小窗）：Hierarchy 只有一台 IkatUICamera（共享）；小窗画在主 UI 之上且排序不穿插；点击小窗区域只进小窗——压在下面的「底层探针」读数不得翻转。</span>
+        <button id="btn-wp-stage" class="wp-btn">双 Stage 开 / 关</button>
+        <span id="wp-stage-read" class="wp-read">Driver 1 · 相机 1</span>
       </div>
-      <div class="wp-frame"><span class="wp-frame-label">3D 视口 · 立方体轨道（血条 / 跳字跟随）</span></div>
+      <div class="wp-frame"><span class="wp-frame-label">3D 视口 · 立方体轨道 + 遮挡墙（血条 / 跳字 / 挂载名牌跟随）</span></div>
       <!-- 锚点模板：根 position:absolute + left/top 0 直挂页根——布局位 (0,0)，
            Transform.Position 即绝对设计坐标（core 语义：transform 叠加在布局位之上）。 -->
+      <div class="wp-probe">
+        <button id="btn-wp-probe" class="wp-btn">底层探针</button>
+        <span id="wp-probe-read" class="wp-read">点击 0 次</span>
+      </div>
       <template id="wp-bar">
         <div role="listitem" style="position:absolute;left:0;top:0;width:120px;height:10px;background-color:#1a2836;border-width:1px;border-style:solid;border-color:#0e1620;border-radius:5px">
           <div id="wp-fill" style="position:absolute;left:0;top:0;width:120px;height:100%;background-color:#e05555;border-radius:4px"></div>
@@ -43,6 +59,13 @@
       </template>
       <template id="wp-dmg">
         <div role="listitem" style="position:absolute;left:0;top:0"><span id="wp-dmg-text" style="font-size:26px;font-weight:700;color:#ffd24a">-100</span></div>
+      </template>
+      <!-- 挂载名牌：根 absolute 屏幕中央（挂载后根的设计位 = 3D 容器原点），内容居中上浮。 -->
+      <template id="wp-plate">
+        <div role="listitem" style="position:absolute;left:840px;top:480px;width:240px;height:96px;background-color:rgba(21,36,51,0.92);border-width:2px;border-style:solid;border-color:#d4a44e;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px">
+          <span style="color:#ffd24a;font-size:20px;font-weight:700">商店 · 挂载</span>
+          <span style="color:#8ec5d8;font-size:13px">world-space mount（ZTest 遮挡）</span>
+        </div>
       </template>
     </div>
   </div>
