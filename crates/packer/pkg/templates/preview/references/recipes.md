@@ -109,8 +109,15 @@ A-layer wiring does.
   inside component `<style>` — dropped, never silently applied.
 - **Runtime-only (preview cannot show)**: NativeHost 3D projection,
   driver-driven list virtualization beyond demo fill, C# tween callbacks,
-  focus/keyboard routing beyond the simulated bits, safe-area insets
-  (shell draws reference guides only).
+  focus/keyboard routing beyond the simulated bits.
+- **Simulated end-to-end**: `env(safe-area-inset-*)` — the server rewrites
+  it to CSS variables and the shell feeds device-preset values with the
+  engine's formula (fit modes give real insets; letterbox gives 0 — its
+  black bars already yield). Pick a notched preset (e.g. iPhone 14) to
+  exercise avoidance; the dashed guides visualize the same numbers.
+  Viewport units (`vw/vh/vmin/vmax`) resolve against the simulated root,
+  so responsive font sizes and paddings flow when you switch device
+  presets or match modes.
 
 If the build emits a preview≠runtime warning (`FenceBorderWithoutStyle`,
 `FenceBgImageWithoutSize`, non-transitionable `transition` properties,

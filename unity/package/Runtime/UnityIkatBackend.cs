@@ -68,7 +68,7 @@ namespace Ikat
 
         /// <summary>
         /// 采集 Unity 输入（指针/键盘/滚轮）→ set_input 系 FFI（引擎中立，由 IkatInputCollector 内部调）。
-        /// DesignSize / UseSafeArea 由 IkatInputCollector 实例携带（Driver Awake 注入）。
+        /// DesignSize 由 IkatInputCollector 实例携带（Driver Awake 注入）。
         /// </summary>
         public override void CollectInput(IntPtr stage)
         {

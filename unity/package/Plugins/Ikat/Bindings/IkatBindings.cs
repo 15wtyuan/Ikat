@@ -69,6 +69,19 @@ namespace Ikat.Bindings
         internal static extern int ikat_compute_adaptation(float design_w, float design_h, float screen_w, float screen_h, float safe_x, float safe_y, float safe_w, float safe_h, uint mode, AdaptResult* @out);
 
         /// <summary>
+        ///  设 Stage 的 viewport inset——`env(safe-area-inset-*)` 的取值源。入参 = 适配
+        ///  三件套（`ikat_compute_adaptation` 的 scale/offset）+ 屏幕 safe 矩形（屏幕 px，
+        ///  top-down 原点），core 内算 root 屏幕矩形与 unsafe 区的交叠深度（三模式同公式：
+        ///  Fit 贴物理边 → 真实 inset；Letterbox root 全在 safe 内 → 恒 0）再除 scale 折
+        ///  design px——换算单源在 Rust，各引擎宿主只转发数字。返回 0=成功，-1=错误
+        ///  （null 句柄 / scale 非有限或 ≤0）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_safe_area", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_set_safe_area(StageHandle* h, float scale, float adapt_off_x, float adapt_off_y, float safe_x, float safe_y, float safe_w, float safe_h);
+
+        /// <summary>
         ///  注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
         ///  is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
         /// </summary>

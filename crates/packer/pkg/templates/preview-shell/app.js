@@ -5,23 +5,27 @@
 
 const LS = {
   preset: "ikatPreview.preset",
+  match: "ikatPreview.matchMode",
   safe: "ikatPreview.safeArea",
   fit: "ikatPreview.fitWindow",
   custom: "ikatPreview.customResolutions",
 };
 
-// 内置设备清单：W/H + 安全区参考线（top/bottom，px；0 = 无）。
-// 参考线是纯视觉提示，core 无安全区概念（真支持另有 issue 跟踪）。
+// 内置设备清单：W/H + 安全区四边（px；0 = 无）。safe 值与 env(safe-area-inset-*)
+// 模拟同源（layoutDevice 换算成 design px 注进 iframe CSS 变量），参考线可视化
+// 同一份数据——预览与运行时同公式（core ikat_stage_set_safe_area）。
 const BUILTIN_PRESETS = [
-  { id: "design",     name: "设计分辨率", w: 0,  h: 0,  safe: { top: 0,  bottom: 0 } },
-  { id: "iphone-se",  name: "iPhone SE",  w: 375,  h: 664,  safe: { top: 0,  bottom: 0 } },
-  { id: "iphone-14",  name: "iPhone 14",  w: 390,  h: 844,  safe: { top: 47, bottom: 34 } },
-  { id: "iphone-16pm",name: "iPhone 16 PM", w: 440, h: 956,  safe: { top: 62, bottom: 34 } },
-  { id: "pixel-8",    name: "Pixel 8",    w: 412,  h: 915,  safe: { top: 24, bottom: 16 } },
-  { id: "galaxy-s23", name: "Galaxy S23", w: 360,  h: 780,  safe: { top: 24, bottom: 16 } },
-  { id: "ipad-mini",  name: "iPad mini",  w: 744,  h: 1133, safe: { top: 24, bottom: 20 } },
-  { id: "hd",         name: "1280×720",   w: 1280, h: 720,  safe: { top: 0,  bottom: 0 } },
-  { id: "fhd",        name: "1920×1080",  w: 1920, h: 1080, safe: { top: 0,  bottom: 0 } },
+  { id: "design",     name: "设计分辨率", w: 0,  h: 0,  safe: { top: 0, bottom: 0, left: 0, right: 0 } },
+  { id: "iphone-se",  name: "iPhone SE",  w: 375,  h: 664,  safe: { top: 0, bottom: 0, left: 0, right: 0 } },
+  { id: "iphone-14",  name: "iPhone 14",  w: 390,  h: 844,  safe: { top: 47, bottom: 34, left: 0, right: 0 } },
+  { id: "iphone-16pm",name: "iPhone 16 PM", w: 440, h: 956,  safe: { top: 62, bottom: 34, left: 0, right: 0 } },
+  { id: "pixel-8",    name: "Pixel 8",    w: 412,  h: 915,  safe: { top: 24, bottom: 16, left: 0, right: 0 } },
+  { id: "galaxy-s23", name: "Galaxy S23", w: 360,  h: 780,  safe: { top: 24, bottom: 16, left: 0, right: 0 } },
+  { id: "ipad-mini",  name: "iPad mini",  w: 744,  h: 1133, safe: { top: 24, bottom: 20, left: 0, right: 0 } },
+  { id: "r43",        name: "4:3 (1024×768)", w: 1024, h: 768, safe: { top: 0, bottom: 0, left: 0, right: 0 } },
+  { id: "u21x9",      name: "21:9 (2560×1080)", w: 2560, h: 1080, safe: { top: 0, bottom: 0, left: 0, right: 0 } },
+  { id: "hd",         name: "1280×720",   w: 1280, h: 720,  safe: { top: 0, bottom: 0, left: 0, right: 0 } },
+  { id: "fhd",        name: "1920×1080",  w: 1920, h: 1080, safe: { top: 0, bottom: 0, left: 0, right: 0 } },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -41,7 +45,7 @@ function saveCustom(list) { localStorage.setItem(LS.custom, JSON.stringify(list)
 
 function allPresets() {
   const design = { id: "design", name: `设计 ${state.design.w}×${state.design.h}`,
-                   w: state.design.w, h: state.design.h, safe: { top: 0, bottom: 0 } };
+                   w: state.design.w, h: state.design.h, safe: { top: 0, bottom: 0, left: 0, right: 0 } };
   return [design, ...BUILTIN_PRESETS.slice(1), ...loadCustom()];
 }
 
@@ -54,10 +58,11 @@ async function init() {
   if (Array.isArray(api.design) && api.design.length === 2) {
     state.design = { w: api.design[0], h: api.design[1] };
   }
-  state.matchMode = api.match_mode || "letterbox";
+  state.matchMode = localStorage.getItem(LS.match) || api.match_mode || "letterbox";
 
   $("ws-design").textContent = `${state.design.w}×${state.design.h}`;
   $("ws-match").textContent = state.matchMode;
+  $("match").value = state.matchMode;
 
   buildTree();
   buildPresetSelect();
@@ -160,12 +165,21 @@ function layoutDevice() {
   const p = state.preset || allPresets()[0];
   const { w: dw, h: dh } = p.id === "design" ? state.design : p;
   const frame = $("frame"), device = $("device"), scaler = $("device-scale");
+  const safe = Object.assign({ top: 0, bottom: 0, left: 0, right: 0 }, p.safe);
+  // safe 内容框（letterbox 的 contain 框，镜像 core：letterbox 以 safe 矩形为框）。
+  const availW = dw - safe.left - safe.right, availH = dh - safe.top - safe.bottom;
 
-  // match_mode 缩放：letterbox=contain（min）；fit-width/fit-height 单轴贴满。
+  // match_mode 缩放 + root 尺寸（镜像 core adapt::compute）：letterbox=contain
+  // （min，以 safe 框为界），root=设计分辨率；fit-width/fit-height 单轴贴满
+  // （fit 贴物理边，safe 不缩基座——避让走 env()），另一维 root 取设备换算值
+  // ——iframe 按 root 尺寸渲染，切设备框触发真实 reflow（运行时 fit 模式如此，
+  // vw/vh 分母跟随），而非 letterbox 的「锁设计分辨率不 reflow」。
   const sx = dw / state.design.w, sy = dh / state.design.h;
   const scale = state.matchMode === "fit-width" ? sx
     : state.matchMode === "fit-height" ? sy
-    : Math.min(sx, sy);
+    : Math.min(availW / state.design.w, availH / state.design.h);
+  const rootW = state.matchMode === "fit-height" ? dw / scale : state.design.w;
+  const rootH = state.matchMode === "fit-width" ? dh / scale : state.design.h;
 
   // 观察级缩放（适应窗口）：整个设备框等比缩进 stage 视口，上限 1（不放大——
   // 放大会糊像素）。transform 不触发 iframe reflow，页内仍按设计分辨率渲染，
@@ -181,24 +195,48 @@ function layoutDevice() {
   scaler.style.width = dw + "px";
   scaler.style.height = dh + "px";
   scaler.style.transform = `scale(${fit})`;
-  frame.style.width = state.design.w + "px";
-  frame.style.height = state.design.h + "px";
+  frame.style.width = rootW + "px";
+  frame.style.height = rootH + "px";
   frame.style.transform = `scale(${scale})`;
 
-  // letterbox 单轴贴满时另一轴居中（黑边）。
-  const rx = state.design.w * scale, ry = state.design.h * scale;
-  frame.style.left = Math.max(0, (dw - rx) / 2) + "px";
-  frame.style.top = Math.max(0, (dh - ry) / 2) + "px";
+  // letterbox 在 safe 框内居中（黑边；镜像 core 的 safe contain）；fit 贴设备框原点。
+  const rx = rootW * scale, ry = rootH * scale;
+  const rootL = state.matchMode === "letterbox" ? safe.left + Math.max(0, (availW - rx) / 2) : 0;
+  const rootT = state.matchMode === "letterbox" ? safe.top + Math.max(0, (availH - ry) / 2) : 0;
+  frame.style.left = rootL + "px";
+  frame.style.top = rootT + "px";
 
   $("zoom").textContent = Math.round(scale * 100) + "%";
 
-  // 安全区参考线：开关 + 当前设备数据。
+  // 安全区参考线：开关 + 当前设备数据（四向）。
   const safeOn = $("safe-area").checked;
-  const s = p.safe || { top: 0, bottom: 0 };
-  $("safe-top").style.height = s.top + "px";
-  $("safe-bottom").style.height = s.bottom + "px";
-  $("safe-top").classList.toggle("has", safeOn && s.top > 0);
-  $("safe-bottom").classList.toggle("has", safeOn && s.bottom > 0);
+  $("safe-top").style.height = safe.top + "px";
+  $("safe-bottom").style.height = safe.bottom + "px";
+  $("safe-left").style.width = safe.left + "px";
+  $("safe-right").style.width = safe.right + "px";
+  $("safe-top").classList.toggle("has", safeOn && safe.top > 0);
+  $("safe-bottom").classList.toggle("has", safeOn && safe.bottom > 0);
+  $("safe-left").classList.toggle("has", safeOn && safe.left > 0);
+  $("safe-right").classList.toggle("has", safeOn && safe.right > 0);
+
+  // env(safe-area-inset-*) 模拟：与 core ikat_stage_set_safe_area 同公式——
+  // root（iframe 映射进设备框的矩形）伸进 unsafe 区的深度 / scale = design px。
+  // letterbox root 在 safe 框内 → 恒 0（黑边已让位）；fit 贴物理边 → 真实 inset。
+  // server 已把 env() 改写成 var(--ikat-safe-*)，这里注值即生效（与参考线同源）。
+  const ins = {
+    top: Math.max(0, safe.top - rootT) / scale,
+    right: Math.max(0, (rootL + rx) - (dw - safe.right)) / scale,
+    bottom: Math.max(0, (rootT + ry) - (dh - safe.bottom)) / scale,
+    left: Math.max(0, safe.left - rootL) / scale,
+  };
+  const doc = frame.contentDocument;
+  if (doc && doc.documentElement) {
+    const rs = doc.documentElement.style;
+    rs.setProperty("--ikat-safe-top", ins.top + "px");
+    rs.setProperty("--ikat-safe-right", ins.right + "px");
+    rs.setProperty("--ikat-safe-bottom", ins.bottom + "px");
+    rs.setProperty("--ikat-safe-left", ins.left + "px");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +250,7 @@ function bindControls() {
   $("custom-go").addEventListener("click", () => {
     const w = parseInt($("custom-w").value, 10), h = parseInt($("custom-h").value, 10);
     if (!(w >= 100 && h >= 100)) return;
-    state.preset = { id: "_custom", name: `${w}×${h}`, w, h, safe: { top: 0, bottom: 0 } };
+    state.preset = { id: "_custom", name: `${w}×${h}`, w, h, safe: { top: 0, bottom: 0, left: 0, right: 0 } };
     $("preset").value = "_custom";
     localStorage.setItem(LS.preset, "design"); // 自定义不持久为默认
     layoutDevice();
@@ -242,7 +280,7 @@ function bindControls() {
     const w = parseInt($("new-w").value, 10), h = parseInt($("new-h").value, 10);
     if (!(w >= 100 && h >= 100)) return;
     const list = loadCustom();
-    const safe = $("new-safe").checked ? { top: 24, bottom: 16 } : { top: 0, bottom: 0 };
+    const safe = $("new-safe").checked ? { top: 24, bottom: 16, left: 0, right: 0 } : { top: 0, bottom: 0, left: 0, right: 0 };
     list.push({ id: `c${Date.now()}`, name, w, h, safe, custom: true });
     saveCustom(list);
     buildPresetSelect();
@@ -255,7 +293,14 @@ function bindControls() {
       selectPage(pg, { replaceHash: true });
     }
   });
+  $("match").addEventListener("change", (e) => {
+    state.matchMode = e.target.value;
+    localStorage.setItem(LS.match, state.matchMode);
+    $("ws-match").textContent = state.matchMode;
+    layoutDevice();
+  });
   window.addEventListener("resize", layoutDevice);
+  $("frame").addEventListener("load", () => layoutDevice());
 }
 
 function renderResList() {

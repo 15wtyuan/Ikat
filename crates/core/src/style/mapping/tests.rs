@@ -589,13 +589,14 @@ fn apply_background_size_invalid_ignored() {
 
 #[test]
 fn parse_radius_group_one_value() {
-    let g = parse_radius_group("8px").unwrap();
+    let (g, d) = parse_radius_group("8px").unwrap();
     assert_eq!(g, [parse_lp("8px"); 4]);
+    assert_eq!(d, [None; 4]);
 }
 
 #[test]
 fn parse_radius_group_two_values() {
-    let g = parse_radius_group("4px 12px").unwrap();
+    let (g, d) = parse_radius_group("4px 12px").unwrap();
     // [v0, v1, v0, v1]（TL/BR=v0, TR/BL=v1）
     assert_eq!(
         g,
@@ -606,12 +607,35 @@ fn parse_radius_group_two_values() {
             parse_lp("12px")
         ]
     );
+    assert_eq!(d, [None; 4]);
 }
 
 #[test]
 fn parse_radius_group_percent() {
-    let g = parse_radius_group("50%").unwrap();
+    let (g, d) = parse_radius_group("50%").unwrap();
     assert_eq!(g, [parse_lp("50%"); 4]);
+    assert_eq!(d, [None; 4]);
+}
+
+#[test]
+fn parse_radius_group_viewport_deferred() {
+    // 视口单位/env() token → 占位 Length(0) + 延迟槽；与 px 混写同组各归各。
+    let (g, d) = parse_radius_group("2vmin 8px").unwrap();
+    assert_eq!(g[0], parse_lp("0px"));
+    assert_eq!(g[1], parse_lp("8px"));
+    assert!(matches!(
+        d[0],
+        Some(DeferredLength::Viewport(ViewportLen {
+            value: 2.0,
+            unit: ViewportUnit::Vmin
+        }))
+    ));
+    assert_eq!(d[1], None);
+    let (_, d) = parse_radius_group("env(safe-area-inset-top)").unwrap();
+    assert!(matches!(
+        d[0],
+        Some(DeferredLength::SafeInset(SafeSide::Top))
+    ));
 }
 
 #[test]
@@ -2255,23 +2279,35 @@ fn viewport_units_parse_into_parallel_slots() {
     assert!(apply_decl(&mut s, "width", "50vw"));
     assert_eq!(
         s.viewport.width,
-        Some(ViewportLen {
+        Some(DeferredLength::Viewport(ViewportLen {
             value: 50.0,
             unit: ViewportUnit::Vw
-        })
+        }))
     );
     assert_eq!(s.taffy_style.size.width, Dimension::length(0.0));
     assert!(apply_decl(&mut s, "min-height", "10vmin"));
     assert_eq!(
-        s.viewport.min_height.map(|v| v.unit),
-        Some(ViewportUnit::Vmin)
+        s.viewport.min_height.map(|v| match v {
+            DeferredLength::Viewport(v) => Some(v.unit),
+            _ => None,
+        }),
+        Some(Some(ViewportUnit::Vmin))
     );
     assert!(apply_decl(&mut s, "max-width", "2.5vmax"));
-    assert_eq!(s.viewport.max_width.map(|v| v.value), Some(2.5));
+    assert_eq!(
+        s.viewport.max_width.map(|v| match v {
+            DeferredLength::Viewport(v) => Some(v.value),
+            _ => None,
+        }),
+        Some(Some(2.5))
+    );
     assert!(apply_decl(&mut s, "top", "5vh"));
     assert_eq!(
-        s.viewport.inset[0].map(|v| (v.value, v.unit)),
-        Some((5.0, ViewportUnit::Vh))
+        s.viewport.inset[0].map(|v| match v {
+            DeferredLength::Viewport(v) => Some((v.value, v.unit)),
+            _ => None,
+        }),
+        Some(Some((5.0, ViewportUnit::Vh)))
     );
     // 级联清槽：后声明 px → 视口覆盖失效、taffy 拿真值
     assert!(apply_decl(&mut s, "width", "100px"));
@@ -2289,34 +2325,87 @@ fn viewport_margin_mixed_tokens() {
     use taffy::style::LengthPercentageAuto;
     let mut s = ResolvedStyle::default();
     assert!(apply_decl(&mut s, "margin", "2vh auto"));
-    let vh2 = || ViewportLen {
-        value: 2.0,
-        unit: ViewportUnit::Vh,
+    let vh2 = || {
+        DeferredLength::Viewport(ViewportLen {
+            value: 2.0,
+            unit: ViewportUnit::Vh,
+        })
     };
     assert_eq!(s.viewport.margin, [Some(vh2()), None, Some(vh2()), None]);
     assert_eq!(s.taffy_style.margin.top, LengthPercentageAuto::length(0.0));
     assert_eq!(s.taffy_style.margin.left, LengthPercentageAuto::auto());
     // 单边声明清该边槽 + 设新槽
     assert!(apply_decl(&mut s, "margin-left", "1vw"));
-    assert_eq!(s.viewport.margin[3].map(|v| v.unit), Some(ViewportUnit::Vw));
+    assert!(matches!(
+        s.viewport.margin[3],
+        Some(DeferredLength::Viewport(ViewportLen {
+            value: 1.0,
+            unit: ViewportUnit::Vw
+        }))
+    ));
     assert!(apply_decl(&mut s, "margin-left", "8px"));
     assert_eq!(s.viewport.margin[3], None);
     assert_eq!(s.taffy_style.margin.left, LengthPercentageAuto::length(8.0));
 }
 
-/// px-only 通道（padding/gap/font-size，fence 值域 Length=px）不吃视口单位——
-/// 返 false 走围栏诊断，不静默落值。
+/// 全长度属性通道吃视口单位/env()（#110 放开）：padding/gap/font-size/letter-spacing/
+/// border-radius 进延迟槽 + taffy/字段落占位；px 声明清槽（级联后者胜出）。
 #[test]
-fn viewport_px_only_channels_reject() {
+fn deferred_lengths_on_all_length_channels() {
     let mut s = ResolvedStyle::default();
-    assert!(!apply_decl(&mut s, "padding", "10vw"));
-    assert!(!apply_decl(&mut s, "gap", "1vh"));
-    assert!(!apply_decl(&mut s, "padding-top", "3vmin"));
-    // font-size 臂是宽容语义（非法值静默保持原值返 true，与 "1em" 同路径）——
-    // vw 不生效但也不报错；px-only 承诺靠 padding/gap 的硬拒绝兑现。
-    let before = s.font_size;
+    assert!(apply_decl(&mut s, "padding", "10vw"));
+    assert!(matches!(
+        s.viewport.padding[0],
+        Some(DeferredLength::Viewport(ViewportLen {
+            value: 10.0,
+            unit: ViewportUnit::Vw
+        }))
+    ));
+    assert!(apply_decl(&mut s, "gap", "1vh"));
+    assert!(matches!(
+        s.viewport.row_gap,
+        Some(DeferredLength::Viewport(_))
+    ));
+    assert!(apply_decl(&mut s, "padding-top", "3vmin"));
+    assert!(matches!(
+        s.viewport.padding[0],
+        Some(DeferredLength::Viewport(_))
+    ));
+    // font-size：vw 进槽、px 字段保持占位；px 覆写后清槽。
     assert!(apply_decl(&mut s, "font-size", "2vw"));
-    assert_eq!(s.font_size, before);
+    assert!(matches!(
+        s.viewport.font_size,
+        Some(DeferredLength::Viewport(_))
+    ));
+    assert_eq!(s.font_size, 16.0);
+    assert!(apply_decl(&mut s, "font-size", "20px"));
+    assert_eq!(s.font_size, 20.0);
+    assert_eq!(s.viewport.font_size, None);
+    // letter-spacing / border-radius / gap longhand / env()
+    assert!(apply_decl(&mut s, "letter-spacing", "0.2vmin"));
+    assert!(matches!(
+        s.viewport.letter_spacing,
+        Some(DeferredLength::Viewport(_))
+    ));
+    assert!(apply_decl(&mut s, "border-radius", "2vmin"));
+    assert!(matches!(
+        s.viewport.border_radius[0][0],
+        Some(DeferredLength::Viewport(_))
+    ));
+    assert!(apply_decl(
+        &mut s,
+        "column-gap",
+        "env(safe-area-inset-right)"
+    ));
+    assert!(matches!(
+        s.viewport.column_gap,
+        Some(DeferredLength::SafeInset(SafeSide::Right))
+    ));
+    // 未知 env() 名不认（core 与围栏同口径）
+    assert!(!apply_decl(&mut s, "row-gap", "env(titlebar-area-x)"));
+    // padding % 不开（px-only 基线保持）。font-size % 由围栏拒——core 臂沿宽容
+    // 语义（非法值静默保持原值返 true，与 "1em" 同路径），不在此断言。
+    assert!(!apply_decl(&mut s, "padding", "10%"));
 }
 
 /// 换算数学：vw/vh 按对应维，vmin/vmax 取两维较小/较大者。

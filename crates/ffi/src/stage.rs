@@ -83,6 +83,50 @@ pub extern "C" fn ikat_compute_adaptation(
     })
 }
 
+/// 设 Stage 的 viewport inset——`env(safe-area-inset-*)` 的取值源。入参 = 适配
+/// 三件套（`ikat_compute_adaptation` 的 scale/offset）+ 屏幕 safe 矩形（屏幕 px，
+/// top-down 原点），core 内算 root 屏幕矩形与 unsafe 区的交叠深度（三模式同公式：
+/// Fit 贴物理边 → 真实 inset；Letterbox root 全在 safe 内 → 恒 0）再除 scale 折
+/// design px——换算单源在 Rust，各引擎宿主只转发数字。返回 0=成功，-1=错误
+/// （null 句柄 / scale 非有限或 ≤0）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_safe_area(
+    h: *mut StageHandle,
+    scale: f32,
+    adapt_off_x: f32,
+    adapt_off_y: f32,
+    safe_x: f32,
+    safe_y: f32,
+    safe_w: f32,
+    safe_h: f32,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        if !scale.is_finite() || scale <= 0.0 {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let (root_w, root_h) = sh.stage.root_size;
+        // root 屏幕矩形（design × scale + 平移）与 safe 矩形的边距；负值钳 0 =
+        // 该边 root 未伸进 unsafe 区（Letterbox 全边如此 → 全 0，不重复让位）。
+        let clamp = |v: f32| v.max(0.0) / scale;
+        let insets = [
+            clamp(safe_y - adapt_off_y),
+            clamp((adapt_off_x + root_w * scale) - (safe_x + safe_w)),
+            clamp((adapt_off_y + root_h * scale) - (safe_y + safe_h)),
+            clamp(safe_x - adapt_off_x),
+        ];
+        match sh.stage.set_safe_insets(insets) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}
+
 /// 注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
 /// is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
 #[no_mangle]

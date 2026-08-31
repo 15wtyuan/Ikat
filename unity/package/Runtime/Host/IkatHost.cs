@@ -81,6 +81,19 @@ namespace Ikat
             return Native.ikat_stage_set_root_size(_stage, w, h) == 0;
         }
 
+        /// <summary>
+        /// 注入屏幕 safe 矩形 + 适配映射（scale/offset，top-down 屏幕 px）——core 算
+        /// root 伸进 unsafe 区的深度折 design px 存 Stage，作 env(safe-area-inset-*)
+        /// 的取值源。三模式同公式：fit 贴物理边 → 真实 inset；letterbox root 全在
+        /// safe 内 → 恒 0（黑边已让位）。每次 RecomputeAdaptation 后跟调一次。
+        /// 换算单源在 Rust——各引擎宿主只转发数字。
+        /// </summary>
+        public bool SetSafeArea(float scale, float offX, float offY, float safeX, float safeY, float safeW, float safeH)
+        {
+            if (_stage == null) return false;
+            return Native.ikat_stage_set_safe_area(_stage, scale, offX, offY, safeX, safeY, safeW, safeH) == 0;
+        }
+
         /// <summary>Stage 原始句柄（internal——同程序集 backend / Driver / InputCollector 可见）。</summary>
         internal IntPtr StagePtr => (IntPtr)_stage;
 

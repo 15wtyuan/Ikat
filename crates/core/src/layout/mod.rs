@@ -174,6 +174,7 @@ pub fn solve(
     scene: &mut Scene,
     fonts: &FontTable,
     root_size: (f32, f32),
+    safe_insets: [f32; 4],
     image_sizes: &ImageSizeTable,
 ) {
     // 防御：空 roots（空 scene）无几何可 solve——直接返回，避免 roots[0] 越界 panic。
@@ -208,13 +209,16 @@ pub fn solve(
         parent_scroll: bool,
         image_sizes: &ImageSizeTable,
         root_size: (f32, f32),
+        safe_insets: [f32; 4],
     ) -> (taffy::NodeId, Vec<taffy::NodeId>) {
         let node = scene.get_live(id, "layout/sync");
         let mut style = node.style.taffy_style.clone();
-        // 视口相对长度（vw/vh/vmin/vmax）按当帧 root_size 换算覆写（分辨率适配的
-        // 重排语言——root_size 随屏幕/适配模式变，声明 vw 的通道跟画布走）。
+        // 视口相对长度（vw/vh/vmin/vmax/env()）按当帧 root_size/safe_insets 换算覆写
+        // （分辨率适配的重排语言——root_size 随屏幕/适配模式变，声明 vw 的通道跟画布走）。
         if !node.style.viewport.is_empty() {
-            node.style.viewport.apply(&mut style, root_size);
+            node.style
+                .viewport
+                .apply(&mut style, root_size, safe_insets);
         }
         // 动画 layout override（#10）：覆写链末位（base → viewport → anim，动画最高
         // 优先级）。vw/vh/vmin/vmax 域按当帧 root_size 换算——动画中途 resize 自动
@@ -436,6 +440,7 @@ pub fn solve(
                     self_scroll,
                     image_sizes,
                     root_size,
+                    safe_insets,
                 );
                 escaped.extend(cesc); // 下层冒上来的，随本层定位性收编或继续上浮
                 let child = scene.get_live(*c, "layout/sync");
@@ -503,6 +508,7 @@ pub fn solve(
         false,
         image_sizes,
         root_size,
+        safe_insets,
     );
     // 根收编余下 escapee：无任何 positioned 祖先时包含块 = 初始包含块（视口），CSS 语义。
     // 无条件 set_children（罕见路径：持续存在的 escapee 场景根每帧标脏，但子树缓存
@@ -925,10 +931,11 @@ pub fn solve_rebuild(
     scene: &mut Scene,
     fonts: &FontTable,
     root_size: (f32, f32),
+    safe_insets: [f32; 4],
     image_sizes: &ImageSizeTable,
 ) {
     scene.layout_cache = LayoutCache::default();
-    solve(scene, fonts, root_size, image_sizes);
+    solve(scene, fonts, root_size, safe_insets, image_sizes);
 }
 
 #[cfg(test)]
@@ -1001,7 +1008,13 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 300.0),
+            [0.0; 4],
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect; // Image 是 root 唯一子
         assert!(
@@ -1069,7 +1082,13 @@ mod tests {
     fn absolute_resolves_against_nearest_positioned_ancestor() {
         let (mut scene, btn) = abs_containing_block_scene(true, false, true);
         let fonts = FontTable::new();
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
         let r = scene.get(btn).unwrap().layout_rect;
         let expect_x = 100.0 + 500.0 - 56.0 - 20.0; // wrap 右内缘 - right - 宽
         assert!(
@@ -1089,7 +1108,13 @@ mod tests {
     fn absolute_nearest_positioned_wins_over_outer_one() {
         let (mut scene, btn) = abs_containing_block_scene(true, true, true);
         let fonts = FontTable::new();
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
         let r = scene.get(btn).unwrap().layout_rect;
         // mid 含上边距 30：top 相对 mid（border box 顶）= 30 + 40 = 70。
         assert!(
@@ -1105,7 +1130,13 @@ mod tests {
         let (mut scene, btn) = abs_containing_block_scene(false, false, true);
         // 场景只设了 top/right：top 相对视口 = 40（wrap/card 偏移不参与）。
         let fonts = FontTable::new();
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
         let r = scene.get(btn).unwrap().layout_rect;
         assert!(
             (r.y - 40.0).abs() < 0.5,
@@ -1125,7 +1156,13 @@ mod tests {
     fn absolute_without_inset_stays_with_direct_parent() {
         let (mut scene, btn) = abs_containing_block_scene(true, false, false);
         let fonts = FontTable::new();
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
         let r = scene.get(btn).unwrap().layout_rect;
         let root = scene.roots[0];
         let wrap = scene.get(root).unwrap().children[0];
@@ -1175,7 +1212,13 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 300.0),
+            [0.0; 4],
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect; // Image 是 root 唯一子
         assert!((r.w - 40.0).abs() < 0.1, "真实像素：w=40，got {}", r.w);
@@ -1216,7 +1259,7 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        solve(&mut scene, &fonts, (300.0, 300.0), [0.0; 4], &empty_sizes());
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 64.0).abs() < 0.1, "兜底：w=64，got {}", r.w);
@@ -1257,7 +1300,13 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 0, 0));
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 300.0),
+            [0.0; 4],
+            &sizes("x.png", 0, 0),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 64.0).abs() < 0.1, "w/h=0 → 兜底 w=64，got {}", r.w);
@@ -1299,7 +1348,13 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 300.0),
+            [0.0; 4],
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.w - 80.0).abs() < 0.1, "w=80 (CSS)");
@@ -1345,7 +1400,13 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &sizes("x.png", 40, 20));
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 300.0),
+            [0.0; 4],
+            &sizes("x.png", 40, 20),
+        );
         let img_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(img_id).unwrap().layout_rect;
         assert!((r.h - 60.0).abs() < 0.1, "h=60 (CSS)");
@@ -1407,7 +1468,7 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        solve(&mut scene, &fonts, (300.0, 300.0), [0.0; 4], &empty_sizes());
         let children = &scene.get(scene.roots[0]).unwrap().children;
         // TextNode 在 children[0]，Button 在 children[1]。
         let ws_id = children[0];
@@ -1460,7 +1521,7 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        solve(&mut scene, &fonts, (300.0, 300.0), [0.0; 4], &empty_sizes());
         let text_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = scene.get(text_id).unwrap().layout_rect;
         assert!(
@@ -1528,7 +1589,13 @@ mod tests {
         let div = scene.get(scene.roots[0]).unwrap().children[0];
         scene.get_mut(div).unwrap().rich_text_block = true;
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 1000.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 1000.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
         let layout = scene.text_layouts[div.index()]
             .as_ref()
             .expect("rich-text-block solve 应填 text_layouts[div]");
@@ -1593,7 +1660,7 @@ mod tests {
         let mut scene = Scene::build(&entries);
         // rich_text_block 保持默认 false → 子 TextNode 走原 Text measure（独立 box）。
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        solve(&mut scene, &fonts, (300.0, 300.0), [0.0; 4], &empty_sizes());
         let text_id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = scene.get(text_id).unwrap().layout_rect;
         assert!(
@@ -1657,7 +1724,7 @@ mod tests {
             "建节点时 base 无 overflow → clip None"
         );
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 300.0), &empty_sizes());
+        solve(&mut scene, &fonts, (300.0, 300.0), [0.0; 4], &empty_sizes());
         // solve 后：style.overflow_x=Auto（rematched）→ clip_rect 应被重派生为 Some(解出的 rect)。
         let clip = scene.get(root).unwrap().clip_rect;
         assert!(
@@ -1742,7 +1809,13 @@ mod tests {
         let label = scene.get(pool).unwrap().children[0];
         scene.get_mut(label).unwrap().rich_text_block = true;
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (300.0, 1000.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (300.0, 1000.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
         let layout = scene.text_layouts[label.index()]
             .as_ref()
             .expect("rich-text-block solve 应填 text_layouts[label]");
@@ -1792,13 +1865,25 @@ mod tests {
         ];
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (800.0, 600.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         let id = scene.get(scene.roots[0]).unwrap().children[0];
         let r = &scene.get(id).unwrap().layout_rect;
         assert!((r.w - 400.0).abs() < 0.1, "50vw @800 -> 400, got {}", r.w);
         assert!((r.h - 60.0).abs() < 0.1, "10vh @600 -> 60, got {}", r.h);
         // resize 后重排跟随
-        solve(&mut scene, &fonts, (1000.0, 500.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (1000.0, 500.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         let r = &scene.get(id).unwrap().layout_rect;
         assert!((r.w - 500.0).abs() < 0.1, "50vw @1000 -> 500, got {}", r.w);
         assert!((r.h - 50.0).abs() < 0.1, "10vh @500 -> 50, got {}", r.h);
@@ -1843,7 +1928,13 @@ mod tests {
         .map(|(p, k, s, c, i)| (p, k, s, c, i, false, None, None, None, None));
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
 
         let area_id = scene.get(scene.roots[0]).unwrap().children[1];
         let scroll_id = scene.get(area_id).unwrap().children[0];
@@ -1904,7 +1995,13 @@ mod tests {
         .map(|(p, k, s, c, i)| (p, k, s, c, i, false, None, None, None, None));
         let mut scene = Scene::build(&entries);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
 
         let fr = scene.get(scene.roots[0]).unwrap().children[0];
         let fr = scene.get(fr).unwrap().layout_rect;
@@ -1999,7 +2096,13 @@ mod tests {
         fonts
             .register("wqy-microhei", std::fs::read(path).unwrap(), true)
             .unwrap();
-        solve(&mut scene, &fonts, (1920.0, 1080.0), &empty_sizes());
+        solve(
+            &mut scene,
+            &fonts,
+            (1920.0, 1080.0),
+            [0.0; 4],
+            &empty_sizes(),
+        );
 
         let wrap_id = scene.get(scene.roots[0]).unwrap().children[0];
         let card_id = scene.get(wrap_id).unwrap().children[0];
@@ -2242,8 +2345,8 @@ mod tests {
         let mut root_size = (800.0_f32, 600.0_f32);
 
         // 预热两帧（首帧全量创建，第二帧稳态复用）。
-        solve(&mut scene, &fonts, root_size, &sizes);
-        solve(&mut scene, &fonts, root_size, &sizes);
+        solve(&mut scene, &fonts, root_size, [0.0; 4], &sizes);
+        solve(&mut scene, &fonts, root_size, [0.0; 4], &sizes);
 
         for frame in 0..300 {
             // ---- 随机操作（8 类，覆盖增量 diff 的全部变更面）----
@@ -2348,9 +2451,9 @@ mod tests {
                 }
             }
             // ---- 差分断言：增量 vs 全重建 ----
-            solve(&mut scene, &fonts, root_size, &sizes);
+            solve(&mut scene, &fonts, root_size, [0.0; 4], &sizes);
             let a = snap(&scene);
-            solve_rebuild(&mut scene, &fonts, root_size, &sizes);
+            solve_rebuild(&mut scene, &fonts, root_size, [0.0; 4], &sizes);
             let b = snap(&scene);
             assert_eq!(
                 a, b,
@@ -2386,12 +2489,12 @@ mod tests {
             Some("短文本宽度贴边".into()),
         );
         let sizes = empty_sizes();
-        solve(&mut scene, &fonts, (800.0, 600.0), &sizes);
+        solve(&mut scene, &fonts, (800.0, 600.0), [0.0; 4], &sizes);
         assert!(
             scene.text_layouts[t.index()].is_some(),
             "首帧 measure 必跑、render 槽必填"
         );
-        solve(&mut scene, &fonts, (800.0, 600.0), &sizes); // 稳态帧：零变更
+        solve(&mut scene, &fonts, (800.0, 600.0), [0.0; 4], &sizes); // 稳态帧：零变更
         assert!(
             scene.text_layouts[t.index()].is_some(),
             "稳态帧 taffy 跳过干净子树，text_layouts 必须承接上帧（None = render 退化重测换行）"
@@ -2441,7 +2544,13 @@ mod tests {
             value: 45.0,
         });
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (800.0, 600.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         let r = &scene.get(id).unwrap().layout_rect;
         assert!(
             (r.w - 123.0).abs() < 0.1,
@@ -2494,11 +2603,23 @@ mod tests {
             value: 50.0,
         });
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (800.0, 600.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         let w1 = scene.get(id).unwrap().layout_rect.w;
         assert!((w1 - 400.0).abs() < 0.1, "50vw @800 -> 400, got {w1}");
         // resize 到 1000：同 override 值（动画未推进），重 solve 跟随新画布
-        solve(&mut scene, &fonts, (1000.0, 500.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (1000.0, 500.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         let w2 = scene.get(id).unwrap().layout_rect.w;
         assert!(
             (w2 - 500.0).abs() < 0.1,
@@ -2557,7 +2678,13 @@ mod tests {
         // 左子动画 override flex-grow = 0（收起中）
         scene.anim.ensure(kids[0]).flex_grow = Some(0.0);
         let fonts = font_table().expect("need font");
-        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (800.0, 600.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         let lw = scene.get(kids[0]).unwrap().layout_rect.w;
         let rw = scene.get(kids[1]).unwrap().layout_rect.w;
         assert!(lw.abs() < 0.1, "grow=0 的子收缩到 0，got {lw}");

@@ -69,9 +69,6 @@ namespace Ikat
         [Tooltip("显示 on-screen FPS 读数（调试用）。")]
         [SerializeField] bool _showFps;
 
-        [Tooltip("根 shrink-to-fit 到 Screen.safeArea（on=避刘海，off=全屏）。")]
-        [SerializeField] bool _safeArea = true;
-
         [Tooltip("输入采集器（通常与本 Driver 同 GO）。留空时 Awake GetComponent 兜底。")]
         [SerializeField] IkatInputCollector _inputCollector;
 
@@ -124,7 +121,6 @@ namespace Ikat
 
         /// <summary>暴露给输入采集等同程序集内部消费者。</summary>
         internal UnityEngine.Vector2 DesignSize => _designSize;
-        internal bool UseSafeArea => _safeArea;
 
         /// <summary>
         /// Load a text file relative to the product root.
@@ -244,13 +240,12 @@ namespace Ikat
             ResolveAdaptation(runtime, applyToStage: false);
 
             // InputCollector 提前 GetComponent：backend.SetRuntimeRoot 需要它（CollectInput 内读）。
-            // 同步注入 DesignSize（= 画布尺寸，三模式统一投影）/UseSafeArea——
-            // IkatInputCollector 自带这两个属性，backend.CollectInput 走同路径（不依赖 stage 字段）。
+            // 同步注入 DesignSize（= 画布尺寸，三模式统一投影）——
+            // IkatInputCollector 自带该属性，backend.CollectInput 走同路径（不依赖 stage 字段）。
             if (_inputCollector == null) _inputCollector = GetComponent<IkatInputCollector>();
             if (_inputCollector != null)
             {
                 _inputCollector.DesignSize = _canvas;
-                _inputCollector.UseSafeArea = _safeArea;
             }
 
             // Unity 特定资源：Shader + MaterialManager。
@@ -810,11 +805,29 @@ namespace Ikat
             RecomputeAdaptation(_designEff.x, _designEff.y, true);
         }
 
+        /// <summary>
+        /// 运行时切换适配模式（letterbox / fit-width / fit-height）——立即重算适配并
+        /// 喂 Stage 重排（fit 模式画布随屏幕变，vw/vh/% 声明当帧跟随）。演示/设置页
+        /// 常用；manifest 的 match_mode 仍是启动正主，本调用只在运行期改写当前值。
+        /// 未知字符串返 false 不动现状。
+        /// </summary>
+        public bool SetAdaptMode(string mode)
+        {
+            var m = Ikat.Bindings.IkatAdaptMode.FromString(mode);
+            if (!m.HasValue) return false;
+            _modeU32 = m.Value;
+            _adaptMode = (AdaptMode)m.Value;
+            RecomputeAdaptation();
+            return true;
+        }
+
         unsafe void RecomputeAdaptation(float dw, float dh, bool applyToStage)
         {
             _designEff = new UnityEngine.Vector2(dw, dh);
             float sw = Screen.width, sh = Screen.height;
-            UnityEngine.Rect a = _safeArea ? Screen.safeArea : new UnityEngine.Rect(0, 0, sw, sh);
+            // safe 矩形恒传：letterbox 以它为 contain 框；fit 模式在 core 忽略（贴物理边，
+            // unsafe 深度走 env() 通道——SetSafeArea 注入，见下）。
+            UnityEngine.Rect a = Screen.safeArea;
             if (a.width <= 0f || a.height <= 0f) a = new UnityEngine.Rect(0, 0, sw, sh);   // 编辑器未配屏防御
             // Rust 侧 safe y 是 top-down（Unity safeArea 是左下原点 y-up）：top-down y = sh - (y+h)。
             Bindings.AdaptResult r;
@@ -852,6 +865,12 @@ namespace Ikat
 
             if (applyToStage && canvasChanged && _host != null && !_host.SetRootSize(r.root_w, r.root_h))
                 Debug.LogWarning($"[IkatStageDriver] set_root_size({r.root_w},{r.root_h}) rejected (invalid size?)");
+
+            // env(safe-area-inset-*) 取值源：适配映射 + 屏幕 safe 矩形（top-down y）。
+            // core 算 root 伸进 unsafe 区的深度折 design px（letterbox → 0，fit → 真实值）。
+            if (applyToStage && _host != null
+                && !_host.SetSafeArea(r.scale, r.offset_x, r.offset_y, a.x, sh - (a.y + a.height), a.width, a.height))
+                Debug.LogWarning("[IkatStageDriver] set_safe_area rejected");
 
             if (applyToStage) ConfigureTransforms();
         }

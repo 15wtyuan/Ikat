@@ -32,6 +32,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
         ("nav-fx", "effects"),
+        ("nav-adapt", "adapt"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -130,6 +131,22 @@ public class ShowcaseRunner : MonoBehaviour
         Debug.Log($"[Showcase] Instantiate showcase/{page} = OK");
     }
 
+    /// adapt 演示页（#110）：三个模式按钮 → Driver.SetAdaptMode 运行时切换 + 读数翻转。
+    /// 判据（肉眼强信号）：切 fit-width 后拖 Game 视图高度 → 内容重排无黑边、字号随
+    /// 窗口缩放（vmin）；letterbox 出黑边对照；读数 span 跟随按钮翻转。
+    void WireAdaptModeSwitch(Container page)
+    {
+        if (!page.TryGet<TextNode>("adapt-readout", out var readout)) return;
+        void SetMode(string mode)
+        {
+            if (_driver.SetAdaptMode(mode))
+                readout.Text = mode;
+        }
+        if (page.TryGet<Button>("btn-mode-letterbox", out var lb)) lb.Clicked += () => SetMode("letterbox");
+        if (page.TryGet<Button>("btn-mode-fit-width", out var fw)) fw.Clicked += () => SetMode("fit-width");
+        if (page.TryGet<Button>("btn-mode-fit-height", out var fh)) fh.Clicked += () => SetMode("fit-height");
+    }
+
     /// 用框架事件系统接导航：nav-card 与 back-home 都是 `<button>`（Button.Clicked）。
     /// （nav-card 原为 `<a>`/Link.Activated，围栏紧缩 a→button 后统一走 Button.Clicked。）
     /// TryGet 找不到（本页没该元素）就跳过——home 页无 back-home，其他页无 nav-card，各取所需。
@@ -153,6 +170,8 @@ public class ShowcaseRunner : MonoBehaviour
             WireLayoutAnimDrivers(page);
         if (pageName == "api-infra")
             WireInfraDrivers(page);
+        if (pageName == "adapt")
+            WireAdaptModeSwitch(page);
         if (pageName == "home")
         {
             foreach (var (cardId, target) in NAV_CARDS)

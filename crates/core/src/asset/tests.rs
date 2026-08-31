@@ -789,8 +789,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 50,
-        "pkg format version must be 50 after v50 taffy 0.14 (#82 taffy Style serde change; v49 progress min persists)"
+        PKG_FORMAT_VERSION, 51,
+        "pkg format version must be 51 after v51 ViewportStyle deferred-length expansion (#110; v50 taffy 0.14)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -851,8 +851,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 50,
-        "pkg format version must be 50 after v50 taffy 0.14 (#82; v49 progress min persists)"
+        PKG_FORMAT_VERSION, 51,
+        "pkg format version must be 51 after v51 ViewportStyle deferred-length expansion (#110; v50 taffy 0.14)"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -999,8 +999,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v46_roundtrip_preserves_link_href() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 50,
-        "pkg format version must be 50 after v50 taffy 0.14 (#82; v49 progress min persists)"
+        PKG_FORMAT_VERSION, 51,
+        "pkg format version must be 51 after v51 ViewportStyle deferred-length expansion (#110; v50 taffy 0.14)"
     );
     let mut root = tn(NodeKind::Container);
     root.rich_text_block = true;
@@ -1087,8 +1087,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 50,
-        "pkg format version must be 50 after v50 taffy 0.14 (#82; v49 progress min persists)"
+        PKG_FORMAT_VERSION, 51,
+        "pkg format version must be 51 after v51 ViewportStyle deferred-length expansion (#110; v50 taffy 0.14)"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

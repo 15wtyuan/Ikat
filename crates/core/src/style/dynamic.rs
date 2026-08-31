@@ -663,7 +663,9 @@ fn compute_scope_map(scene: &Scene, node_ids: &[NodeId]) -> HashMap<NodeId, Node
 /// 比较旧/新级联值的可动画通道（BgColor/TextColor/Opacity）；变化则推入
 /// `scene.pending_transitions`，供 Stage tick drain 后 kill 旧 tween + 提交新 tween。
 /// 首次 cascade（cascaded_once=false）即时生效不产请求，并置 cascaded_once=true。
-pub fn rematch_pseudo_classes(scene: &mut Scene) {
+/// `root_size`/`safe_insets` 是延迟长度（视口单位/env()）的解析分母/取值源，由
+/// Stage 每帧传入（viewport 概念归 Stage，不从 scene 来——见 propagate_inherited）。
+pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_insets: [f32; 4]) {
     // 预提取 specificity 元组 + owned rule 副本 + scope_root（避免借 scene.dynamic_rules 跨 get_mut）。
     let rules_with_spec: Vec<(u32, u32, u32, DynamicRule, NodeId)> = scene
         .dynamic_rules
@@ -784,7 +786,7 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
     }
     // 通用可继承属性传播：每节点从 base_style 独立 cascade（不读父），故继承须 rematch 后
     // 按 tree order 补一次：子未显式声明（set_map 无该 bit）→ 取父 effective 值。
-    propagate_inherited(scene, &set_map);
+    propagate_inherited(scene, &set_map, root_size, safe_insets);
 }
 
 /// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 11 个继承
@@ -804,8 +806,18 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
             }
         };
     }
+    // 字段 + 延迟长度槽成对拷（宽高/padding/margin/gap 等几何通道既有 taffy 值也有
+    // viewport 平行槽）：只拷 taffy 值会让 solve 期 viewport.apply 用旧槽覆写 inline。
+    macro_rules! cpy_slot {
+        ($($f:ident).+, $($vf:ident).+, $bit:expr) => {
+            if s & ($bit) != 0 {
+                style.$($f).+ = inline.$($f).+.clone();
+                style.viewport.$($vf).+ = inline.viewport.$($vf).+;
+            }
+        };
+    }
     // 继承属性（bits 0-7 + 33-35）
-    cpy!(font_size, INH_FONT_SIZE);
+    cpy_slot!(font_size, font_size, INH_FONT_SIZE);
     cpy!(color, INH_COLOR);
     cpy!(font_family, INH_FONT_FAMILY);
     cpy!(font_weight, INH_FONT_WEIGHT);
@@ -813,22 +825,26 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
     // line-height 双槽（倍数/px）同一 bit：声明的两形一起保、继承的两形一起拷。
     cpy!(line_height, INH_LINE_HEIGHT);
     cpy!(line_height_px, INH_LINE_HEIGHT);
-    cpy!(letter_spacing, INH_LETTER_SPACING);
+    cpy_slot!(letter_spacing, letter_spacing, INH_LETTER_SPACING);
     cpy!(white_space, INH_WHITE_SPACE);
     cpy!(overflow_wrap, INH_OVERFLOW_WRAP);
     cpy!(word_break, INH_WORD_BREAK);
     cpy!(text_wrap, INH_TEXT_WRAP);
-    // 非继承属性（bits 8-31）——taffy_style 子字段
-    cpy!(taffy_style.size.width, INLINE_WIDTH);
-    cpy!(taffy_style.size.height, INLINE_HEIGHT);
-    cpy!(taffy_style.min_size.width, INLINE_MIN_WIDTH);
-    cpy!(taffy_style.min_size.height, INLINE_MIN_HEIGHT);
-    cpy!(taffy_style.max_size.width, INLINE_MAX_WIDTH);
-    cpy!(taffy_style.max_size.height, INLINE_MAX_HEIGHT);
-    cpy!(taffy_style.padding, INLINE_PADDING);
-    cpy!(taffy_style.margin, INLINE_MARGIN);
+    // 非继承属性（bits 8-31）——taffy_style 子字段 + viewport 平行槽
+    cpy_slot!(taffy_style.size.width, width, INLINE_WIDTH);
+    cpy_slot!(taffy_style.size.height, height, INLINE_HEIGHT);
+    cpy_slot!(taffy_style.min_size.width, min_width, INLINE_MIN_WIDTH);
+    cpy_slot!(taffy_style.min_size.height, min_height, INLINE_MIN_HEIGHT);
+    cpy_slot!(taffy_style.max_size.width, max_width, INLINE_MAX_WIDTH);
+    cpy_slot!(taffy_style.max_size.height, max_height, INLINE_MAX_HEIGHT);
+    cpy_slot!(taffy_style.padding, padding, INLINE_PADDING);
+    cpy_slot!(taffy_style.margin, margin, INLINE_MARGIN);
     cpy!(taffy_style.border, INLINE_BORDER_WIDTH);
-    cpy!(taffy_style.gap, INLINE_GAP);
+    if s & INLINE_GAP != 0 {
+        style.taffy_style.gap = inline.taffy_style.gap;
+        style.viewport.row_gap = inline.viewport.row_gap;
+        style.viewport.column_gap = inline.viewport.column_gap;
+    }
     cpy!(taffy_style.flex_direction, INLINE_FLEX_DIRECTION);
     cpy!(taffy_style.flex_wrap, INLINE_FLEX_WRAP);
     cpy!(taffy_style.justify_content, INLINE_JUSTIFY_CONTENT);
@@ -840,10 +856,23 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
         style.taffy_style.position = inline.taffy_style.position;
         style.position_declared = inline.position_declared;
     }
-    cpy!(taffy_style.inset.left, INLINE_LEFT);
-    cpy!(taffy_style.inset.top, INLINE_TOP);
-    cpy!(taffy_style.inset.right, INLINE_RIGHT);
-    cpy!(taffy_style.inset.bottom, INLINE_BOTTOM);
+    // inset 四边：taffy 值 + viewport.inset[idx]（[t,r,b,l]）成对拷，同 cpy_slot 理由。
+    if s & INLINE_TOP != 0 {
+        style.taffy_style.inset.top = inline.taffy_style.inset.top;
+        style.viewport.inset[0] = inline.viewport.inset[0];
+    }
+    if s & INLINE_RIGHT != 0 {
+        style.taffy_style.inset.right = inline.taffy_style.inset.right;
+        style.viewport.inset[1] = inline.viewport.inset[1];
+    }
+    if s & INLINE_BOTTOM != 0 {
+        style.taffy_style.inset.bottom = inline.taffy_style.inset.bottom;
+        style.viewport.inset[2] = inline.viewport.inset[2];
+    }
+    if s & INLINE_LEFT != 0 {
+        style.taffy_style.inset.left = inline.taffy_style.inset.left;
+        style.viewport.inset[3] = inline.viewport.inset[3];
+    }
     // 非继承属性——视觉/渲染字段
     cpy!(background_color, INLINE_BACKGROUND_COLOR);
     cpy!(opacity, INLINE_OPACITY);
@@ -865,27 +894,43 @@ fn apply_inline_override(style: &mut ResolvedStyle, inline: &ResolvedStyle, set:
 
 /// 通用可继承属性传播（tree-order DFS）。子未显式声明的可继承字段 → 取父 effective 值。
 /// `effective` = 节点当前 style 值（anim override 本轮仅 color 用过，font 等无 anim）。
-fn propagate_inherited(scene: &mut Scene, set_map: &HashMap<NodeId, InheritedSet>) {
+///
+/// 延迟长度（视口单位/env()）解析嵌在本走查：font-size/letter-spacing 是继承属性，
+/// 必须父先解析成 px、子再拷贝（px 字段是传播载体）；border-radius 非继承但同走查
+/// 顺带落 px 缓存。几何通道（padding/gap 等）不走这里——solve 建树时 viewport.apply
+/// 直接覆写 taffy 副本。
+fn propagate_inherited(
+    scene: &mut Scene,
+    set_map: &HashMap<NodeId, InheritedSet>,
+    root_size: (f32, f32),
+    safe_insets: [f32; 4],
+) {
     let roots = scene.roots.clone();
     for root in roots {
-        propagate_inherited_rec(scene, root, None, set_map);
+        propagate_inherited_rec(scene, root, None, set_map, root_size, safe_insets);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn propagate_inherited_rec(
     scene: &mut Scene,
     id: NodeId,
     parent_style: Option<ResolvedStyle>,
     set_map: &HashMap<NodeId, InheritedSet>,
+    root_size: (f32, f32),
+    safe_insets: [f32; 4],
 ) {
-    let (my_style, children) = {
+    let (mut my_style, children) = {
         let n = scene.get_live(id, "dynamic/propagate_inherited:read");
         (n.style.clone(), n.children.clone())
     };
+    // 本节点延迟长度先解析（ViewportStyle 是 Copy，拷出再借 &mut 消字段/整体双借）
+    let vp = my_style.viewport;
+    vp.apply_visual(&mut my_style, root_size, safe_insets);
     // 父 effective = 父传下来的 style 快照（已含父自己的继承结果，因 tree order）
     if let Some(parent_eff) = parent_style {
         let inh = set_map.get(&id).copied().unwrap_or_default();
-        let mut new_style = my_style.clone();
+        let mut new_style = my_style;
         macro_rules! copy_if_unset {
             ($field:ident, $bit:expr) => {
                 if (inh.0 & $bit) == 0 {
@@ -895,7 +940,7 @@ fn propagate_inherited_rec(
         }
         copy_if_unset!(font_size, INH_FONT_SIZE);
         // anim text-color override to children is dropped (the old propagate_color_inheritance
-        // had it); restore when text anim + inheritance interact.
+        // had this); restore when text anim + inheritance interact.
         copy_if_unset!(color, INH_COLOR);
         copy_if_unset!(font_family, INH_FONT_FAMILY);
         copy_if_unset!(font_weight, INH_FONT_WEIGHT);
@@ -914,12 +959,29 @@ fn propagate_inherited_rec(
             .style = new_style;
         // 向下传我更新后的 style 作为子 effective
         for c in children {
-            propagate_inherited_rec(scene, c, Some(eff_for_children.clone()), set_map);
+            propagate_inherited_rec(
+                scene,
+                c,
+                Some(eff_for_children.clone()),
+                set_map,
+                root_size,
+                safe_insets,
+            );
         }
     } else {
-        // 根节点：无父继承，effective = 自己 style，直接向下传
+        // 根节点：无父继承，effective = 自己 style（延迟长度已解析，落盘供 solve/render 读）
+        scene
+            .get_live_mut(id, "dynamic/propagate_inherited:write-root")
+            .style = my_style.clone();
         for c in children {
-            propagate_inherited_rec(scene, c, Some(my_style.clone()), set_map);
+            propagate_inherited_rec(
+                scene,
+                c,
+                Some(my_style.clone()),
+                set_map,
+                root_size,
+                safe_insets,
+            );
         }
     }
 }
@@ -1265,20 +1327,28 @@ fn push_snap_warning(scene: &mut Scene, node: NodeId, prop: crate::tween::TweenP
 /// tag 判别走 CompactLength（mapping.rs parse 同款手法）。percent 从 0..1 分数还原为
 /// CSS 原始数（25% ↔ 25）。
 fn size_anim_len(
-    vp: Option<crate::style::resolved::ViewportLen>,
+    vp: Option<crate::style::resolved::DeferredLength>,
     dim: &taffy::style::Dimension,
 ) -> Option<crate::scene::AnimLen> {
     use crate::scene::{AnimLen, LenDomain};
     if let Some(v) = vp {
-        let domain = match v.unit {
-            crate::style::resolved::ViewportUnit::Vw => LenDomain::Vw,
-            crate::style::resolved::ViewportUnit::Vh => LenDomain::Vh,
-            crate::style::resolved::ViewportUnit::Vmin => LenDomain::Vmin,
-            crate::style::resolved::ViewportUnit::Vmax => LenDomain::Vmax,
+        let domain = match v {
+            crate::style::resolved::DeferredLength::Viewport(vl) => match vl.unit {
+                crate::style::resolved::ViewportUnit::Vw => LenDomain::Vw,
+                crate::style::resolved::ViewportUnit::Vh => LenDomain::Vh,
+                crate::style::resolved::ViewportUnit::Vmin => LenDomain::Vmin,
+                crate::style::resolved::ViewportUnit::Vmax => LenDomain::Vmax,
+            },
+            // env() 端点无对应动画域（safe inset 是每帧环境值非声明长度）——
+            // 与 auto 端点同判：无动画（snap），不伪造成 px。
+            crate::style::resolved::DeferredLength::SafeInset(_) => return None,
         };
         return Some(AnimLen {
             domain,
-            value: v.value,
+            value: match v {
+                crate::style::resolved::DeferredLength::Viewport(vl) => vl.value,
+                _ => unreachable!(),
+            },
         });
     }
     if dim.is_auto() {
@@ -1457,7 +1527,7 @@ mod tests {
             &mut s,
             rule("game-item-card", "background-color", "#0000ff"),
         );
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(hid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0]),
@@ -1475,7 +1545,7 @@ mod tests {
             n.custom_tag = Some("game-item-card".to_string());
         }
         push_global(&mut s, rule("div", "background-color", "#ff0000"));
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(hid).unwrap().style.background_color,
             None,
@@ -1493,7 +1563,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED); // 模拟命中 diff 后状态
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         // background_color 是视觉字段，不触发 layout dirty
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
@@ -1547,7 +1617,7 @@ mod tests {
         let sizes = std::collections::HashMap::new();
 
         // 非 hover 态：rematch 从 base_style 起，无规则命中 → UA 蓝保真。
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(a_id).unwrap().style.color,
             [0.0, 0.0, 238.0 / 255.0, 1.0]
@@ -1568,7 +1638,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(a_id).unwrap().style.color,
             [1.0, 0.0, 0.0, 1.0],
@@ -1618,7 +1688,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         let cid = s.get(pid).unwrap().children[0];
         let c = s.get(cid).unwrap().style.color;
         // #1a1d2e = (26,29,46)/255
@@ -1653,7 +1723,7 @@ mod tests {
         };
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         push_global(&mut s, rule(".par", "font-size", "24px"));
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         let cid = s.get(s.roots[0]).unwrap().children[0];
         assert_eq!(
             s.get(cid).unwrap().style.font_size,
@@ -1673,7 +1743,7 @@ mod tests {
         let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
         push_global(&mut s, rule(".par", "font-size", "24px"));
         push_global(&mut s, rule(".c", "font-size", "12px"));
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         let cid = s.get(s.roots[0]).unwrap().children[0];
         assert_eq!(
             s.get(cid).unwrap().style.font_size,
@@ -1692,7 +1762,7 @@ mod tests {
         leaf.kind = NodeKind::TextNode;
         let mut s = Scene::from_nodes(vec![root, mid, leaf], vec![(0, 1), (1, 2)]);
         push_global(&mut s, rule(".a", "font-size", "20px"));
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         let mid_id = s.get(s.roots[0]).unwrap().children[0];
         let leaf_id = s.get(mid_id).unwrap().children[0];
         assert_eq!(
@@ -1712,7 +1782,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::ACTIVE);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([1.0, 0.0, 0.0, 1.0]),
@@ -1730,7 +1800,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::DISABLED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.opacity,
             0.5,
@@ -1748,7 +1818,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         // 验 style.taffy_style.size.width 被改
         use taffy::style::Dimension;
         assert_eq!(
@@ -1767,7 +1837,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -1799,7 +1869,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED); // parent hovered
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(child_id).unwrap().style.color,
             [0.0, 0.0, 1.0, 1.0],
@@ -1820,7 +1890,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.get(bid).unwrap().style.color, [1.0, 0.0, 0.0, 1.0]);
     }
 
@@ -1836,7 +1906,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0])
@@ -1846,7 +1916,7 @@ mod tests {
             .interaction
             .flags
             .remove(NodeFlags::HOVERED); // 取消 hover
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             None,
@@ -1864,7 +1934,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::FOCUSED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             Some([0.0, 0.0, 1.0, 1.0]),
@@ -1883,7 +1953,7 @@ mod tests {
             .interaction
             .flags
             .remove(NodeFlags::FOCUSED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_color,
             None,
@@ -1919,7 +1989,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::FOCUSED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(child_id).unwrap().style.color,
             [0.0, 0.0, 1.0, 1.0],
@@ -1941,7 +2011,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_image.as_deref(),
             Some("icons/home.png"),
@@ -1960,7 +2030,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(bid).unwrap().style.background_size,
             crate::style::resolved::BackgroundSize::Cover,
@@ -1979,7 +2049,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         // hover → border-radius:8px 生效（四角 h=v=Length(8)）
         let bc = &s.get(bid).unwrap().style.border_radius.corners;
         for c in bc {
@@ -2376,7 +2446,7 @@ mod tests {
         s.controls
             .ensure(id, ControlState::Toggle { checked: true });
         push_global(&mut s, rule(r#"[aria-checked="true"]"#, "color", "#ff0000"));
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(id).unwrap().style.color,
             [1.0, 0.0, 0.0, 1.0],
@@ -2384,7 +2454,7 @@ mod tests {
         );
         s.controls
             .ensure(id, ControlState::Toggle { checked: false });
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_ne!(
             s.get(id).unwrap().style.color,
             [1.0, 0.0, 0.0, 1.0],
@@ -2414,7 +2484,7 @@ mod tests {
             .flags
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.pending_transitions.len(),
             1,
@@ -2455,7 +2525,7 @@ mod tests {
             .flags
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.pending_transitions.len(), 1, "transform 变化 → 1 请求");
         let r = &s.pending_transitions[0];
         assert!(matches!(r.prop, TweenProp::Transform));
@@ -2496,7 +2566,7 @@ mod tests {
             .flags
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.pending_transitions.len(), 1);
         let r = &s.pending_transitions[0];
         assert!(
@@ -2530,7 +2600,7 @@ mod tests {
             .flags
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.pending_transitions.len(), 1);
         let r = &s.pending_transitions[0];
         assert!(matches!(r.prop, TweenProp::Transform));
@@ -2558,7 +2628,7 @@ mod tests {
             .interaction
             .flags
             .insert(NodeFlags::HOVERED);
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.pending_transitions.len(),
             0,
@@ -2617,7 +2687,7 @@ mod tests {
         // 验证 set_map 接收 inline 的继承 bit（经 propagate_inherited 传父子）。
         let (mut scene, root, child) = build_parent_child();
         crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         let child_color = scene.get(child).unwrap().style.color;
         assert_eq!(
             child_color,
@@ -2634,7 +2704,7 @@ mod tests {
         let (mut scene, root, _child) = build_parent_child();
         crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
         crate::scene::dynamic::unset_inline_override(&mut scene, root, "color").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_ne!(
             scene.get(root).unwrap().style.color,
             [1.0, 0.0, 0.0, 1.0],
@@ -2650,7 +2720,7 @@ mod tests {
         // 没设 inline 的节点（inline_set == 0）：rematch 不 panic。
         let (mut scene, root) = build_simple_tree();
         assert_eq!(scene.get(root).unwrap().inline_set.0, 0);
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         // base color = 默认黑（ResolvedStyle::default）
         assert_eq!(scene.get(root).unwrap().style.color, [0.0, 0.0, 0.0, 1.0]);
     }
@@ -2662,7 +2732,7 @@ mod tests {
         scene.get_mut(root).unwrap().classes = vec!["r".to_string()];
         push_global(&mut scene, rule(".r", "color", "#0000ff"));
         crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(root).unwrap().style.color,
             [1.0, 0.0, 0.0, 1.0],
@@ -2676,7 +2746,7 @@ mod tests {
         let (mut scene, root, child) = build_parent_child();
         crate::scene::dynamic::set_inline_override(&mut scene, root, "background-color:#00ff00")
             .unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(root).unwrap().style.background_color,
             Some([0.0, 1.0, 0.0, 1.0]),
@@ -2695,7 +2765,7 @@ mod tests {
         // 非继承 taffy 字段 width：inline 设 → 应用到 style.taffy_style.size.width。
         let (mut scene, root, _child) = build_parent_child();
         crate::scene::dynamic::set_inline_override(&mut scene, root, "width:123px").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         use taffy::style::Dimension;
         assert_eq!(
             scene.get(root).unwrap().style.taffy_style.size.width,
@@ -2709,7 +2779,7 @@ mod tests {
         // 验证 INLINE_DISPLAY bit 的双字段覆盖。
         let (mut scene, root, _child) = build_parent_child();
         crate::scene::dynamic::set_inline_override(&mut scene, root, "display:none").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(root).unwrap().style.taffy_style.display,
             taffy::Display::None,
@@ -2737,7 +2807,7 @@ mod tests {
             n.base_style.inline_declared |= INLINE_DISPLAY;
         }
         push_global(&mut scene, rule(".r", "display", "flex"));
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(root).unwrap().style.taffy_style.display,
             taffy::Display::None,
@@ -2758,7 +2828,7 @@ mod tests {
         scene.get_mut(child).unwrap().classes = vec!["c".to_string()];
         push_global(&mut scene, rule(".c", "color", "#0000ff"));
         crate::scene::dynamic::set_inline_override(&mut scene, root, "color:#ff0000").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(child).unwrap().style.color,
             [0.0, 0.0, 1.0, 1.0],
@@ -2784,7 +2854,7 @@ mod tests {
         let mid_id = scene.get(root_id).unwrap().children[0];
         let leaf_id = scene.get(mid_id).unwrap().children[0];
         crate::scene::dynamic::set_inline_override(&mut scene, root_id, "color:#ff0000").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(leaf_id).unwrap().style.color,
             [1.0, 0.0, 0.0, 1.0],
@@ -2822,7 +2892,7 @@ mod tests {
         );
         // transform 无 bit → 不写 inline_override（transform 字段保持默认，无 ghost）
         // rematch 不 panic
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         let n = scene.get(root).unwrap();
         assert_eq!(
             n.style.taffy_style.padding.top,
@@ -2879,7 +2949,7 @@ mod tests {
             "border_color 无 ghost red 残留"
         );
         // rematch：border 2px 生效（bit 置），border_color 仍 None（base 值）
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         use taffy::style::LengthPercentage;
         let s = &scene.get(root).unwrap().style;
         assert_eq!(
@@ -2956,7 +3026,7 @@ mod tests {
         // 该规则会穿透命中 leaf 染红。
         let base_color = s.get(leaf_id).unwrap().base_style.color;
         push_scoped(&mut s, page_root_id, rule(".leaf", "color", "#ff0000"));
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             s.get(leaf_id).unwrap().style.color,
             base_color,
@@ -3101,10 +3171,10 @@ mod tests {
         // 验证 u64 位图 bit 32 不被截断（u32 位图时代该 bit 装不下）。
         let (mut scene, root, _child) = build_parent_child();
         crate::scene::dynamic::set_inline_override(&mut scene, root, "z-index:7").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(scene.get(root).unwrap().style.z_index, 7);
         crate::scene::dynamic::unset_inline_override(&mut scene, root, "z-index").unwrap();
-        rematch_pseudo_classes(&mut scene);
+        rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(
             scene.get(root).unwrap().style.z_index,
             0,
@@ -3143,7 +3213,7 @@ mod tests {
             .flags
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.pending_transitions.len(), 1, "同域 height 变化 → 1 请求");
         let r = &s.pending_transitions[0];
         assert!(matches!(r.prop, TweenProp::Height));
@@ -3184,7 +3254,7 @@ mod tests {
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
         s.pending_anim_warnings.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert!(
             s.pending_transitions.is_empty(),
             "跨域端点不建 tween（新级联值直接生效 = snap）"
@@ -3227,7 +3297,7 @@ mod tests {
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
         s.pending_anim_warnings.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert!(s.pending_transitions.is_empty(), "auto 端不建 tween");
         assert!(s.pending_anim_warnings.is_empty(), "auto 端不产跨域警告");
     }
@@ -3258,7 +3328,7 @@ mod tests {
             .flags
             .insert(NodeFlags::HOVERED);
         s.pending_transitions.clear();
-        rematch_pseudo_classes(&mut s);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
         assert_eq!(s.pending_transitions.len(), 1);
         let r = &s.pending_transitions[0];
         assert!(matches!(r.prop, TweenProp::BoxShadow));

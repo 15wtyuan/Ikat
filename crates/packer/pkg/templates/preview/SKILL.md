@@ -43,8 +43,12 @@ your scripts restore **consumer behavior**, never re-layout.
 
 `ikat preview <workspace>` (long-running; prints one JSON with `url`) serves
 a workbench: package/page tree on the left, device-frame preview on the
-right (scaled by the workspace `match_mode` — the page itself never
-reflows). Per page it injects at most three ES modules, in this order:
+right. Scaling follows the match mode (switchable in the toolbar,
+persisted): `letterbox` locks the iframe to the design resolution (no
+reflow, black bars); `fit-width` / `fit-height` size the iframe to the
+runtime root (the free axis reflows with the device frame — vw/vh
+denominators follow, exactly like the engine). Per page it injects at
+most three ES modules, in this order:
 
 ```
 /ikat-preview/lib/boot.js        ← ALWAYS (framework behavior layer)
@@ -122,6 +126,11 @@ pages and control pages are already alive through the A layer.
   gradients, keyframes timing) — scripts restore behavior, not pixels.
 - Custom resolutions / safe-area guides are preview-shell UI (localStorage
   prefs); they never touch the workspace.
+- `env(safe-area-inset-*)` is rewritten server-side to
+  `var(--ikat-safe-*, 0px)`; the shell feeds the vars from the selected
+  device preset using the same formula as the engine (fit = real insets
+  against the physical frame, letterbox = 0). Safe-area guides and env
+  values share one preset table.
 - Trust tiers for what a preview can and cannot show:
   `references/recipes.md` §Trust list.
 

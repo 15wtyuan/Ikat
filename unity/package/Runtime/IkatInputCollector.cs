@@ -25,7 +25,6 @@ namespace Ikat
         /// 由当前 Driver（IkatStageDriver 或 IkatHost Driver）在 Awake / resize 时注入。
         /// </summary>
         internal UnityEngine.Vector2 DesignSize { get; set; }
-        internal bool UseSafeArea { get; set; }
         /// 渲染缩放比（design px → screen px）。
         internal float MapScale { get; set; } = 1f;
         /// 画布原点 (0,0) 的 top-down 屏幕 x（px）。

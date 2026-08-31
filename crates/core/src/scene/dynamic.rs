@@ -68,7 +68,15 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
             continue;
         }
         if let Some((prop, val)) = decl.split_once(':') {
-            apply_decl(style, prop.trim(), val.trim());
+            let prop = prop.trim();
+            if apply_decl(style, prop, val.trim()) {
+                // 动态建树的 set-ness：声明成功的可继承属性记 bit，供 propagate 判
+                // 「子是否显式声明」（与打包路径 css_resolve 的 inherited_set bake 同义，
+                // 防嵌套动态节点的自有声明被父继承值覆盖）。
+                if let Some(bit) = crate::style::dynamic::inherited_bit(prop) {
+                    style.inherited_set.0 |= bit;
+                }
+            }
         }
     }
 }

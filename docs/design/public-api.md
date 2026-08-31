@@ -568,7 +568,7 @@ fallback 到默认字体会给出误导性宽度）。
 - **纹理注册**：`Image.Src` 是字符串 key（包内 or 运行时注册）。动态纹理的注册（`byte[]→Texture` 解码 + 注册 key）是引擎后端契约（Unity 侧 `SpriteResolver.Register(key, Texture2D)` 一类），用户自己解码塞入。查不到 key = 静默 error 态 + 警告一次，不抛。**每个引擎后端必须提供 runtime key 注册能力。**
 - **原生渲染挂载**：3D 模型/粒子等非 UI 渲染挂载是引擎后端契约（Unity 侧 NativeHost），不进公共 API；集成层自行桥接。
 - **光标指针 affordance**：意图是核心契约——core 沿 hover 命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none，含 `cursor` 声明），经 `IkatHost.CursorIntent` 属性 + `CursorIntentChanged` 事件（去抖，仅变化帧）交集成层；**渲染是引擎后端契约**，同纹理注册/NativeHost 一类。Unity 侧 `IkatStageDriver`：缺省 intent 0/1 = 系统光标（不内置皮肤），intent 2 = 内置全透明载体（藏指针是语义）；`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供业务按意图注册贴图（null = 清除；hotspot 从纹理左上角量；实现契约详见 projection-layer.md §3.3）。浏览器 preview 走原生 `cursor`，无此层。
-- **分辨率适配**：策略数学在核心（`ikat_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `ikat.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `IkatHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
+- **分辨率适配**：策略数学在核心（`ikat_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `ikat.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `IkatHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随）+ `IkatHost.SetSafeArea` 注入适配映射与屏幕 safe 矩形（core 单源算 root 伸进 unsafe 区的深度折 design px，作 CSS `env(safe-area-inset-*)` 的取值源；fit 贴物理边 → 真实值，letterbox → 恒 0），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
 
 ### 11.4 变长内容范式（替代预置满额）
 

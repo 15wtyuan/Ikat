@@ -1880,12 +1880,17 @@ fn taffy_display_none_excludes_parked_slot_from_flow() {
     // 删 items [2, 4) → slot 2,3 就地 park。
     crate::list::notify_removed(s.scene.as_mut().unwrap(), ul, 2, 2).unwrap();
     // rematch → 把 display:none 便签拷进 node.style。
-    crate::style::dynamic::rematch_pseudo_classes(s.scene.as_mut().unwrap());
+    crate::style::dynamic::rematch_pseudo_classes(
+        s.scene.as_mut().unwrap(),
+        s.root_size,
+        s.safe_insets,
+    );
     // solve → taffy 跳 parked slot（display:none），active slot 拿 40px 高。
     crate::layout::solve(
         s.scene.as_mut().unwrap(),
         &s.fonts,
         s.root_size,
+        [0.0; 4],
         &s.image_sizes,
     );
     let scene = s.scene.as_ref().unwrap();

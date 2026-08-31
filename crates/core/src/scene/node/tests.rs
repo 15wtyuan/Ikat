@@ -199,7 +199,7 @@ fn rich_text_block_inline_children_remain_in_scene_tree_after_solve() {
 
     // solve：rich_text_block → build 不递归 inline 子进 taffy → 它们 layout_rect 保持 0。
     let image_sizes: crate::layout::ImageSizeTable = std::collections::HashMap::new();
-    crate::layout::solve(&mut scene, &fonts, (200.0, 1000.0), &image_sizes);
+    crate::layout::solve(&mut scene, &fonts, (200.0, 1000.0), [0.0; 4], &image_sizes);
 
     // 折叠证据：span 及其内外 TextNode layout_rect 塌成 0（不在 taffy 树里 = 无独立几何）。
     let span_rect = scene.get(span).unwrap().layout_rect;

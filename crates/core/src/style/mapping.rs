@@ -1,11 +1,11 @@
 use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, CursorStyle, DisplayMode,
-    GradCoord, Gradient, GradientStop, OverflowMode, OverflowWrap, RadialExtent, RadialShape,
-    ResolvedStyle, SliceInsets, TextAlign, TextDecoration, TextSecurity, TextWrap, TransformOrigin,
-    ViewportLen, ViewportUnit, WhiteSpace, WordBreak, GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS,
-    MAX_OUTER_SHADOW_LAYERS,
+    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, CursorStyle,
+    DeferredLength, DisplayMode, GradCoord, Gradient, GradientStop, OverflowMode, OverflowWrap,
+    RadialExtent, RadialShape, ResolvedStyle, SafeSide, SliceInsets, TextAlign, TextDecoration,
+    TextSecurity, TextWrap, TransformOrigin, ViewportLen, ViewportUnit, WhiteSpace, WordBreak,
+    GRADIENT_MAX_STOPS, MAX_INSET_SHADOW_LAYERS, MAX_OUTER_SHADOW_LAYERS,
 };
 use crate::transform::LenPct;
 use taffy::geometry::{Rect, Size};
@@ -54,8 +54,8 @@ pub fn parse_dimension(s: &str) -> Dimension {
     }
 }
 
-/// 视口相对单位（`vw`/`vh`/`vmin`/`vmax`）解析口。仅尺寸族/inset/margin 通道接它；
-/// padding/gap/font-size 等围栏 px-only（CSS_PROPS 值域），不进此路。
+/// 视口相对单位（`vw`/`vh`/`vmin`/`vmax`）解析口。全长度属性通道可接（值域由围栏
+/// CSS_PROPS 门控，core 侧按能力全放开——运行时动态规则的第二真相源不窄于围栏）。
 fn try_viewport(s: &str) -> Option<ViewportLen> {
     let s = s.trim();
     const SUFFIXES: [(&str, ViewportUnit); 4] = [
@@ -74,11 +74,30 @@ fn try_viewport(s: &str) -> Option<ViewportLen> {
     None
 }
 
-/// 尺寸族声明统一入口（width/height/min-*/max-*/flex-basis）：视口单位进
-/// `style.viewport` 平行槽（taffy 落 length(0) 占位，solve 期按 root_size 换算覆写）；
+/// `env(safe-area-inset-top/right/bottom/left)` 四值（safe-area 之外的 env() 名
+/// 不认——围栏拒、core 同口径静默 None）。大小写敏感（CSS env 名如此）。
+fn try_env(s: &str) -> Option<SafeSide> {
+    match s.trim() {
+        "env(safe-area-inset-top)" => Some(SafeSide::Top),
+        "env(safe-area-inset-right)" => Some(SafeSide::Right),
+        "env(safe-area-inset-bottom)" => Some(SafeSide::Bottom),
+        "env(safe-area-inset-left)" => Some(SafeSide::Left),
+        _ => None,
+    }
+}
+
+/// 延迟长度解析口：视口单位或 env()。
+fn try_deferred(s: &str) -> Option<DeferredLength> {
+    try_viewport(s)
+        .map(DeferredLength::Viewport)
+        .or_else(|| try_env(s).map(DeferredLength::SafeInset))
+}
+
+/// 尺寸族声明统一入口（width/height/min-*/max-*/flex-basis）：延迟长度进
+/// `style.viewport` 平行槽（taffy 落 length(0) 占位，solve 期按 root/safe 换算覆写）；
 /// px/%/auto 进 taffy 并清平行槽——CSS 级联后者胜出，px 覆写 vw 后 vw 必须失效。
-fn apply_size_decl(vp: &mut Option<ViewportLen>, ts_slot: &mut Dimension, value: &str) {
-    if let Some(v) = try_viewport(value) {
+fn apply_size_decl(vp: &mut Option<DeferredLength>, ts_slot: &mut Dimension, value: &str) {
+    if let Some(v) = try_deferred(value) {
         *vp = Some(v);
         *ts_slot = Dimension::length(0.0);
     } else {
@@ -91,7 +110,7 @@ fn apply_size_decl(vp: &mut Option<ViewportLen>, ts_slot: &mut Dimension, value:
 /// （size 槽仍是 Dimension）。复用 apply_size_decl 的视口/级联语义后换型落位——
 /// Length/Percent 直映，auto 落 AUTO（min-width:auto / max-width:auto = 无约束）。
 fn apply_minmax_decl(
-    vp: &mut Option<ViewportLen>,
+    vp: &mut Option<DeferredLength>,
     ts_slot: &mut LengthPercentageAuto,
     value: &str,
 ) {
@@ -126,15 +145,73 @@ pub fn parse_four(s: &str) -> Option<[f32; 4]> {
     })
 }
 
-/// margin 围栏 px/%/auto/视口单位 → ([t,r,b,l] taffy 值, [t,r,b,l] 视口覆盖)。
-/// 任一 token 四者皆非（em/rem/keyword）→ None。兑现 fence 承诺：
-/// `margin:10%` → Percent，`margin:auto` → Auto（居中），`margin:0 auto` →
-/// top/bottom Length(0)、left/right Auto；视口 token 进覆盖槽 + taffy 落 0 占位。
-fn parse_margin_four(s: &str) -> Option<([LengthPercentageAuto; 4], [Option<ViewportLen>; 4])> {
+/// 单 token px 或延迟长度（视口单位/env()）。px 落 LengthPercentage + 清覆盖槽，
+/// 延迟落 length(0) 占位 + 进覆盖槽。
+fn parse_px_or_deferred(tok: &str) -> Option<(LengthPercentage, Option<DeferredLength>)> {
+    let tok = tok.trim();
+    if let Some(v) = try_deferred(tok) {
+        return Some((LengthPercentage::length(0.0), Some(v)));
+    }
+    let px = tok
+        .strip_suffix("px")
+        .unwrap_or(tok)
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    Some((LengthPercentage::length(px), None))
+}
+
+/// padding 围栏 px/延迟长度 → ([t,r,b,l] taffy 值, [t,r,b,l] 延迟覆盖)。
+/// 任一 token 皆非 → None（整条声明无效）。% 不开（padding px-only 基线保持，
+/// 响应式走视口单位——票面拍板）。
+fn parse_padding_four(s: &str) -> Option<([LengthPercentage; 4], [Option<DeferredLength>; 4])> {
     let parts: Vec<&str> = s.split_whitespace().collect();
-    let p = |i: usize| -> Option<(LengthPercentageAuto, Option<ViewportLen>)> {
+    let p = |i: usize| parse_px_or_deferred(parts.get(i)?);
+    let (v0, d0) = p(0)?;
+    Some(match parts.len() {
+        1 => ([v0, v0, v0, v0], [d0, d0, d0, d0]),
+        2 => {
+            let (v1, d1) = p(1)?;
+            ([v0, v1, v0, v1], [d0, d1, d0, d1])
+        }
+        3 => {
+            let (v1, d1) = p(1)?;
+            let (v2, d2) = p(2)?;
+            ([v0, v1, v2, v1], [d0, d1, d2, d1])
+        }
+        _ => {
+            let (v1, d1) = p(1)?;
+            let (v2, d2) = p(2)?;
+            let (v3, d3) = p(3)?;
+            ([v0, v1, v2, v3], [d0, d1, d2, d3])
+        }
+    })
+}
+
+/// gap 值对 [(row, col)]：1 token → 同值；2 token → (row, col)；更多 → None
+/// （CSS gap 只收 1-2 值，整条无效——多 token 静默取前两值会造成预览/运行时口径分叉）。
+fn parse_gap_pair(s: &str) -> Option<[(LengthPercentage, Option<DeferredLength>); 2]> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let p = |i: usize| parse_px_or_deferred(parts.get(i)?);
+    match parts.len() {
+        1 => {
+            let v = p(0)?;
+            Some([v, v])
+        }
+        2 => Some([p(0)?, p(1)?]),
+        _ => None,
+    }
+}
+
+/// margin 围栏 px/%/auto/延迟长度 → ([t,r,b,l] taffy 值, [t,r,b,l] 延迟覆盖)。
+/// 任一 token 皆非（em/rem/keyword）→ None。兑现 fence 承诺：
+/// `margin:10%` → Percent，`margin:auto` → Auto（居中），`margin:0 auto` →
+/// top/bottom Length(0)、left/right Auto；延迟 token 进覆盖槽 + taffy 落 0 占位。
+fn parse_margin_four(s: &str) -> Option<([LengthPercentageAuto; 4], [Option<DeferredLength>; 4])> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let p = |i: usize| -> Option<(LengthPercentageAuto, Option<DeferredLength>)> {
         let x = parts.get(i)?.trim();
-        if let Some(v) = try_viewport(x) {
+        if let Some(v) = try_deferred(x) {
             return Some((LengthPercentageAuto::length(0.0), Some(v)));
         }
         if x == "auto" {
@@ -300,15 +377,18 @@ fn parse_slice(value: &str) -> Option<SliceInsets> {
     })
 }
 
-/// 解析 border-radius 1~4 值（每值 px 或 %）→ [LengthPercentage;4]（TL,TR,BR,BL）。
-/// 与 parse_four 同序，但保留 %。任一值非法（auto/inherit/initial/非 px-% 数字）→ None
-/// （CSS：整条声明无效）。
-fn parse_radius_group(s: &str) -> Option<[LengthPercentage; 4]> {
+/// 解析 border-radius 1~4 值（每值 px/%/延迟长度）→ ([TL,TR,BR,BL] taffy 值,
+/// [TL,TR,BR,BL] 延迟覆盖)。与 parse_four 同序。任一值非法（auto/inherit/initial/
+/// 非数字）→ None（CSS：整条声明无效）。
+fn parse_radius_group(s: &str) -> Option<([LengthPercentage; 4], [Option<DeferredLength>; 4])> {
     let parts: Vec<&str> = s.split_whitespace().collect();
-    let p = |i: usize| -> Option<LengthPercentage> {
+    let p = |i: usize| -> Option<(LengthPercentage, Option<DeferredLength>)> {
         let tok = parts.get(i)?.trim();
         if tok == "auto" || tok == "inherit" || tok == "initial" {
             return None;
+        }
+        if let Some(v) = try_deferred(tok) {
+            return Some((LengthPercentage::length(0.0), Some(v)));
         }
         // parse_lp 对垃圾（如 "abc"）静默返回 Length(0)，需额外校验：
         // 合法 token = 裸数字 / 数字px / 数字%
@@ -316,14 +396,26 @@ fn parse_radius_group(s: &str) -> Option<[LengthPercentage; 4]> {
         if num_part.trim().parse::<f32>().is_err() {
             return None;
         }
-        Some(parse_lp(tok))
+        Some((parse_lp(tok), None))
     };
-    let v0 = p(0)?;
+    let (v0, d0) = p(0)?;
     Some(match parts.len() {
-        1 => [v0, v0, v0, v0],
-        2 => [v0, p(1)?, v0, p(1)?],
-        3 => [v0, p(1)?, p(2)?, p(1)?],
-        _ => [v0, p(1)?, p(2)?, p(3)?],
+        1 => ([v0, v0, v0, v0], [d0, d0, d0, d0]),
+        2 => {
+            let (v1, d1) = p(1)?;
+            ([v0, v1, v0, v1], [d0, d1, d0, d1])
+        }
+        3 => {
+            let (v1, d1) = p(1)?;
+            let (v2, d2) = p(2)?;
+            ([v0, v1, v2, v1], [d0, d1, d2, d1])
+        }
+        _ => {
+            let (v1, d1) = p(1)?;
+            let (v2, d2) = p(2)?;
+            let (v3, d3) = p(3)?;
+            ([v0, v1, v2, v3], [d0, d1, d2, d3])
+        }
     })
 }
 
@@ -1117,14 +1209,21 @@ fn apply_border_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool
     true
 }
 
-/// padding-top/right/bottom/left 单边 longhand：设 ts.padding 对应边，不动其他三边。
-/// px-only（同 padding 简写）：复用 parse_four 的 px 解析，单 longhand 取首值；非 px → false。
+/// padding-top/right/bottom/left 单边 longhand：设 ts.padding 对应边 + 延迟覆盖槽，
+/// 不动其他三边。px/延迟长度（同 padding 简写口径）；皆非 → false。
 fn apply_padding_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool {
-    let [v, _, _, _] = match parse_four(value) {
+    let ([v, _, _, _], [d, _, _, _]) = match parse_padding_four(value) {
         Some(f) => f,
         None => return false,
     };
-    let lp = LengthPercentage::length(v);
+    let lp = v;
+    let idx = match side {
+        Side::Top => 0,
+        Side::Right => 1,
+        Side::Bottom => 2,
+        Side::Left => 3,
+    };
+    style.viewport.padding[idx] = d;
     let ts = &mut style.taffy_style;
     match side {
         Side::Top => ts.padding.top = lp,
@@ -1155,6 +1254,37 @@ fn apply_margin_side(style: &mut ResolvedStyle, side: Side, value: &str) -> bool
         Side::Right => ts.margin.right = v,
         Side::Bottom => ts.margin.bottom = v,
         Side::Left => ts.margin.left = v,
+    }
+    true
+}
+
+/// inset 单边写入（top/right/bottom/left longhand 与 `inset` 简写共用）。
+/// idx 序 [top, right, bottom, left]。px/%/auto/延迟长度同 longhand 值域。
+fn apply_inset_side(style: &mut ResolvedStyle, idx: usize, value: &str) -> bool {
+    let lp = if let Some(v) = try_deferred(value) {
+        style.viewport.inset[idx] = Some(v);
+        taffy::style::LengthPercentageAuto::length(0.0)
+    } else {
+        style.viewport.inset[idx] = None;
+        if let Some(px) = parse_px(value) {
+            taffy::style::LengthPercentageAuto::length(px)
+        } else if let Some(pct) = value.trim().strip_suffix('%') {
+            match pct.trim().parse::<f32>() {
+                Ok(v) => taffy::style::LengthPercentageAuto::percent(v / 100.0),
+                Err(_) => return false,
+            }
+        } else if value.trim() == "auto" {
+            taffy::style::LengthPercentageAuto::auto()
+        } else {
+            return false;
+        }
+    };
+    let ts = &mut style.taffy_style;
+    match idx {
+        0 => ts.inset.top = lp,
+        1 => ts.inset.right = lp,
+        2 => ts.inset.bottom = lp,
+        _ => ts.inset.left = lp,
     }
     true
 }
@@ -1196,15 +1326,16 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "padding" => {
-            let [t, r, b, l] = match parse_four(value) {
+            let ([t, r, b, l], d) = match parse_padding_four(value) {
                 Some(v) => v,
                 None => return false,
             };
+            style.viewport.padding = d;
             ts.padding = Rect {
-                left: LengthPercentage::length(l),
-                right: LengthPercentage::length(r),
-                top: LengthPercentage::length(t),
-                bottom: LengthPercentage::length(b),
+                left: l,
+                right: r,
+                top: t,
+                bottom: b,
             };
             true
         }
@@ -1271,14 +1402,15 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 Some((h, v)) => (h, v),
                 None => (value, value), // 无 / → 垂直 = 水平（正圆角）
             };
-            let h = match parse_radius_group(h_group) {
+            let (h, dh) = match parse_radius_group(h_group) {
                 Some(g) => g,
                 None => return false,
             };
-            let v = match parse_radius_group(v_group) {
+            let (v, dv) = match parse_radius_group(v_group) {
                 Some(g) => g,
                 None => return false,
             };
+            style.viewport.border_radius = [dh, dv];
             style.border_radius = BorderRadius {
                 corners: [
                     CornerRadius { h: h[0], v: v[0] }, // TL
@@ -1290,34 +1422,45 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "gap" => {
-            let f = match parse_four(value) {
+            let [(row, drow), (col, dcol)] = match parse_gap_pair(value) {
                 Some(v) => v,
                 None => return false,
             };
+            style.viewport.row_gap = drow;
+            style.viewport.column_gap = dcol;
             ts.gap = Size {
-                width: LengthPercentage::length(f[1]),
-                height: LengthPercentage::length(f[0]),
+                width: col,
+                height: row,
             };
             true
         }
         // CSS `gap` longhand：row-gap 对应纵向间距（gap.height），column-gap 横向（gap.width），
-        // 与上方 `gap` shorthand 拆分语义一致。复用 parse_four 的 px 解析（含裸数字），
-        // 单 longhand 取首值——与 padding-* 单边 longhand 同口径（px-only：非 px 落 false）。
-        // 裸数字（如 row-gap:0）须与 px 后缀等价，否则 default `0` 会被静默拒。
+        // 与上方 `gap` shorthand 拆分语义一致。px/延迟长度（裸数字与 px 后缀等价，
+        // 否则 default `0` 会被静默拒）。
         "row-gap" => {
-            let [v, _, _, _] = match parse_four(value) {
-                Some(f) => f,
+            let (v, d) = match value
+                .split_whitespace()
+                .next()
+                .and_then(parse_px_or_deferred)
+            {
+                Some(v) => v,
                 None => return false,
             };
-            ts.gap.height = LengthPercentage::length(v);
+            style.viewport.row_gap = d;
+            ts.gap.height = v;
             true
         }
         "column-gap" => {
-            let [v, _, _, _] = match parse_four(value) {
-                Some(f) => f,
+            let (v, d) = match value
+                .split_whitespace()
+                .next()
+                .and_then(parse_px_or_deferred)
+            {
+                Some(v) => v,
                 None => return false,
             };
-            ts.gap.width = LengthPercentage::length(v);
+            style.viewport.column_gap = d;
+            ts.gap.width = v;
             true
         }
         "flex-direction" => {
@@ -1672,7 +1815,14 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "font-size" => {
-            style.font_size = parse_px(value).unwrap_or(style.font_size);
+            // 延迟长度（视口单位/env()）进平行槽，solve 期按 root/safe 解析后再继承传播
+            //（px 字段此刻是占位值）；px 声明清槽——级联后者胜出。
+            if let Some(d) = try_deferred(value) {
+                style.viewport.font_size = Some(d);
+            } else if let Some(v) = parse_px(value) {
+                style.font_size = v;
+                style.viewport.font_size = None;
+            }
             true
         }
         "font-family" => {
@@ -1722,10 +1872,16 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
         }
         "letter-spacing" => {
-            let Some(v) = parse_px(value) else {
-                return false;
-            };
-            style.letter_spacing = v;
+            // 同 font-size：延迟长度进槽，px 落字段清槽。
+            if let Some(d) = try_deferred(value) {
+                style.viewport.letter_spacing = Some(d);
+            } else {
+                let Some(v) = parse_px(value) else {
+                    return false;
+                };
+                style.letter_spacing = v;
+                style.viewport.letter_spacing = None;
+            }
             true
         }
         "white-space" => {
@@ -1851,6 +2007,26 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 _ => false, // fixed/sticky/其他 → 围栏外
             }
         }
+        "inset" => {
+            // inset 简写（#110）：四边同域 longhand 的 1~4 值展开（与 margin 同值域
+            // px/%/auto/延迟长度、同 [t,r,b,l] 展开序），逐边走 top/right/bottom/left。
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            if parts.is_empty() || parts.len() > 4 {
+                return false;
+            }
+            let sides: [&str; 4] = match parts.len() {
+                1 => [parts[0]; 4],
+                2 => [parts[0], parts[1], parts[0], parts[1]],
+                3 => [parts[0], parts[1], parts[2], parts[1]],
+                _ => [parts[0], parts[1], parts[2], parts[3]],
+            };
+            for (idx, side) in sides.iter().enumerate() {
+                if !apply_inset_side(style, idx, side) {
+                    return false;
+                }
+            }
+            true
+        }
         "top" | "right" | "bottom" | "left" => {
             // inset 四边。px 写 Length；% 按含块解析（绝对定位居中写法 top:50% 等的
             // 浏览器语义，百分比相对 containing block 尺寸，由 taffy solve 兑现）；
@@ -1862,31 +2038,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 "left" => 3,
                 _ => unreachable!(),
             };
-            let lp = if let Some(v) = try_viewport(value) {
-                style.viewport.inset[idx] = Some(v);
-                taffy::style::LengthPercentageAuto::length(0.0)
-            } else {
-                style.viewport.inset[idx] = None;
-                if let Some(px) = parse_px(value) {
-                    taffy::style::LengthPercentageAuto::length(px)
-                } else if let Some(pct) = value.trim().strip_suffix('%') {
-                    match pct.trim().parse::<f32>() {
-                        Ok(v) => taffy::style::LengthPercentageAuto::percent(v / 100.0),
-                        Err(_) => return false,
-                    }
-                } else if value.trim() == "auto" {
-                    taffy::style::LengthPercentageAuto::auto()
-                } else {
-                    return false;
-                }
-            };
-            match idx {
-                0 => ts.inset.top = lp,
-                1 => ts.inset.right = lp,
-                2 => ts.inset.bottom = lp,
-                _ => ts.inset.left = lp,
-            }
-            true
+            apply_inset_side(style, idx, value)
         }
         "box-shadow" => {
             // 括号感知 tokenizer：多层 / inset / blur / spread / spaced rgba()。

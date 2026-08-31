@@ -549,9 +549,9 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 - **策略数学 = core**（`ikat_compute_adaptation` 纯函数，全引擎共享同一份）：三模式枚举——
   - `letterbox`（默认，contain）：root 锁设计分辨率，取较小缩放比，safe 区内居中留黑边。布局永远按设计稿排，最可预测。
   - `fit-width` / `fit-height`：拆黑边重排——锁一维锚（宽或高 = 设计稿），另一维 root 直接取屏幕换算值，`Stage.set_root_size` 喂核心下帧重排（flex/% / vw-vh 声明流动）。px 不变形（缩放仍均匀），无黑边无裁切。
-- **重排语言 = 围栏视口单位**：`vw`/`vh`/`vmin`/`vmax`（分母 = root_size 画布，区别于 `%` 相对父容器），进 `ResolvedStyle.viewport` 平行字段（taffy CompactLength 装不下第四种 tag），solve 建树期按当帧 root_size 换算覆写。收哪些通道见 fence.md §5.2（尺寸族 / flex-basis / inset / margin；padding/gap/font-size 保持 px-only）。
+- **重排语言 = 围栏视口单位 + env()**：`vw`/`vh`/`vmin`/`vmax`（分母 = root_size 画布，区别于 `%` 相对父容器）与 `env(safe-area-inset-*)` 同为**延迟长度**（`DeferredLength`），进 `ResolvedStyle.viewport` 平行字段（taffy CompactLength 装不下第四种 tag）。消费分两路：几何通道 solve 建树期按当帧 root/safe 换算覆写 taffy 副本；视觉通道（font-size/letter-spacing 是继承属性）在继承传播的 tree-order 走查里先解析成 px 再向下传（父的 resolved px 是子的继承源）。收哪些通道见 fence.md §5.2（#110 起全长度属性：尺寸/inset/margin/padding/gap 族 + flex-basis + font-size + letter-spacing + border-radius）。
 
-Fit 模式下 root 从 safe 矩形起算（内容填满 safe 区、不进刘海）；letterbox 以 safe 矩形为 contain 框。叠加顺序：适配算 scale/root → 布局 → 渲染根变换 + 输入逆映射消费同一组 scale/offset（单源 = core 数学，集成层不自己重推）。
+safe-area 语义（#110 定案，web viewport-fit=cover 模型）：**fit 模式 root 贴物理全屏**（scale 按物理宽/高算，unsafe 带被 root 覆盖、背景满铺贴边），元素用 `env(safe-area-inset-*)` 自行避让；letterbox 仍以 safe 矩形为 contain 框——root 全在 safe 内，env() 恒 0（黑边已让位、不重复避让）。三模式同一条公式「env() = root 伸进 unsafe 屏区的深度（design px）」，由宿主按 adapt 结果 + 屏幕 safe 矩形经 `ikat_stage_set_safe_area` 注入（core 单源换算，跨引擎不重写）。叠加顺序：适配算 scale/root → safe inset 注入 → 布局 → 渲染根变换 + 输入逆映射消费同一组 scale/offset（单源 = core 数学，集成层不自己重推）。
 
 跨引擎契约：模式枚举是 FFI u32 ABI（只增不改）；未来 Godot 后端复用同一 `ikat_compute_adaptation`，保三引擎适配行为逐像素一致。
 

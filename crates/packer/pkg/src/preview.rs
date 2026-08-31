@@ -725,6 +725,7 @@ fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
         }
     }
     let body = crate::preview_comp_style::rewrite_component_css(name, &css, &html_rel);
+    let body = rewrite_env_to_vars(&body);
     Response::new(200, "OK", "text/css; charset=utf-8", body)
 }
 
@@ -786,7 +787,15 @@ fn serve_workspace_file(ui: &Path, rel: &str, fonts_css: &str, req: &Request) ->
         }
     }
     let mut resp = match std::fs::read(&canon) {
-        Ok(b) => Response::new(200, "OK", mime, b),
+        Ok(b) => {
+            // 外链 CSS 同 HTML 待遇：env() 改写保真（见 rewrite_env_to_vars）
+            let body = if mime.starts_with("text/css") {
+                rewrite_env_to_vars(&String::from_utf8_lossy(&b)).into_bytes()
+            } else {
+                b
+            };
+            Response::new(200, "OK", mime, body)
+        }
         Err(_) => return Response::text(500, "Internal Server Error", "read failed"),
     };
     resp.last_modified = mtime;
@@ -961,7 +970,109 @@ fn build_fonts_css(ui: &Path, fonts: &[workspace::FontCfg]) -> String {
 /// 路径（浏览器按页面 URL 解析 → 落回本 server 的 /ws/ 下同一目录）。
 /// 字体样式（#104）先插到 `<head>` 开标签后——在页面自身 `<style>`/`<link>`
 /// 之前，页面 CSS 想覆盖默认 family 仍能赢（工作区手写是真相源）。
+/// env(safe-area-inset-*) → var(--ikat-safe-*, 0px) 纯文本改写（#110 预览保真）。
+/// 浏览器 env() 原生但恒 0（无 viewport-fit=cover + 无 notch）；不改写则用 env() 的
+/// 页面预览/运行时分叉。外壳按当前设备预设把换算后的 design px 写进 iframe 根的
+/// CSS 变量（与 safe 参考线同一张预设表 = 同源）。只应施于 CSS 文本。
+pub(crate) fn rewrite_env_to_vars(css: &str) -> String {
+    css.replace("env(safe-area-inset-top)", "var(--ikat-safe-top, 0px)")
+        .replace("env(safe-area-inset-right)", "var(--ikat-safe-right, 0px)")
+        .replace(
+            "env(safe-area-inset-bottom)",
+            "var(--ikat-safe-bottom, 0px)",
+        )
+        .replace("env(safe-area-inset-left)", "var(--ikat-safe-left, 0px)")
+}
+
+/// HTML 内的 CSS 片段改写：`<style>` 块内容 + tag 的 `style="..."` 属性值。
+/// 文本节点里的字面 env(...)（如展示 CSS 源码的页面）不动——只动 CSS 上下文。
+/// 朴素假设（与既有 insert_fonts_style 同口径）：合法 HTML 属性值里的 '>' 须转义。
+fn rewrite_env_in_html(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let mut out = String::with_capacity(html.len());
+    let mut i = 0;
+    while i < html.len() {
+        // <style ...> 块：内容按 CSS 改写
+        if lower[i..].starts_with("<style") {
+            if let (Some(open_end), Some(close_at)) = (
+                lower[i..].find('>').map(|g| i + g + 1),
+                lower[i..].find("</style").map(|c| i + c),
+            ) {
+                if open_end <= close_at {
+                    out.push_str(&html[i..open_end]);
+                    out.push_str(&rewrite_env_to_vars(&html[open_end..close_at]));
+                    i = close_at; // 继续扫 </style> 之后的段落
+                    continue;
+                }
+            }
+        }
+        // 普通段：直通到下一个 '<'
+        match html[i..].find('<') {
+            None => {
+                out.push_str(&html[i..]);
+                return out;
+            }
+            Some(off) if off > 0 => {
+                out.push_str(&html[i..i + off]);
+                i += off;
+                continue;
+            }
+            _ => {}
+        }
+        // 此刻 html[i] == '<'
+        if lower[i..].starts_with("<style") {
+            continue; // 下一轮走 style 块分支
+        }
+        // 普通 tag：整段（到 '>' 含）内改写 style 属性
+        match lower[i..].find('>') {
+            None => {
+                out.push_str(&html[i..]);
+                return out;
+            }
+            Some(gt) => {
+                let seg_end = i + gt + 1; // 含 '>'
+                out.push_str(&rewrite_env_in_tag(&html[i..seg_end]));
+                i = seg_end;
+            }
+        }
+    }
+    out
+}
+
+/// 单个 tag 段（`<div ...>`）内的 style 属性改写。
+fn rewrite_env_in_tag(tag: &str) -> String {
+    let lower = tag.to_ascii_lowercase();
+    let Some(mut at) = lower.find("style=") else {
+        return tag.to_string();
+    };
+    let mut out = String::with_capacity(tag.len());
+    let mut consumed = 0;
+    loop {
+        let val_start = at + 7; // 越过 style= 与引号
+        let Some(q) = tag[..val_start].chars().last() else {
+            break;
+        };
+        if q != '"' && q != '\'' {
+            break; // 无引号属性值（非规范 HTML）：不冒险改写
+        }
+        let Some(rel) = tag[val_start..].find(q) else {
+            break;
+        };
+        let val_end = val_start + rel;
+        out.push_str(&tag[consumed..val_start]);
+        out.push_str(&rewrite_env_to_vars(&tag[val_start..val_end]));
+        consumed = val_end;
+        match lower[consumed..].find("style=") {
+            Some(next) => at = consumed + next,
+            None => break,
+        }
+    }
+    out.push_str(&tag[consumed..]);
+    out
+}
+
 pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str, fonts_css: &str) -> String {
+    let html = &rewrite_env_in_html(html);
     let html = insert_fonts_style(html, fonts_css);
     let mut tags = String::new();
     tags.push_str(r#"<script type="module" src="/ikat-preview/lib/boot.js"></script>"#);
@@ -1611,5 +1722,35 @@ mod tests {
                 .contains("cache-control: no-store"));
             let _ = std::fs::remove_dir_all(&ui);
         }
+    }
+}
+
+#[cfg(test)]
+mod env_rewrite_tests {
+    use super::{rewrite_env_in_html, rewrite_env_to_vars};
+
+    /// #110 env() 预览改写：CSS 文本四值全换 var()；style 块与 style 属性都覆盖；
+    /// 文本节点字面量不动。
+    #[test]
+    fn env_rewrite_covers_css_contexts_only() {
+        let css =
+            "a { padding-top: env(safe-area-inset-top); inset: env(safe-area-inset-left) 0 0 0 }";
+        assert_eq!(
+            rewrite_env_to_vars(css),
+            "a { padding-top: var(--ikat-safe-top, 0px); inset: var(--ikat-safe-left, 0px) 0 0 0 }"
+        );
+
+        let html = r#"<html><head><style>.x { top: env(safe-area-inset-top) }</style></head>
+<body><div style="padding: env(safe-area-inset-bottom) 8px">hi</div>
+<p>docs say env(safe-area-inset-top) is zero</p>
+<div class='y' style='left:env(safe-area-inset-left)'>2</div>
+<style>.z { right: env(safe-area-inset-right) }</style></body></html>"#;
+        let out = rewrite_env_in_html(html);
+        assert!(out.contains(".x { top: var(--ikat-safe-top, 0px) }"));
+        assert!(out.contains("padding: var(--ikat-safe-bottom, 0px) 8px"));
+        assert!(out.contains("left:var(--ikat-safe-left, 0px)"));
+        assert!(out.contains(".z { right: var(--ikat-safe-right, 0px) }"));
+        // 文本节点字面量不动
+        assert!(out.contains("docs say env(safe-area-inset-top) is zero"));
     }
 }

@@ -1408,6 +1408,7 @@ fn render_text_payload_matches_layout_text_layout() {
         &mut scene,
         &fonts,
         (120.0, 100.0),
+        [0.0; 4],
         &std::collections::HashMap::new(),
     );
     let text_id = scene.get(scene.roots[0]).unwrap().children[0];
@@ -1509,6 +1510,7 @@ fn render_long_text_still_wraps_with_layout_reuse() {
         &mut scene,
         &fonts,
         (container_w, 100.0),
+        [0.0; 4],
         &std::collections::HashMap::new(),
     );
     // 验证 solve 填了 text_layouts 且确实换行为多行。
@@ -1616,6 +1618,7 @@ fn rich_text_block_renders_text_mesh() {
         &mut scene,
         &fonts,
         (200.0, 1000.0),
+        [0.0; 4],
         &std::collections::HashMap::new(),
     );
     // 契约：text_layouts[div] 已填，inline 子 layout_rect=0。
@@ -1746,6 +1749,7 @@ fn rich_text_block_div_emits_box_shadow() {
         &mut scene,
         &fonts,
         (200.0, 1000.0),
+        [0.0; 4],
         &std::collections::HashMap::new(),
     );
     crate::scene::transform::compute_world_transforms(&mut scene);
@@ -1830,6 +1834,7 @@ fn non_rich_container_renders_text_child_separately() {
         &mut scene,
         &fonts,
         (200.0, 1000.0),
+        [0.0; 4],
         &std::collections::HashMap::new(),
     );
     let tn = scene.get(scene.roots[0]).unwrap().children[0];

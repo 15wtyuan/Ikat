@@ -41,6 +41,12 @@ pub struct Stage {
     pub scene: Option<Scene>,
     pub fonts: FontTable,
     pub root_size: (f32, f32),
+    /// viewport inset 四边 design px [top, right, bottom, left]（env(safe-area-inset-*)
+    /// 的取值源）。数值 = root 覆盖 unsafe 屏区的深度：Fit 贴物理边 → 真实 inset，
+    /// Letterbox → 恒 0。宿主经 FFI `ikat_stage_set_safe_area` 按 adapt 结果注入；
+    /// 默认全 0（桌面/无刘海 = 无 unsafe 区）。与 root_size 同类：Stage 级环境输入，
+    /// 不从包来。
+    pub safe_insets: [f32; 4],
     /// 资源池：pkg_name → Package（多包共存）。load_package 填，instantiate 读。
     /// load_package 不建 scene，只填本字典。
     pub packages: std::collections::HashMap<String, crate::asset::Package>,
@@ -120,6 +126,7 @@ impl Stage {
             scene: None,
             fonts: FontTable::new(),
             root_size,
+            safe_insets: [0.0; 4],
             packages: std::collections::HashMap::new(),
             last_pkg_load_version: 0,
             image_sizes: std::collections::HashMap::new(),
@@ -158,6 +165,18 @@ impl Stage {
             return Err(format!("set_root_size: invalid size {w}x{h}"));
         }
         self.root_size = (w, h);
+        Ok(())
+    }
+
+    /// 设 viewport inset（env(safe-area-inset-*) 的值，design px [top,right,bottom,left]）。
+    /// FFI `ikat_stage_set_safe_area` 按适配结果算好后走这里；拒绝非有限或负值
+    /// （语义上 inset 是深度，不为负）。设完下帧 rematch/propagate + solve 即生效
+    /// （env() 声明跟随，无需显式触发）。
+    pub fn set_safe_insets(&mut self, insets: [f32; 4]) -> Result<(), String> {
+        if insets.iter().any(|v| !v.is_finite() || *v < 0.0) {
+            return Err(format!("set_safe_insets: invalid insets {insets:?}"));
+        }
+        self.safe_insets = insets;
         Ok(())
     }
 
@@ -1184,7 +1203,7 @@ impl Stage {
         let list_ops = crate::list::plan_visible(scene);
         crate::list::execute_visible(scene, list_ops);
         // 4. 伪类重匹配（提到 solve 前：改 taffy_style/transform/colors，本帧全部消费）
-        rematch_pseudo_classes(scene);
+        rematch_pseudo_classes(scene, self.root_size, self.safe_insets);
         // 4.5 transition drain：rematch 检测可动画通道变化时推入 scene.pending_transitions。
         //     每个请求 kill 旧 (node,prop) tween（override 保留 mid-flight 末值，见 tween.rs kill）
         //     + 提交新 tween（start = mid-flight override → 无闪烁）。切页 kill 语义。
@@ -1250,7 +1269,13 @@ impl Stage {
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
-        solve(scene, &self.fonts, self.root_size, &self.image_sizes);
+        solve(
+            scene,
+            &self.fonts,
+            self.root_size,
+            self.safe_insets,
+            &self.image_sizes,
+        );
         // 5.5 measure 文本控件显示文本——需 solve 产出的 layout_rect.w 定 content width,
         //     且须在 render 前完成（光标命中测试/几何依赖 TextLayout 缓存）。
         crate::scene::control::measure_text_controls(scene, &self.fonts);
