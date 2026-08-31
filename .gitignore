@@ -96,6 +96,11 @@ tmp
 # ZCode harness session state
 .zcode/
 
+# preview server 运行时状态（pid/port/token，随会话再生，绝不该入库；
+# .loom/ 是更名前同位残留目录——若再冒出来说明有旧版二进制在跑）
+**/.ikat/preview.json
+**/.loom/
+
 # ===== 2021.3 回归工程 =====
 # Bundles 与 unity/showcase-unity 同份产物拷贝（33MB），不重复入库；恢复见该工程 README.md
 unity/showcase-unity-2021/Assets/Bundles/
