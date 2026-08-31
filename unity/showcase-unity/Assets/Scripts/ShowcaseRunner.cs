@@ -1071,7 +1071,10 @@ public class ShowcaseRunner : MonoBehaviour
         foreach (var al in inst.GetComponentsInChildren<AudioListener>(true)) DestroyImmediate(al);
         foreach (var cam in inst.GetComponentsInChildren<Camera>(true))
         {
-            foreach (var flare in cam.GetComponents<FlareLayer>()) DestroyImmediate(flare);
+            // FlareLayer 按类型名剥（不引类型——6000.5+ 起 Built-in RP 组件全进废弃名单，
+            // 编译期引用即 CS0618；同函数剥 AstronautPlayer 同款名字匹配模式）。
+            foreach (var comp in cam.GetComponents<Component>())
+                if (comp != null && comp.GetType().Name == "FlareLayer") DestroyImmediate(comp);
             DestroyImmediate(cam);
         }
         foreach (var mb in inst.GetComponentsInChildren<MonoBehaviour>(true))
