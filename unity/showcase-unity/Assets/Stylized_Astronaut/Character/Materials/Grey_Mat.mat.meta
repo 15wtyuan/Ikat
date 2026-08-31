@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: bd5105e1f39844b4daded70961d0174f
+timeCreated: 1521228365
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 114298
+  packageName: Stylized Astronaut
+  packageVersion: 1.0
+  assetPath: Assets/Stylized_Astronaut/Character/Materials/Grey_Mat.mat
+  uploadId: 577064

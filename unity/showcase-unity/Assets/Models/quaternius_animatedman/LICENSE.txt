@@ -1,6 +1,0 @@
-Quaternius Animated Man — CC0 1.0 (Public Domain)
-Source: https://quaternius.com/packs/animatedman.html
-License: https://creativecommons.org/publicdomain/zero/1.0/
-
-No attribution required. Character FBX + textures downloaded separately
-(browser, Google Drive link) and placed in this folder by the user.

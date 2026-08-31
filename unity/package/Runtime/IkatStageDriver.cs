@@ -761,8 +761,13 @@ namespace Ikat
                 cam.orthographicSize = sh / 2f;   // 不变（覆盖全屏，root 映射进 safe 区）
                 cam.cullingMask = 1 << IkatUILayer;
                 cam.clearFlags = CameraClearFlags.Depth;
-                cam.nearClipPlane = 0.1f;   // Unity 要求 near>0；相机 z=-10 看向 z=0 内容
-                cam.farClipPlane = 100f;
+                // 正交相机允许负 near：裁剪窗口须以 UI 平面（z=0）为中心前后对称——
+                // NativeHost 3D 内容按 design px 归一化（~520px 高 × root scale 即数千
+                // 世界单位），居中摆位时深度会越过 UI 平面向后延伸到相机（z=-10）之后；
+                // near>0 会把 z<-9.9 的整段后方内容切掉。前后各给 10000 深度余量。
+                // UI mesh 全在 z≈0 平面、排序走 sortingOrder，均不依赖此窗口。
+                cam.nearClipPlane = -9990f;
+                cam.farClipPlane = 10000f;
                 // 相机独立于根（不 SetParent）：放世界 (0,0,-10) 看向 +z，content 在 z=0。
                 cam.transform.SetParent(null, false);
                 cam.transform.localPosition = new Vector3(0f, 0f, -10f);

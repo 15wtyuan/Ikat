@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 51c7b5abfedd4e741bef70712caf60fd
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 114298
+  packageName: Stylized Astronaut
+  packageVersion: 1.0
+  assetPath: Assets/Stylized_Astronaut/Character/AstronautPlayer.cs
+  uploadId: 577064

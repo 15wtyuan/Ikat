@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 036f7dcabd9944343aec7d56821fdd7e
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 114298
+  packageName: Stylized Astronaut
+  packageVersion: 1.0
+  assetPath: Assets/Stylized_Astronaut/Character/AstronautThirdPersonCamera.cs
+  uploadId: 577064

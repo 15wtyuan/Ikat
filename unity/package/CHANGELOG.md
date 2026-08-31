@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **IkatUICamera 裁剪窗扩为 UI 平面中心的前后对称大窗（#102）**：此前
+  `near=0.1 / far=100`——NativeHost 3D 内容按 design px 归一化（数百 px
+  高 × root scale 即数千世界单位深），居中摆位时深度越过 UI 平面向后延
+  伸到相机（z=-10）之后，旧窗口把模型后段/远端整片裁掉（视觉上只剩贴
+  着 UI 平面的五官或整段消失）。改为 `near=-9990 / far=10000`（正交相
+  机支持负 near），前后各留万级深度余量。UI mesh 全在 z≈0 平面、排序走
+  sortingOrder，均不受此窗口影响。
 - **UI layer 改用内置 "UI"(5)，杜绝宿主 layer 冲突（#105）**：此前 Driver
   硬编码 layer 6——6–31 是用户可命名层，宿主工程把它命名成自己的用途
   （如 FloatingText）完全合法，后果是语义混用 + Everything 掩码主相机把

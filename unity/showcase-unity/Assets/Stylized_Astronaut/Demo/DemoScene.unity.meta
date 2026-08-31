@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: e2224b88424b4f0469748624439f318e
+timeCreated: 1521227573
+licenseType: Store
+DefaultImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 114298
+  packageName: Stylized Astronaut
+  packageVersion: 1.0
+  assetPath: Assets/Stylized_Astronaut/Demo/DemoScene.unity
+  uploadId: 577064
