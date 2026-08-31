@@ -24,6 +24,13 @@
       <input id="custom-h" type="number" min="100" max="4320" placeholder="H">
       <button id="custom-go">应用</button>
     </label>
+    <label>模式
+      <select id="match">
+        <option value="letterbox">letterbox</option>
+        <option value="fit-width">fit-width</option>
+        <option value="fit-height">fit-height</option>
+      </select>
+    </label>
     <label><input type="checkbox" id="safe-area"> 安全区参考线</label>
     <label><input type="checkbox" id="fit-window"> 适应窗口</label>
     <button id="reload" title="重载页面（重播 CSS 动画）">↻</button>
@@ -38,6 +45,8 @@
       <div id="device-scale">
         <div id="safe-top" class="safe-band"></div>
         <div id="safe-bottom" class="safe-band"></div>
+        <div id="safe-left" class="safe-band-v"></div>
+        <div id="safe-right" class="safe-band-v"></div>
         <iframe id="frame" title="page preview"></iframe>
       </div>
     </div>

@@ -1206,7 +1206,7 @@ fn page_rules_style_host_but_scope_rules_do_not() {
         &[class_rule("card-host", "background-color", "#00ff00")],
         &[class_rule("card-host", "background-color", "#0000ff")],
     );
-    rematch_pseudo_classes(s.scene.as_mut().unwrap());
+    rematch_pseudo_classes(s.scene.as_mut().unwrap(), s.root_size, s.safe_insets);
     let bg = s
         .scene
         .as_ref()
@@ -1230,7 +1230,7 @@ fn scope_rules_style_internals_page_rules_isolated() {
         &[],
         &[class_rule("gic-body", "background-color", "#0000ff")],
     );
-    rematch_pseudo_classes(s.scene.as_mut().unwrap());
+    rematch_pseudo_classes(s.scene.as_mut().unwrap(), s.root_size, s.safe_insets);
     let bg = s
         .scene
         .as_ref()
@@ -1250,7 +1250,7 @@ fn scope_rules_style_internals_page_rules_isolated() {
         &[class_rule("gic-body", "background-color", "#ff0000")],
         &[],
     );
-    rematch_pseudo_classes(s2.scene.as_mut().unwrap());
+    rematch_pseudo_classes(s2.scene.as_mut().unwrap(), s2.root_size, s2.safe_insets);
     let bg2 = s2
         .scene
         .as_ref()

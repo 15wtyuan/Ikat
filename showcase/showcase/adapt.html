@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat Showcase · 全屏覆盖适配</title>
+  <style>
+  /* 适配演示页（#110）：root 不锁设计尺寸——100vw/100vh 贴画布，fit 模式下画布
+     即屏幕（无黑边），letterbox 下画布=设计分辨率（黑边作对照）。所有响应式声明
+     都走视口单位（vw/vh/vmin）+ env()：切比例/拖窗口时流动。 */
+  /* 背景满铺贴边：渐变对角带直接坐 root（fit 模式贴物理四边的肉眼判据——无黑边；
+     不用 absolute 覆盖层：positioned 恒画在 static 之上，会盖死内容） */
+  .root { position:relative; display:flex; flex-direction:column; width:100vw; height:100vh;
+          background-color:#152433;
+          background-image:linear-gradient(135deg, #1d3450 0%, #0e1620 60%, #241d3a 100%); }
+
+  /* env() 避让条：fit 贴物理边时让开 notch/home indicator（预览选 iPhone 设备
+     生效；桌面编辑器 inset=0 贴边）。读数条自带 env padding，正文不再让。 */
+  .safe-strip { position:relative; display:flex; flex-direction:row; align-items:center; gap:1.5vmin;
+                padding:1vmin 2vmin env(safe-area-inset-top) env(safe-area-inset-left);
+                background-color:#1b2b3fdd; }
+  .strip-label { color:#8ec5d8; font-size:1.4vmin; }
+  .readout { color:#ffd479; font-size:1.4vmin; font-weight:700; }
+
+  .body { position:relative; display:flex; flex-direction:column; flex-grow:1;
+          padding:2vmin 3vmin; gap:2vmin; overflow-y:hidden; }
+
+  /* 响应式字号：vmin 分母 = 画布短边——拖窗口整体缩放（肉眼强信号） */
+  .hero { display:flex; flex-direction:column; gap:1vmin; }
+  .hero-title { color:#e0e6ec; font-size:4.5vmin; font-weight:700; letter-spacing:0.4vmin; }
+  .hero-sub { color:#9aa0b4; font-size:1.8vmin; letter-spacing:0.2vmin; }
+
+  /* 锚定舞台：四角 + 居中，inset 简写 + margin auto 居中 */
+  .stage { position:relative; flex-grow:1; background-color:#0b121cdd; border-radius:2vmin;
+           border-width:1px; border-style:solid; border-color:#2a5a75; }
+  .corner { position:absolute; width:9vmin; height:9vmin; border-radius:1.5vmin;
+            display:flex; align-items:center; justify-content:center;
+            color:#eaf6fb; font-size:1.5vmin; }
+  .c-tl { inset:2vmin auto auto 2vmin; background-color:#5fb4d4; }
+  .c-tr { inset:2vmin 2vmin auto auto; background-color:#7d5fbd; }
+  .c-bl { inset:auto auto 2vmin 2vmin; background-color:#3f7d5a; }
+  .c-br { inset:auto 2vmin 2vmin auto; background-color:#b4763f; }
+  /* margin auto 居中：任意比例下不漂移 */
+  .center-chip { position:absolute; width:16vmin; height:16vmin; border-radius:50%;
+                 inset:0; margin:auto; background-color:#8ec5d8;
+                 display:flex; align-items:center; justify-content:center;
+                 color:#0e1620; font-size:1.8vmin; font-weight:700; }
+  /* vw 流式侧带：宽跟画布宽走 */
+  .side-band { position:absolute; top:14vmin; bottom:14vmin; width:12vw;
+               background-color:#1a2f45aa; border-radius:1vmin;
+               display:flex; align-items:flex-end; justify-content:center;
+               padding-bottom:1vmin; color:#8ea; font-size:1.3vmin; }
+  .band-l { left:2vmin; }
+  .band-r { right:2vmin; }
+
+  /* 模式切换排：gap/border-radius 全走 vmin，随窗口缩放 */
+  .mode-row { position:relative; display:flex; flex-direction:row; gap:1.5vmin;
+              align-items:center; padding:1vmin 2vmin env(safe-area-inset-bottom) env(safe-area-inset-right);
+              background-color:#152433dd; }
+  .mode-btn { color:#cfe3ee; font-size:1.5vmin; padding:0.8vmin 1.6vmin;
+              border-radius:1vmin; background-color:#1a2f45; }
+  .mode-btn:hover { background-color:#2a5a75; }
+  .hint { color:#6c7080; font-size:1.2vmin; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="safe-strip">
+      <span class="strip-label">env() 避让条（safe inset 让位）</span>
+      <span class="readout" id="adapt-readout">letterbox</span>
+    </div>
+    <div class="body">
+      <div class="hero">
+        <span class="hero-title">全屏覆盖适配 · 响应式字号 4.5vmin</span>
+        <span class="hero-sub">标题/字距/圆角全 vmin —— 拖窗口看整体缩放；四角贴角、圆盘居中、侧带宽 12vw 跟宽走</span>
+      </div>
+      <div class="stage">
+        <div class="corner c-tl">TL</div>
+        <div class="corner c-tr">TR</div>
+        <div class="corner c-bl">BL</div>
+        <div class="corner c-br">BR</div>
+        <div class="side-band band-l">12vw</div>
+        <div class="side-band band-r">12vw</div>
+        <div class="center-chip">居中</div>
+      </div>
+    </div>
+    <div class="mode-row">
+      <button class="mode-btn" id="btn-mode-letterbox">letterbox</button>
+      <button class="mode-btn" id="btn-mode-fit-width">fit-width</button>
+      <button class="mode-btn" id="btn-mode-fit-height">fit-height</button>
+      <span class="hint">切模式 + 拖 Game 视图（free aspect）：fit 全屏铺满无黑边、内容流动；letterbox 出黑边对照</span>
+    </div>
+  </div>
+</body>
+</html>

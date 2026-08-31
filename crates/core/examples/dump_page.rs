@@ -34,7 +34,30 @@ fn main() {
     );
 
     let pkg = std::fs::read(&pkg_path).expect("read pkg");
-    let mut s = Stage::new((1920.0, 1080.0)).expect("Stage::new");
+    // 适配取证（#110）：IKAT_ROOT=WxH 设 root 形状（fit 模式的重排 root，如
+    // 1920x1440 = fit-width@4:3 屏）；IKAT_SAFE=t,r,b,l 设 env(safe-area-inset-*)
+    // design px（对拍 browser 侧 --safe）。缺省 = 设计分辨率 + 无 inset。
+    let root_size = std::env::var("IKAT_ROOT")
+        .ok()
+        .and_then(|v| {
+            let (w, h) = v.split_once('x')?;
+            Some((w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?))
+        })
+        .unwrap_or((1920.0, 1080.0));
+    let safe_insets: [f32; 4] = std::env::var("IKAT_SAFE")
+        .ok()
+        .map(|v| {
+            let parts: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            [
+                parts.first().copied().unwrap_or(0.0),
+                parts.get(1).copied().unwrap_or(0.0),
+                parts.get(2).copied().unwrap_or(0.0),
+                parts.get(3).copied().unwrap_or(0.0),
+            ]
+        })
+        .unwrap_or([0.0; 4]);
+    let mut s = Stage::new(root_size).expect("Stage::new");
+    s.set_safe_insets(safe_insets).expect("set_safe_insets");
     s.register_font("LXGWWenKai", std::fs::read(&font_default).unwrap(), true)
         .unwrap();
     s.register_font(
@@ -59,7 +82,10 @@ fn main() {
     let scene = s.scene.as_ref().unwrap();
 
     println!(
-        "========== page={page} stage=1920x1080 nodes={} ==========",
+        "========== page={page} stage={}x{} safe={:?} nodes={} ==========",
+        root_size.0,
+        root_size.1,
+        safe_insets,
         scene.nodes.len()
     );
     println!(

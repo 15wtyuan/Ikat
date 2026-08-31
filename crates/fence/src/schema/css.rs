@@ -664,6 +664,11 @@ pub static CSS_SHORTHANDS: &[ShorthandSpec] = &[
         kind: ShorthandKind::Box,
     },
     ShorthandSpec {
+        name: "inset",
+        expands_to: &["top", "right", "bottom", "left"],
+        kind: ShorthandKind::Box,
+    },
+    ShorthandSpec {
         name: "overflow",
         expands_to: &["overflow-x", "overflow-y"],
         kind: ShorthandKind::Replicate,
@@ -961,5 +966,24 @@ mod tests {
             diags.is_empty(),
             "valid caret/selection colors report no diagnostics: {diags:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod inset_shorthand_tests {
+    use crate::value_check::value_error;
+
+    /// #110 `inset` 简写：Box 型 1-4 值，域同 top/right/bottom/left longhand
+    /// （px/%/auto/视口单位/env()）。
+    #[test]
+    fn inset_shorthand_box_forms() {
+        assert!(value_error("inset", "0").is_none());
+        assert!(value_error("inset", "10px 20px").is_none());
+        assert!(value_error("inset", "5% 10px 15% 20px").is_none());
+        assert!(value_error("inset", "0 auto").is_none());
+        assert!(value_error("inset", "2vh env(safe-area-inset-top)").is_none());
+        assert!(value_error("inset", "6").is_some());
+        assert!(value_error("inset", "1px 2px 3px 4px 5px").is_some());
+        assert!(value_error("inset", "1em").is_some());
     }
 }

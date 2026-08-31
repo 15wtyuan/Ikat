@@ -127,13 +127,13 @@ fn class_add_starts_player_fill_both_retains_class_remove_reclaims() {
     push_rule(&mut scene, "fade", "animation", "fadeIn .4s both");
 
     // 初始无 class：rematch + sync 不启任何 player。
-    rematch_pseudo_classes(&mut scene);
+    rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
     sync_animation_players(&mut scene);
     assert_eq!(scene.players.len(), 0, "无 class 时无 player");
 
     // 加 class → 下帧 rematch + sync 启 player。
     scene.get_mut(id).unwrap().classes.push("fade".to_string());
-    rematch_pseudo_classes(&mut scene);
+    rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
     sync_animation_players(&mut scene);
     assert_eq!(scene.players.len(), 1, "加 class 后启 player");
     let p = scene.players.values().next().unwrap();
@@ -162,7 +162,7 @@ fn class_add_starts_player_fill_both_retains_class_remove_reclaims() {
 
     // 移除 class → rematch + sync 回收 player，通道回 None。
     scene.get_mut(id).unwrap().classes.retain(|c| c != "fade");
-    rematch_pseudo_classes(&mut scene);
+    rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
     sync_animation_players(&mut scene);
     assert_eq!(scene.players.len(), 0, "声明消失 → 回收 player");
     assert!(
@@ -228,7 +228,7 @@ fn multi_animation_creates_one_player_per_declaration() {
         "a .3s linear, b .5s linear",
     );
     scene.get_mut(id).unwrap().classes.push("multi".to_string());
-    rematch_pseudo_classes(&mut scene);
+    rematch_pseudo_classes(&mut scene, (1080.0, 1920.0), [0.0; 4]);
     sync_animation_players(&mut scene);
     assert_eq!(scene.players.len(), 2, "每条声明一个 player");
     let mut names: Vec<String> = scene

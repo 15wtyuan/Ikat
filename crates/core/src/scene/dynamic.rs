@@ -74,6 +74,7 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
                 // 运行时 create_node 的显式 color/font-size 等须抵抗 propagate_inherited
                 // 的父值覆写——不 bake 则每帧被父值盖掉再被 rematch 复位（终值 = 父值，
                 // 显式继承属性视觉丢失 + render build 缓存帧帧失效的双病灶）。
+                //（#110 分支独立修了同病灶，merge 时择一保留。）
                 if let Some(bit) = crate::style::dynamic::inherited_bit(prop) {
                     style.inherited_set.0 |= bit;
                 }

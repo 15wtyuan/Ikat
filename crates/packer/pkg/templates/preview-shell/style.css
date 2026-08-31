@@ -50,7 +50,11 @@ button:hover { border-color: var(--accent); }
              background: #f04b4b26; border-bottom: 1px dashed #f04b4b88; z-index: 2; }
 #safe-top { top: 0; }
 #safe-bottom { bottom: 0; border-bottom: 0; border-top: 1px dashed #f04b4b88; }
-#device.safe #safe-band.has { display: block; }
+.safe-band-v { position: absolute; top: 0; bottom: 0; display: none; pointer-events: none;
+               background: #f04b4b26; border-right: 1px dashed #f04b4b88; z-index: 2; }
+#safe-left { left: 0; }
+#safe-right { right: 0; border-right: 0; border-left: 1px dashed #f04b4b88; }
+#device.safe #safe-band.has, #device.safe #safe-band-v.has { display: block; }
 
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line);
          border-radius: 8px; padding: 18px; min-width: 420px; }

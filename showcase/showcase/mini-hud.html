@@ -7,7 +7,7 @@
   /* 第二 Driver（运行时拉起）的小窗页：根透明，只有左下角一块小面板压在主 Stage 的
      「底层探针」按钮上方——双 Stage 输入独占路由的靶面（本窗 Pick 命中即独占本帧输入，
      底层主 Stage 按钮不得响应）。与主 Stage 同一共享 ResourceHost：字体只注册一次。 */
-  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e162000; }
+  .root {display:flex;flex-direction:column; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e162000; }
   .mh-panel {position:absolute; left:16px; bottom:16px; display:flex;flex-direction:column; width:360px; gap:12px; background-color:rgba(33,51,36,0.88); border-width:2px; border-style:solid; border-color:#5fb4d4; border-radius:10px; padding:20px 24px; z-index:0; }
   .mh-title { color:#a8e6a0; font-size:16px; font-weight:700; }
   .mh-desc { color:#9aa0b4; font-size:12px; }

@@ -158,7 +158,13 @@ mod tests {
         let span = scene.get(div).unwrap().children[1];
         scene.get_mut(div).unwrap().rich_text_block = true;
         let fonts = font_table().expect("need DejaVuSans.ttf fixture");
-        solve(&mut scene, &fonts, (200.0, 1000.0), &HashMap::new());
+        solve(
+            &mut scene,
+            &fonts,
+            (200.0, 1000.0),
+            [0.0; 4],
+            &HashMap::new(),
+        );
         (scene, div, tn0, span)
     }
 

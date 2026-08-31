@@ -179,6 +179,7 @@ fn main() {
                 s.scene.as_mut().unwrap(),
                 &host.fonts,
                 s.root_size,
+                s.safe_insets,
                 &host.image_sizes,
             );
         }

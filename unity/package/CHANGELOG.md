@@ -35,6 +35,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **增量渲染构建（#109）**：输入指纹命中的节点整段复用上帧渲染产物——
   ~2400 节点稳态帧构建耗时约减半；500 血条压测稳态 ~9ms（对照全量重建
   ~16.9ms）。
+- **fit 模式 safe-area 基座反转：贴物理边 + CSS 级避让（#110）**：`fit-width` /
+  `fit-height` 的画布不再从 `Screen.safeArea` 起算（旧行为在异形屏留出一条
+  不被 UI 覆盖的空带 = 局部黑边），改为贴物理全屏——scale 按物理宽/高算，
+  刘海带被画布覆盖、背景满铺贴边。避让交给 CSS：新增
+  `env(safe-area-inset-top/right/bottom/left)` 作为长度值来源（任意长度属性
+  可用，按 design px 换算），元素用它写 padding/inset 自行避开 notch /
+  home indicator（web `viewport-fit=cover` 语义）。letterbox 不变（black
+  bars 已让位，env() 恒 0，不重复避让）。**Breaking**：Driver 的
+  `_safeArea` Inspector 开关移除（语义统一后它是第二真理源）；fit 模式下
+  vw/vh 分母变为含 unsafe 带的完整画布（100vh = 物理全高）。
+- **视口单位放开到全长度属性（#110）**：`vw` / `vh` / `vmin` / `vmax` 此前
+  只收尺寸族/inset/margin，现放开到 `font-size` / `padding` 族 / `gap` 族 /
+  `letter-spacing` / `border-radius`（响应式字号 `font-size: 2vmin` 由此
+  而来；`%` for font-size 仍拒）。字号/字距的视口值沿继承链传播 resolved
+  px。`inset` 四边简写进围栏。pkg 格式 v51（旧 pkg.bin 拒载，须重打）。
+
 
 ### Fixed
 - **IkatUICamera 裁剪窗扩为 UI 平面中心的前后对称大窗（#102）**：此前

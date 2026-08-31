@@ -190,6 +190,17 @@ fn bad_length_token(token: &str, units: &[&str], allow_auto: bool) -> bool {
     if allow_auto && t == "auto" {
         return false;
     }
+    // env(safe-area-inset-*) 四值：全长度属性可用（safe-area 之外的 env() 名不认，
+    // 与 core try_env 同口径）。
+    if matches!(
+        t,
+        "env(safe-area-inset-top)"
+            | "env(safe-area-inset-right)"
+            | "env(safe-area-inset-bottom)"
+            | "env(safe-area-inset-left)"
+    ) {
+        return false;
+    }
     for u in units {
         if let Some(num) = t.strip_suffix(u) {
             return num.trim().parse::<f32>().is_err();
@@ -198,16 +209,18 @@ fn bad_length_token(token: &str, units: &[&str], allow_auto: bool) -> bool {
     true
 }
 
-/// 各长度 parser 的合法单位 + auto 开放度（与 core 通道一一对应：视口单位只接
-/// 尺寸族/inset/margin——恰好就是 LengthPercentAuto 的全部属性；padding/gap/
-/// font-size/letter-spacing 是 px-only；border-radius 收 px/%）。
+/// 各长度 parser 的合法单位 + auto 开放度（与 core 通道一一对应）。#110 视口单位
+/// 放开到全长度属性：Length（font-size/padding 族/gap 族/letter-spacing）与
+/// LengthPercent 同收 vw/vh/vmin/vmax；% 仍只归 LengthPercent/LengthPercentAuto/
+/// border-radius（font-size % 不开——字号级联语义牵动文本测量全链，票面拍板）。
+/// env(safe-area-inset-*) 见 [`bad_length_token`]（域无关）。
 fn length_domain(parser: &CssValueParser) -> Option<(&'static [&'static str], bool)> {
-    const PX: &[&str] = &["px"];
-    const PX_PCT: &[&str] = &["px", "%"];
+    const PX_VIEW: &[&str] = &["px", "vw", "vh", "vmin", "vmax"];
+    const PX_PCT_VIEW: &[&str] = &["px", "%", "vw", "vh", "vmin", "vmax"];
     const SIZE_UNITS: &[&str] = &["px", "%", "vw", "vh", "vmin", "vmax"];
     match parser {
-        CssValueParser::Length => Some((PX, false)),
-        CssValueParser::LengthPercent => Some((PX_PCT, false)),
+        CssValueParser::Length => Some((PX_VIEW, false)),
+        CssValueParser::LengthPercent => Some((PX_PCT_VIEW, false)),
         CssValueParser::LengthPercentAuto => Some((SIZE_UNITS, true)),
         _ => None,
     }
@@ -221,8 +234,9 @@ fn length_form_hint(units: &[&str], allow_auto: bool) -> String {
         s.push_str(", auto allowed");
     }
     s.push_str(
-        "; browsers drop unitless declarations while the runtime reads bare \
-         numbers as px, so preview and runtime diverge",
+        "; env(safe-area-inset-top/right/bottom/left) allowed; browsers drop unitless \
+         declarations while the runtime reads bare numbers as px, so preview and runtime \
+         diverge",
     );
     s
 }
@@ -234,7 +248,11 @@ fn length_family_error(prop: &str, value: &str) -> Option<String> {
     let value = value.trim();
     if let Some(spec) = find_css_prop(prop) {
         let (units, allow_auto, multi) = match &spec.parser {
-            CssValueParser::BorderRadius => (&["px", "%"] as &[&str], false, true),
+            CssValueParser::BorderRadius => (
+                &["px", "%", "vw", "vh", "vmin", "vmax"] as &[&str],
+                false,
+                true,
+            ),
             p => {
                 let (units, allow_auto) = length_domain(p)?;
                 (units, allow_auto, false)
@@ -436,7 +454,7 @@ mod tests {
         assert!(value_error("padding", "6").is_some());
         assert!(value_error("padding-top", "6").is_some());
         assert!(value_error("margin", "4 8").is_some());
-        // 合法面：带单位 / 裸 0 / auto / 视口单位（尺寸族·inset·margin 通道）/ %。
+        // 合法面：带单位 / 裸 0 / auto / 视口单位（#110 全长度属性放开）/ %。
         assert!(value_error("padding", "4px 8px").is_none());
         assert!(value_error("padding-top", "0").is_none());
         assert!(value_error("margin", "0 auto").is_none());
@@ -445,9 +463,21 @@ mod tests {
         assert!(value_error("top", "2vmin").is_none());
         assert!(value_error("width", "50%").is_none());
         assert!(value_error("width", "auto").is_none());
-        // 域外单位：padding/gap 是 px-only（core parse_four 非 px 即拒）。
+        // #110：视口单位/env() 进 px-only 族（font-size/padding/gap/letter-spacing/
+        // border-radius）；% 仍拒（font-size % 票面不开，padding px-only 基线保持）。
+        assert!(value_error("gap", "8vw").is_none());
+        assert!(value_error("padding", "2vmin 4vmax").is_none());
+        assert!(value_error("font-size", "2vmin").is_none());
+        assert!(value_error("letter-spacing", "0.1vmax").is_none());
+        assert!(value_error("border-radius", "2vmin").is_none());
+        assert!(value_error("padding-top", "env(safe-area-inset-top)").is_none());
+        assert!(value_error("top", "env(safe-area-inset-left)").is_none());
+        assert!(value_error("font-size", "env(safe-area-inset-bottom)").is_none());
+        // 未知 env() 名拒（只收 safe-area-inset 四值）
+        assert!(value_error("padding-top", "env(titlebar-area-x)").is_some());
+        // 域外：% 不开 / em 拒。
         assert!(value_error("padding", "4%").is_some());
-        assert!(value_error("gap", "8vw").is_some());
+        assert!(value_error("font-size", "50%").is_some());
         assert!(value_error("font-size", "1.2em").is_some());
         // longhand 多 token：浏览器无效、core 只取首值——拦。
         assert!(value_error("padding-top", "4px 8px").is_some());
@@ -460,6 +490,8 @@ mod tests {
         assert!(value_error("border-radius", "8px").is_none());
         assert!(value_error("border-radius", "8px 16px / 4px").is_none());
         assert!(value_error("border-radius", "50%").is_none());
+        assert!(value_error("border-radius", "2vmin").is_none());
+        assert!(value_error("border-radius", "1vw 2vh / env(safe-area-inset-top)").is_none());
         assert!(value_error("border-radius", "8").is_some());
         assert!(value_error("border-radius", "8px 16px 4px 2px 1px").is_some());
         assert!(value_error("border-radius", "8px / ").is_some());

@@ -7,15 +7,15 @@ error):
 - `width` / `height` / `min-width` / `min-height` / `max-width` / `max-height` — px, %, auto, viewport units (`vw` / `vh` / `vmin` / `vmax` — resolve against the stage canvas, not the parent; the reflow language for resolution adaptation)
 - `display` — block / flex / none / inline (grid rejected)
 - `flex-direction` / `flex-wrap` / `flex-grow` / `flex-shrink` / `flex-basis`
-- `gap` / `row-gap` / `column-gap`
+- `gap` / `row-gap` / `column-gap` — px or viewport units (1-2 values)
 - `justify-content` / `align-items` / `align-content` / `align-self`
 - `order` / `aspect-ratio` — integer
 - `z-index` — integer, no `auto`; declared only on positioned elements or flex items (build error elsewhere — see the z-index bullet under Positioning)
-- `position` — absolute / relative / static (initial value `static`); with `top` / `right` / `bottom` / `left` (px / % / auto / viewport units; `%` resolves against the containing block — browser semantics)
+- `position` — absolute / relative / static (initial value `static`); with `top` / `right` / `bottom` / `left` (px / % / auto / viewport units / `env()`; `%` resolves against the containing block — browser semantics)
 - **Containing block of an `absolute` element = nearest ancestor with `position: relative` or `absolute`** (browser semantics); if none, the viewport. Known limits: an `absolute` element with all four insets `auto` keeps its direct-parent static position (browser hypothetical-box semantics not implemented); overflow clipping still follows DOM ancestors.
-- `padding-top` / `padding-right` / `padding-bottom` / `padding-left`
+- `padding-top` / `padding-right` / `padding-bottom` / `padding-left` — px or viewport units
 - `margin-top` / `margin-right` / `margin-bottom` / `margin-left`
-- `border-color` / `border-style` / `border-radius` / `border-image-slice`
+- `border-color` / `border-style` / `border-radius` (px / % / viewport units) / `border-image-slice`
 - `background-color` / `background-image` / `background-size` / `background-repeat` / `background-clip` / `-webkit-background-clip`
 - `opacity` / `box-shadow` / `pointer-events` / `transform` / `transform-origin` / `filter`
 - `cursor` — `auto` / `default` / `none` / `pointer` (not inherited). `auto` = UA default:
@@ -30,8 +30,9 @@ error):
   runtime the hand is drawn only if the game registers a cursor texture
   (`IkatStageDriver.SetCursorTexture`); unregistered, hover falls back to the
   system arrow.
-- `color` / `font-size` / `font-family` / `font-weight`
-- `text-align` / `line-height` / `letter-spacing` / `white-space` / `text-shadow`
+- `color` / `font-size` (px or viewport units — responsive sizes like `font-size: 2vmin`;
+  `%` / `em` / `rem` rejected) / `font-family` / `font-weight`
+- `text-align` / `line-height` / `letter-spacing` (px or viewport units) / `white-space` / `text-shadow`
 - `white-space` — full set: `normal` / `nowrap` / `pre` / `pre-wrap` / `pre-line` (space collapsing × auto-wrap × source-newline preservation); CJK line breaking avoids line-start punctuation / line-end opening brackets (kinsoku)
 - `overflow-wrap` — `normal` (overlong word overflows, browser-consistent) / `break-word` (split only when the word alone exceeds the line)
 - `word-break` — `normal` / `break-all` (break between any characters) / `keep-all` (no breaks inside CJK words)
@@ -48,6 +49,7 @@ Shorthands (expand to the properties above):
 
 - `padding` — four-side box
 - `margin` — four-side box
+- `inset` — four-side box (top / right / bottom / left)
 - `overflow` — sets both axes
 - `border` — color-led border shorthand
 - `border-width` — four-side box
@@ -58,6 +60,18 @@ Shorthands (expand to the properties above):
 - `background` — color, image, size, repeat
 - `flex` — grow, shrink, basis
 <!-- fence-sync:css-supported-end -->
+
+Length tokens (wherever a length is accepted): besides px / % / viewport units,
+`env(safe-area-inset-top)` / `env(safe-area-inset-right)` /
+`env(safe-area-inset-bottom)` / `env(safe-area-inset-left)` resolve to the
+depth the UI canvas reaches into the unsafe screen region (design px). Under
+full-bleed adaptation (fit-width / fit-height) the canvas covers the physical
+screen, so these give the notch / home-indicator margins — combine with
+`padding` or `inset` to keep content clear. Under letterbox the canvas lives
+entirely inside the safe area, so all four are `0` (the black bars already
+yield; no double avoidance). Other `env()` names are build errors. Browser
+preview rewrites these to CSS variables fed from the selected device preset,
+so preview matches the runtime.
 
 ## Value domains
 

@@ -80,15 +80,40 @@ const reset = readFileSync(new URL('./reset.css', import.meta.url), 'utf8');
 // preview-base.css @font-face rules — see that file. Core measures text with
 // the same real files, so both sides must resolve the same families.
 
+// --viewport=WxH：按运行时 root 形状开视口（#110 适配对拍——fit 模式 root ≠ 设计
+// 分辨率，vw/vh 分母须与 core Stage root_size 一致；缺省 1920x1080）。
+// --safe=t,r,b,l：预填 --ikat-safe-* CSS 变量（env() 改写的取值口），与 core 侧
+// IKAT_SAFE 对拍 env() 通道；缺省全 0。
+const argOf = (name, fallback) => {
+  const a = process.argv.find((x) => x.startsWith(`--${name}=`));
+  return a ? a.slice(name.length + 3) : fallback;
+};
+const vp = argOf('viewport', '1920x1080');
+const [vpW, vpH] = vp.split('x').map((n) => parseInt(n, 10));
+const safeArg = argOf('safe', '0,0,0,0');
+const safeVals = safeArg.split(',').map((n) => parseFloat(n));
+
 const preview = await startPreview();
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  const page = await browser.newPage({ viewport: { width: vpW, height: vpH } });
   // 预览模拟脚本（main.js/pages/*.js）由 server 注入并保持启用：它是 core 运行时
   // 行为的浏览器侧模拟（textbox 占位行、progressbar fill 宽、slider thumb 定位）。
   // 整体禁掉会制造假 diff（空 textbox 浏览器侧 39px、core 侧仍渲染占位行 20px）。
   // 唯一要撤销的是 data-fill 演示克隆（见下）。
   await page.goto(`http://127.0.0.1:${preview.port}/ws/${encodeURI(relFromWs)}`, { waitUntil: 'networkidle' });
+  // --safe：预填 env() 改写后的 CSS 变量（goto 后注值——addInitScript 版本被页面
+  // 加载序列覆盖，变量活不到测量时刻；与 reset 同批注入 + 同批重排等待）。
+  await page.evaluate(
+    ([t, r, b, l]) => {
+      const st = document.documentElement.style;
+      st.setProperty('--ikat-safe-top', t + 'px');
+      st.setProperty('--ikat-safe-right', r + 'px');
+      st.setProperty('--ikat-safe-bottom', b + 'px');
+      st.setProperty('--ikat-safe-left', l + 'px');
+    },
+    safeVals,
+  );
   await page.addStyleTag({ content: reset });
   await page.waitForTimeout(100); // let reset reflow settle
 

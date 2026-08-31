@@ -10,8 +10,10 @@
 //!   root 直接取真实屏幕换算值，布局重排（flex/% / vw-vh 声明流动）。无黑边、
 //!   无裁切，px 不变形（缩放仍是均匀的）。
 //!
-//! safe-area：Fit 模式 root 从 safe 矩形起算（内容填满 safe 区、不进刘海），
-//! Letterbox 以 safe 矩形为 contain 的框。
+//! safe-area：Fit 模式 root 贴物理全屏（背景满铺到物理边，unsafe 带被 root 覆盖），
+//! 避让交给 CSS `env(safe-area-inset-*)`（unsafe 深度经 Stage viewport inset 暴露，
+//! web viewport-fit=cover 语义）；Letterbox 以 safe 矩形为 contain 的框——root 全在
+//! safe 内，env() 恒 0，黑边已让位、不重复避让。
 
 /// 适配模式。数值即 FFI 侧 u32（ABI 稳定：只增不改）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +41,7 @@ impl AdaptMode {
 /// 适配输出。`scale` = 渲染均匀缩放比（screen_px = design_px * scale）；
 /// `root` = 喂 Stage 的画布尺寸（设计单位）；`offset` = 设计原点 (0,0) 在屏幕
 /// 像素系的落点（screen 系原点左上、y 向下——与 Unity Screen 一致）。Fit 模式
-/// offset = safe 矩形原点（无居中偏移）。
+/// offset = (0,0)（root 贴物理原点，unsafe 避让走 CSS env()）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct AdaptResult {
@@ -50,9 +52,10 @@ pub struct AdaptResult {
     pub offset_y: f32,
 }
 
-/// 计算适配三件套。`safe` = 安全区矩形 (x, y, w, h) 屏幕像素；零宽高（编辑器
-/// 未配屏等防御场景）自动退回全屏。design 非有限或 ≤0 时按 1080×1920 兜底
-/// （与 Unity Driver 侧零向量兜底同值，双端一致）。
+/// 计算适配三件套。`safe` = 安全区矩形 (x, y, w, h) 屏幕像素，仅 Letterbox 消费
+/// （contain 框）；Fit 模式忽略它（root 贴物理边，unsafe 深度走 env() 通道）。
+/// 零宽高（编辑器未配屏等防御场景）自动退回全屏。design 非有限或 ≤0 时按
+/// 1080×1920 兜底（与 Unity Driver 侧零向量兜底同值，双端一致）。
 pub fn compute(
     design: (f32, f32),
     screen: (f32, f32),
@@ -88,23 +91,23 @@ pub fn compute(
             }
         }
         AdaptMode::FitWidth => {
-            let scale = saw / dw;
+            let scale = sw / dw;
             AdaptResult {
                 scale,
                 root_w: dw,
-                root_h: sah / scale,
-                offset_x: sx,
-                offset_y: sy,
+                root_h: sh / scale,
+                offset_x: 0.0,
+                offset_y: 0.0,
             }
         }
         AdaptMode::FitHeight => {
-            let scale = sah / dh;
+            let scale = sh / dh;
             AdaptResult {
                 scale,
-                root_w: saw / scale,
+                root_w: sw / scale,
                 root_h: dh,
-                offset_x: sx,
-                offset_y: sy,
+                offset_x: 0.0,
+                offset_y: 0.0,
             }
         }
     }
@@ -201,9 +204,10 @@ mod tests {
     }
 
     #[test]
-    fn safe_area_shrinks_fit_region() {
-        // 刘海屏：safe=(0,132,1080,2208)（顶部 132px 状态栏）→ FitWidth root 高按 2208 算，
-        // 内容顶边落在 y=132，不进刘海。
+    fn fit_modes_ignore_safe_area() {
+        // 刘海屏：safe=(0,132,1080,2208)（顶部 132px 状态栏）→ Fit 模式贴物理边：
+        // root 高按整屏 2340 算、offset=(0,0)，132px 带被 root 覆盖，避让交给
+        // CSS env(safe-area-inset-*)（Stage viewport inset 通道）。
         let r = compute(
             (1080.0, 1920.0),
             (1080.0, 2340.0),
@@ -211,8 +215,17 @@ mod tests {
             AdaptMode::FitWidth,
         );
         assert_eq!(r.scale, 1.0);
-        assert_eq!(r.root_h, 2208.0);
-        assert_eq!(r.offset_y, 132.0);
+        assert_eq!(r.root_h, 2340.0);
+        assert_eq!((r.offset_x, r.offset_y), (0.0, 0.0));
+        let r = compute(
+            (1080.0, 1920.0),
+            (1080.0, 2340.0),
+            (12.0, 132.0, 1056.0, 2208.0),
+            AdaptMode::FitHeight,
+        );
+        assert_eq!(r.root_h, 1920.0);
+        assert!((r.root_w - 1080.0 * 1920.0 / 2340.0).abs() < 1e-3);
+        assert_eq!((r.offset_x, r.offset_y), (0.0, 0.0));
     }
 
     #[test]
@@ -231,17 +244,18 @@ mod tests {
 
     #[test]
     fn zero_safe_area_falls_back_to_full_screen() {
+        // Fit 模式已不吃 safe，回退门只有 Letterbox 消费——挂 Letterbox 验。
         let r = compute(
             (1080.0, 1920.0),
             (1080.0, 2340.0),
             (0.0, 0.0, 0.0, 0.0),
-            AdaptMode::FitWidth,
+            AdaptMode::Letterbox,
         );
         let full = compute(
             (1080.0, 1920.0),
             (1080.0, 2340.0),
             FULL,
-            AdaptMode::FitWidth,
+            AdaptMode::Letterbox,
         );
         assert_eq!(r, full);
     }

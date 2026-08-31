@@ -42,5 +42,5 @@
     "w": 1920.0,
     "h": 1080.0
   },
-  "match_mode": "letterbox"
+  "match_mode": "fit-width"
 }

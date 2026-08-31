@@ -257,7 +257,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **盒模型**
 
-`padding-top/right/bottom/left`, `margin-top/right/bottom/left`
+`padding-top/right/bottom/left`（px/视口单位/env()）, `margin-top/right/bottom/left`
 
 > **UA 默认 / noop**：`button` UA 默认 `text-align:center` + `justify-content:center` + `align-items:center`（内容居中，`css_resolve.rs`）；`resize`（`none`/`both`/`horizontal`/`vertical`）fence 接受但 core 不消费（noop，避免 textarea 报 prop 名错）。
 
@@ -290,7 +290,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **文本**
 
-`color`（继承）, `font-size`（继承）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，Ikat 私有扩展）
+`color`（继承）, `font-size`（继承；px/视口单位——响应式字号 `font-size:2vmin`，`%`/`em`/`rem` 拒）, `font-family`（继承）, `font-weight`（继承）, `text-align`（继承）, `line-height`（继承）, `letter-spacing`（继承）, `white-space`（继承）, `text-shadow`（继承）, `-webkit-text-stroke`（继承）, `font-effect`（继承，Ikat 私有扩展）
 
 - `text-decoration`（**不继承**，#74）：值集 `none` / `underline`（`line-through`/`overline` 围栏拒绝）。作用于 rich inline 流的 run——`span`/`a` 声明均可；`<a>` 打包期烙 UA 默认 `underline`，作者声明覆盖。
 
@@ -333,10 +333,11 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | 解析器 | 校验方式 |
 |---|---|
 | `Keyword([...])` | 必须是列出的关键字之一 |
-| `Length` | 长度值（px） |
-| `LengthPercent` | 长度或百分比 |
-| `LengthPercentAuto` | 长度、百分比或 auto |
-| `Viewport` | `vw` / `vh` / `vmin` / `vmax`（分母 = 画布对应维；尺寸族 + `flex-basis` + inset 四边 + margin 族收，padding/gap/font-size 等 px-only 通道不收） |
+| `Length` | 长度值（px 或视口单位——#110 全长度属性放开） |
+| `LengthPercent` | 长度或百分比（长度含视口单位） |
+| `LengthPercentAuto` | 长度、百分比或 auto（长度含视口单位） |
+| `Viewport` | `vw` / `vh` / `vmin` / `vmax`（分母 = 画布对应维；#110 起全长度属性收：尺寸族 + inset/margin/padding/gap 族 + `flex-basis` + `font-size` + `letter-spacing` + `border-radius`） |
+| `Env` | `env(safe-area-inset-top/right/bottom/left)`（长度 token 的第四种来源，全长度属性可用；值 = 画布伸进屏幕 unsafe 区的深度，design px——fit 模式贴物理边 → 真实 inset，letterbox → 恒 0（黑边已让位不重复避让）。safe-area 之外的 env() 名是 `FenceBadCssValue`） |
 | `Color` | 颜色值（围栏仅校验属性名，值格式交 core `parse_color`：`#rgb`/`#rgba`/`#rrggbb`/`#rrggbbaa` hex、`rgb()`/`rgba()` 函数式） |
 | `Number` | 数字 |
 | `Integer` | 整数 |
@@ -351,14 +352,14 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `TextEffect` | `glow(w color)` / `blur(w)` |
 | `TextStroke` | `width color` |
 | `BackgroundClipText` | `text` 触发渐变字形 |
-| `BorderRadius` | 1-4 值 px/% + `/` 垂直值 |
+| `BorderRadius` | 1-4 值 px/%/视口单位 + `/` 垂直值 |
 | `FourSidedPx` | 1-4 值 px（九宫格等） |
 | `FourSidedMargin` | 1-4 值 px/%/auto |
 | `Raw` | 原样存储，不校验 |
 
 关键字值校验在 `css_resolve` 阶段进行。非关键字值由 `apply_decl` 的值解析逻辑处理，解析失败也产生 `FenceBadCssValue` diagnostic。
 
-**长度形态门（单位强制）**：长度族声明（`Length`/`LengthPercent`/`LengthPercentAuto`/`BorderRadius` 属性 + `padding`/`margin` Box 简写）打包期逐 token 校验单位——**非零长度必须带单位，仅 `0` 可裸写**（`FenceBadCssValue`）。理由：core 的 `parse_four`/`parse_lp` 对裸数字一律当 px（运行时生效），浏览器则整条丢弃——`padding: 14px 6 16px 6` 这类声明预览与运行时静默分叉（#95 skill-slot 实证）。单位集按域开放（与 core 通道一致，见上表 Viewport 行）：px-only 通道收 `px`；尺寸族/inset/margin 收 `px`/`%`/视口单位/`auto`；border-radius 收 `px`/`%`。longhand 只收单值（多 token 浏览器无效、core 只取首值）。**注意**：`em` 全域不在围栏（core `parse_px` 不收）——浏览器生效、运行时丢弃的反向分歧同样拦（showcase 曾用 `letter-spacing:-0.02em` 实证，已换算 px）。
+**长度形态门（单位强制）**：长度族声明（`Length`/`LengthPercent`/`LengthPercentAuto`/`BorderRadius` 属性 + `padding`/`margin` Box 简写）打包期逐 token 校验单位——**非零长度必须带单位，仅 `0` 可裸写**（`FenceBadCssValue`）。理由：core 的 `parse_four`/`parse_lp` 对裸数字一律当 px（运行时生效），浏览器则整条丢弃——`padding: 14px 6 16px 6` 这类声明预览与运行时静默分叉（#95 skill-slot 实证）。单位集按域开放（与 core 通道一致，见上表 Viewport/Env 行）：px-only 族（padding/gap/font-size/letter-spacing）收 `px`/视口单位；尺寸族/inset/margin 收 `px`/`%`/视口单位/`auto`；border-radius 收 `px`/`%`/视口单位。`env(safe-area-inset-*)` 四值作为长度 token 域无关全收（见上表 Env 行）。longhand 只收单值（多 token 浏览器无效、core 只取首值）。**注意**：`em` 全域不在围栏（core `parse_px` 不收）——浏览器生效、运行时丢弃的反向分歧同样拦（showcase 曾用 `letter-spacing:-0.02em` 实证，已换算 px）。
 
 **缓动函数全集**（真相源 = core 的 `parse_ease`/`css_ease_keyword`，fence/core 共用同一解析器防漂移）。
 
@@ -373,6 +374,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 |---|---|---|
 | `padding` | padding-top/right/bottom/left | Box（四边） |
 | `margin` | margin-top/right/bottom/left | Box（四边） |
+| `inset` | top/right/bottom/left | Box（四边，#110 进围栏；值域同 longhand） |
 | `overflow` | overflow-x, overflow-y | Replicate（双轴同设） |
 | `border` | border-color | BorderShorthand |
 | `border-width` | — | Box |

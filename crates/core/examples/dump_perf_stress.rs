@@ -167,7 +167,11 @@ fn main() {
         t_list += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        ikat_core::style::dynamic::rematch_pseudo_classes(s.scene.as_mut().unwrap());
+        ikat_core::style::dynamic::rematch_pseudo_classes(
+            s.scene.as_mut().unwrap(),
+            s.root_size,
+            s.safe_insets,
+        );
         t_rematch += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
@@ -196,6 +200,7 @@ fn main() {
                 s.scene.as_mut().unwrap(),
                 &host.fonts,
                 s.root_size,
+                s.safe_insets,
                 &host.image_sizes,
             );
         }

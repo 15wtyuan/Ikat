@@ -295,7 +295,7 @@ mod tests {
         let div = scene.get(scene.roots[0]).unwrap().children[0];
         let span = scene.get(div).unwrap().children[1];
         scene.get_mut(div).unwrap().rich_text_block = true;
-        solve(&mut scene, &ft, (200.0, 1000.0), &HashMap::new());
+        solve(&mut scene, &ft, (200.0, 1000.0), [0.0; 4], &HashMap::new());
         compute_world_transforms(&mut scene);
 
         // span run 区域中心 → 命中 span（细化生效）。
@@ -412,7 +412,7 @@ mod tests {
         let div = scene.get(scene.roots[0]).unwrap().children[0];
         let a = scene.get(div).unwrap().children[1];
         scene.get_mut(div).unwrap().rich_text_block = true;
-        solve(&mut scene, &ft, (200.0, 1000.0), &HashMap::new());
+        solve(&mut scene, &ft, (200.0, 1000.0), [0.0; 4], &HashMap::new());
         compute_world_transforms(&mut scene);
 
         // 链接 run 区域中心 → 命中 a（run.source=a 的细化）。

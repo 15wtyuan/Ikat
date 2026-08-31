@@ -154,7 +154,7 @@ fn bench_render_build(c: &mut Criterion) {
     // 稳态帧（增量命中路径）：预热两帧建缓存与字形，之后每帧全部指纹命中。
     {
         let mut scene = api_infra_shape();
-        solve(&mut scene, &fonts, root, &sizes);
+        solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
         ikat_core::scene::transform::compute_world_transforms(&mut scene);
         let mut cache = RenderBuildCache::default();
         let prev = std::collections::HashMap::new();
@@ -181,7 +181,7 @@ fn bench_render_build(c: &mut Criterion) {
     // 全量重建基线（A2 前行为）：一次性 cache（每帧 miss）。
     {
         let mut scene = api_infra_shape();
-        solve(&mut scene, &fonts, root, &sizes);
+        solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
         ikat_core::scene::transform::compute_world_transforms(&mut scene);
         let prev = std::collections::HashMap::new();
         c.bench_function("render_build/steady_full_rebuild", |b| {

@@ -153,16 +153,16 @@ fn bench_solve(c: &mut Criterion) {
     // 稳态帧：场景零变更——增量 solve 应只剩期望态 diff 开销（无 relayout）。
     {
         let mut scene = api_infra_shape();
-        solve(&mut scene, &fonts, root, &sizes);
-        solve(&mut scene, &fonts, root, &sizes); // 预热：首帧全量建树、二帧起稳态
+        solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
+        solve(&mut scene, &fonts, root, [0.0; 4], &sizes); // 预热：首帧全量建树、二帧起稳态
         c.bench_function("solve/steady_frame", |b| {
-            b.iter(|| solve(&mut scene, &fonts, root, &sizes))
+            b.iter(|| solve(&mut scene, &fonts, root, [0.0; 4], &sizes))
         });
     }
     // 单点变更帧：每迭代改一个容器的宽 → set_style + 受影响子树局部 relayout。
     {
         let mut scene = api_infra_shape();
-        solve(&mut scene, &fonts, root, &sizes);
+        solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
         let nodes: Vec<_> = scene.nodes.values().map(|n| n.id).collect();
         let mut cursor = 0usize;
         c.bench_function("solve/one_style_change", |b| {
@@ -175,16 +175,16 @@ fn bench_solve(c: &mut Criterion) {
                     .taffy_style
                     .size
                     .width = Dimension::length(40.0 + (cursor % 200) as f32);
-                solve(&mut scene, &fonts, root, &sizes)
+                solve(&mut scene, &fonts, root, [0.0; 4], &sizes)
             })
         });
     }
     // 全重建基线（坑 186 旧路径）：每迭代从零建 taffy 树 + 全量 compute。
     {
         let mut scene = api_infra_shape();
-        solve(&mut scene, &fonts, root, &sizes);
+        solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
         c.bench_function("solve_rebuild/every_frame", |b| {
-            b.iter(|| solve_rebuild(&mut scene, &fonts, root, &sizes))
+            b.iter(|| solve_rebuild(&mut scene, &fonts, root, [0.0; 4], &sizes))
         });
     }
 }

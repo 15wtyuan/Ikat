@@ -324,22 +324,66 @@ impl ViewportLen {
     }
 }
 
-/// 节点的视口相对长度声明集。全部 `None` = 无视口单位（Default）。
-/// 约束：声明 px/% 会清掉同通道的视口覆盖（CSS 级联后者胜出语义），
-/// 由 `apply_decl` 各臂维护；布局建树时 `apply` 用当帧 root_size 覆写 taffy 副本。
+/// `env(safe-area-inset-*)` 的四边。数值 = root 覆盖 unsafe 屏区的深度（design px），
+/// 三适配模式同公式：Fit 贴物理边 → 真实 inset；Letterbox root 全在 safe 内 → 恒 0
+/// （黑边已让位、不重复避让）。宿主按 adapt 结果与屏幕 safe 矩形算好经 Stage 注入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SafeSide {
+    Top = 0,
+    Right = 1,
+    Bottom = 2,
+    Left = 3,
+}
+
+/// solve 期才定值的长度声明——taffy CompactLength 装 length/percent/auto 之外的第
+/// 四种长度来源。视口单位以 Stage root_size 为分母；env() 以 Stage 注入的 safe
+/// inset 为值。与 [`ViewportLen`] 合槽（一通道一声明，后者胜出清前者）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum DeferredLength {
+    Viewport(ViewportLen),
+    SafeInset(SafeSide),
+}
+
+impl DeferredLength {
+    /// `safe` = viewport inset 四边 design px [top, right, bottom, left]。
+    pub fn resolve(&self, root: (f32, f32), safe: [f32; 4]) -> f32 {
+        match self {
+            Self::Viewport(v) => v.resolve(root),
+            Self::SafeInset(side) => safe[*side as usize],
+        }
+    }
+}
+
+/// 节点的延迟解析长度声明集（视口单位 + env()）。全部 `None` = 无（Default）。
+/// 约束：声明 px/% 会清掉同通道的延迟覆盖（CSS 级联后者胜出语义），由
+/// `apply_decl` 各臂维护；消费分两路——几何通道（尺寸/inset/margin/flex-basis/
+/// padding/gap）solve 建树时 `apply` 用当帧 root/safe 覆写 taffy 副本，视觉通道
+/// （font-size/letter-spacing，继承属性）在继承传播的 tree-order 走查里逐节点
+/// `apply_visual` 先解析再向下传（border-radius 非继承，同走查顺带写）。
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct ViewportStyle {
-    pub width: Option<ViewportLen>,
-    pub height: Option<ViewportLen>,
-    pub min_width: Option<ViewportLen>,
-    pub min_height: Option<ViewportLen>,
-    pub max_width: Option<ViewportLen>,
-    pub max_height: Option<ViewportLen>,
-    pub flex_basis: Option<ViewportLen>,
+    pub width: Option<DeferredLength>,
+    pub height: Option<DeferredLength>,
+    pub min_width: Option<DeferredLength>,
+    pub min_height: Option<DeferredLength>,
+    pub max_width: Option<DeferredLength>,
+    pub max_height: Option<DeferredLength>,
+    pub flex_basis: Option<DeferredLength>,
     /// inset 四边 [top, right, bottom, left]
-    pub inset: [Option<ViewportLen>; 4],
+    pub inset: [Option<DeferredLength>; 4],
     /// margin 四边 [top, right, bottom, left]
-    pub margin: [Option<ViewportLen>; 4],
+    pub margin: [Option<DeferredLength>; 4],
+    /// padding 四边 [top, right, bottom, left]（solve 建树覆写 taffy 副本）
+    pub padding: [Option<DeferredLength>; 4],
+    /// row-gap（纵向）/column-gap（横向）
+    pub row_gap: Option<DeferredLength>,
+    pub column_gap: Option<DeferredLength>,
+    /// 继承属性：tree-order 解析成 px 写 `ResolvedStyle.font_size` 后向下传播
+    pub font_size: Option<DeferredLength>,
+    /// 继承属性：同 font_size
+    pub letter_spacing: Option<DeferredLength>,
+    /// border-radius 四角 [TL, TR, BR, BL]；`[h][v]` 对应 `/` 两侧
+    pub border_radius: [[Option<DeferredLength>; 4]; 2],
 }
 
 impl ViewportStyle {
@@ -347,14 +391,18 @@ impl ViewportStyle {
         *self == Self::default()
     }
 
-    /// 把视口声明按 `root` 换算后覆写到 taffy 副本上（solve 建树期调用；
-    /// 只动有声明的通道，未声明通道保持 taffy 原值）。
-    pub fn apply(&self, style: &mut TaffyStyle, root: (f32, f32)) {
-        let dim =
-            |v: &Option<ViewportLen>| v.map(|v| taffy::style::Dimension::length(v.resolve(root)));
+    /// 把几何通道的延迟声明按 `root`/`safe` 换算后覆写到 taffy 副本上（solve 建树
+    /// 期调用；只动有声明的通道，未声明通道保持 taffy 原值）。
+    pub fn apply(&self, style: &mut TaffyStyle, root: (f32, f32), safe: [f32; 4]) {
+        let dim = |v: &Option<DeferredLength>| {
+            v.map(|v| taffy::style::Dimension::length(v.resolve(root, safe)))
+        };
         // min/max 槽是 LengthPercentageAuto（taffy 0.14 起分型），同 inset/margin 走 lpa。
-        let lpa = |v: &Option<ViewportLen>| {
-            v.map(|v| taffy::style::LengthPercentageAuto::length(v.resolve(root)))
+        let lpa = |v: &Option<DeferredLength>| {
+            v.map(|v| taffy::style::LengthPercentageAuto::length(v.resolve(root, safe)))
+        };
+        let lp = |v: &Option<DeferredLength>| {
+            v.map(|v| taffy::style::LengthPercentage::length(v.resolve(root, safe)))
         };
         if let Some(v) = dim(&self.width) {
             style.size.width = v;
@@ -400,6 +448,45 @@ impl ViewportStyle {
         }
         if let Some(v) = lpa(&self.margin[3]) {
             style.margin.left = v;
+        }
+        if let Some(v) = lp(&self.padding[0]) {
+            style.padding.top = v;
+        }
+        if let Some(v) = lp(&self.padding[1]) {
+            style.padding.right = v;
+        }
+        if let Some(v) = lp(&self.padding[2]) {
+            style.padding.bottom = v;
+        }
+        if let Some(v) = lp(&self.padding[3]) {
+            style.padding.left = v;
+        }
+        if let Some(v) = lp(&self.row_gap) {
+            style.gap.height = v;
+        }
+        if let Some(v) = lp(&self.column_gap) {
+            style.gap.width = v;
+        }
+    }
+
+    /// 视觉通道（font-size/letter-spacing/border-radius）解析成 px 写回
+    /// `ResolvedStyle`。font-size/letter-spacing 是继承属性——须在继承传播的
+    /// tree-order 走查里逐节点调（父先解析、子后拷贝/再解析）；border-radius
+    /// 非继承，同一走查顺带写。幂等：延迟槽是真相源，px 字段是当帧缓存。
+    pub fn apply_visual(&self, style: &mut ResolvedStyle, root: (f32, f32), safe: [f32; 4]) {
+        if let Some(v) = self.font_size {
+            style.font_size = v.resolve(root, safe);
+        }
+        if let Some(v) = self.letter_spacing {
+            style.letter_spacing = v.resolve(root, safe);
+        }
+        for (ci, corner) in style.border_radius.corners.iter_mut().enumerate() {
+            if let Some(v) = self.border_radius[0][ci] {
+                corner.h = LengthPercentage::length(v.resolve(root, safe));
+            }
+            if let Some(v) = self.border_radius[1][ci] {
+                corner.v = LengthPercentage::length(v.resolve(root, safe));
+            }
         }
     }
 }
