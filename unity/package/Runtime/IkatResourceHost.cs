@@ -80,6 +80,9 @@ namespace Ikat
         /// 宿主 glyph atlas 同步：拉脏页 → 上传/更新 R8 纹理（本类持有）→ 全量幂等注册进
         /// 该 driver 的 resolver。页是 append-only（native 侧不重排，旧字形 UV 永不变），
         /// 脏页只可能是新页或原页扩容——后者复用同一 Texture2D 重上传，不断材质引用。
+        /// 页纹理必须保持 CPU 可写：原位重上传走 LoadRawTextureData，Apply 传
+        /// makeNoLongerReadable=true 会释放 CPU 副本，下一次同尺寸脏页上传即抛
+        /// "Texture is not readable"（脏页清不掉 → 每帧重抛、SyncFrame 中断）。
         /// </summary>
         public void SyncAtlas(SpriteResolver resolver)
         {
@@ -117,14 +120,14 @@ namespace Ikat
                             && tex.width == (int)w && tex.height == (int)ph)
                         {
                             fixed (byte* p = buf) { tex.LoadRawTextureData((IntPtr)p, needed); }
-                            tex.Apply(false, true);
+                            tex.Apply(false, false);
                         }
                         else
                         {
                             if (tex != null) DestroyTex(tex);
                             var created = new Texture2D((int)w, (int)ph, TextureFormat.R8, false, true);
                             fixed (byte* p = buf) { created.LoadRawTextureData((IntPtr)p, needed); }
-                            created.Apply(false, true);
+                            created.Apply(false, false);
                             _atlasPages[path] = created;
                         }
                     }

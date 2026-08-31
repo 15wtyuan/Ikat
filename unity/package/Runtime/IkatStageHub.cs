@@ -117,7 +117,10 @@ namespace Ikat
         /// <summary>按名认领存量共享相机（编辑器重编译幸存者）。只搜本场景根对象。</summary>
         static Camera FindExisting(UnityEngine.SceneManagement.Scene scene)
         {
-            if (!scene.IsValid()) return null;
+            // 场景未完全加载（isLoaded=false，如 Driver Awake 早于场景加载完成）时
+            // GetRootGameObjects 抛 ArgumentException。认领是机会主义扫描，
+            // 查不了就当无可认领——走新建。
+            if (!scene.IsValid() || !scene.isLoaded) return null;
             foreach (var root in scene.GetRootGameObjects())
             {
                 if (root.name != CameraName) continue;
