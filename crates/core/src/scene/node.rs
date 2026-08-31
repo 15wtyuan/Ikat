@@ -293,6 +293,10 @@ pub struct Node {
     /// 渲染输入版本（A2 增量 build 的失效信号）：style 被改写（rematch 比较）/ set_src
     /// 等几何输入变化时 +1。render build 的输入指纹含它——缺席 = 陈旧 mesh 缓存。
     pub render_input_version: u32,
+    /// 运行时渲染隐藏（世界锚点出屏/相机背后自动隐藏用）。与 display:none 语义正交：
+    /// 不剪子树、不影响布局/命中——只让本节点（含其全部渲染行）visible=0。
+    /// 后端语义：保留镜像对象、SetActive(false)（不是销毁）。
+    pub render_hidden: bool,
     /// 打包期烘焙的 style（不变，rematch 基线）。style 是运行时 rematch 覆写值。
     pub base_style: ResolvedStyle,
     /// 运行时 class 列表（建树时从 ElementData.classes 填；供动态规则 class 选择器匹配）。
@@ -340,6 +344,7 @@ impl Default for Node {
             dirty_mesh: true,
             dirty_text: false,
             render_input_version: 0,
+            render_hidden: false,
             base_style: ResolvedStyle::default(),
             classes: Vec::new(),
             id_attr: None,
@@ -906,6 +911,7 @@ impl Scene {
                 dirty_mesh: true,
                 dirty_text: matches!(kind, NodeKind::TextNode),
                 render_input_version: 0,
+                render_hidden: false,
                 classes: classes.clone(),
                 id_attr: id_attr.clone(),
                 custom_tag: None,

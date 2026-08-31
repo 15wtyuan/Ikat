@@ -809,6 +809,15 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_set_transform(StageHandle* h, ulong node_id, float tx, float ty, float sx, float sy, float rot, float ox, float oy);
 
         /// <summary>
+        ///  运行时渲染隐藏（世界锚点出屏/相机背后自动隐藏）。与 display:none 正交：不影响布局/
+        ///  命中，只控本节点全部渲染行 visible 位（后端语义：保留镜像对象、SetActive(false)——
+        ///  C# MirrorPool 对 visible=0 行清 stale + 隐藏，不销毁）。visible：0=显示 非0=隐藏。
+        ///  返回 0=成功，-1=null 句柄 / 无场景 / 节点不 live。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_node_visible", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_set_node_visible(StageHandle* h, ulong node_id, byte visible);
+
+        /// <summary>
         ///  设控件 value（ProgressBar / Slider）。ProgressBar clamp [0, max]；
         ///  Slider clamp [min, max] 并按 step 量化。非 value 控件 / null 句柄 → -1。
         ///

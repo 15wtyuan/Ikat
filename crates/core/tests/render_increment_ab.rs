@@ -174,3 +174,43 @@ fn steady_state_frame_is_all_cache_hits() {
     assert_eq!(s.render_cache.misses, 0, "稳态帧零重建");
     assert!(s.render_cache.hits > 0, "稳态帧全部命中");
 }
+
+/// render_hidden（世界锚点出屏自动隐藏的 core 面）：开 → 全部渲染行 visible=0，
+/// 关 → 恢复；布局/命中不受影响（与 display:none 正交）。A/B 双路同步一致。
+#[test]
+fn render_hidden_toggles_visibility_without_layout_change() {
+    let mut inc = make_stage();
+    let mut full = make_stage();
+    full.incremental_render = false;
+    let _ = inc.render_json();
+    let _ = full.render_json();
+    let base_layout = {
+        let s = inc.scene.as_ref().unwrap();
+        let root = s.roots[0];
+        s.get(root).unwrap().layout_rect
+    };
+
+    let body = {
+        let s = inc.scene.as_ref().unwrap();
+        let root = s.roots[0];
+        s.get(root).unwrap().children[1]
+    };
+    inc.set_node_render_hidden(body, true).unwrap();
+    full.set_node_render_hidden(body, true).unwrap();
+
+    let j1 = inc.render_json();
+    let j2 = full.render_json();
+    assert_eq!(j1, j2, "隐藏帧 A/B 全等");
+    assert!(j1.contains("\"visible\": false"), "渲染行 visible=0 进输出");
+    // 布局不动（display:none 会塌掉高度——render_hidden 不得）。
+    let after_layout = {
+        let s = inc.scene.as_ref().unwrap();
+        let root = s.roots[0];
+        s.get(root).unwrap().layout_rect
+    };
+    assert_eq!(base_layout, after_layout, "render_hidden 不影响布局");
+
+    inc.set_node_render_hidden(body, false).unwrap();
+    full.set_node_render_hidden(body, false).unwrap();
+    assert_eq!(inc.render_json(), full.render_json(), "恢复帧 A/B 全等");
+}

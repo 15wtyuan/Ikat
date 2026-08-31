@@ -116,6 +116,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         dirty_mesh: true,
         dirty_text,
         render_input_version: 0,
+        render_hidden: false,
         classes: Vec::new(),
         id_attr: None,
         custom_tag: None,
@@ -187,6 +188,7 @@ pub fn create_node_from_template(
         dirty_mesh: true,
         dirty_text,
         render_input_version: 0,
+        render_hidden: false,
         classes: Vec::new(),
         id_attr: None,
         custom_tag: None,
@@ -472,6 +474,15 @@ pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), Strin
     }
     scene.text_contents.insert(node, text.into());
     scene.get_mut(node).unwrap().dirty_text = true;
+    Ok(())
+}
+
+/// 运行时渲染隐藏开关（世界锚点出屏自动隐藏）。与 display:none 正交：不影响布局/
+/// 命中，只控渲染行 visible 位（后端保留镜像对象、SetActive(false)）。node 不 live → Err。
+pub fn set_node_render_hidden(scene: &mut Scene, node: NodeId, hidden: bool) -> Result<(), String> {
+    let n = scene.get_mut(node).ok_or("node not live")?;
+    n.render_hidden = hidden;
+    n.render_input_version += 1;
     Ok(())
 }
 

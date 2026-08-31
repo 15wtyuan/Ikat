@@ -48,6 +48,7 @@ pub fn render_input_fp(n: &Node, scene: &Scene, alpha: f32, res_gen: u64, frame_
         return h.finish();
     }
     n.render_input_version.hash(&mut h);
+    n.render_hidden.hash(&mut h);
     ((n.layout_rect.w * 4.0).round() as i64).hash(&mut h);
     ((n.layout_rect.h * 4.0).round() as i64).hash(&mut h);
     n.rich_text_block.hash(&mut h);

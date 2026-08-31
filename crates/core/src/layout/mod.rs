@@ -2141,6 +2141,7 @@ mod tests {
             kind,
             style: ResolvedStyle::default(),
             render_input_version: 0,
+            render_hidden: false,
             base_style: ResolvedStyle::default(),
             taffy_id: None,
             layout_rect: Rect::default(),

@@ -100,7 +100,17 @@ namespace Ikat
             int n = blob.LeanCount;
             for (int i = 0; i < n; i++)
             {
-                if (!blob.Visible(i)) continue;
+                // visible=0（世界锚点出屏的 render_hidden）：保留镜像对象、隐藏——与
+                // display:none 的「剪除条目」正交（那些节点根本不产行，走 stale 销毁路径）。
+                if (!blob.Visible(i))
+                {
+                    if (pool.TryGetValue(poolKey, out var roH))
+                    {
+                        roH.Stale = false;
+                        if (roH.Go.activeSelf) roH.Go.SetActive(false);
+                    }
+                    continue;
+                }
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 1=Header 2=Full（Skip 不在此）
                 ulong id = blob.NodeId(i);

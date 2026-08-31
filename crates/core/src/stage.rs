@@ -881,6 +881,16 @@ impl Stage {
         crate::scene::dynamic::set_src(self.scene.as_mut().ok_or("no scene")?, node, src)
     }
 
+    /// 运行时渲染隐藏（世界锚点出屏/相机背后自动隐藏）。与 display:none 正交：不影响
+    /// 布局/命中，只控本节点全部渲染行 visible 位（后端保留镜像对象、SetActive(false)）。
+    pub fn set_node_render_hidden(&mut self, node: NodeId, hidden: bool) -> Result<(), String> {
+        crate::scene::dynamic::set_node_render_hidden(
+            self.scene.as_mut().ok_or("no scene")?,
+            node,
+            hidden,
+        )
+    }
+
     /// 写 inline override（便签层，优先级 > 动态规则 > base_style）。node 不 live / 无 scene → Err。
     pub fn set_inline_override(&mut self, node: NodeId, css: &str) -> Result<(), String> {
         crate::scene::dynamic::set_inline_override(

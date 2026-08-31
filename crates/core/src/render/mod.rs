@@ -296,6 +296,7 @@ fn thumb_render_node(node_id: u64, rect: Rect, sort_key: u32) -> RenderNode {
 /// box-shadow 由调用方在 match 外统一处理（检查 `n.kind.is_container()`）。
 #[allow(clippy::too_many_arguments)]
 fn build_container_mesh(
+    visible: bool,
     n: &crate::scene::node::Node,
     node_id: u64,
     parent_id: Option<u64>,
@@ -516,7 +517,7 @@ fn build_container_mesh(
     RenderNode {
         node_id,
         parent_id,
-        visible: true,
+        visible,
         alpha,
         color_tint,
         world_matrix: wm,
@@ -1639,6 +1640,7 @@ fn emit_deco_segments(
 /// 直接塞进 base/子页/占位 RenderNode.effect，不再产 back/front layer 合成节点（原
 /// 双层合成机制全废；box-shadow 现走专属 tag 字节 synth，不走此路径）。
 fn push_text_meshes(
+    visible: bool,
     nodes: &mut Vec<RenderNode>,
     id_to_pos: &mut std::collections::HashMap<NodeId, usize>,
     meshes: TextMeshes,
@@ -1660,7 +1662,7 @@ fn push_text_meshes(
         nodes.push(RenderNode {
             node_id: text_primary_id,
             parent_id,
-            visible: true,
+            visible,
             alpha,
             color_tint,
             world_matrix: wm,
@@ -1702,7 +1704,7 @@ fn push_text_meshes(
         nodes.push(RenderNode {
             node_id: text_primary_id,
             parent_id,
-            visible: true,
+            visible,
             alpha,
             color_tint,
             world_matrix: wm,
@@ -1740,7 +1742,7 @@ fn push_text_meshes(
         nodes.push(RenderNode {
             node_id: sub_id,
             parent_id,
-            visible: true,
+            visible,
             alpha,
             color_tint,
             world_matrix: wm,
@@ -1784,6 +1786,7 @@ fn push_text_meshes(
 /// 应一次性收集全部顶点再用 [`push_solid_mesh`] 单次 push，避免多节点同 id 的 hash 碰撞。
 #[allow(clippy::too_many_arguments)]
 fn push_solid_quad(
+    visible: bool,
     nodes: &mut Vec<RenderNode>,
     node_id: u64,
     parent_id: Option<u64>,
@@ -1801,13 +1804,14 @@ fn push_solid_quad(
     let colors = vec![color; 4];
     let indices = vec![0u32, 1, 2, 0, 2, 3];
     push_solid_mesh(
-        nodes, node_id, parent_id, wm, alpha, reuse_key, verts, uvs, colors, indices,
+        visible, nodes, node_id, parent_id, wm, alpha, reuse_key, verts, uvs, colors, indices,
     );
 }
 
 /// 推一个已组装好的纯色 mesh RenderNode（多 quad 合并为一节点，供选区/下划线跨行用）。
 #[allow(clippy::too_many_arguments)]
 fn push_solid_mesh(
+    visible: bool,
     nodes: &mut Vec<RenderNode>,
     node_id: u64,
     parent_id: Option<u64>,
@@ -1822,7 +1826,7 @@ fn push_solid_mesh(
     nodes.push(RenderNode {
         node_id,
         parent_id,
-        visible: true,
+        visible,
         alpha,
         color_tint: [1.0; 4],
         world_matrix: wm,
@@ -1895,6 +1899,8 @@ fn render_one_node(
     alpha: f32,
 ) {
     let anim = scene.anim.get(n.id);
+    // 运行时渲染隐藏（世界锚点出屏）：本节点全部渲染行 visible=0（后端保留 GO 隐藏）。
+    let visible = !n.render_hidden;
     let wm = scene
         .world_transforms
         .get(n.id.index())
@@ -1948,6 +1954,7 @@ fn render_one_node(
             // inline flow，此处画进父 mesh 即它们的全部视觉。
             if n.rich_text_block {
                 let bg = build_container_mesh(
+                    visible,
                     n,
                     node_id,
                     parent_id,
@@ -2008,6 +2015,7 @@ fn render_one_node(
                     n.style.background_clip_text,
                 );
                 push_text_meshes(
+                    visible,
                     nodes,
                     id_to_pos,
                     meshes,
@@ -2027,6 +2035,7 @@ fn render_one_node(
                     .unwrap_or(&n.style.box_shadow);
                 if n.kind.is_container() && !shadows.is_empty() {
                     push_container_shadows(
+                        visible,
                         nodes,
                         back_layer_pairs,
                         node_id,
@@ -2042,6 +2051,7 @@ fn render_one_node(
                 return; // 背景 + 文字 + 阴影已推，跳过末尾 id_to_pos / push；inline 子由主循环跳过。
             }
             build_container_mesh(
+                visible,
                 n,
                 node_id,
                 parent_id,
@@ -2100,7 +2110,7 @@ fn render_one_node(
             RenderNode {
                 node_id,
                 parent_id,
-                visible: true,
+                visible,
                 alpha,
                 color_tint,
                 world_matrix: wm,
@@ -2173,6 +2183,7 @@ fn render_one_node(
                 n.style.background_clip_text,
             );
             push_text_meshes(
+                visible,
                 nodes,
                 id_to_pos,
                 meshes,
@@ -2192,6 +2203,7 @@ fn render_one_node(
             // 背景 RenderNode 先进 nodes，占住 id_to_pos（供 batch 子节点查找）；
             // 文字走 push_text_meshes 追加，register_id_map=false 避免覆盖背景位置。
             let bg_rn = build_container_mesh(
+                visible,
                 n,
                 node_id,
                 parent_id,
@@ -2350,6 +2362,7 @@ fn render_one_node(
                 }
                 if !verts.is_empty() {
                     push_solid_mesh(
+                        visible,
                         nodes,
                         tf_synth_id(node_id, TF_SELECTION_SYNTH_BYTE),
                         parent_id,
@@ -2377,6 +2390,7 @@ fn render_one_node(
             // 渲染残缺）。合成 id 让文字独立 GO；primary（低 56 位）仍 = node_id，供
             // sort_key 传播还原。register_id_map=false：背景已注册 n.id → id_to_pos。
             push_text_meshes(
+                visible,
                 nodes,
                 id_to_pos,
                 meshes,
@@ -2438,6 +2452,7 @@ fn render_one_node(
                     }
                     if !verts.is_empty() {
                         push_solid_mesh(
+                            visible,
                             nodes,
                             tf_synth_id(node_id, TF_COMPOSITION_SYNTH_BYTE),
                             parent_id,
@@ -2467,6 +2482,7 @@ fn render_one_node(
                     let x = rect.x + off_left + cx;
                     let y = rect.y + line.y;
                     push_solid_quad(
+                        visible,
                         nodes,
                         tf_synth_id(node_id, TF_CURSOR_SYNTH_BYTE),
                         parent_id,
@@ -2486,7 +2502,7 @@ fn render_one_node(
         _ => RenderNode {
             node_id,
             parent_id,
-            visible: true,
+            visible,
             alpha,
             color_tint,
             world_matrix: wm,
@@ -2524,6 +2540,7 @@ fn render_one_node(
         .unwrap_or(&n.style.box_shadow);
     if n.kind.is_container() && !shadows.is_empty() {
         push_container_shadows(
+            visible,
             nodes,
             back_layer_pairs,
             node_id,
@@ -2553,6 +2570,7 @@ fn render_one_node(
 /// 最离 primary 上）。outer 层进 back_layer_pairs 供 back-shadow sort_key 传播；inset 层
 /// 不进（由 front-shadow 传播按 is_front_shadow_synth 自动收集）。
 fn push_container_shadows(
+    visible: bool,
     nodes: &mut Vec<RenderNode>,
     back_layer_pairs: &mut Vec<(u64, u64)>,
     node_id: u64,
@@ -2585,7 +2603,7 @@ fn push_container_shadows(
         nodes.push(RenderNode {
             node_id: sid,
             parent_id,
-            visible: true,
+            visible,
             alpha,
             color_tint,
             world_matrix: wm,
@@ -2630,7 +2648,7 @@ fn push_container_shadows(
         nodes.push(RenderNode {
             node_id: sid,
             parent_id,
-            visible: true,
+            visible,
             alpha,
             color_tint,
             world_matrix: wm,

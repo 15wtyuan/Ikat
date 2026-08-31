@@ -521,3 +521,26 @@ pub extern "C" fn ikat_stage_set_transform(
         }
     })
 }
+
+/// 运行时渲染隐藏（世界锚点出屏/相机背后自动隐藏）。与 display:none 正交：不影响布局/
+/// 命中，只控本节点全部渲染行 visible 位（后端语义：保留镜像对象、SetActive(false)——
+/// C# MirrorPool 对 visible=0 行清 stale + 隐藏，不销毁）。visible：0=显示 非0=隐藏。
+/// 返回 0=成功，-1=null 句柄 / 无场景 / 节点不 live。
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_node_visible(
+    h: *mut StageHandle,
+    node_id: u64,
+    visible: u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let node = ikat_core::scene::node::NodeId(node_id);
+        match sh.stage.set_node_render_hidden(node, visible == 0) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}
