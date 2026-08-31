@@ -1882,11 +1882,12 @@ fn taffy_display_none_excludes_parked_slot_from_flow() {
     // rematch → 把 display:none 便签拷进 node.style。
     crate::style::dynamic::rematch_pseudo_classes(s.scene.as_mut().unwrap());
     // solve → taffy 跳 parked slot（display:none），active slot 拿 40px 高。
+    let host = s.host.borrow();
     crate::layout::solve(
         s.scene.as_mut().unwrap(),
-        &s.fonts,
+        &host.fonts,
         s.root_size,
-        &s.image_sizes,
+        &host.image_sizes,
     );
     let scene = s.scene.as_ref().unwrap();
     let ls = scene.lists.get(ul).unwrap();

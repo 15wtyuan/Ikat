@@ -806,11 +806,11 @@ fn set_image_sizes_ffi_round_trip() {
     // 通过 handle 直接读 stage.image_sizes 验落地
     let handle = unsafe { &*h };
     assert_eq!(
-        handle.stage.image_sizes.get("atlas/icon.png"),
+        handle.stage.host.borrow().image_sizes.get("atlas/icon.png"),
         Some(&(64, 64))
     );
     assert_eq!(
-        handle.stage.image_sizes.get("atlas/bg.jpg"),
+        handle.stage.host.borrow().image_sizes.get("atlas/bg.jpg"),
         Some(&(128, 256))
     );
     ikat_stage_free(h);
@@ -838,7 +838,7 @@ fn set_image_sizes_zero_count_no_op() {
     let h = stage_new_with_dejavu(200.0, 200.0);
     ikat_stage_set_image_sizes(h, std::ptr::null(), std::ptr::null(), std::ptr::null(), 0);
     let handle = unsafe { &*h };
-    assert!(handle.stage.image_sizes.is_empty());
+    assert!(handle.stage.host.borrow().image_sizes.is_empty());
     ikat_stage_free(h);
 }
 
@@ -852,9 +852,9 @@ fn set_image_sizes_null_path_skipped() {
     let hs: [u32; 2] = [20, 64];
     ikat_stage_set_image_sizes(h, paths.as_ptr(), ws.as_ptr(), hs.as_ptr(), 2);
     let handle = unsafe { &*h };
-    assert_eq!(handle.stage.image_sizes.len(), 1);
+    assert_eq!(handle.stage.host.borrow().image_sizes.len(), 1);
     assert_eq!(
-        handle.stage.image_sizes.get("atlas/icon.png"),
+        handle.stage.host.borrow().image_sizes.get("atlas/icon.png"),
         Some(&(64, 64))
     );
     ikat_stage_free(h);
@@ -1161,4 +1161,51 @@ fn ikat_tween_spec_size_is_44() {
     };
     let base = &spec as *const _ as usize;
     assert_eq!(&spec.yoyo as *const _ as usize - base, 40);
+}
+
+/// 宿主分离 ABI 冒烟：ikat_host_new → 宿主级注册字体 → 两个 ikat_stage_new_bound
+/// 挂同一宿主 → 双方都能 measure（字体共享可见）→ null host 拒绑 → 释放顺序
+/// （stage 先、host 后；Rc 语义下乱序也安全，这里验证正常顺序全链无 panic）。
+#[test]
+fn host_bound_stages_share_resources_abi() {
+    let host = ikat_host_new();
+    assert!(!host.is_null(), "host_new must succeed");
+    let font_bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../core/tests/fixtures/DejaVuSans.ttf"
+    ))
+    .expect("DejaVuSans.ttf fixture must exist");
+    let family = b"DejaVu";
+    let rc = ikat_host_register_font(
+        host,
+        family.as_ptr(),
+        family.len(),
+        font_bytes.as_ptr(),
+        font_bytes.len(),
+        1,
+    );
+    assert_eq!(rc, 0, "host_register_font must return 0");
+
+    let a = ikat_stage_new_bound(host, 800.0, 600.0);
+    assert!(!a.is_null(), "stage_new_bound must succeed");
+    let b = ikat_stage_new_bound(host, 1920.0, 1080.0);
+    assert!(!b.is_null(), "second stage_new_bound must succeed");
+
+    // 双 Stage 共享宿主字体：都能用宿主注册的 family 建 root + 文本节点 + tick。
+    for st in [a, b] {
+        let root = crate::ikat_stage_create_root(st, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+        assert!(root != u64::MAX, "create_root must succeed");
+        let text = crate::ikat_stage_create_node(st, b"span".as_ptr(), 4, b"hi".as_ptr(), 2);
+        assert!(text != u64::MAX, "create_node must succeed");
+        crate::ikat_stage_append_child(st, root, text);
+        crate::ikat_stage_tick(st, 0.016);
+    }
+    // null host 拒绑（返 null 不 panic）。
+    assert!(ikat_stage_new_bound(std::ptr::null_mut(), 100.0, 100.0).is_null());
+
+    ikat_stage_free(a);
+    ikat_stage_free(b);
+    ikat_host_free(host);
+    // null 句柄 no-op。
+    ikat_host_free(std::ptr::null_mut());
 }

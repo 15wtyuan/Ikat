@@ -38,7 +38,7 @@ fn load_package_into_pool_without_scene() {
     let mut s = Stage::new_for_test(); // scene = Some(空骨架)
     let pkg_bytes = make_test_pkg("comp1");
     s.load_package("bag", &pkg_bytes).unwrap();
-    assert!(s.packages.contains_key("bag"), "进资源池");
+    assert!(s.host.borrow().packages.contains_key("bag"), "进资源池");
     assert!(s.scene.is_some(), "scene 不变（load 不建/不清 scene）");
     // scene 仍是空骨架（无 roots）——load_package 没碰 scene
     assert!(
@@ -52,21 +52,23 @@ fn load_package_multi_pkg_coexist() {
     let mut s = Stage::new_for_test();
     s.load_package("bag", &make_test_pkg("c1")).unwrap();
     s.load_package("mail", &make_test_pkg("c2")).unwrap();
-    assert_eq!(s.packages.len(), 2, "多包共存");
-    assert!(s.packages.contains_key("bag"));
-    assert!(s.packages.contains_key("mail"));
+    assert_eq!(s.host.borrow().packages.len(), 2, "多包共存");
+    assert!(s.host.borrow().packages.contains_key("bag"));
+    assert!(s.host.borrow().packages.contains_key("mail"));
 }
 
 #[test]
 fn load_package_replace_same_name() {
     let mut s = Stage::new_for_test();
     s.load_package("bag", &make_test_pkg("c1")).unwrap();
-    assert_eq!(s.packages.len(), 1);
+    assert_eq!(s.host.borrow().packages.len(), 1);
     s.load_package("bag", &make_test_pkg("c2")).unwrap();
-    assert_eq!(s.packages.len(), 1, "同名替换（不堆积）");
+    assert_eq!(s.host.borrow().packages.len(), 1, "同名替换（不堆积）");
     // 替换后包内组件应是 c2（验证是替换不是 no-op）
     assert!(
-        s.packages["bag"].components.contains_key("c2"),
+        s.host.borrow().packages["bag"]
+            .components
+            .contains_key("c2"),
         "替换后是新包（含 c2）"
     );
 }

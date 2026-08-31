@@ -171,18 +171,19 @@ fn print_diagnostic_row(n: &Node, scene: &Scene, s: &Stage) {
             let mut glyph_dbg = String::from(" glyphs[");
             for ch in probes {
                 let fam_str = st.font_family.as_deref();
-                let stack = s.fonts.stack_for(fam_str);
+                let host = s.host.borrow();
+                let stack = host.fonts.stack_for(fam_str);
                 let (font, _font_id) = stack.pick(ch);
                 let gid = font.face.glyph_index(ch);
                 let gid_n = gid.map(|g| g.0).unwrap_or(0);
                 let src_label = if std::ptr::eq(
                     font as *const _,
-                    s.fonts.select(Some("LXGWWenKai")) as *const _,
+                    host.fonts.select(Some("LXGWWenKai")) as *const _,
                 ) {
                     "LXGW"
                 } else if std::ptr::eq(
                     font as *const _,
-                    s.fonts.select(Some("DejaVuSans")) as *const _,
+                    host.fonts.select(Some("DejaVuSans")) as *const _,
                 ) {
                     "DejaVu"
                 } else {

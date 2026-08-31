@@ -105,7 +105,8 @@ namespace Ikat.Bindings
 
         /// <summary>
         ///  最近一次 load_package 失败的 pkg 声明格式版本（0=无/非版本错）。
-        ///  配合 `ikat_stage_load_package` 返回码 1/2 使用。
+        ///  配合 `ikat_stage_load_package` 返回码 1/2 使用。共享宿主下宿主级装载
+        ///  （`ikat_host_load_package`）的版本记录也在此可见。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_stage_last_pkg_load_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern uint ikat_stage_last_pkg_load_version(StageHandle* h);
@@ -149,6 +150,70 @@ namespace Ikat.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_shutdown", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void ikat_shutdown();
+
+        /// <summary>
+        ///  创建宿主句柄。字体/atlas/包/图尺寸先于此注册，再 `ikat_stage_new_bound` 挂 Stage。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_new", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern HostHandle* ikat_host_new();
+
+        /// <summary>
+        ///  null-safe 释放宿主句柄。挂接中的 Stage 仍持 Rc 克隆，资源随最后一个引用释放。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void ikat_host_free(HostHandle* h);
+
+        /// <summary>
+        ///  挂外部宿主建 Stage（多 Stage 共享一份资源驻留）。失败返回 null。
+        ///  老入口 `ikat_stage_new` 等价「自建独占宿主」——单 Stage 用法不变。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_new_bound", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern StageHandle* ikat_stage_new_bound(HostHandle* h, float w, float hgt);
+
+        /// <summary>
+        ///  宿主级字体注册（签名/语义同 `ikat_stage_register_font`，落共享宿主）。
+        ///  返回 0=成功，-1=错误。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_register_font", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_host_register_font(HostHandle* h, byte* family, nuint family_len, byte* bytes, nuint bytes_len, byte is_default);
+
+        /// <summary>
+        ///  宿主级回退链（签名/语义同 `ikat_stage_set_fallback_families`，落共享宿主）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_set_fallback_families", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_host_set_fallback_families(HostHandle* h, byte* text, nuint text_len);
+
+        /// <summary>
+        ///  宿主级包装载（签名/语义同 `ikat_stage_load_package`，落共享宿主）。
+        ///  0=ok；1=TooOld；2=TooNew；-1=其他 err。版本记录由 core 侧写入宿主
+        ///  （`ikat_stage_last_pkg_load_version` 对共享宿主同样可见）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_load_package", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_host_load_package(HostHandle* h, byte* name, nuint name_len, byte* bytes, nuint bytes_len);
+
+        /// <summary>
+        ///  宿主级图尺寸批量注入（签名/语义同 `ikat_stage_set_image_sizes`，落共享宿主）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_set_image_sizes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void ikat_host_set_image_sizes(HostHandle* h, byte** paths_ptr, uint* ws, uint* hs, nuint count);
+
+        /// <summary>
+        ///  宿主级 glyph atlas 脏页拉取（签名/语义同 `ikat_stage_font_atlas_dirty_pages`）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_font_atlas_dirty_pages", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint ikat_host_font_atlas_dirty_pages(HostHandle* h, uint* @out, nuint max);
+
+        /// <summary>
+        ///  宿主级 glyph atlas 页像素拉取（签名/语义同 `ikat_stage_font_atlas_page`，双调法）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_font_atlas_page", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern nuint ikat_host_font_atlas_page(HostHandle* h, uint page, uint* out_w, uint* out_h, byte* out_buf, nuint buf_len);
+
+        /// <summary>
+        ///  宿主级清脏页（签名/语义同 `ikat_stage_font_atlas_clear_dirty`）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_host_font_atlas_clear_dirty", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void ikat_host_font_atlas_clear_dirty(HostHandle* h);
 
         /// <summary>
         ///  跑一帧 tick_and_render → build_blob 写入缓存。dt 累积进 time_s（双击窗口，C# 传 unscaledDeltaTime）。
@@ -1368,6 +1433,17 @@ namespace Ikat.Bindings
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct StageHandle
+    {
+    }
+
+    /// <summary>
+    ///  opaque 宿主句柄：`Rc&lt;RefCell&lt;ResourceHost&gt;&gt;`。`ikat_stage_new_bound` 克隆 Rc
+    ///  挂进 Stage；宿主释放须在所有挂接 Stage 释放之后（顺序由 C# 侧保证，越序 =
+    ///  Stage 悬垂 Rc 仍安全——Rc 引用计数使 host_free 后 Stage 自持的克隆仍有效，
+    ///  真正释放发生在最后一个引用 drop）。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct HostHandle
     {
     }
 

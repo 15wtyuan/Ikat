@@ -11,7 +11,6 @@ use crate::render::FrameData;
 use crate::scene::node::{NodeFlags, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::{rematch_pseudo_classes, sync_animation_players, ScopedRule};
 use crate::style::resolved::OverflowMode;
-use crate::text::layout::FontTable;
 
 // 宿主经 Stage 命名空间消费光标决策（FFI 返回判别值）；裸 use 已在上方供本模块用。
 pub use crate::input::CursorIntent;
@@ -39,19 +38,15 @@ pub enum MeasureTextError {
 
 pub struct Stage {
     pub scene: Option<Scene>,
-    pub fonts: FontTable,
+    /// 共享资源宿主（字体表 / 字形 atlas / 包池 / 图尺寸表 / 注册表代数）。
+    /// `new` 自建独占宿主（单 Stage 行为与拆分前一致）；`new_bound` 挂外部宿主——
+    /// 多 Stage 共享一份字体驻留与 glyph atlas。单线程 FFI 纪律：一个 Stage 的
+    /// tick/资源调用运行到完成才轮到下一个，RefCell 重入 = bug 探测器。
+    pub host: std::rc::Rc<std::cell::RefCell<crate::host::ResourceHost>>,
+    /// 上次 tick 对账看到的宿主 `generation`。不等 = 宿主注册表变过（register_font /
+    /// set_fallback / set_image_sizes 都不经场景 mutation），tick 前强制文本失效重测。
+    host_generation_seen: u64,
     pub root_size: (f32, f32),
-    /// 资源池：pkg_name → Package（多包共存）。load_package 填，instantiate 读。
-    /// load_package 不建 scene，只填本字典。
-    pub packages: std::collections::HashMap<String, crate::asset::Package>,
-    /// 最近一次 load_package 版本错配时 pkg 声明的格式版本（0=无记录/非版本错）。
-    /// FFI 层写给宿主做「Unity 包与 ikat.exe 同版本重打」的专属报错。
-    pub last_pkg_load_version: u32,
-    /// 图尺寸表：归一化 path → (w, h) 像素。
-    /// 运行时由 `set_image_sizes` 灌入（来自 atlas.json，含真实图尺寸）。
-    /// `solve`/`build_render_nodes` 查此表算 Image intrinsic 尺寸（measure 三档）+ 九宫格 UV。
-    /// path 缺失或 w/h=0 → fallback 64×64（核心不知图集，但知图尺寸）。
-    pub image_sizes: std::collections::HashMap<String, (u32, u32)>,
     /// 单指针状态机（hover/active 状态 + 命中 diff + 产事件）。
     pub pointer_state: PointerState,
     /// set_input 缓存的本帧输入；tick_and_render 消费后 clear。
@@ -82,9 +77,6 @@ pub struct Stage {
     /// build_render_nodes 比较定 ChangeLevel。transient 不进 pkg（Stage 字段非 Scene 字段）。
     /// reload/节点数变 → clear → 下帧全 dirty（无基线）。
     pub prev_node_hashes: std::collections::HashMap<u64, (u64, u64)>,
-    /// 核心字形 atlas（v1.6 自绘字体）。render build 期 ensure 字形 UV，
-    /// FFI 拉 R8 脏页上传。Stage 持有（非 Scene——atlas 是渲染资源，生命周期跨 tick）。
-    pub glyph_atlas: crate::text::atlas::GlyphAtlas,
     /// 全局 ListView 序号分配器（reuse_key 命名空间隔离用，见 list::encode_reuse_key）。
     /// 每个 ListView 首次进入数据驱动模式时取一个唯 ordinal，确保多 List 的 slot reuse_key
     /// 在场景级全局命名空间不冲突。Stage 持有（跨 tick 单调递增，重置场景也不回卷）。
@@ -114,15 +106,59 @@ impl std::fmt::Display for LoadPkgError {
     }
 }
 
+/// 宿主注册表变更后的文本失效：清 measure 缓存两表 + taffy `mark_dirty` 文本叶子。
+///
+/// 为什么必须显式失效：字体注册/回退链/图尺寸变更都发生在宿主上，不产生任何场景
+/// mutation——Text 的 MeasureContext 只存 family 名（重注册同名换 font id 时 ctx
+/// 逐字节相同），taffy 值比较短路后不会重测，measure 缓存与 text_layouts 全部陈旧。
+/// mark_dirty 沿祖先上溯，下帧 solve 强制重跑文本叶子闭包；指纹含字体 id 链与
+/// color，重测自动取新注册表。image_sizes 变更同理影响 Image intrinsic（ctx 会在
+/// sync 重算时自然 diff，这里一并脏化无害——注册表变更是低频事件）。
+fn invalidate_text_after_host_change(scene: &mut Scene) {
+    for slot in scene.text_measure_cache.iter_mut() {
+        *slot = None;
+    }
+    for slot in scene.text_layouts.iter_mut() {
+        *slot = None;
+    }
+    let ids: Vec<Option<(NodeId, taffy::NodeId)>> = scene.layout_cache.ids.clone();
+    let mut to_dirty: Vec<taffy::NodeId> = Vec::new();
+    for (scene_id, taffy_id) in ids.into_iter().flatten() {
+        let is_text = scene
+            .get(scene_id)
+            .map(|n| n.kind == crate::scene::NodeKind::TextNode || n.rich_text_block)
+            .unwrap_or(false);
+        if is_text {
+            to_dirty.push(taffy_id);
+        }
+    }
+    let tree = &mut scene.layout_cache.tree;
+    for taffy_id in to_dirty {
+        let _ = tree.mark_dirty(taffy_id);
+    }
+}
+
 impl Stage {
     pub fn new(root_size: (f32, f32)) -> Result<Self, String> {
+        Self::new_bound(
+            std::rc::Rc::new(std::cell::RefCell::new(crate::host::ResourceHost::new())),
+            root_size,
+        )
+    }
+
+    /// 挂外部宿主建 Stage（多 Stage 共享一份资源驻留）。宿主生命周期由调用方管理
+    /// （FFI：`ikat_host_new`/`ikat_host_free`）；Stage drop 只放 Rc 引用，最后一个
+    /// 引用者 drop 时资源释放。`new` = 自建独占宿主的等价便捷入口。
+    pub fn new_bound(
+        host: std::rc::Rc<std::cell::RefCell<crate::host::ResourceHost>>,
+        root_size: (f32, f32),
+    ) -> Result<Self, String> {
+        let host_generation_seen = host.borrow().generation;
         Ok(Stage {
             scene: None,
-            fonts: FontTable::new(),
+            host,
+            host_generation_seen,
             root_size,
-            packages: std::collections::HashMap::new(),
-            last_pkg_load_version: 0,
-            image_sizes: std::collections::HashMap::new(),
             pointer_state: PointerState::new(),
             pending_input: Vec::new(),
             last_events: Vec::new(),
@@ -134,20 +170,22 @@ impl Stage {
             tweens: crate::tween::TweenManager::new(),
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
-            glyph_atlas: crate::text::atlas::GlyphAtlas::new(),
             next_list_ordinal: 0,
         })
     }
 
-    /// 注册字体进字体表。is_default=true 设为默认（measure 的 fallback）。
-    /// FFI 层在首次 tick 前必须注册至少一个 default 字体，否则 measure 时 select panic。
+    /// 注册字体进宿主字体表（共享宿主 = 所有挂接 Stage 可见）。is_default=true 设为
+    /// 默认（measure 的 fallback）。FFI 层在首次 tick 前必须注册至少一个 default 字体，
+    /// 否则 measure 时 select panic。注册表变更走 generation 失效钩（见 ResourceHost）。
     pub fn register_font(
         &mut self,
         family: &str,
         bytes: Vec<u8>,
         is_default: bool,
     ) -> Result<(), String> {
-        self.fonts.register(family, bytes, is_default)
+        let mut host = self.host.borrow_mut();
+        host.bump_generation();
+        host.fonts.register(family, bytes, is_default)
     }
 
     /// 运行时改画布尺寸（分辨率适配 / 窗口 resize / 横竖屏切换）。solve 每帧跑
@@ -166,13 +204,15 @@ impl Stage {
     /// 空切片清空回退（退回单字体）。source-agnostic：只收 family 名，后端把系统字体
     /// register 进来后照样能用——核心不问字体来源。
     pub fn set_fallback_families(&mut self, families: &[String]) {
-        self.fonts.set_fallback_families(families);
+        let mut host = self.host.borrow_mut();
+        host.bump_generation();
+        host.fonts.set_fallback_families(families);
     }
 
     /// 取走缺字诊断报告（tofu 取证）：pick 全链缺字的 (family, char)，会话级去重。
     /// 宿主每帧 tick 后调（隔帧也不丢——pending 累积，去重集会话级持久）。
     pub fn take_missing_glyph_reports(&mut self) -> Vec<String> {
-        self.fonts.take_missing_glyph_reports()
+        self.host.borrow_mut().fonts.take_missing_glyph_reports()
     }
 
     /// 无节点纯文本测量：字符串 + 字体 + 字号 → 宽高 + 行数。布局前预估用
@@ -189,7 +229,7 @@ impl Stage {
         size_px: f32,
         max_width: f32,
     ) -> Result<TextMetrics, MeasureTextError> {
-        if !self.fonts.contains_family(family) {
+        if !self.host.borrow().fonts.contains_family(family) {
             return Err(MeasureTextError::UnknownFamily(format!(
                 "measure_text: family `{family}` not registered (register_font it first; \
                  measure must use the same font that will render)"
@@ -205,7 +245,8 @@ impl Stage {
                 "measure_text: invalid max_width {max_width}"
             )));
         }
-        let stack = self.fonts.stack_for(Some(family));
+        let host = self.host.borrow();
+        let stack = host.fonts.stack_for(Some(family));
         let layout = crate::text::layout::measure_text(
             text,
             size_px,
@@ -234,22 +275,12 @@ impl Stage {
     ///
     /// **图尺寸**：由 `set_image_sizes` 在运行时灌入（来自 atlas.json），不再从包 manifest 自建。
     pub fn load_package(&mut self, name: &str, bytes: &[u8]) -> Result<(), LoadPkgError> {
-        use crate::asset::{PkgError, MAX_VERSION, MIN_VERSION};
-        let mut pkg = crate::asset::read_package(bytes).map_err(|e| match e {
-            PkgError::TooOld(v) => LoadPkgError::TooOld {
-                pkg: v,
-                min: MIN_VERSION,
-            },
-            PkgError::TooNew(v) => LoadPkgError::TooNew {
-                pkg: v,
-                max: MAX_VERSION,
-            },
-            other => LoadPkgError::Malformed(other.to_string()),
-        })?;
-        pkg.name = name.to_string(); // read_package 填空串，这里覆盖为真实包名
+        crate::host::load_package_into(&mut self.host.borrow_mut(), name, bytes)
+    }
 
-        self.packages.insert(name.to_string(), pkg);
-        Ok(())
+    /// 最近一次 load_package 失败的 pkg 声明格式版本（0=无/非版本错）。配 FFI 返回码 1/2。
+    pub fn last_pkg_load_version(&self) -> u32 {
+        self.host.borrow().last_pkg_load_version
     }
 
     /// 卸载包：从资源池移除模板注册（Unity prefab 删除语义——已实例化的活节点是
@@ -260,7 +291,9 @@ impl Stage {
     /// driver 级注册，二者都不隶属任何包——卸载单个包既无可释放也无可破坏的资源。
     /// 未加载的包名 → Err。
     pub fn unload_package(&mut self, name: &str) -> Result<(), String> {
-        self.packages
+        let mut host = self.host.borrow_mut();
+        host.bump_generation();
+        host.packages
             .remove(name)
             .map(|_| ())
             .ok_or_else(|| format!("package `{name}` is not loaded"))
@@ -269,7 +302,9 @@ impl Stage {
     /// 查图尺寸（path → (w, h) 像素）。供 layout/render 用。
     /// path 缺失或 w/h=0 → None（调用方 fallback 64×64）。
     pub fn image_size(&self, path: &str) -> Option<(u32, u32)> {
-        self.image_sizes
+        self.host
+            .borrow()
+            .image_sizes
             .get(path)
             .copied()
             .filter(|(w, h)| *w != 0 && *h != 0)
@@ -278,8 +313,10 @@ impl Stage {
     /// 批量灌图尺寸（后端读所有 atlas.json 合并后一次性推入）。
     /// 覆盖式合并：同 path 后写赢。上万条也是 O(n) HashMap 插入，启动一次调用。
     pub fn set_image_sizes(&mut self, sizes: &[(String, u32, u32)]) {
+        let mut host = self.host.borrow_mut();
+        host.bump_generation();
         for (path, w, h) in sizes {
-            self.image_sizes.insert(path.clone(), (*w, *h));
+            host.image_sizes.insert(path.clone(), (*w, *h));
         }
     }
 
@@ -656,7 +693,8 @@ impl Stage {
 
     /// 拉脏页 page_idx 列表（写入 out，返实际数）。atlas 未用 / 无 scene → 0。
     pub fn font_atlas_dirty_pages(&self, out: &mut [u32]) -> usize {
-        let dirty = self.glyph_atlas.dirty_pages();
+        let host = self.host.borrow();
+        let dirty = host.glyph_atlas.dirty_pages();
         let n = dirty.len().min(out.len());
         out[..n].copy_from_slice(&dirty[..n]);
         n
@@ -671,7 +709,8 @@ impl Stage {
         out_h: &mut u32,
         out: &mut [u8],
     ) -> usize {
-        let (bytes, w, h) = self.glyph_atlas.page_bytes(page);
+        let host = self.host.borrow();
+        let (bytes, w, h) = host.glyph_atlas.page_bytes(page);
         let needed = (w * h) as usize;
         if out.len() < needed {
             return needed; // 双调：caller 扩 buf 重调
@@ -684,7 +723,7 @@ impl Stage {
 
     /// 清脏页（backend 拉完调）。
     pub fn font_atlas_clear_dirty(&mut self) {
-        self.glyph_atlas.clear_dirty();
+        self.host.borrow_mut().glyph_atlas.clear_dirty();
     }
 
     /// 编程聚焦（照 fgui RequestFocus）。强制聚焦任意非 disabled 节点
@@ -904,8 +943,10 @@ impl Stage {
     /// id_attr 多实例约定限制：find_node_by_id 返首个匹配（不做核心 id 去重，YAGNI）。
     pub fn instantiate(&mut self, pkg: &str, component: &str) -> Result<NodeId, String> {
         let scene = self.scene.as_mut().ok_or("no scene (create_root first)")?;
-        // clone 出 template 避开 packages + scene 双借（packages 在 self 上，scene 也在 self 上）。
+        // clone 出 template 避开 packages + scene 双借（packages 在宿主上，scene 在 Stage 上）。
         let template = self
+            .host
+            .borrow()
             .packages
             .get(pkg)
             .and_then(|p| p.components.get(component))
@@ -1135,6 +1176,14 @@ impl Stage {
             Some(s) => s,
             None => return FrameData::default(),
         };
+        // 宿主注册表对账：register_font / set_fallback / set_image_sizes 等宿主侧变更
+        // 不经场景 mutation（Text 的 MeasureContext 只存 family 名），taffy 与 measure
+        // 缓存都无感。代数不等 → 清文本缓存两表 + taffy mark_dirty 文本叶子，本帧重测。
+        let host_generation = self.host.borrow().generation;
+        if host_generation != self.host_generation_seen {
+            self.host_generation_seen = host_generation;
+            invalidate_text_after_host_change(scene);
+        }
         let mut out: Vec<EventRecord> = Vec::new();
         // drain FFI setter 产的事件（set_control_text 等）进本帧 out。这些 setter 在 tick 外
         // 调用、写 pending_events；此处 drain 使事件在下 tick 入 last_events（与 C# 读
@@ -1248,12 +1297,14 @@ impl Stage {
             crate::scene::control::sync_control_visuals(scene, cid, self.root_size.1);
         }
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
-        // 核心知图尺寸（打包期 PNG IHDR 静态，存 Stage.image_sizes）。solve 查尺寸表算
+        // 核心知图尺寸（打包期 PNG IHDR 静态，存宿主 image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
-        solve(scene, &self.fonts, self.root_size, &self.image_sizes);
+        let mut host_ref = self.host.borrow_mut();
+        let host = &mut *host_ref;
+        solve(scene, &host.fonts, self.root_size, &host.image_sizes);
         // 5.5 measure 文本控件显示文本——需 solve 产出的 layout_rect.w 定 content width,
         //     且须在 render 前完成（光标命中测试/几何依赖 TextLayout 缓存）。
-        crate::scene::control::measure_text_controls(scene, &self.fonts);
+        crate::scene::control::measure_text_controls(scene, &host.fonts);
         // 5.55 单行文本视口跟随：measure 刷新缓存后、render 前钳 view_x（光标跟随滚动）。
         crate::scene::control::sync_edit_view(scene);
         // 5.6 ListView 高度回填：solve 后 slot 拿到真实 layout_rect.h，回填 HeightCache。
@@ -1269,15 +1320,16 @@ impl Stage {
         crate::scene::transform::compute_world_transforms(scene);
         // 8. 渲染（+ 合成 scrollbar）。传上帧 hash 基线，未变节点 change_level=Skip；
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
-        // build_render_nodes 查 Stage.image_sizes 算九宫格 UV（slice_px / src_px）。
+        // build_render_nodes 查宿主 image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
         let (frame, new_hashes, sort_keys) = build_render_nodes(
             scene,
-            &self.fonts,
+            &host.fonts,
             &self.prev_node_hashes,
-            &self.image_sizes,
-            &mut self.glyph_atlas,
+            &host.image_sizes,
+            &mut host.glyph_atlas,
         );
+        drop(host_ref);
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
         frame
@@ -1463,8 +1515,9 @@ mod tests {
             })
         );
         assert_eq!(
-            s.last_pkg_load_version, 0,
-            "core 侧不落 last 版本（FFI 层写）"
+            s.last_pkg_load_version(),
+            MIN_VERSION - 1,
+            "版本错配记录进宿主（FFI 只读不写）"
         );
         assert_eq!(
             s.load_package("new", &pkg_header_with_version(MAX_VERSION + 1)),
@@ -1498,6 +1551,63 @@ mod tests {
         assert_eq!(s.get_node_kind(sp), Some(NodeKind::TextNode));
         // 无效句柄 → None（不撞 Container=0）。
         assert_eq!(s.get_node_kind(crate::scene::NodeId::INVALID), None);
+    }
+
+    /// 宿主共享契约：同宿主挂两个 Stage，一边 register_font 另一边立即可 measure；
+    /// 字体驻留只有一份（ResourceHost 单实例）；两 Stage 场景互不可见（实例态隔离）。
+    #[test]
+    fn bound_stages_share_host_resources() {
+        let Some(bytes) = test_font_bytes() else {
+            return;
+        };
+        let host = std::rc::Rc::new(std::cell::RefCell::new(crate::host::ResourceHost::new()));
+        let mut a = Stage::new_bound(host.clone(), (800.0, 600.0)).unwrap();
+        let b = Stage::new_bound(host.clone(), (1920.0, 1080.0)).unwrap();
+        a.register_font("dejavu", bytes, true).unwrap();
+        assert!(
+            b.measure_text("hi", "dejavu", 16.0, 0.0).is_ok(),
+            "宿主字体对后挂的 Stage 可见（共享 FontTable）"
+        );
+        // 场景互不可见：a 的 root 不在 b 里。
+        let root = a.create_root("div", "").unwrap();
+        assert!(
+            b.get_node_kind(root).is_none(),
+            "树实例隔离——NodeId 不跨 Stage 泄漏"
+        );
+        // 宿主引用计数：两 Stage + 本地 host clone 各持一份。
+        assert_eq!(std::rc::Rc::strong_count(&host), 3);
+    }
+
+    /// 注册表失效钩：字体重注册（同名换 font id）不产生场景 mutation，MeasureContext
+    /// 逐字节不变——若只靠 taffy 值比较，文本永远吃旧缓存。generation 对账后下一 tick
+    /// 必须重测（text_layouts 换新，run 的 font_id 用新注册的 id）。
+    #[test]
+    fn host_registry_change_forces_text_remeasure() {
+        let Some(bytes) = test_font_bytes() else {
+            return;
+        };
+        let mut s = Stage::new((800.0, 600.0)).unwrap();
+        s.register_font("dejavu", bytes.clone(), true).unwrap();
+        let root = s.create_root("div", "").unwrap();
+        let text = s.create_node("span", "hello").unwrap();
+        s.append_child(root, text).unwrap();
+        s.tick_and_render();
+        let scene = s.scene.as_ref().unwrap();
+        let font_id_v1 =
+            scene.text_layouts[text.index()].as_ref().unwrap().lines[0].runs[0].font_id;
+
+        // 同名重注册：分配新 id（register 覆盖 family，next_id 递增不复用）。
+        s.register_font("dejavu", bytes, true).unwrap();
+        s.tick_and_render();
+        let scene = s.scene.as_ref().unwrap();
+        let layout = scene.text_layouts[text.index()]
+            .as_ref()
+            .expect("失效钩后 text_layouts 仍须被重新填充");
+        let font_id_v2 = layout.lines[0].runs[0].font_id;
+        assert_ne!(
+            font_id_v1, font_id_v2,
+            "重注册换 id 后重测必须取新 id（陈旧 = 旧字体面 + atlas 撞键）"
+        );
     }
 
     #[test]

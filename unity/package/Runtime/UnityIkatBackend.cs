@@ -32,9 +32,15 @@ namespace Ikat
         byte[] _frameBuf;                    // ArrayPool 租用（搬自 IkatStage.Tick 的复用语义）
         int _lastFrameLen;                   // 诊断：上一帧 blob 实际字节数（_frameBuf 可能 Rent 超长）
         uint _lastFfiPanicCount;             // Rust FFI guard 兜底计数上次采样（变化即有 panic 被吞）
+        readonly IkatResourceHost _resourceHost; // 共享资源宿主（null = 单 Stage 自建宿主，atlas 走本类 per-stage 路径）
 
         /// <param name="mm">由 Driver 构造并注入（Shader.Find("Ikat/Unlit") 后建）。</param>
-        public UnityIkatBackend(MaterialManager mm) { _mm = mm; }
+        /// <param name="resourceHost">共享资源宿主（多 Stage 共享字体/atlas）；null = 单 Stage 兼容路径。</param>
+        public UnityIkatBackend(MaterialManager mm, IkatResourceHost resourceHost = null)
+        {
+            _mm = mm;
+            _resourceHost = resourceHost;
+        }
 
         /// <summary>
         /// Driver Awake 注入：渲染根（MirrorPool / NativeHost 镜像 GO 挂此 root）+ 输入采集器。
@@ -126,12 +132,18 @@ namespace Ikat
         /// SyncFrame 内 <see cref="MirrorPool.Sync"/> 前调——本帧渲染节点包含 text Mesh image_path，
         /// 先注册 atlas Sprite 使 text 节点的 image_path 命中 GetSprite 缓存。
         ///
-        /// 双调法取页数据：先探 buf_len=0 返所需字节数 → 分配 buf → 再调填 w/h/bytes。
-        /// Atlas 页面通常是 512×512=256KB，每页用独立 ArrayPool 缓冲区（不挤 _frameBuf）。
-        /// 单字体路径固定 f0（默认字体 font_id=0）；多字体再扩 key。
+        /// 共享宿主（多 Stage）：走 <see cref="IkatResourceHost.SyncAtlas"/> 单点拉取
+        /// （脏页 clear 是全局的，多 driver 各拉各清会让后拉者永远缺新字形页）。
+        /// 单 Stage：本类 per-stage 路径（双调法取页数据：先探 buf_len=0 返所需字节数
+        /// → 分配 buf → 再调填 w/h/bytes。页面通常 512×512=256KB，独立 ArrayPool 缓冲）。
         /// </summary>
         unsafe void SyncFontAtlas(StageHandle* h)
         {
+            if (_resourceHost != null)
+            {
+                _resourceHost.SyncAtlas(_sprites);
+                return;
+            }
             // 探脏页（通常 ≤8 页；单字体极少超 16）。
             const int MAX_DIRTY = 16;
             uint* dirtyPtr = stackalloc uint[MAX_DIRTY];

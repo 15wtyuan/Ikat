@@ -87,7 +87,7 @@ fn issue1_text_wrap(scene: &Scene, s: &Stage) {
             st.text_align,
             st.wrap_control(),
             None,
-            &s.fonts.stack_for(st.font_family.as_deref()),
+            &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
             ikat_core::text::rich::weight_from_font_weight(st.font_weight),
         );
@@ -286,7 +286,7 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: ikat_core::scene::node::NodeId, 
             st.text_align,
             st.wrap_control(),
             None,
-            &s.fonts.stack_for(st.font_family.as_deref()),
+            &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
             ikat_core::text::rich::weight_from_font_weight(st.font_weight),
         );

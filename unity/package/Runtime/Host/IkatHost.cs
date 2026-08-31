@@ -34,7 +34,7 @@ namespace Ikat
         public bool IsDisposed { get; private set; }
 
         /// <summary>
-        /// 建 Stage 句柄 + <see cref="UIContext"/> + 接 backend。
+        /// 建 Stage 句柄 + <see cref="UIContext"/> + 接 backend（自建独占资源宿主——单 Stage 行为）。
         /// 不在此注入 Unity 特定资源（SpriteResolver 等）——交给 <paramref name="backend"/> 内部持有，
         /// 由 Driver 调 <see cref="UnityIkatBackend"/>.InitSprites/SetRuntimeRoot 等引擎特定初始化。
         /// </summary>
@@ -43,10 +43,24 @@ namespace Ikat
         /// <param name="backend">引擎后端实现（Unity: <see cref="UnityIkatBackend"/>；未来 Godot: GodotIkatBackend）。</param>
         /// <exception cref="InvalidOperationException">ikat_stage_new 返 null（核心侧 stage 分配失败）。</exception>
         public IkatHost(float designW, float designH, IkatBackend backend)
+            : this(designW, designH, backend, IntPtr.Zero) { }
+
+        /// <summary>
+        /// 挂共享资源宿主建 Stage（多 Stage 共享字体驻留 / glyph atlas / 包池）。
+        /// 资源 FFI（RegisterFont/SetFallbackFamilies/SetImageSizes/LoadPackage）在挂接后
+        /// 仍走本类 stage 级入口——native 侧等价落同一宿主。
+        /// </summary>
+        /// <param name="resourceHostHandle">共享宿主句柄（Unity 侧 <c>IkatResourceHost.Handle</c>；
+        /// 引擎中立层只收裸句柄不引资源类型）。Zero = 自建独占宿主。</param>
+        /// <exception cref="InvalidOperationException">ikat_stage_new/bound 返 null。</exception>
+        public IkatHost(float designW, float designH, IkatBackend backend, IntPtr resourceHostHandle)
         {
-            _stage = Native.ikat_stage_new(designW, designH);
+            _stage = resourceHostHandle != IntPtr.Zero
+                ? Native.ikat_stage_new_bound((HostHandle*)resourceHostHandle, designW, designH)
+                : Native.ikat_stage_new(designW, designH);
             if (_stage == null)
-                throw new InvalidOperationException($"ikat_stage_new({designW},{designH}) returned null");
+                throw new InvalidOperationException(
+                    $"ikat_stage_new({designW},{designH}, host={resourceHostHandle != IntPtr.Zero}) returned null");
             _ctx = new UIContext((IntPtr)_stage);
             _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         }

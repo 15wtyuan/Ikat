@@ -18,6 +18,7 @@ pub fn sync_bindings() -> Result<(), Box<dyn std::error::Error>> {
     let ffi_modules = [
         "lib.rs",
         "stage.rs",
+        "host.rs",
         "frame.rs",
         "events.rs",
         "node_getters.rs",

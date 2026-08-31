@@ -183,7 +183,7 @@ fn run_text_dump(font_path: &str) {
             st.text_align,
             st.wrap_control(),
             None,
-            &s.fonts.stack_for(st.font_family.as_deref()),
+            &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
             ikat_core::text::rich::weight_from_font_weight(st.font_weight),
         );
@@ -195,7 +195,7 @@ fn run_text_dump(font_path: &str) {
             st.text_align,
             st.wrap_control(),
             Some(rect_w),
-            &s.fonts.stack_for(st.font_family.as_deref()),
+            &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
             ikat_core::text::rich::weight_from_font_weight(st.font_weight),
         )

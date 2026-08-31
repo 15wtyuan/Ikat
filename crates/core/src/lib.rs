@@ -19,6 +19,7 @@ pub mod asset;
 pub mod dump;
 pub mod event;
 pub mod hit;
+pub mod host;
 pub mod input;
 pub mod layout;
 pub mod list;

@@ -184,31 +184,25 @@ pub extern "C" fn ikat_stage_load_package(
             Err(_) => return -1,
         };
         let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
-        sh.stage.last_pkg_load_version = 0;
         match sh.stage.load_package(name, bytes) {
             Ok(()) => 0,
-            Err(ikat_core::stage::LoadPkgError::TooOld { pkg, .. }) => {
-                sh.stage.last_pkg_load_version = pkg;
-                1
-            }
-            Err(ikat_core::stage::LoadPkgError::TooNew { pkg, .. }) => {
-                sh.stage.last_pkg_load_version = pkg;
-                2
-            }
+            Err(ikat_core::stage::LoadPkgError::TooOld { .. }) => 1,
+            Err(ikat_core::stage::LoadPkgError::TooNew { .. }) => 2,
             Err(_) => -1,
         }
     })
 }
 
 /// 最近一次 load_package 失败的 pkg 声明格式版本（0=无/非版本错）。
-/// 配合 `ikat_stage_load_package` 返回码 1/2 使用。
+/// 配合 `ikat_stage_load_package` 返回码 1/2 使用。共享宿主下宿主级装载
+/// （`ikat_host_load_package`）的版本记录也在此可见。
 #[no_mangle]
 pub extern "C" fn ikat_stage_last_pkg_load_version(h: *const StageHandle) -> u32 {
     ffi_guard(0, || {
         if h.is_null() {
             return 0;
         }
-        unsafe { (*h).stage.last_pkg_load_version }
+        unsafe { (*h).stage.last_pkg_load_version() }
     })
 }
 
@@ -285,10 +279,7 @@ pub extern "C" fn ikat_stage_instantiate(
 /// 故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
 /// 此处自动成为清理入口，无需再改 C# 接线。
 ///
-/// **注意：Font 的 `Box::leak`（`text/layout.rs`）是真泄漏**——`bytes.clone()` 后 leak 取
-/// `'static` 切片喂 ttf-parser Face，原 Vec 虽被 `_bytes` 持有但与 leaked 切片不是同一份，
-/// Stage drop 时 `_bytes` 释放的是 clone 来源而非 leaked 副本。每次 Stage 创建都 leak 一份字体字节，
-/// 不可由 shutdown 回收（leak 切片无 handle 跟踪）。若未来域重载内存观测触发阈值，
-/// 再考虑字体缓存化为进程单例。
+/// 字体字节不泄漏（宿主分离后已修）：`Font` 持回收哨兵，drop 时收回 `Box::leak`
+/// 的字节；FontTable 归属 ResourceHost（`ikat_host_free` / 最后一个挂接 Stage 释放）。
 #[no_mangle]
 pub extern "C" fn ikat_shutdown() {}

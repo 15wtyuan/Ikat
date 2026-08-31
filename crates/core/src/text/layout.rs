@@ -234,9 +234,38 @@ pub struct TextLayout {
 
 /// 封装一个 ttf 字体。
 ///
-/// Face 借用 `Box::leak` 产出的 `'static` 切片；leak 的内存不释放（字体数量有限，可接受）。
+/// `face` 借用一段 `'static` 字节切片（`Face::parse` 要求数据活过返回值，只能 leak 取
+/// 'static 生命周期）；`reclaim` 持有该泄漏分配的所有权哨兵，Font drop 时把字节收回。
+/// 字段按声明序 drop：face（无 Drop 实现）先走，回收最后执行。字体常驻 FontTable /
+/// ResourceHost，正常生命周期下 leak 不再跨进程累积——宿主/实例分离后多 Stage 共享
+/// 一份驻留，重注册换字体时旧字节随旧 Font drop 释放。
 pub struct Font {
     pub face: Face<'static>,
+    /// 仅为 Drop 副作用存在（drop 时回收 face 借用的泄漏字节），无读路径。
+    #[allow(dead_code)]
+    reclaim: Option<LeakedFontBytes>,
+}
+
+/// `Box::leak` 产出的字节分配的回收哨兵。分配来自 `Vec::into_boxed_slice`
+/// （cap == len），Drop 重组 Vec 走正常释放路径。
+struct LeakedFontBytes {
+    ptr: *mut u8,
+    len: usize,
+}
+
+// 安全性：ptr 指向堆上 u8 分配（无线程亲和、无内部可变性），Font 移动/跨线程共享
+// 不改变其有效性——Arc<Font> 因而是 Send+Sync，clippy 的 Rc 改写建议不适用
+// （FontTable 跨 FFI 边界共享，保持 Arc 语义）。
+unsafe impl Send for LeakedFontBytes {}
+unsafe impl Sync for LeakedFontBytes {}
+
+impl Drop for LeakedFontBytes {
+    fn drop(&mut self) {
+        // 安全性：分配来自 into_boxed_slice（cap == len，对齐 1），三参数一致重组即原分配。
+        unsafe {
+            drop(Vec::from_raw_parts(self.ptr, self.len, self.len));
+        }
+    }
 }
 
 impl Font {
@@ -246,9 +275,22 @@ impl Font {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
-        let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
-        let face = Face::parse(leaked, 0).map_err(|e| format!("{:?}", e))?;
-        Ok(Font { face })
+        let leaked: &'static mut [u8] = Box::leak(bytes.into_boxed_slice());
+        let (ptr, len) = (leaked.as_mut_ptr(), leaked.len());
+        let face = match Face::parse(leaked, 0) {
+            Ok(f) => f,
+            Err(e) => {
+                // parse 失败：无人再引用泄漏字节，立即收回再向上传错。
+                unsafe {
+                    drop(Vec::from_raw_parts(ptr, len, len));
+                }
+                return Err(format!("{:?}", e));
+            }
+        };
+        Ok(Font {
+            face,
+            reclaim: Some(LeakedFontBytes { ptr, len }),
+        })
     }
 
     pub fn ascent(&self, font_size: f32) -> f32 {
@@ -275,8 +317,8 @@ impl Font {
 ///
 /// 注册第一个 is_default=true 的字体为 default。select 在无 default 时 panic——
 /// FFI 层保证任何 tick（会触发 measure）前已注册 default，契约由调用方维护。
-/// Font 仍是 Face<'static>（Box::leak 字节，进程级单字体可接受；多字体数量有限，
-/// leak 不释放可接受，真要回收改 Arc<Vec<u8>> 持字节，YAGNI）。
+/// Font 的字节驻留随 Font drop 回收（见 Font 的 reclaim 哨兵）；FontTable 归属
+/// ResourceHost，多 Stage 共享一份驻留。
 ///
 /// family_to_id 为每个注册 family 分配稳定 u32 id，供 atlas key 和合成
 /// image_path 用。id 在 register 时分配，不随字体表增删变化。
@@ -1720,6 +1762,60 @@ mod tests {
         Font::from_path(&p).ok()
     }
 
+    // —— 字节回收取证用的透明计数分配器（只统计，不改行为）——
+    // TRACK 只在被测窗口内开；≥1KB 的 dealloc 记 layout.size。判据用「精确等于字体
+    // 文件字节数的释放」——并行测试的小分配噪声不可能恰好等于整份字体大小。
+    mod reclaim_probe {
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+
+        pub static TRACK: AtomicBool = AtomicBool::new(false);
+        pub static BIG_FREES: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+        pub struct Counting;
+        unsafe impl GlobalAlloc for Counting {
+            unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+                System.alloc(l)
+            }
+            unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+                if TRACK.load(Ordering::Relaxed) && l.size() >= 1024 {
+                    BIG_FREES.lock().unwrap().push(l.size());
+                }
+                System.dealloc(p, l)
+            }
+            unsafe fn realloc(&self, p: *mut u8, l: Layout, ns: usize) -> *mut u8 {
+                System.realloc(p, l, ns)
+            }
+        }
+        #[global_allocator]
+        static A: Counting = Counting;
+    }
+
+    /// 字体字节随 Font drop 回收（leak 修复回归）。修复前 `Box::leak` 的字节无
+    /// handle 跟踪，drop 不释放——每次 Stage 重建/宿主重注册都累积一份（CJK ttc
+    /// 数十 MB）。判据：drop 后出现一次**精确等于字体文件大小**的释放。
+    #[test]
+    fn font_bytes_are_reclaimed_on_drop() {
+        let p = format!(
+            "{}/tests/fixtures/DejaVuSans.ttf",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let Ok(len) = std::fs::metadata(&p).map(|m| m.len() as usize) else {
+            eprintln!("skip: no test font");
+            return;
+        };
+        let font = Font::from_path(&p).expect("DejaVuSans parses");
+        reclaim_probe::TRACK.store(true, std::sync::atomic::Ordering::Relaxed);
+        drop(font);
+        reclaim_probe::TRACK.store(false, std::sync::atomic::Ordering::Relaxed);
+        let frees = reclaim_probe::BIG_FREES.lock().unwrap().clone();
+        assert!(
+            frees.contains(&len),
+            "font bytes ({len}B) must be freed on Font drop; big frees recorded: {frees:?}"
+        );
+    }
+
     /// tofu 取证日志：pick 全链缺字记录（family+char）、会话级去重、take 排空。
     /// 回退链覆盖的字不算缺（不画 tofu）；清空回退后同字才进报告。
     #[test]
@@ -2222,7 +2318,11 @@ mod tests {
                 None,
             )
         };
-        assert_ne!(f(&[1]), f(&[2]), "主字体 id 变 → fp 变（同 family 重注册换 id 必 miss）");
+        assert_ne!(
+            f(&[1]),
+            f(&[2]),
+            "主字体 id 变 → fp 变（同 family 重注册换 id 必 miss）"
+        );
         assert_ne!(f(&[1]), f(&[1, 2]), "fallback 链变 → fp 变（解析结果不同）");
         assert_eq!(f(&[1]), f(&[1]), "同链同 fp");
     }

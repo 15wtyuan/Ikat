@@ -67,7 +67,10 @@ fn set_image_sizes_and_measure_uses_real_dims() {
     s.create_root("div", "width:300px;height:300px").unwrap();
     s.load_package("bag", &pkg_bytes).unwrap();
     // 模拟 set_image_sizes：灌入 (w=40, h=20)
-    s.image_sizes.insert("icons/wide.png".into(), (40, 20));
+    s.host
+        .borrow_mut()
+        .image_sizes
+        .insert("icons/wide.png".into(), (40, 20));
     assert_eq!(
         s.image_size("icons/wide.png"),
         Some((40, 20)),
@@ -189,7 +192,10 @@ fn css_length_overrides_real_image_size() {
     s.create_root("div", "width:300px;height:300px").unwrap();
     s.load_package("bag", &pkg_bytes).unwrap();
     // 灌入真实尺寸 40×20
-    s.image_sizes.insert("icons/wide.png".into(), (40, 20));
+    s.host
+        .borrow_mut()
+        .image_sizes
+        .insert("icons/wide.png".into(), (40, 20));
     let comp_root = s.instantiate("bag", "comp1").unwrap();
     s.append_child(s.scene.as_ref().unwrap().roots[0], comp_root)
         .unwrap();
@@ -216,8 +222,14 @@ fn multi_package_merged_sizes_via_direct_insert() {
     s.load_package("a", &pkg_a).unwrap();
     s.load_package("b", &pkg_b).unwrap();
     // 模拟 set_image_sizes：分别灌入 a 和 b 的尺寸
-    s.image_sizes.insert("icons/a.png".into(), (10, 20));
-    s.image_sizes.insert("icons/b.png".into(), (30, 40));
+    s.host
+        .borrow_mut()
+        .image_sizes
+        .insert("icons/a.png".into(), (10, 20));
+    s.host
+        .borrow_mut()
+        .image_sizes
+        .insert("icons/b.png".into(), (30, 40));
     assert_eq!(s.image_size("icons/a.png"), Some((10, 20)), "path a 进表");
     assert_eq!(s.image_size("icons/b.png"), Some((30, 40)), "path b 进表");
 }
@@ -229,10 +241,16 @@ fn reload_package_with_new_sizes() {
     let pkg_v2 = make_pkg_with_image("icons/x.png");
     let mut s = Stage::new_for_test();
     s.load_package("bag", &pkg_v1).unwrap();
-    s.image_sizes.insert("icons/x.png".into(), (10, 10));
+    s.host
+        .borrow_mut()
+        .image_sizes
+        .insert("icons/x.png".into(), (10, 10));
     assert_eq!(s.image_size("icons/x.png"), Some((10, 10)), "首次灌入");
     s.load_package("bag", &pkg_v2).unwrap();
-    s.image_sizes.insert("icons/x.png".into(), (50, 50));
+    s.host
+        .borrow_mut()
+        .image_sizes
+        .insert("icons/x.png".into(), (50, 50));
     assert_eq!(
         s.image_size("icons/x.png"),
         Some((50, 50)),
@@ -266,7 +284,11 @@ fn set_image_sizes_zero_dim_is_stored_but_filtered() {
         "w/h=0 filter -> None"
     );
     // 但 HashMap 里有它
-    assert!(stage.image_sizes.contains_key("icons/zero.png"));
+    assert!(stage
+        .host
+        .borrow()
+        .image_sizes
+        .contains_key("icons/zero.png"));
 }
 
 /// reuse_key 是运行时字段（不进 pkg），driver 给 slot 节点设。

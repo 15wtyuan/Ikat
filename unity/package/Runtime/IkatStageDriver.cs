@@ -75,6 +75,13 @@ namespace Ikat
         [Tooltip("输入采集器（通常与本 Driver 同 GO）。留空时 Awake GetComponent 兜底。")]
         [SerializeField] IkatInputCollector _inputCollector;
 
+        [Tooltip("挂共享资源宿主（多 Stage 共享字体驻留/glyph atlas/包池——per-Stage 固定成本降回一份）。" +
+                 "on 时本 Driver 挂 IkatResourceHost.Shared（首个开启者懒建）；同宿主的 Driver 须用同一份字体清单（首个注册生效）。")]
+        [SerializeField] bool _useSharedHost;
+
+        /// <summary>生效共享宿主（Awake 解析）。null = 自建独占宿主（单 Stage 行为）。</summary>
+        IkatResourceHost _sharedHost;
+
         [Tooltip("产物根目录（含 ikat.runtime.json + ui/ + atlas/ + fonts/）。空 = Assets/Bundles（打包器输出，editor 用）；built player 该路径不存在，须显式设此字段（如指向 StreamingAssets 拷贝）。")]
         [SerializeField] string _productRoot = "";
 
@@ -263,15 +270,17 @@ namespace Ikat
             _mm = new MaterialManager(shader);
 
             // 引擎分层：backend（Unity 特定）+ host（引擎无关驱动序）。
-            // IkatHost 构造 ikat_stage_new → 建 UIContext → 接 backend。
-            // ikat_stage_new 失败时 IkatHost 抛 InvalidOperationException——
-            // _host 留 null，LateUpdate/OnDestroy 静默跳过。
+            // IkatHost 构造 ikat_stage_new（共享宿主版走 ikat_stage_new_bound）→ 建 UIContext → 接 backend。
+            // 构造失败时 IkatHost 抛 InvalidOperationException——_host 留 null，LateUpdate/OnDestroy 静默跳过。
             // stage 建在画布尺寸上（Letterbox = 设计分辨率；Fit 模式一维已随屏幕适配——
             // ResolveAdaptation 已算好 _canvas）。零向量防御在 Rust 侧（1080×1920 兜底）。
-            _backend = new UnityIkatBackend(_mm);
+            // 共享宿主：atlas 拉取随 backend 路由到 IkatResourceHost.SyncAtlas 单点。
+            if (_useSharedHost && _sharedHost == null)
+                _sharedHost = IkatResourceHost.Shared ??= new IkatResourceHost();
+            _backend = new UnityIkatBackend(_mm, _sharedHost);
             try
             {
-                _host = new IkatHost(_canvas.x, _canvas.y, _backend);
+                _host = new IkatHost(_canvas.x, _canvas.y, _backend, _sharedHost?.Handle ?? IntPtr.Zero);
             }
             catch (Exception e)
             {
@@ -459,6 +468,10 @@ namespace Ikat
         /// </summary>
         protected virtual void RegisterFontsFromManifest(RuntimeManifest runtime)
         {
+            // 共享宿主守卫：同名重注册会换 font_id（native 代数失效钩触发全文本重测）
+            // 且 atlas 按新 GlyphKey 重光栅整套字形（N driver × N 套字形副本）。
+            // 首个挂接 Driver 的字体清单即宿主清单；差异化字体须直接操作 IkatResourceHost。
+            if (_sharedHost != null && _sharedHost.FontsRegistered) return;
             if (runtime?.fonts == null) return;
             var fallbacks = new List<string>();
             foreach (var rf in runtime.fonts)
@@ -473,6 +486,7 @@ namespace Ikat
             }
             if (fallbacks.Count > 0)
                 _host.SetFallbackFamilies(fallbacks);
+            if (_sharedHost != null) _sharedHost.FontsRegistered = true;
         }
 
         /// <summary>
@@ -707,7 +721,7 @@ namespace Ikat
         // native 全局态当前为空（Stage per-handle，stage_free drop），但 hook 必须接——引入
         // global texture/font registry 时此处自动清，无需再改接线。
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { Native.ikat_shutdown(); }
+        static void ResetStatics() { Native.ikat_shutdown(); IkatResourceHost.Shared = null; }
 
         /// <summary>
         /// 建/取 UI 相机。独立 GO（非根的子节点）——避免被根的 (sf,-sf,sf) scale 影响。

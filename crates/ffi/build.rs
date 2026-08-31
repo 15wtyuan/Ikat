@@ -8,6 +8,7 @@ fn main() {
     csbindgen::Builder::default()
         .input_extern_file("src/lib.rs")
         .input_extern_file("src/stage.rs")
+        .input_extern_file("src/host.rs")
         .input_extern_file("src/frame.rs")
         .input_extern_file("src/events.rs")
         .input_extern_file("src/node_getters.rs")

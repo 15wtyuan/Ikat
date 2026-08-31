@@ -37,7 +37,7 @@ fn main() {
     }
     // scene 未建（load_package 不建 scene）；从 packages 字典读组件模板节点。
     println!("{:<22} {:<18} {:<16} {:<16}", "id", "src", "css.w", "css.h");
-    for pkg in s.packages.values() {
+    for pkg in s.host.borrow().packages.values() {
         for comp in pkg.components.values() {
             for n in &comp.nodes {
                 let src = match &n.kind {

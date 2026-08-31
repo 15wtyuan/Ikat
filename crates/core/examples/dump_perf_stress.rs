@@ -190,16 +190,22 @@ fn main() {
         t_ctrl += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        ikat_core::layout::solve(
-            s.scene.as_mut().unwrap(),
-            &s.fonts,
-            s.root_size,
-            &s.image_sizes,
-        );
+        {
+            let host = s.host.borrow();
+            ikat_core::layout::solve(
+                s.scene.as_mut().unwrap(),
+                &host.fonts,
+                s.root_size,
+                &host.image_sizes,
+            );
+        }
         t_solve += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        ikat_core::scene::control::measure_text_controls(s.scene.as_mut().unwrap(), &s.fonts);
+        ikat_core::scene::control::measure_text_controls(
+            s.scene.as_mut().unwrap(),
+            &s.host.borrow().fonts,
+        );
         t_measure += t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
