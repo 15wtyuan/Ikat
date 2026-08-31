@@ -811,11 +811,20 @@ namespace Ikat.Bindings
         /// <summary>
         ///  运行时渲染隐藏（世界锚点出屏/相机背后自动隐藏）。与 display:none 正交：不影响布局/
         ///  命中，只控本节点全部渲染行 visible 位（后端语义：保留镜像对象、SetActive(false)——
-        ///  C# MirrorPool 对 visible=0 行清 stale + 隐藏，不销毁）。visible：0=显示 非0=隐藏。
+        ///  C# MirrorPool 对 visible=0 行清 stale + 隐藏，不销毁）。visible：非0=显示 0=隐藏。
         ///  返回 0=成功，-1=null 句柄 / 无场景 / 节点不 live。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_stage_set_node_visible", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int ikat_stage_set_node_visible(StageHandle* h, ulong node_id, byte visible);
+
+        /// <summary>
+        ///  world-space 挂载登记（#109 C8）：node 子树挂到业务摆放的 3D 容器——渲染行顶点
+        ///  re-base 到挂载根局部系 + blob mount_id 列写 slot（后端按槽位路由 SetParent）。
+        ///  slot：driver 分配保证唯一；0 = 解除挂载回屏幕空间。
+        ///  返回 0=成功，-1=null 句柄 / 无场景 / 节点不 live。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_node_mount", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_set_node_mount(StageHandle* h, ulong node_id, uint slot);
 
         /// <summary>
         ///  设控件 value（ProgressBar / Slider）。ProgressBar clamp [0, max]；

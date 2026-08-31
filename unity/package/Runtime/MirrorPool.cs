@@ -51,11 +51,53 @@ namespace Ikat
 
         readonly Dictionary<ulong, RenderObj> _poolByNodeId = new();
         readonly Dictionary<ulong, RenderObj> _poolByReuse = new();
+        // world-space 挂载容器登记（#109 C8）：槽位 → 业务摆放的 3D 容器 Transform。
+        // blob mount_id 列非 0 的行 SetParent 到对应容器（顶点已 re-base 到挂载根局部系，
+        // 容器层随业务 → 场景相机渲染 + ZTest LEqual 吃 3D 深度遮挡）。
+        readonly Dictionary<ulong, Transform> _mountContainers = new();
         // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
         // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
         readonly HashSet<uint> _clipsAppliedThisFrame = new();
         // 本帧启 CLIPPED_ROUNDED 的 ctx 集合（同 ctx 后续节点复用 rounded 标志保 material key 一致）。
         readonly HashSet<uint> _roundedCtxsThisFrame = new();
+
+        /// <summary>
+        /// 行归属解析：挂载行（mount_id ≠ 0 且容器登记存活）→ 容器；其余（含容器已销毁的
+        /// 降级兜底）→ 屏幕 root。容器被业务销毁时行回落屏幕路径——可见性降级但不悬空。
+        /// </summary>
+        Transform ResolveParent(Transform root, ulong mountId)
+        {
+            if (mountId != 0
+                && _mountContainers.TryGetValue(mountId, out var c)
+                && c != null)
+                return c;
+            return root;
+        }
+
+        /// <summary>登记挂载容器（Driver BindWorldMount → backend 转发）。</summary>
+        internal void SetMountContainer(ulong slot, Transform container) =>
+            _mountContainers[slot] = container;
+
+        /// <summary>
+        /// 解除挂载容器：先把容器下存活镜像 GO 挂回屏幕 root（core 侧 mount 已清 0，本帧
+        /// Sync 的 UpdateHeader 会自然回落 root——这里先行归位防容器销毁连带销毁镜像 GO），
+        /// 再移除登记。容器 GO 本体的销毁归 Driver（容器是它建的）。
+        /// </summary>
+        internal void ClearMountContainer(ulong slot, Transform root)
+        {
+            if (!_mountContainers.Remove(slot, out var c) || c == null) return;
+            ReparentFromContainer(_poolByNodeId, c, root);
+            ReparentFromContainer(_poolByReuse, c, root);
+        }
+
+        static void ReparentFromContainer(Dictionary<ulong, RenderObj> pool, Transform container, Transform root)
+        {
+            foreach (var ro in pool.Values)
+            {
+                if (ro.Go != null && ro.Go.transform.parent == container)
+                    ro.Go.transform.SetParent(root, false);
+            }
+        }
 
         /// 当前镜像中的 GO 数量（两 dict 之和）。测试/调试用。
         public int Count => _poolByNodeId.Count + _poolByReuse.Count;
@@ -140,7 +182,7 @@ namespace Ikat
                 // 确保 RenderObj 存在；新建 GO 无 mesh → 强制 FULL（无视 blob 的 HEADER）
                 if (!pool.TryGetValue(poolKey, out var ro))
                 {
-                    ro = NewRenderObj(root);
+                    ro = NewRenderObj(ResolveParent(root, blob.MountId(i)));
                     pool[poolKey] = ro;
                     level = 2; // 强制 FULL
                 }
@@ -175,12 +217,15 @@ namespace Ikat
         void UpdateHeader(RenderObj ro, FrameBlob blob, int i, Transform root,
                           MaterialManager mm, byte kind, SpriteLookup look, Texture tex)
         {
-            // flatten：所有节点挂 root。
+            // flatten：所有节点挂 root（挂载行除外——路由到业务 3D 容器，见 ResolveParent）。
             // pure 和非 pure 统一 GO localPosition=(Mtx,Mty)（world translate 进 GO transform）。
             // 非纯平移的 scale/rotate 进 _ObjectMatrix（无 translate）。translate 进 GO
             // localPosition；但 renderer.bounds = GO 平移 × 未旋转 mesh ≠ 旋转后真实
             // AABB——剔除补偿见 CompensateMeshBoundsForLinear（#66）。
-            ro.Go.transform.SetParent(root, false);
+            Transform parent = ResolveParent(root, blob.MountId(i));
+            ro.Go.transform.SetParent(parent, false);
+            if (ro.Go.layer != parent.gameObject.layer)
+                ro.Go.layer = parent.gameObject.layer; // 挂载行随容器层（场景层 → 3D 深度遮挡）
             bool pure = blob.IsPureTranslation(i);
             ro.Go.transform.localPosition = new Vector3(blob.Mtx(i), blob.Mty(i), 0f);
             ro.Go.transform.localRotation = Quaternion.identity;

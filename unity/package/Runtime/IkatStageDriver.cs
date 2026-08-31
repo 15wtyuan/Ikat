@@ -510,6 +510,59 @@ namespace Ikat
             _backend?.NativeHost.Unbind(node._id);
         }
 
+        // ── world-space 子树挂载（#109 C8）─────────────────────────────────────
+        // 与世界锚点（投影路，纯 C# 组合）互补的第三路：整棵 UI 子树挂到业务 3D 变换——
+        // 行顶点 re-base 到挂载根局部系（core），镜像 GO SetParent 到容器（MirrorPool 按
+        // blob mount_id 路由）。容器层由业务定（场景层 → 3D 相机渲染，ZTest LEqual 吃
+        // 深度遮挡）。内层 y-flip 容器镜像 UI 根 (sf,-sf,sf) 的 y 翻转；挂载尺寸不含屏幕
+        // 适配缩放——世界大小由 worldParent 的 scale 决定。
+        readonly Dictionary<ulong, uint> _mountSlots = new();      // node id → slot
+        readonly Dictionary<uint, GameObject> _mountInners = new(); // slot → y-flip 容器 GO
+        uint _nextMountSlot = 1;
+
+        /// <summary>
+        /// 把 node 子树挂到 3D 变换 worldParent 下：子树在挂载根设计位置处的视觉整体
+        /// （布局/命中仍在屏幕系——挂载只改渲染归属）重现为 worldParent 的子物体。
+        /// v1 约束：挂载根须成 stacking context（声明 z-index）；挂载内禁 dropdown /
+        /// 滚动容器 / 外阴影根 / overflow clip（clip 平面定义在屏幕系，挂载后无意义）。
+        /// 重复绑定同节点 = 换绑（旧容器销毁重建）。node null / host 未就绪 = no-op。
+        /// </summary>
+        public void BindWorldMount(Node node, Transform worldParent)
+        {
+            if (node == null || worldParent == null || _host == null) return;
+            UnbindWorldMount(node);   // 换绑：先清旧容器与登记
+            uint slot = _nextMountSlot++;
+            var inner = new GameObject("IkatMountInner")
+            {
+                hideFlags = HideFlags.DontSaveInEditor,
+            };
+            inner.transform.SetParent(worldParent, false);
+            inner.transform.localScale = new Vector3(1f, -1f, 1f); // y-flip（同 UI 根约定）
+            _mountSlots[node._id] = slot;
+            _mountInners[slot] = inner;
+            _backend.SetMountContainer(slot, inner.transform);
+            _host.SetNodeMount(node._id, slot);
+        }
+
+        /// <summary>
+        /// 解除 world-space 挂载：子树回屏幕空间渲染（镜像 GO 先行挂回渲染根，容器销毁）。
+        /// 未挂载节点 = no-op。
+        /// </summary>
+        public void UnbindWorldMount(Node node)
+        {
+            if (node == null) return;
+            if (_mountSlots.Remove(node._id, out uint slot))
+            {
+                _host?.SetNodeMount(node._id, 0);
+                _backend?.ClearMountContainer(slot);
+                if (_mountInners.Remove(slot, out var inner) && inner != null)
+                {
+                    if (Application.isPlaying) Destroy(inner);
+                    else DestroyImmediate(inner);
+                }
+            }
+        }
+
         /// <summary>
         /// Register fonts from the runtime manifest's font list.
         /// Overridable for custom loading strategies.
@@ -786,6 +839,23 @@ namespace Ikat
                 _selfCamera = null;
             }
             IkatStageHub.Unregister(this);
+            // world-space 挂载清账：core 登记 + 容器（镜像 GO 已随 host/backend 释放路径走）。
+            if (_mountSlots.Count > 0)
+            {
+                var ids = new List<ulong>(_mountSlots.Keys);
+                foreach (var id in ids)
+                {
+                    uint slot = _mountSlots[id];
+                    _host?.SetNodeMount(id, 0);
+                    _backend?.ClearMountContainer(slot);
+                    if (_mountInners.Remove(slot, out var inner) && inner != null)
+                    {
+                        if (Application.isPlaying) Destroy(inner);
+                        else DestroyImmediate(inner);
+                    }
+                }
+                _mountSlots.Clear();
+            }
             // 软件光标还原系统箭头（#93）：SetCursor 的纹理是进程级状态，Play 结束/对象销毁
             // 后残留会把箭头替换带出 UI 会话。先还原再销毁纹理——顺序反了会有一帧
             // SetCursor 指向已销毁纹理。

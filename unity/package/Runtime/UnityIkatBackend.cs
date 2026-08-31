@@ -52,6 +52,14 @@ namespace Ikat
             _nhm.SortBase = sortBase;
         }
 
+        /// <summary>C8 挂载容器登记（Driver BindWorldMount → MirrorPool 路由表）。</summary>
+        internal void SetMountContainer(ulong slot, Transform container) =>
+            _pool.SetMountContainer(slot, container);
+
+        /// <summary>C8 解除挂载容器（镜像 GO 先行挂回屏幕 root，容器销毁归 Driver）。</summary>
+        internal void ClearMountContainer(ulong slot) =>
+            _pool.ClearMountContainer(slot, _renderRoot);
+
         /// <summary>
         /// Driver Awake 注入：渲染根（MirrorPool / NativeHost 镜像 GO 挂此 root）+ 输入采集器。
         /// 必须在第一次 <see cref="SyncFrame"/> 前调——SyncFrame 读 _renderRoot，null 时跳过镜像。

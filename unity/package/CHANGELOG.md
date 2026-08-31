@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **多 Stage 隔离：共享相机 + 排序基址 + 输入独占路由（#109）**：同场景多
+  Driver 并存不再互相打爆——per-Scene 引用计数共享 `IkatUICamera`（按名
+  认领存量相机先于新建，编辑器重编译幸存相机不再积累重复）；各 Stage
+  sortingOrder 基址 = 层序 × 8192（16 位预算 4 档）；多 Driver 时输入按
+  层序顶→底探测首个 Pick 命中者独占本帧全部输入（单 Driver 零开销直通）。
+- **世界锚点（投影路世界 UI，#109）**：`IkatStageDriver.SetWorldAnchor /
+  ClearWorldAnchor`——每帧把 3D 世界点经相机投影成设计坐标写
+  `node.Transform.Position`（跳字/血条类 HUD 跟随 3D 实体）；出屏/相机
+  背后自动隐藏（渲染层开关，与 `display:none` 正交；**继承语义**：隐藏
+  祖先 = 整子树隐藏，后端保留镜像对象仅 SetActive(false)）。
+- **world-space 子树挂载（#109）**：`IkatStageDriver.BindWorldMount /
+  UnbindWorldMount`——整棵 UI 子树挂到业务 3D 变换下渲染（行顶点 re-base
+  到挂载根局部系 + 按槽位路由 SetParent，容器层随业务 → 场景相机渲染 +
+  ZTest LEqual 吃 3D 深度遮挡）；布局/命中仍在屏幕系。v1 约束：挂载根须
+  声明 z-index 成 stacking context；挂载内禁 dropdown / 滚动容器 / 外阴
+  影根 / overflow clip。
+- **共享资源宿主（#109）**：多 Stage 共享字体注册/字形图集/图片尺寸表
+  （`IkatResourceHost`），字体注册一次全 Stage 复用（无 id churn / 图集
+  重光栅）；单 Stage 行为不变。
+
+### Changed
+- **frame blob v15 列级增量（#109）**：未变更行出 SOA 进段末 16B/条 Skip
+  段；胖参数块（color_matrix/effect/shadow/gradient）挪 fat arena（全零
+  不写）。全 Skip 帧带宽 132+16n 字节（v14 为 128+512n）。
+- **增量渲染构建（#109）**：输入指纹命中的节点整段复用上帧渲染产物——
+  ~2400 节点稳态帧构建耗时约减半；500 血条压测稳态 ~9ms（对照全量重建
+  ~16.9ms）。
+
 ### Fixed
 - **IkatUICamera 裁剪窗扩为 UI 平面中心的前后对称大窗（#102）**：此前
   `near=0.1 / far=100`——NativeHost 3D 内容按 design px 归一化（数百 px

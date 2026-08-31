@@ -109,6 +109,17 @@ namespace Ikat
             return Native.ikat_stage_set_node_visible(_stage, nodeId, visible ? (byte)1 : (byte)0);
         }
 
+        /// <summary>
+        /// world-space 挂载登记（#109 C8）：slot 非 0 = node 子树挂到业务 3D 容器（渲染行
+        /// 顶点 re-base 到挂载根局部系 + blob mount_id 标注）；slot 0 = 解除回屏幕空间。
+        /// 返回 0=成功；-1=stage 已释放或节点不 live。
+        /// </summary>
+        internal int SetNodeMount(ulong nodeId, uint slot)
+        {
+            if (_stage == null) return -1;
+            return Native.ikat_stage_set_node_mount(_stage, nodeId, slot);
+        }
+
         /// <summary>注入的引擎后端（Driver 可拿回去调引擎特定方法，如 UnityIkatBackend.NativeHost）。</summary>
         public IkatBackend Backend => _backend;
 

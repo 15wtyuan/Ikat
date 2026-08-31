@@ -582,6 +582,40 @@ these field names (defaults in parentheses):
 | `_inputCollector` | IkatInputCollector | null = `GetComponent` fallback |
 | `_productRoot` | string | empty = Editor `Assets/Bundles` / player StreamingAssets |
 
+## World anchoring & world-space mounts (Unity driver)
+
+Two complementary routes for tying UI to the 3D world (engine-integration
+layer, same class as NativeHost — see `docs/design/public-api.md` §11.3):
+
+```csharp
+// Projection route — UI tracks a 3D point (damage numbers, health bars):
+// driver projects worldPos through the camera every frame (before Step)
+// and writes node.Transform.Position in design px. Off-screen / behind
+// the camera auto-hides the node (render-only, subtree-inherited —
+// layout and hit-testing are untouched). Node must be a direct child of
+// the page root styled `position:absolute; left:0; top:0` so its layout
+// slot is (0,0) and Transform.Position acts as absolute coords.
+// Re-Set with the same node to update worldPos (following a moving
+// entity); offsetPx is in design px (y-down: negative y = up).
+public void SetWorldAnchor(Node node, Camera camera, Vector3 worldPos, Vector2 offsetPx);
+public void ClearWorldAnchor(Node node);
+public int WorldAnchorCount { get; }
+
+// Mount route — a whole subtree renders under a business 3D transform:
+// rows are re-based to the mount root's local frame (its design position
+// becomes the local origin) and parented to worldParent through a y-flip
+// container; row layer follows the container (scene camera renders it,
+// ZTest LEqual gives real 3D occlusion). Layout/hit stay in screen space.
+// v1 constraints: the mount root must be a stacking context (declare
+// z-index); no dropdowns / scroll containers / outer-shadow roots /
+// overflow clip inside the mounted subtree.
+public void BindWorldMount(Node mountRoot, Transform worldParent);
+public void UnbindWorldMount(Node mountRoot);
+
+// Damage numbers = business-side TweenBuilder x anchor combo (e.g.
+// TweenChannel.Opacity fade while the anchor offset floats upward).
+```
+
 ## Runtime diagnostics
 
 ```csharp
