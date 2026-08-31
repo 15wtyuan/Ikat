@@ -601,6 +601,17 @@ public void SetWorldAnchor(Node node, Camera camera, Vector3 worldPos, Vector2 o
 public void ClearWorldAnchor(Node node);
 public int WorldAnchorCount { get; }
 
+// Runtime render-only visibility (the same channel the anchor auto-hide
+// uses): false hides the node's whole subtree render output (inherited
+// like CSS visibility:hidden; mirror objects are kept, layout and hit
+// testing are untouched). Orthogonal to display:none.
+public void SetNodeRenderVisible(Node node, bool visible);
+
+// Second-stage bootstrapping (runtime-spawned drivers): set layer order
+// and the shared-host flag BEFORE Awake — AddComponent on an inactive
+// GameObject, call this, then SetActive(true).
+public void ConfigureStage(int stageOrder, bool useSharedHost);
+
 // Mount route — a whole subtree renders under a business 3D transform:
 // rows are re-based to the mount root's local frame (its design position
 // becomes the local origin) and parented to worldParent through a y-flip

@@ -40,10 +40,7 @@ namespace Ikat.Tests
                 Assert.AreEqual(IkatStageHub.SortStride, IkatStageHub.SortBaseOf(d2), "层序 1 基址 = 档宽");
 
                 // 共享相机：场景里恰一台 IkatUICamera。
-                int count = 0;
-                foreach (var c in Object.FindObjectsByType<Camera>(FindObjectsSortMode.None))
-                    if (c.gameObject.name == "IkatUICamera") count++;
-                Assert.AreEqual(1, count, "两 Driver 并存只建一台共享 UI 相机（layer 互画消灭）");
+                Assert.AreEqual(1, CountIkatUICameras(), "两 Driver 并存只建一台共享 UI 相机（layer 互画消灭）");
 
 
             }
@@ -87,11 +84,7 @@ namespace Ikat.Tests
             try
             {
                 go.AddComponent<IkatStageDriver>();
-                var cams = Object.FindObjectsByType<Camera>(FindObjectsSortMode.None);
-                int count = 0;
-                foreach (var c in cams)
-                    if (c.gameObject.name == "IkatUICamera") count++;
-                Assert.AreEqual(1, count, "存量相机被认领，不建第二台");
+                Assert.AreEqual(1, CountIkatUICameras(), "存量相机被认领，不建第二台");
             }
             finally
             {
@@ -100,6 +93,21 @@ namespace Ikat.Tests
                 var cam = GameObject.Find("IkatUICamera");
                 if (cam != null) Object.DestroyImmediate(cam);
             }
+        }
+
+        /// 场景内 IkatUICamera 计数。FindObjectsInactive 重载（2023.1+ 存在、新 Unity
+        /// 不在废弃名单——SortMode 版 6000.5+ obsolete，FindObjectsOfType 2023.1+ 警告源）；
+        /// 2021 走旧 API。
+        static int CountIkatUICameras()
+        {
+            int count = 0;
+#if UNITY_2023_1_OR_NEWER
+            foreach (var c in Object.FindObjectsByType<Camera>(FindObjectsInactive.Exclude))
+#else
+            foreach (var c in Object.FindObjectsOfType<Camera>())
+#endif
+                if (c.gameObject.name == "IkatUICamera") count++;
+            return count;
         }
     }
 }

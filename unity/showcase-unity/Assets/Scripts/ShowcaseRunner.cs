@@ -793,8 +793,9 @@ public class ShowcaseRunner : MonoBehaviour
     {
         int cams = 0;
 #if UNITY_2023_1_OR_NEWER
-        // FindObjectsByType：FindObjectsOfType 在新 Unity 是 obsolete 警告源（2023.1+ 替代）。
-        foreach (var c in FindObjectsByType<Camera>(UnityEngine.FindObjectsSortMode.None))
+        // FindObjectsInactive 重载：SortMode 版在 6000.5+ 也进废弃名单，FindObjectsOfType
+        // 在 2023.1+ 是 obsolete 警告源——此重载全周期可用。
+        foreach (var c in FindObjectsByType<Camera>(UnityEngine.FindObjectsInactive.Exclude))
 #else
         foreach (var c in FindObjectsOfType<Camera>())
 #endif
@@ -809,8 +810,7 @@ public class ShowcaseRunner : MonoBehaviour
         var go = new GameObject("IkatMiniStage");
         go.SetActive(false);
         var d = go.AddComponent<IkatStageDriver>();
-        d._useSharedHost = true;
-        d._stageOrder = 1;   // 高序：画在主 Stage 之上，输入探测优先
+        d.ConfigureStage(1, true);   // 高序：画在主 Stage 之上，输入探测优先（Awake 前配好）
         go.SetActive(true);
         _miniDriver = d;
         _miniSpawnTime = Time.time;
@@ -977,7 +977,7 @@ public class ShowcaseRunner : MonoBehaviour
             if (_stressBars.Count == 0) return;
             _stressHidden = !_stressHidden;
             for (int i = 0; i < 250; i++)
-                _driver.Host.SetNodeRenderVisible(_stressBars[i]._id, !_stressHidden);
+                _driver.SetNodeRenderVisible(_stressBars[i], !_stressHidden);
             read.TextContent = _stressHidden ? "250 隐藏（保留对象，恢复不闪）" : "500 · 全显";
         };
     }

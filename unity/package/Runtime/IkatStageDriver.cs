@@ -696,6 +696,29 @@ namespace Ikat
         }
 
         /// <summary>
+        /// 双 Stage 摆台入口：设层序（hub 排序/输入路由用）与共享宿主开关。**须在 Awake
+        /// 前调**——运行时建 Driver 的流程 = inactive GO 上 AddComponent → 本调用 →
+        /// SetActive(true)（Awake 读这两个字段完成 hub 注册与宿主解析）。
+        /// </summary>
+        public void ConfigureStage(int stageOrder, bool useSharedHost)
+        {
+            _stageOrder = stageOrder;
+            _useSharedHost = useSharedHost;
+        }
+
+        /// <summary>
+        /// 运行时渲染隐藏开关（世界锚点出屏同款通道）：visible=false 只控本节点及子树
+        /// 全部渲染行隐藏（visibility 继承语义；后端保留镜像对象），与 display:none
+        /// 正交——布局与命中不受影响。压测/批量显隐的公共入口（showcase 等包外代码用；
+        /// 包内 FFI 直连 IkatHost）。
+        /// </summary>
+        public void SetNodeRenderVisible(Node node, bool visible)
+        {
+            if (node == null || _host == null) return;
+            _host.SetNodeRenderVisible(node._id, visible);
+        }
+
+        /// <summary>
         /// 解除世界锚定（节点保持当前 transform 与显示态——隐藏态不回卷，销毁/回收路径
         /// 自理；需要恢复显示走再次 SetWorldAnchor 或留在屏内即自动恢复）。
         /// 未锚定节点为 no-op。
