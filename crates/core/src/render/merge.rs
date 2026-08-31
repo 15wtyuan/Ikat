@@ -75,10 +75,22 @@ pub fn merge_meshes(
     control_ids: &std::collections::HashSet<u64>,
     nodes: Vec<RenderNode>,
 ) -> Vec<RenderNode> {
+    merge_meshes_tracked(control_ids, nodes).0
+}
+
+/// <see cref="merge_meshes"/> 的生产入口：额外返回 merged 锚 → 批成员 node_id 表（push 序）。
+/// 增量定级消费：merged 行的 payload 是批内多行 concat，锚自身单行 hash 不代表批内容
+/// （非锚成员变更不可见）——须按成员 ph 拼合重算（见 build_render_nodes_cached 定级 pass）。
+pub fn merge_meshes_tracked(
+    control_ids: &std::collections::HashSet<u64>,
+    nodes: Vec<RenderNode>,
+) -> (Vec<RenderNode>, std::collections::HashMap<u64, Vec<u64>>) {
     let mut order: Vec<usize> = (0..nodes.len()).collect();
     order.sort_by_key(|&i| nodes[i].sort_key);
 
     let mut out: Vec<RenderNode> = Vec::with_capacity(nodes.len());
+    let mut merged_members: std::collections::HashMap<u64, Vec<u64>> =
+        std::collections::HashMap::new();
     let mut i = 0;
     while i < order.len() {
         let idx = order[i];
@@ -100,11 +112,15 @@ pub fn merge_meshes(
         if batch_idx.len() == 1 {
             out.push(nodes[idx].clone());
         } else {
+            merged_members.insert(
+                batch_idx.iter().map(|&bi| nodes[bi].node_id).min().unwrap(),
+                batch_idx.iter().map(|&bi| nodes[bi].node_id).collect(),
+            );
             out.push(merge_batch(&nodes, &batch_idx));
         }
         i = j;
     }
-    out
+    (out, merged_members)
 }
 
 /// 把一组同 DrawState Mesh 节点拼成单个 merged Mesh payload。

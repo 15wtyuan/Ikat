@@ -27,15 +27,21 @@ namespace Ikat.HeadlessTests
     /// </summary>
     public unsafe class BoxShadowTests
     {
-        // Frame blob column layout (mirror crates/ffi/src/blob.rs build_blob).
-        // Header = magic(4) + version(4) + node_count(4) + 22 column offsets (×4).
-        private const int HeaderFixedLen = 12; // magic + version + node_count
-        private const int NumColumns = 22;
-        // Column indices (must match the column push order in build_blob).
-        private const int ColNodeId = 0;        // u64（#26 拓宽，8B stride）
-        private const int ColProgram = 16;       // u8
-        private const int ColShadowParams = 21;  // [f32;6] = 24 bytes
-        private const int ShadowParamsSize = 24;
+        // Frame blob v15 column layout (mirror crates/ffi/src/blob.rs build_blob).
+        // Header 132B = magic(4)+version(4)+node_count(4)+skip_count(4) + 21 col offsets(×4)
+        //   + mesh off/len(2) + clip off/len(2) + path off/len(2) + fat off/len(2).
+        private const int HeaderFixedLen = 16; // magic + version + node_count + skip_count
+        private const int NumColumns = 21;
+        // Column indices (must match LEAN_COLUMNS in build_blob).
+        private const int ColNodeId = 0;        // u64, 8B stride
+        private const int ColProgram = 16;      // u8, 1B stride
+        private const int ColFatOff = 20;       // u32, 4B stride（1-based fat arena 引用）
+        private const int FatArenaOffAt = 124;  // header 内 fat_arena_off 字段（16 + 21*4 + 6*4）
+        // fat block: mask byte (bit0=color_matrix 80B, bit1=effect 128B, bit2=shadow 24B,
+        // bit3=gradient 208B) + present blocks packed in that order.
+        private const int FatColorMatrixSize = 80;
+        private const int FatEffectSize = 128;
+        private const int FatShadowSize = 24;
         // Synth node_id high-byte ranges (mirror render::FRONT/BACK_SHADOW_SYNTH_BYTE).
         private const byte FrontSynthLo = 36;   // inset synth: 36..=43
         private const byte FrontSynthHi = 43;
@@ -68,7 +74,7 @@ namespace Ikat.HeadlessTests
                 int sdfProgramCount = 0; // blur layers (program == 5)
                 int solidProgramCount = 0; // hard-edge layers (program == 0)
                 int nodesWithZeroParams = 0;
-                for (int i = 0; i < blob.NodeCount; i++)
+                for (int i = 0; i < blob.LeanCount; i++)
                 {
                     ulong nodeId = blob.GetNodeId(i);
                     byte hi = (byte)(nodeId >> 56);
@@ -113,29 +119,44 @@ namespace Ikat.HeadlessTests
         {
             private readonly byte* _ptr;
             private readonly int _nodeCount;
+            private readonly int _skipCount;
             private readonly uint _nodeIdOff;
             private readonly uint _programOff;
-            private readonly uint _shadowParamsOff;
+            private readonly uint _fatOffCol;
+            private readonly uint _fatArenaOff;
 
             public FrameBlob(byte* ptr)
             {
                 _ptr = ptr;
-                _nodeCount = (int)ReadU32(ptr, 8); // node_count at byte offset 8
+                _nodeCount = (int)ReadU32(ptr, 8);  // node_count = lean + skip
+                _skipCount = (int)ReadU32(ptr, 12); // skip_count（v15）
                 _nodeIdOff = ReadU32(ptr, HeaderFixedLen + ColNodeId * 4);
                 _programOff = ReadU32(ptr, HeaderFixedLen + ColProgram * 4);
-                _shadowParamsOff = ReadU32(ptr, HeaderFixedLen + ColShadowParams * 4);
+                _fatOffCol = ReadU32(ptr, HeaderFixedLen + ColFatOff * 4);
+                _fatArenaOff = ReadU32(ptr, FatArenaOffAt);
             }
 
-            public int NodeCount => _nodeCount;
+            /// <summary>lean 行数（Skip 行不进列——列访问器只对 lean 行有效）。</summary>
+            public int LeanCount => _nodeCount - _skipCount;
 
             public ulong GetNodeId(int i) => ReadU64(_ptr, (int)_nodeIdOff + i * 8);
             public byte GetProgram(int i) => _ptr[_programOff + i];
+
+            /// shadow_params 经 fat arena（v15 挪出 SOA）：fat_off 1-based → mask byte +
+            /// 按位在场的块（cm → effect → shadow → grad 顺序）——shadow 块前跳过 cm/effect。
             public float[] GetShadowParams(int i)
             {
                 float[] p = new float[6];
-                byte* base_ = _ptr + _shadowParamsOff + i * ShadowParamsSize;
-                for (int j = 0; j < 6; j++)
-                    p[j] = ReadF32(base_, j * 4);
+                uint fatOff = ReadU32(_ptr, (int)_fatOffCol + i * 4);
+                if (fatOff == 0) return p; // 无胖块（全零）——调用方断言会拦
+                byte* blk = _ptr + _fatArenaOff + fatOff - 1;
+                byte mask = *blk;
+                byte* cur = blk + 1;
+                if ((mask & 0b0001) != 0) cur += FatColorMatrixSize;
+                if ((mask & 0b0010) != 0) cur += FatEffectSize;
+                if ((mask & 0b0100) != 0)
+                    for (int j = 0; j < 6; j++)
+                        p[j] = ReadF32(cur, j * 4);
                 return p;
             }
 

@@ -612,9 +612,12 @@ pub fn has_class(scene: &Scene, node: NodeId, name: &str) -> Option<bool> {
 }
 
 /// 设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
+/// 顺手 bump render_input_version：reuse_key 是缓存行的输出字段（blob reuse_key 列），
+/// structure_sig 不含它——不 bump 会回放旧键值。
 pub fn set_reuse_key(scene: &mut Scene, node: NodeId, key: u32) {
     if let Some(n) = scene.get_mut(node) {
         n.reuse_key = key;
+        n.render_input_version += 1;
     }
 }
 

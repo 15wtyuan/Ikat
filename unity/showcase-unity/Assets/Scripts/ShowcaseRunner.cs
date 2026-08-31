@@ -95,13 +95,14 @@ public class ShowcaseRunner : MonoBehaviour
         internal int Cube;
         internal float Age, DriftX;   // 上浮由锚点 offset 推进；渐隐走 TweenChannel.Opacity
     }
-    // (圆心, 半径, 角速度, 初相, 尺寸, 竖直轨)。相机默认 (0,1,-10) 平视 +z：fov60 在
-    // z≈3 深度处半高 ≈ tan30°×13 ≈ 7.5——竖轨半径 8.5 必出上下缘，水平轨全期在屏内。
+    // (圆心, 半径, 角速度, 初相, 尺寸, 竖直轨)。相机 (0,1,-10) 平视 +z：fov60 在
+    // z≈3 深度（d=13）处半高 = tan30°×13 ≈ 7.5——竖轨半径 9.2 + 头顶上抬 0.625 后
+    // 锚点 y 摆幅 ≈ [-7.07, 11.3]，上下缘都扫出屏（自动隐藏双向证据）；水平轨全期在屏内。
     static readonly (Vector3 c, float r, float w, float p, float s, bool v)[] WORLD_CUBES =
     {
         (new Vector3(0f, 0f, 2.5f), 2.2f, 0.9f, 0.0f, 0.7f, false),
         (new Vector3(2f, 0f, 3.5f), 3.6f, -0.6f, 2.1f, 0.9f, false),
-        (new Vector3(3f, 1.5f, 3f), 8.5f, 0.45f, 4.2f, 0.55f, true),
+        (new Vector3(3f, 1.5f, 3f), 9.2f, 0.45f, 4.2f, 0.55f, true),
     };
     const float WorldDmgLife = 1.4f;
     GameObject _worldStageRoot;

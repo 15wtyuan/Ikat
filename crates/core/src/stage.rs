@@ -894,12 +894,39 @@ impl Stage {
     /// world-space 挂载登记（#109 C8）：把 node 子树标记为挂载到业务摆放的 3D 容器。
     /// slot 由 driver 分配保证唯一（0 = 解除挂载回屏幕空间）；挂载子树渲染行顶点 re-base
     /// 到挂载根局部系（见 render::mount_rebase），blob mount_id 列写 slot 供后端路由。
-    /// v1 约束（对外文档）：挂载根须成 stacking context（声明 z）；挂载内禁 dropdown /
-    /// 滚动容器 / 外阴影根 / overflow clip。node 不 live / 无 scene → Err。
+    /// v1 约束（机器门）：挂载子树内禁 Dropdown（浮层臂不参与挂载 re-base，会整层落回
+    /// 屏幕空间）与非 Visible overflow（clip 平面定义在屏幕系，挂到 3D 后无意义——
+    /// render 侧会把挂载行 mask 清 0，这里前置拒绝防「声明的裁剪静默失效」）。
+    /// node 不 live / 无 scene → Err。
     pub fn set_node_mount(&mut self, node: NodeId, slot: u32) -> Result<(), String> {
         let scene = self.scene.as_mut().ok_or("no scene")?;
         if scene.get(node).is_none() {
             return Err("node not live".into());
+        }
+        if slot != 0 {
+            let mut bad: Option<String> = None;
+            let mut stack = vec![node];
+            while let (Some(cur), None) = (stack.pop(), &bad) {
+                let n = scene.get(cur).expect("walk live");
+                if matches!(
+                    n.kind,
+                    crate::scene::node::NodeKind::Dropdown
+                        | crate::scene::node::NodeKind::OptionItem
+                ) {
+                    bad = Some("dropdown/option inside mount".into());
+                    break;
+                }
+                if n.style.overflow_x != crate::style::resolved::OverflowMode::Visible
+                    || n.style.overflow_y != crate::style::resolved::OverflowMode::Visible
+                {
+                    bad = Some("overflow (clip/scroll) inside mount".into());
+                    break;
+                }
+                stack.extend(n.children.iter().copied());
+            }
+            if let Some(reason) = bad {
+                return Err(format!("mount rejected (v1): {reason}"));
+            }
         }
         if slot == 0 {
             scene.mounts.remove(&node);

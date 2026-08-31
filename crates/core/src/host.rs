@@ -71,6 +71,7 @@ pub fn load_package_into(
             pkg.name = name.to_string(); // read_package 填空串，覆盖为真实包名
             host.bump_generation();
             host.packages.insert(name.to_string(), pkg);
+            host.last_pkg_load_version = 0; // 成功清残留（上一次错配值不得跨成功装载存活）
             Ok(())
         }
         Err(e) => {

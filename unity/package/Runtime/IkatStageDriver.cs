@@ -118,8 +118,11 @@ namespace Ikat
 #endif
         }
 
-        /// <summary>sortingOrder 基址（hub 按层序分配；MirrorPool/NativeHost 消费）。</summary>
+        /// <summary>sortingOrder 基址（hub 按层序分配；MirrorPool/NativeHost 消费）。
+        /// 注册集变化（DriverCount 变）时 LateUpdate 重取——中途注册低序 Driver 会挤档，
+        /// 缓存旧值会与新高序 Stage 撞档穿插。</summary>
         int _sortBase;
+        int _lastDriverCount = -1;
 
         /// <summary>自建相机是否来自 hub 共享池（OnDestroy 走 Release 而非直接销毁）。</summary>
         bool _cameraFromHub;
@@ -538,10 +541,17 @@ namespace Ikat
             };
             inner.transform.SetParent(worldParent, false);
             inner.transform.localScale = new Vector3(1f, -1f, 1f); // y-flip（同 UI 根约定）
+            if (_host.SetNodeMount(node._id, slot) != 0)
+            {
+                // core 拒绝（v1 约束：挂载子树内禁 dropdown / overflow clip）——回滚容器与登记。
+                _mountInners.Remove(slot);
+                if (Application.isPlaying) Destroy(inner); else DestroyImmediate(inner);
+                Debug.LogError(
+                    $"[Ikat] BindWorldMount rejected (v1: no dropdowns / overflow clip inside mount): {node._id}");
+                return;
+            }
             _mountSlots[node._id] = slot;
-            _mountInners[slot] = inner;
             _backend.SetMountContainer(slot, inner.transform);
-            _host.SetNodeMount(node._id, slot);
         }
 
         /// <summary>
@@ -551,11 +561,11 @@ namespace Ikat
         public void UnbindWorldMount(Node node)
         {
             if (node == null) return;
-            if (_mountSlots.Remove(node._id, out uint slot))
+            if (_mountSlots.TryGetValue(node._id, out uint slot) && _mountSlots.Remove(node._id))
             {
                 _host?.SetNodeMount(node._id, 0);
                 _backend?.ClearMountContainer(slot);
-                if (_mountInners.Remove(slot, out var inner) && inner != null)
+                if (_mountInners.TryGetValue(slot, out var inner) && _mountInners.Remove(slot) && inner != null)
                 {
                     if (Application.isPlaying) Destroy(inner);
                     else DestroyImmediate(inner);
@@ -712,6 +722,13 @@ namespace Ikat
             foreach (var kv in _worldAnchors)
             {
                 var a = kv.Value;
+                // 节点已 Dispose（跳字到期/切页）：显式出列——Transform 写在已死节点上会抛
+                // ObjectDisposedException 且中断本帧其余锚点跟随；rc≠0 自清兜底不到这里。
+                if (a.Node == null || a.Node.IsDisposed)
+                {
+                    (dead ??= new List<ulong>()).Add(kv.Key);
+                    continue;
+                }
                 var cam = a.Cam != null ? a.Cam : Camera.main;
                 if (cam == null) continue; // 无相机可投影：保持现状（不闪隐）
                 // WorldToViewportPoint：y-up 0..1；z>0 = 在相机前方（背后 z<0）。
@@ -757,6 +774,11 @@ namespace Ikat
             // 本帧全部输入——渲染次序即输入次序）；单 Driver 零开销直通。
             _backend.InputEnabled = IkatStageHub.DriverCount <= 1
                 || IkatStageHub.RouteInput(this) == this;
+            if (IkatStageHub.DriverCount != _lastDriverCount)
+            {
+                _lastDriverCount = IkatStageHub.DriverCount;
+                _sortBase = IkatStageHub.SortBaseOf(this);
+            }
             _backend.SetSortBase(_sortBase);
 
             // 世界锚点投影（Step 前：Transform 写在 flush seam 之前才当帧生效）。
@@ -839,23 +861,19 @@ namespace Ikat
                 _selfCamera = null;
             }
             IkatStageHub.Unregister(this);
-            // world-space 挂载清账：core 登记 + 容器（镜像 GO 已随 host/backend 释放路径走）。
-            if (_mountSlots.Count > 0)
+            // world-space 挂载清账：stage 已释放（上方 host.Dispose）、镜像 GO 已随
+            // backend.Dispose 清——此处只剩 y-flip 容器本体须销毁（DontSaveInEditor 不归
+            // 编辑器回收）。挂载子树本身随场景/树销毁，core 登记随 stage 释放。
+            foreach (var kv in _mountInners)
             {
-                var ids = new List<ulong>(_mountSlots.Keys);
-                foreach (var id in ids)
+                if (kv.Value != null)
                 {
-                    uint slot = _mountSlots[id];
-                    _host?.SetNodeMount(id, 0);
-                    _backend?.ClearMountContainer(slot);
-                    if (_mountInners.Remove(slot, out var inner) && inner != null)
-                    {
-                        if (Application.isPlaying) Destroy(inner);
-                        else DestroyImmediate(inner);
-                    }
+                    if (Application.isPlaying) Destroy(kv.Value);
+                    else DestroyImmediate(kv.Value);
                 }
-                _mountSlots.Clear();
             }
+            _mountInners.Clear();
+            _mountSlots.Clear();
             // 软件光标还原系统箭头（#93）：SetCursor 的纹理是进程级状态，Play 结束/对象销毁
             // 后残留会把箭头替换带出 UI 会话。先还原再销毁纹理——顺序反了会有一帧
             // SetCursor 指向已销毁纹理。

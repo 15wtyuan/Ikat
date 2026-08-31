@@ -85,7 +85,12 @@ namespace Ikat
         /// </summary>
         internal void ClearMountContainer(ulong slot, Transform root)
         {
-            if (!_mountContainers.Remove(slot, out var c) || c == null) return;
+            if (!_mountContainers.TryGetValue(slot, out var c) || c == null)
+            {
+                _mountContainers.Remove(slot);
+                return;
+            }
+            _mountContainers.Remove(slot);
             ReparentFromContainer(_poolByNodeId, c, root);
             ReparentFromContainer(_poolByReuse, c, root);
         }
@@ -142,6 +147,11 @@ namespace Ikat
             int n = blob.LeanCount;
             for (int i = 0; i < n; i++)
             {
+                ulong id = blob.NodeId(i);
+                uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
+                ulong poolKey = reuseKey != 0 ? reuseKey : id;
+                Dictionary<ulong, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
+
                 // visible=0（世界锚点出屏的 render_hidden）：保留镜像对象、隐藏——与
                 // display:none 的「剪除条目」正交（那些节点根本不产行，走 stale 销毁路径）。
                 if (!blob.Visible(i))
@@ -155,10 +165,6 @@ namespace Ikat
                 }
                 byte kind = blob.PayloadKind(i);
                 byte level = blob.ChangeLevel(i);   // 1=Header 2=Full（Skip 不在此）
-                ulong id = blob.NodeId(i);
-                uint reuseKey = blob.ReuseKey(i);    // 虚拟列表
-                ulong poolKey = reuseKey != 0 ? reuseKey : id;
-                Dictionary<ulong, RenderObj> pool = reuseKey != 0 ? _poolByReuse : _poolByNodeId;
 
                 // v10：kind 只有 1=Mesh（文本核心自产 atlas 走同路径）。
                 if (kind != 1) continue;

@@ -3,113 +3,119 @@ using NUnit.Framework;
 
 namespace Ikat.Tests
 {
-    /// FrameBlob Visible/Parked bit accessor 单元测试（v12 blob，22 列 SOA）。
-    /// 焦点：active 条目 bit0=1 bit1=0；parked keepalive 条目 bit0=0 bit1=1。
+    /// FrameBlob v15 reader 单元测试（合成 blob：132B header + 21 lean 列 + skip 段）。
+    /// 焦点：lean 行 Visible bit0；skip 条目 SkipParked bit1 / SkipNodeId / SkipReuseKey
+    /// 双段解耦（lean 列只对前 LeanCount 行有效，skip 段独立计数）。
     public class FrameBlobVisibleParkedTests
     {
-        /// 构造 v12 blob（22 列）。active 条目 + parked keepalive 条目。
-        /// col_visible 数组填每节点的 visible 字节值：
-        ///   0b01 = active（bit0=可见）
-        ///   0b10 = parked（bit1=keepalive）
-        static byte[] BuildBlobV12(byte[] colVisible)
+        /// 构造 v15 blob。colVisible = lean 行的 visible 字节（bit0 = 可见）；
+        /// skip 段 = 每条 (node_id, reuse_key, flags)——flags bit1 = parked keepalive。
+        static byte[] BuildBlobV15(byte[] colVisible, (ulong id, uint rk, byte flags)[] skips)
         {
-            int nodeCount = colVisible.Length;
+            int lean = colVisible.Length;
             var b = new List<byte>();
 
-            // header: magic, version, node_count
-            b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Cu));
-            b.AddRange(System.BitConverter.GetBytes(12u));
-            b.AddRange(System.BitConverter.GetBytes((uint)nodeCount));
+            // header 132B：magic(4)+version(4)+node_count(4)+skip_count(4) + 21 col offsets(×4)
+            // + mesh off/len + clip off/len + path off/len + fat off/len（8×4）。
+            const int numCols = 21;
+            // lean 列 stride（顺序 = blob.rs LEAN_COLUMNS；合计 84B/行）：
+            // node_id8 parent8 visible1 alpha4 sort4 mask4 ma4 mb4 mc4 md4 mtx4 mty4
+            // kind1 mesh_off4 mesh_len4 path_idx4 program1 change1 reuse4 mount8 fat4。
+            int[] stride = { 8, 8, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 1, 4, 8, 4 };
+            int headerLen = 16 + numCols * 4 + 8 * 4;
+            Assert.That(headerLen, Is.EqualTo(132), "v15 header 恒 132B（防布局漂移的锚）");
 
-            // v12: 22 列 stride（bytes per entry）：col 0..21
-            int[] stride = { 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24 };
-            // 22 col offsets（SOA），header 总长 124
-            const int headerLen = 124;
+            b.AddRange(System.BitConverter.GetBytes(0x4D4F4F4Du)); // magic
+            b.AddRange(System.BitConverter.GetBytes(15u));          // version
+            b.AddRange(System.BitConverter.GetBytes((uint)(lean + skips.Length))); // node_count = lean + skip
+            b.AddRange(System.BitConverter.GetBytes((uint)skips.Length));          // skip_count
+
             int off = headerLen;
-            for (int i = 0; i < 22; i++)
+            for (int i = 0; i < numCols; i++)
             {
                 b.AddRange(System.BitConverter.GetBytes((uint)off));
-                off += stride[i] * nodeCount;
+                off += stride[i] * lean;
             }
-            // arena headers: mesh/clip/path 全空
-            b.AddRange(System.BitConverter.GetBytes(off));           // mesh_arena_off
-            b.AddRange(System.BitConverter.GetBytes(0u));            // mesh_arena_len
-            b.AddRange(System.BitConverter.GetBytes(off + 4u));      // clip_table_off
-            b.AddRange(System.BitConverter.GetBytes(4u));            // clip_table_len (clip_count=0)
-            b.AddRange(System.BitConverter.GetBytes(off + 4u + 4u)); // path_table_off
-            b.AddRange(System.BitConverter.GetBytes(4u));            // path_table_len (path_count=0)
-
-            // col 0: node_id (per-entry index)
-            for (int i = 0; i < nodeCount; i++)
-                b.AddRange(System.BitConverter.GetBytes((uint)(i + 1)));
-            // col 1: parent_id
-            for (int i = 0; i < nodeCount; i++)
-                b.AddRange(System.BitConverter.GetBytes(i < 2 ? 0 : -1)); // active=rooted, parked=no parent
-            // col 2: visible byte
-            for (int i = 0; i < nodeCount; i++)
-                b.Add(colVisible[i]);
-            // cols 3-21: fill zero (MirrorPool won't read these in parked path)
-            int[] strideTail = { 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 1, 80, 1, 4, 128, 24 };
-            foreach (int s in strideTail)
-                for (int i = 0; i < nodeCount; i++)
-                    for (int j = 0; j < s; j++)
-                        b.Add(0);
-
-            // clip_table: clip_count=0
+            // 四 arena 顺序：mesh（空）→ clip（count=0）→ path（count=0）→ fat（空）。
+            int meshOff = off, clipOff = off, pathOff = off + 4, fatOff = off + 8;
+            b.AddRange(System.BitConverter.GetBytes((uint)meshOff));
             b.AddRange(System.BitConverter.GetBytes(0u));
-            // path_table: path_count=0
+            b.AddRange(System.BitConverter.GetBytes((uint)clipOff));
+            b.AddRange(System.BitConverter.GetBytes(4u));
+            b.AddRange(System.BitConverter.GetBytes((uint)pathOff));
+            b.AddRange(System.BitConverter.GetBytes(4u));
+            b.AddRange(System.BitConverter.GetBytes((uint)fatOff));
             b.AddRange(System.BitConverter.GetBytes(0u));
 
+            // lean 列内容：node_id = i+1；visible = 入参；其余全零（reader 只测这两列）。
+            for (int i = 0; i < lean; i++)
+                b.AddRange(System.BitConverter.GetBytes((uint)(i + 1)));   // col0 node_id 低 4B
+            for (int i = 0; i < lean; i++)
+                b.AddRange(System.BitConverter.GetBytes(0u));               // col0 高 4B
+            for (int i = 0; i < lean; i++)
+                b.AddRange(System.BitConverter.GetBytes(0u));               // col1 parent_id 低 4B
+            for (int i = 0; i < lean; i++)
+                b.AddRange(System.BitConverter.GetBytes(0u));               // col1 高 4B
+            for (int i = 0; i < lean; i++)
+                b.Add(colVisible[i]);                                       // col2 visible
+            int tailBytes = 84 - 8 - 8 - 1;                                 // 余 18 列全零
+            for (int i = 0; i < tailBytes * lean; i++)
+                b.Add(0);
+
+            // clip 表（count=0）+ path 表（count=0）。
+            b.AddRange(System.BitConverter.GetBytes(0u));
+            b.AddRange(System.BitConverter.GetBytes(0u));
+
+            // skip 段：每条 16B = node_id u64 + reuse_key u32 + flags u8 + pad3。
+            foreach (var (id, rk, flags) in skips)
+            {
+                b.AddRange(System.BitConverter.GetBytes(id));
+                b.AddRange(System.BitConverter.GetBytes(rk));
+                b.Add(flags);
+                b.Add(0); b.Add(0); b.Add(0);
+            }
             return b.ToArray();
         }
 
         [Test]
-        public void ParkedBit_RoundTrips()
+        public void VisibleBit_And_SkipSegment_RoundTrip()
         {
-            // 3 active (0b01) + 2 parked keepalive (0b10)
-            var blob = new FrameBlob(BuildBlobV12(new byte[] {
-                0b01, 0b01, 0b01,  // active
-                0b10, 0b10         // parked
-            }));
+            // 2 可见 lean 行 + 1 隐藏 lean 行；skip 段 1 parked + 1 普通 keepalive。
+            var blob = new FrameBlob(BuildBlobV15(
+                new byte[] { 0b1, 0b1, 0b0 },
+                new[] { (0x7777_0001_0000_0002ul, 5u, (byte)0b10), (0x7777_0001_0000_0003ul, 0u, (byte)0) }));
 
-            Assert.That(blob.IsValid, Is.True, "v12 blob IsValid");
-            Assert.That(blob.NodeCount, Is.EqualTo(5), "3 active + 2 parked = 5");
+            Assert.That(blob.IsValid, Is.True, "v15 blob IsValid");
+            Assert.That(blob.NodeCount, Is.EqualTo(5), "node_count = lean + skip");
+            Assert.That(blob.LeanCount, Is.EqualTo(3), "LeanCount 剥离 skip 段");
+            Assert.That(blob.SkipCount, Is.EqualTo(2));
 
-            for (int i = 0; i < 3; i++)
-            {
-                Assert.That(blob.Visible(i), Is.True,  $"active[{i}].Visible=true");
-                Assert.That(blob.Parked(i),  Is.False, $"active[{i}].Parked=false");
-            }
+            Assert.That(blob.Visible(0), Is.True);
+            Assert.That(blob.Visible(1), Is.True);
+            Assert.That(blob.Visible(2), Is.False, "隐藏行（世界锚点出屏）visible=0");
 
-            for (int i = 3; i < 5; i++)
-            {
-                Assert.That(blob.Visible(i), Is.False, $"parked[{i}].Visible=false");
-                Assert.That(blob.Parked(i),  Is.True,  $"parked[{i}].Parked=true");
-            }
+            Assert.That(blob.SkipNodeId(0), Is.EqualTo(0x7777_0001_0000_0002ul));
+            Assert.That(blob.SkipReuseKey(0), Is.EqualTo(5u));
+            Assert.That(blob.SkipParked(0), Is.True, "skip flags bit1 = parked keepalive");
+            Assert.That(blob.SkipParked(1), Is.False, "普通 keepalive 条目 bit1=0");
+            Assert.That(blob.SkipNodeId(1), Is.EqualTo(0x7777_0001_0000_0003ul));
         }
 
-        /// 纯 active blob（无 parked）：Visible 全 true，Parked 全 false。
+        /// 旧 Parked(i) 访问器在 v15 恒 false（parked 语义移居 SkipParked）——锁死兼容语义。
         [Test]
-        public void AllActive_VisibleAllTrue_ParkedAllFalse()
+        public void ParkedLegacyAccessor_IsAlwaysFalseInV15()
         {
-            var blob = new FrameBlob(BuildBlobV12(new byte[] { 0b01, 0b01, 0b01, 0b01 }));
-            Assert.That(blob.NodeCount, Is.EqualTo(4));
-
-            for (int i = 0; i < 4; i++)
-            {
-                Assert.That(blob.Visible(i), Is.True);
-                Assert.That(blob.Parked(i), Is.False);
-            }
-        }
-
-        /// 全零 visible 字节（gone 条目）：Visible=false, Parked=false。
-        [Test]
-        public void ZeroVisibleByte_IsNotVisibleAndNotParked()
-        {
-            var blob = new FrameBlob(BuildBlobV12(new byte[] { 0x00 }));
-            Assert.That(blob.NodeCount, Is.EqualTo(1));
-            Assert.That(blob.Visible(0), Is.False);
+            var blob = new FrameBlob(BuildBlobV15(
+                new byte[] { 0b1 }, new[] { (9ul, 3u, (byte)0b10) }));
             Assert.That(blob.Parked(0), Is.False);
+        }
+
+        [Test]
+        public void WrongVersion_IsInvalid()
+        {
+            var raw = BuildBlobV15(new byte[] { 0b1 }, new (ulong, uint, byte)[0]);
+            raw[4] = 14; // 旧版本号
+            Assert.That(new FrameBlob(raw).IsValid, Is.False, "版本不匹配必须拒收");
         }
     }
 }

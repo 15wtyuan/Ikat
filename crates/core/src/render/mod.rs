@@ -663,11 +663,11 @@ fn mount_rec(
 }
 
 /// 挂载行 re-base：把挂载根世界原点 o 从行坐标系剥离——wm 前乘 T(-o)；纯平移行顶点同减
-///（与 blob 侧既有纯平移 re-base 合流后语义不变：本地顶点 + 剥离后矩阵）。mask 重置 0
-///（v1 挂载内禁 overflow clip——clip 平面定义在屏幕系，挂到 3D 容器后无意义，围栏约束）。
+///（与 blob 侧既有纯平移 re-base 合流后语义不变：本地顶点 + 剥离后矩阵）。mask 清理不在
+/// 此处——assign_sort_keys / mask 传播会重写 mask_context，真正的清 0 在 merge 后统一
+/// post-pass（build_render_nodes_cached 内，v1 挂载内禁 clip）。
 fn mount_rebase(rn: &mut RenderNode, slot: u32, ox: f32, oy: f32) {
     rn.mount_root_id = slot;
-    rn.mask_context = MaskContext(0);
     rn.world_matrix = crate::transform::mul(
         &crate::transform::from_translate(-ox, -oy),
         &rn.world_matrix,
@@ -803,7 +803,7 @@ pub fn build_render_nodes_cached(
         // 指纹输入枚举见 dirty::render_input_fp；跳过 atlas ensure（atlas 只增不重排，
         // 缓存帧已 ensure 过，字形槽永不过期）。
         let fp = dirty::render_input_fp(
-            n, scene, alpha, visible, mount_root, mount_ox, mount_oy, res_gen, frame_no,
+            n, scene, alpha, visible, mount_root, mount_slot, mount_ox, mount_oy, res_gen, frame_no,
         );
         if let Some(entry) = cache.entries.get(&n.id) {
             if entry.input_fp == fp {
@@ -910,7 +910,15 @@ pub fn build_render_nodes_cached(
             }
         })
         .collect();
-    let mut nodes = merge::merge_meshes(&control_ids, nodes);
+    let (mut nodes, merged_members) = merge::merge_meshes_tracked(&control_ids, nodes);
+    // v1 挂载内禁 clip：挂载行 mask 清 0（clip 平面定义在屏幕系，随 3D 容器变换后无
+    // 意义）。须在 assign_sort_keys / 各 mask 传播 pass 之后做——那些 pass 按祖先 clip
+    // 链重写 mask，build 期清会被覆盖（行自身 mount_root_id 标注在此处仍有效）。
+    for rn in &mut nodes {
+        if rn.mount_root_id != 0 {
+            rn.mask_context = MaskContext(0);
+        }
+    }
     // post-merge 最大 sort_key：scrollbar thumb / open popup 末尾追加续号用。须在
     // reorder + merge 之后算——reorder 重赋全序 sort_key、merge 可能吞空 mesh entry，
     // pre-merge 的 max 会过期（popup 末尾追加若用过期值，sort_key 会与正常节点交错，
@@ -990,10 +998,26 @@ pub fn build_render_nodes_cached(
     let mut new_hashes = std::collections::HashMap::with_capacity(nodes.len());
     for rn in &mut nodes {
         let hh = crate::render::dirty::header_hash(rn);
-        let ph = ph_reuse
-            .get(&rn.node_id)
-            .copied()
-            .unwrap_or_else(|| crate::render::dirty::payload_hash(rn));
+        // merged 行的 payload 是批内多行 concat——锚自身单行 hash 不代表批内容（非锚
+        // 成员变更会漏检成 Skip → 旧 mesh 上屏）。按成员 ph（各自便宜且已算好）拼合
+        // 重算：任一成员几何变 / 批成员集变（拆批/并批）→ 批 hash 必变。
+        let ph = if let Some(members) = merged_members.get(&rn.node_id) {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            0x4D45_5247u64.hash(&mut h); // "MERG" 判别——与单行 payload hash 空间区分
+            for &m in members {
+                // ph_reuse 按构造含全部 pre-merge 行（hit 回放缓存 phs / miss 存 emitted
+                // phs）；缺项回退 id 自身（两帧同值 → 退化为 Skip 判定，不误伤）。
+                let member_ph = ph_reuse.get(&m).copied().unwrap_or(m);
+                member_ph.hash(&mut h);
+            }
+            h.finish()
+        } else {
+            ph_reuse
+                .get(&rn.node_id)
+                .copied()
+                .unwrap_or_else(|| crate::render::dirty::payload_hash(rn))
+        };
         rn.change_level = match prev.get(&rn.node_id) {
             None => ChangeLevel::Full,
             Some(&(prev_hh, prev_ph)) => {

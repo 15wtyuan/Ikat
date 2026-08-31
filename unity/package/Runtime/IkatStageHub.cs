@@ -31,21 +31,26 @@ namespace Ikat
         public const int MaxOrdinals = 4;
         const string CameraName = "IkatUICamera";
 
-        static readonly List<(IkatStageDriver driver, int order)> s_drivers = new();
+        static readonly List<(IkatStageDriver driver, int order, int seq)> s_drivers = new();
         static readonly Dictionary<int, SharedCamera> s_cameras = new(); // scene handle → 引用计数
+        static int s_nextSeq; // 注册序号：order 同值时的稳定 tiebreaker（List.Sort 不稳定）
 
         /// <summary>本会话已注册的 Driver 数。</summary>
         public static int DriverCount => s_drivers.Count;
 
         /// <summary>
-        /// Driver Awake 注册：排入层序列表（order 升序、同序按注册先后），返回
-        /// sortingOrder 基址。inputEnabled=false 的 Driver（如 world-space 舞台）
-        /// 参与渲染排序但不参与输入路由。
+        /// Driver Awake 注册：排入层序列表（order 升序、同序按注册先后——seq tiebreaker
+        /// 保稳定），返回 sortingOrder 基址。inputEnabled=false 的 Driver（如 world-space
+        /// 舞台）参与渲染排序但不参与输入路由。中途注册/注销会改变各 Driver 的档位——
+        /// Driver 侧按 DriverCount 变化重取基址，勿一次性缓存。
         /// </summary>
         public static int Register(IkatStageDriver driver, int order)
         {
-            if (s_drivers.FindIndex(e => e.driver == driver) < 0) s_drivers.Add((driver, order));
-            s_drivers.Sort((a, b) => a.order.CompareTo(b.order));
+            if (s_drivers.FindIndex(e => e.driver == driver) < 0)
+                s_drivers.Add((driver, order, s_nextSeq++));
+            s_drivers.Sort((a, b) => a.order != b.order
+                ? a.order.CompareTo(b.order)
+                : a.seq.CompareTo(b.seq));
             return SortBaseOf(driver);
         }
 

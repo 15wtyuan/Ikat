@@ -275,6 +275,17 @@ fn world_mount_rebases_subtree_rows_round_trip() {
         "挂载子树行带 mount_root_id 标注"
     );
 
+    // 同根换槽（重绑另一 3D 容器）：归属/原点不变、唯槽位变——指纹必须失效旧行
+    //（漏了会回放旧槽行，后端路由错容器）。
+    inc.set_node_mount(body, 9).unwrap();
+    full.set_node_mount(body, 9).unwrap();
+    let j3 = inc.render_json();
+    assert_eq!(j3, full.render_json(), "换槽帧 A/B 全等");
+    assert!(
+        j3.contains("\"mount_root_id\": 9") && !j3.contains("\"mount_root_id\": 7"),
+        "换槽后行全部携带新槽位（旧槽行不得回放）"
+    );
+
     // 挂载根移动（inline override 高度变化 → 根 layout 位变 → 原点变）后 A/B 仍全等。
     inc.set_inline_override(body, "height:460px").unwrap();
     full.set_inline_override(body, "height:460px").unwrap();
@@ -297,5 +308,40 @@ fn world_mount_rebases_subtree_rows_round_trip() {
         strip(&j_after),
         strip(&j_before),
         "解除挂载 = 回到屏幕空间形态（几何往返闭合）"
+    );
+}
+
+/// merged 批非锚成员变更必须 Full（A/B 对拍结构性盲区：双 Stage 同用 ph_reuse，同错
+/// 则同错、逐字节仍全等——须断言 change_level 本身）。merged 行 payload = 批内多行
+/// concat，锚自身单行 hash 不代表批内容：改批内第二个成员的宽度，锚指纹不变，唯有
+/// 成员 ph 拼合的批 hash 能捕捉 → 该帧必须出现 Full 行（错误实现会全 Skip → 旧 mesh）。
+#[test]
+fn merged_batch_member_change_upgrades_to_full() {
+    let mut s = Stage::new((800.0, 600.0)).unwrap();
+    s.register_font("dejavu", font_bytes(), true).unwrap();
+    let root = s.create_root("div", "width:800px;height:600px").unwrap();
+    // 两个同 DrawState 相邻 solid div → merge 成单行（锚 = 较小 node id = 第一个）。
+    let a = s
+        .create_node("div", "width:100px;height:50px;background-color:#334455")
+        .unwrap();
+    s.append_child(root, a).unwrap();
+    let b = s
+        .create_node("div", "width:100px;height:50px;background-color:#335544")
+        .unwrap();
+    s.append_child(root, b).unwrap();
+
+    let _ = s.render_json(); // 首建（全 Full）
+    let j_steady = s.render_json(); // 稳态：全 Skip
+    assert!(
+        !j_steady.contains("\"change_level\": \"Full\""),
+        "稳态帧应全 Skip（前置自检）"
+    );
+
+    // 改非锚成员 b 的宽度：merged 批内容变 → 该行必须 Full。
+    s.set_inline_override(b, "width:160px").unwrap();
+    let j = s.render_json();
+    assert!(
+        j.contains("\"change_level\": \"Full\""),
+        "merged 批非锚成员变更必须升 Full（Skip = 成员几何丢失上屏）"
     );
 }

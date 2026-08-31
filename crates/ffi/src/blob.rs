@@ -129,13 +129,18 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     // （进 skip 段，flags bit1=parked）。slot 根 reuse_key 是出生即定的永久 ordinal；
     // 后代 reuse_key=0（后端按 node_id 保留）。
     //
+    // 契约注意：skip 条目的 flags bit0 与 lean 行 visible 列**不同义**——lean 的
+    // visible=0 = 本帧隐藏（后端 SetActive(false)）；skip 条目只表「对象在、沿用上帧
+    // 态」（bit0 现保留恒 0，后端不读）。Skip 行的隐藏态由后端对象的上帧状态延续，
+    // 不经本段传递。
+    //
     // 子树全发（非仅根）：slot park 时 display:none 剪整子树，若只保根，后代 GO（文本
     // mesh 等）被 stale 销毁，reactivate 重建——每帧滚动 churn（item 闪没 + 掉帧）。
     // 注意：scene.lists 是 HashMap，迭代顺序跨帧不保证——skip 段排列无稳定序（无需）。
     for (slot_node, reuse_key) in scene.parked_keepalive_nodes() {
         skip_buf.extend_from_slice(&slot_node.0.to_le_bytes());
         skip_buf.extend_from_slice(&reuse_key.to_le_bytes());
-        skip_buf.push(0b10); // bit1=parked，bit0=不可见
+        skip_buf.push(0b10); // bit1=parked（bit0 保留恒 0，见上方契约注意）
         skip_buf.extend_from_slice(&[0u8; 3]);
     }
     let skip_count = (skip_buf.len() / SKIP_ENTRY_SIZE) as u32;
