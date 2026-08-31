@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Ikat 靶子冻结 Showcase · 商店</title>
   <style>
-  .root {display:flex;flex-direction:column; width:1920px; height:1080px; background-color:#0e1620; }
+  .root {display:flex;flex-direction:column; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; }
   .body {display:flex;flex-direction:column; flex-grow:1; padding:32px; gap:24px; overflow-y:auto; }
   .page-title { color:#e0e6ec; font-size:28px; font-weight:700; }
   .grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:24px; }
@@ -19,7 +19,7 @@
   .btn-buy { background-color:#d4a44e; color:#0e1620; font-size:15px; font-weight:700; padding:10px 20px; border-radius:10px; align-self:flex-start; }
   .btn-buy:hover { filter:brightness(1.12); }
   .link-detail { color:#5fb4d4; font-size:14px; }
-  .dialog-overlay {display:flex;flex-direction:column; position:absolute; top:0; left:0; width:1920px; height:1080px; background-color:#000a; justify-content:center; align-items:center; }
+  .dialog-overlay {display:flex;flex-direction:column; position:absolute; top:0; left:0; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#000a; justify-content:center; align-items:center; }
   .dialog {display:flex;flex-direction:column; width:480px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:32px; gap:20px; box-shadow:0 12px 48px #000c; }
   .dialog-title { color:#e0e6ec; font-size:22px; font-weight:700; }
   .dialog-row {display:flex; flex-direction:row; align-items:center; justify-content:space-between; }
