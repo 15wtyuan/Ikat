@@ -28,6 +28,11 @@ criterion = "0.5"
 name = "solve"
 harness = false
 
+# #109 A2 render build 基准（增量命中 vs 全量重建）。
+[[bench]]
+name = "render_build"
+harness = false
+
 # #9 动画并发基准（tween 池化推进 / player update_all / churn 回池）。
 [[bench]]
 name = "anim"

@@ -6,7 +6,7 @@
 
 use crate::input::{EventRecord, PointerEvent, PointerState};
 use crate::layout::solve;
-use crate::render::build_render_nodes;
+
 use crate::render::FrameData;
 use crate::scene::node::{NodeFlags, NodeId, NodeKind, Rect, Scene};
 use crate::style::dynamic::{rematch_pseudo_classes, sync_animation_players, ScopedRule};
@@ -77,6 +77,14 @@ pub struct Stage {
     /// build_render_nodes 比较定 ChangeLevel。transient 不进 pkg（Stage 字段非 Scene 字段）。
     /// reload/节点数变 → clear → 下帧全 dirty（无基线）。
     pub prev_node_hashes: std::collections::HashMap<u64, (u64, u64)>,
+    /// A2 增量 render build 缓存（输入指纹 → 上帧产物）。present-set 签名变自动清空；
+    /// 新 scene 也清（ensure_scene）。transient 不进 pkg。
+    pub render_cache: crate::render::dirty::RenderBuildCache,
+    /// 单调帧号（每 tick +1）。增量指纹的 nonce（控件壳永不命中路径）。
+    pub frame_no: u64,
+    /// A2 增量开关（false = 每帧清空 render 缓存 = 全量重建，等价拆分前行为）。
+    /// A/B 对拍测试用（同脚本两 Stage 对比逐帧输出必须全等）。
+    pub incremental_render: bool,
     /// 全局 ListView 序号分配器（reuse_key 命名空间隔离用，见 list::encode_reuse_key）。
     /// 每个 ListView 首次进入数据驱动模式时取一个唯 ordinal，确保多 List 的 slot reuse_key
     /// 在场景级全局命名空间不冲突。Stage 持有（跨 tick 单调递增，重置场景也不回卷）。
@@ -170,6 +178,9 @@ impl Stage {
             tweens: crate::tween::TweenManager::new(),
             pending_dt: 0.0,
             prev_node_hashes: std::collections::HashMap::new(),
+            render_cache: crate::render::dirty::RenderBuildCache::default(),
+            frame_no: 0,
+            incremental_render: true,
             next_list_ordinal: 0,
         })
     }
@@ -804,6 +815,7 @@ impl Stage {
         if self.scene.is_none() {
             self.scene = Some(crate::scene::node::Scene::default());
             self.prev_node_hashes.clear(); // 新 scene → 无基线，下帧全 dirty
+            self.render_cache.entries.clear(); // 新 scene → 产物缓存全失效
         }
     }
 
@@ -1299,6 +1311,12 @@ impl Stage {
         // 5. solve（读 rematch 后的 taffy_style → layout_rect）
         // 核心知图尺寸（打包期 PNG IHDR 静态，存宿主 image_sizes）。solve 查尺寸表算
         // Image intrinsic（三档：CSS > 真实像素 > 64×64）。不知图集（运行时纹理/UV 归 Unity）。
+        self.frame_no += 1;
+        let frame_no = self.frame_no;
+        if !self.incremental_render {
+            self.render_cache.entries.clear();
+        }
+        let res_gen = self.host.borrow().generation;
         let mut host_ref = self.host.borrow_mut();
         let host = &mut *host_ref;
         solve(scene, &host.fonts, self.root_size, &host.image_sizes);
@@ -1322,12 +1340,15 @@ impl Stage {
         //    返回新 hash 存 self.prev_node_hashes 供下帧比。
         // build_render_nodes 查宿主 image_sizes 算九宫格 UV（slice_px / src_px）。
         // Image payload 带 path，UV 全图 (0,0)-(1,1)（无 atlas 子区），Unity 查 Sprite 拿真实 UV。
-        let (frame, new_hashes, sort_keys) = build_render_nodes(
+        let (frame, new_hashes, sort_keys) = crate::render::build_render_nodes_cached(
             scene,
             &host.fonts,
             &self.prev_node_hashes,
             &host.image_sizes,
             &mut host.glyph_atlas,
+            &mut self.render_cache,
+            res_gen,
+            frame_no,
         );
         drop(host_ref);
         scene.node_sort_keys = sort_keys;

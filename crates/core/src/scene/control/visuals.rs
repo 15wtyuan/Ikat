@@ -125,6 +125,9 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
             crate::text::rich::weight_from_font_weight(s.font_weight),
         );
         scene.text_layouts[id.index()] = Some(layout);
+        if id.index() < scene.text_layout_versions.len() {
+            scene.text_layout_versions[id.index()] += 1;
+        }
     }
 }
 

@@ -68,7 +68,16 @@ pub fn apply_css(style: &mut ResolvedStyle, css: &str) {
             continue;
         }
         if let Some((prop, val)) = decl.split_once(':') {
-            apply_decl(style, prop.trim(), val.trim());
+            let (prop, val) = (prop.trim(), val.trim());
+            if apply_decl(style, prop, val) {
+                // 可继承声明 bake 进 inherited_set（与打包期 fence css_resolve 同纪律）：
+                // 运行时 create_node 的显式 color/font-size 等须抵抗 propagate_inherited
+                // 的父值覆写——不 bake 则每帧被父值盖掉再被 rematch 复位（终值 = 父值，
+                // 显式继承属性视觉丢失 + render build 缓存帧帧失效的双病灶）。
+                if let Some(bit) = crate::style::dynamic::inherited_bit(prop) {
+                    style.inherited_set.0 |= bit;
+                }
+            }
         }
     }
 }
@@ -106,6 +115,7 @@ pub fn create_node(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         children: Vec::new(),
         dirty_mesh: true,
         dirty_text,
+        render_input_version: 0,
         classes: Vec::new(),
         id_attr: None,
         custom_tag: None,
@@ -176,6 +186,7 @@ pub fn create_node_from_template(
         children: Vec::new(),
         dirty_mesh: true,
         dirty_text,
+        render_input_version: 0,
         classes: Vec::new(),
         id_attr: None,
         custom_tag: None,
@@ -472,7 +483,9 @@ pub fn set_src(scene: &mut Scene, node: NodeId, src: &str) -> Result<(), String>
         Some(_) => return Err("set_src 只对 Image 节点生效".into()),
     }
     scene.image_srcs.insert(node, src.into());
-    scene.get_mut(node).unwrap().dirty_mesh = true;
+    let n = scene.get_mut(node).unwrap();
+    n.dirty_mesh = true;
+    n.render_input_version += 1;
     Ok(())
 }
 

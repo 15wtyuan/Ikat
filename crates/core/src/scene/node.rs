@@ -290,6 +290,9 @@ pub struct Node {
     pub children: Vec<NodeId>,
     pub dirty_mesh: bool,
     pub dirty_text: bool,
+    /// 渲染输入版本（A2 增量 build 的失效信号）：style 被改写（rematch 比较）/ set_src
+    /// 等几何输入变化时 +1。render build 的输入指纹含它——缺席 = 陈旧 mesh 缓存。
+    pub render_input_version: u32,
     /// 打包期烘焙的 style（不变，rematch 基线）。style 是运行时 rematch 覆写值。
     pub base_style: ResolvedStyle,
     /// 运行时 class 列表（建树时从 ElementData.classes 填；供动态规则 class 选择器匹配）。
@@ -336,6 +339,7 @@ impl Default for Node {
             children: Vec::new(),
             dirty_mesh: true,
             dirty_text: false,
+            render_input_version: 0,
             base_style: ResolvedStyle::default(),
             classes: Vec::new(),
             id_attr: None,
@@ -720,6 +724,10 @@ pub struct Scene {
     /// 不换行；长文本 → Some(available) 换行），render 若用 rect.w（stretch 后的 available 整数宽）
     /// 重测，短文本因 intrinsic 亚像素超 available 误判换行。故 render 复用 layout 结果，不重测。
     pub text_layouts: Vec<Option<crate::text::layout::TextLayout>>,
+    /// text_layouts 每槽写入代数（写入时 +1）。render build 增量的输入指纹含它——
+    /// TextLayout 重算（内容/样式/约束变）而 style 未变时（如约束宽变导致重测），
+    /// 指纹仍须失效。与 text_layouts 平行（alloc_node_slot / free_node_slot 联动）。
+    pub text_layout_versions: Vec<u32>,
     /// 跨帧 measure_text memo（每节点两槽 intrinsic/constrained，带 fingerprint）。
     /// solve 闭包命中 fingerprint → 复用 TextLayout 跳过 shaping。详见
     /// text::layout::TextMeasureCache。render 不读此（读 text_layouts render 槽）。
@@ -774,6 +782,9 @@ impl Scene {
         if self.text_layouts.len() < need {
             self.text_layouts.resize(need, None);
         }
+        if self.text_layout_versions.len() < need {
+            self.text_layout_versions.resize(need, 0);
+        }
         if self.text_measure_cache.len() < need {
             self.text_measure_cache.resize(need, None);
         }
@@ -788,6 +799,9 @@ impl Scene {
             self.node_sort_keys[idx] = 0;
         }
         self.text_layouts[idx] = None;
+        if idx < self.text_layout_versions.len() {
+            self.text_layout_versions[idx] = 0;
+        }
         self.text_measure_cache[idx] = None;
         match kind {
             NodeKind::TextNode => {
@@ -820,6 +834,9 @@ impl Scene {
         }
         if idx < self.text_layouts.len() {
             self.text_layouts[idx] = None;
+        }
+        if idx < self.text_layout_versions.len() {
+            self.text_layout_versions[idx] = 0;
         }
         if idx < self.text_measure_cache.len() {
             self.text_measure_cache[idx] = None;
@@ -888,6 +905,7 @@ impl Scene {
                 children: Vec::new(),
                 dirty_mesh: true,
                 dirty_text: matches!(kind, NodeKind::TextNode),
+                render_input_version: 0,
                 classes: classes.clone(),
                 id_attr: id_attr.clone(),
                 custom_tag: None,

@@ -533,6 +533,8 @@ pub fn solve(
     // node.rs text_layouts 字段注释）。未重测节点的布局没变，上帧 TextLayout 仍准确；
     // 重测节点由闭包按 Some 优先规则覆写。新节点槽位由 alloc_node_slot 清 None，无串染。
     let mut text_layouts: Vec<Option<TextLayout>> = std::mem::take(&mut scene.text_layouts);
+    // 平行写入代数表（同 carry-over 模式）：render 槽写入时 +1，A2 增量指纹消费。
+    let mut text_layout_versions: Vec<u32> = std::mem::take(&mut scene.text_layout_versions);
     // measure memo：跨帧 carry-over。mem::take 出 scene（期间 scene.text_measure_cache 空），
     // 闭包用完在末尾写回——与 text_layouts 同模式，避 borrow 冲突（build 已在上方借过 scene）。
     let mut measure_cache: Vec<Option<crate::text::layout::TextMeasureCache>> =
@@ -540,6 +542,9 @@ pub fn solve(
     let cap_need = scene.nodes.capacity() + 1;
     if text_layouts.len() < cap_need {
         text_layouts.resize(cap_need, None);
+    }
+    if text_layout_versions.len() < cap_need {
+        text_layout_versions.resize(cap_need, 0);
     }
     if measure_cache.len() < cap_need {
         measure_cache.resize(cap_need, None);
@@ -740,6 +745,7 @@ pub fn solve(
                                     let rslot = &mut text_layouts[sid.index()];
                                     if rslot.is_none() || known_in.width.is_some() {
                                         *rslot = Some(layout.clone());
+                                        text_layout_versions[sid.index()] += 1;
                                     }
                                 }
                                 Size {
@@ -840,6 +846,7 @@ pub fn solve(
                                     let slot = &mut text_layouts[sid.index()];
                                     if slot.is_none() || known_in.width.is_some() {
                                         *slot = Some(layout.clone());
+                                        text_layout_versions[sid.index()] += 1;
                                     }
                                 }
                                 Size {
@@ -919,6 +926,7 @@ pub fn solve(
     write_back(scene, &cache.tree, &cache.ids, &taffy_abs, scene.roots[0]);
     // layout 阶段 TextLayout 缓存交还 scene，供 render 复用（不重测）。
     scene.text_layouts = text_layouts;
+    scene.text_layout_versions = text_layout_versions;
     // measure memo 写回（跨帧持久）。
     scene.text_measure_cache = measure_cache;
     // 持久 taffy 树写回（增量 solve 载体）。
@@ -2132,6 +2140,7 @@ mod tests {
             parent: Some(parent),
             kind,
             style: ResolvedStyle::default(),
+            render_input_version: 0,
             base_style: ResolvedStyle::default(),
             taffy_id: None,
             layout_rect: Rect::default(),

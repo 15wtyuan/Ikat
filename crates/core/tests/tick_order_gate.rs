@@ -51,7 +51,9 @@ const EXPECTED_TICK_STEPS: &[(&str, &str)] = &[
         "compute_world_transforms",
         "crate::scene::transform::compute_world_transforms",
     ),
-    ("build_render_nodes", "build_render_nodes("),
+    // A2 增量后 stage 调 build_render_nodes_cached（输入指纹缓存入口；名字前缀仍含
+    // build_render_nodes，语义步骤不变——识别子串不带 "(" 以兼容两入口名）。
+    ("build_render_nodes", "build_render_nodes"),
 ];
 
 /// 从 stage.rs 提取 tick_and_render 函数体：起于签名行、止于下一个方法定义

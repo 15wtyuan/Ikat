@@ -775,7 +775,12 @@ pub fn rematch_pseudo_classes(scene: &mut Scene) {
             }
         }
         let node = scene.get_live_mut(node_id, "dynamic/rematch:write");
-        node.style = new_style;
+        // 值比较短路：稳态帧 style 逐字节不变——不写不 bump（bump 会打死 render build
+        // 缓存）。变化才写 + render_input_version +1（A2 增量指纹的失效信号）。
+        if node.style != new_style {
+            node.style = new_style;
+            node.render_input_version += 1;
+        }
         if display_decl_seen && node.style.display_mode == DisplayMode::Flex && node.rich_text_block
         {
             node.rich_text_block = false;
@@ -909,9 +914,11 @@ fn propagate_inherited_rec(
         copy_if_unset!(text_wrap, INH_TEXT_WRAP);
         // per-clone，节点多时换就地改 + 父快照
         let eff_for_children = new_style.clone();
-        scene
-            .get_live_mut(id, "dynamic/propagate_inherited:write")
-            .style = new_style;
+        let node = scene.get_live_mut(id, "dynamic/propagate_inherited:write");
+        if node.style != new_style {
+            node.style = new_style;
+            node.render_input_version += 1;
+        }
         // 向下传我更新后的 style 作为子 effective
         for c in children {
             propagate_inherited_rec(scene, c, Some(eff_for_children.clone()), set_map);

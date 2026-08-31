@@ -597,6 +597,29 @@ pub fn build_render_nodes(
     std::collections::HashMap<u64, (u64, u64)>,
     Vec<u32>,
 ) {
+    // 无缓存入口（测试 / example）：一次性 cache = 每帧全量重建（与拆分前等价）。
+    let mut cache = dirty::RenderBuildCache::default();
+    build_render_nodes_cached(scene, fonts, prev, image_sizes, atlas, &mut cache, 0, 0)
+}
+
+/// A2 增量入口（Stage::tick_and_render 用）：输入指纹命中的节点跳过 render_one_node，
+/// 整段复用上帧产物（含合成层）；present-set 签名变（结构变化）→ 缓存整表清空兜底。
+/// `res_gen` = 宿主资源代数（image_sizes / 字体注册变更全局失效）；`frame_no` 单调
+/// 帧号（控件壳永不命中路径的 nonce）。
+pub fn build_render_nodes_cached(
+    scene: &Scene,
+    fonts: &FontTable,
+    prev: &std::collections::HashMap<u64, (u64, u64)>,
+    image_sizes: &ImageSizeTable,
+    atlas: &mut GlyphAtlas,
+    cache: &mut dirty::RenderBuildCache,
+    res_gen: u64,
+    frame_no: u64,
+) -> (
+    FrameData,
+    std::collections::HashMap<u64, (u64, u64)>,
+    Vec<u32>,
+) {
     // id_to_pos: NodeId → nodes vec 0 基位置。剪 display:none 子树后 nodes 与 scene.nodes
     // 不等长，batch 按此映射索引 nodes；pruned 节点不入表（batch DFS 遇 id_to_pos 没有
     // 的节点即跳过该子树）。
@@ -618,7 +641,33 @@ pub fn build_render_nodes(
     // inset 阴影不经此表——由 propagate_text_sub_page_sort_keys 按 tag 字节自动收集。
     let mut back_layer_pairs: Vec<(u64, u64)> = Vec::new();
     // 富文本行内图 RenderNode 追踪：(主节点 node_id, 行内图合成 node_id)。
-    let inline_image_pairs: Vec<(u64, u64)> = Vec::new();
+    let mut inline_image_pairs: Vec<(u64, u64)> = Vec::new();
+
+    // —— A2 present-set 签名（过滤后实际进渲染的节点集）。签名变 = 结构变化（增删/
+    // 换父/display 翻转/popup 开合/fold 变化）→ 缓存整表清空（保守兜底，正确性优先）。
+    // 过滤谓词与下方渲染循环一致（pruned / 纯空白 / fold）。
+    let mut structure_sig: u64 = 0;
+    for n in scene.nodes.values() {
+        if pruned.contains(&n.id) {
+            continue;
+        }
+        if crate::scene::node::is_whitespace_only_text(scene, n.id) {
+            continue;
+        }
+        if is_folded_into_rich_text(scene, n.id) {
+            continue;
+        }
+        structure_sig = structure_sig.wrapping_mul(31).wrapping_add(n.id.0);
+    }
+    if cache.structure_sig != structure_sig {
+        cache.entries.clear();
+        cache.structure_sig = structure_sig;
+    }
+    // 命中/新存行的 payload_hash 复用表（node_id → ph）：hash 定级 pass 免重算几何 hash。
+    // 命中行的几何与缓存帧逐字节相同（指纹含矩阵/alpha 全量）；新存行在存入时顺手算好。
+    let mut ph_reuse: std::collections::HashMap<u64, u64> =
+        std::collections::HashMap::with_capacity(nodes.capacity());
+
     for n in scene.nodes.values() {
         if pruned.contains(&n.id) {
             continue;
@@ -634,6 +683,31 @@ pub fn build_render_nodes(
         if is_folded_into_rich_text(scene, n.id) {
             continue;
         }
+        let alpha = alphas[n.id.index()];
+        // —— A2 增量：输入指纹命中 → 整段复用上帧产物（含合成层与配对追踪）。
+        // 指纹输入枚举见 dirty::render_input_fp；跳过 atlas ensure（atlas 只增不重排，
+        // 缓存帧已 ensure 过，字形槽永不过期）。
+        let fp = dirty::render_input_fp(n, scene, alpha, res_gen, frame_no);
+        if let Some(entry) = cache.entries.get(&n.id) {
+            if entry.input_fp == fp {
+                cache.hits += 1;
+                let base = nodes.len();
+                for (i, rn) in entry.nodes.iter().enumerate() {
+                    nodes.push(rn.clone());
+                    if let Some(&ph) = entry.phs.get(i) {
+                        ph_reuse.insert(rn.node_id, ph);
+                    }
+                }
+                id_to_pos.insert(n.id, base + entry.primary_idx);
+                back_layer_pairs.extend_from_slice(&entry.back_pairs);
+                inline_image_pairs.extend_from_slice(&entry.inline_pairs);
+                continue;
+            }
+        }
+        cache.misses += 1;
+        let before = nodes.len();
+        let pairs_before = back_layer_pairs.len();
+        let inline_before = inline_image_pairs.len();
         // 主 DFS 走正常路径：register_id_map=true（登记 id_to_pos 供 assign_sort_keys /
         // NativeHost FFI 查询）。open popup 子树末尾另走 render_one_node(register=false) +
         // 浮层 sort_key/mask 重赋（见下方 popup 追加块）。
@@ -647,7 +721,28 @@ pub fn build_render_nodes(
             &mut id_to_pos,
             &mut back_layer_pairs,
             true,
-            alphas[n.id.index()],
+            alpha,
+        );
+        // 产物入缓存：该节点产出的全部 RenderNode（含合成层）+ 配对追踪 + primary 下标。
+        let emitted = nodes[before..].to_vec();
+        let primary_idx = emitted
+            .iter()
+            .position(|rn| rn.node_id == n.id.0)
+            .unwrap_or(0);
+        let phs: Vec<u64> = emitted.iter().map(dirty::payload_hash).collect();
+        for (rn, &ph) in emitted.iter().zip(phs.iter()) {
+            ph_reuse.insert(rn.node_id, ph);
+        }
+        cache.entries.insert(
+            n.id,
+            dirty::CachedNodeBuild {
+                input_fp: fp,
+                nodes: emitted,
+                primary_idx,
+                back_pairs: back_layer_pairs[pairs_before..].to_vec(),
+                inline_pairs: inline_image_pairs[inline_before..].to_vec(),
+                phs,
+            },
         );
     }
     // batch / merge / thumb
@@ -765,7 +860,10 @@ pub fn build_render_nodes(
     let mut new_hashes = std::collections::HashMap::with_capacity(nodes.len());
     for rn in &mut nodes {
         let hh = crate::render::dirty::header_hash(rn);
-        let ph = crate::render::dirty::payload_hash(rn);
+        let ph = ph_reuse
+            .get(&rn.node_id)
+            .copied()
+            .unwrap_or_else(|| crate::render::dirty::payload_hash(rn));
         rn.change_level = match prev.get(&rn.node_id) {
             None => ChangeLevel::Full,
             Some(&(prev_hh, prev_ph)) => {

@@ -1,9 +1,141 @@
 //! dirty hash：header_hash（表头） + payload_hash（几何），供 Stage 跨帧分轴比较定
 //! ChangeLevel。碰撞最坏 1 帧延迟，不破正确性。
+//! 另有 render_input_fp（A2 增量 build 的输入侧指纹）+ RenderBuildCache——把变更检测
+//! 从「重建后验尸」前移到「重建前验输入」，输入未变的节点整段复用上帧产物。
 
 use crate::render::node::{NodePayload, RenderNode};
+use crate::scene::node::{Node, NodeKind, Scene};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+
+/// 控件壳节点（merge 排除清单同款）：EditState / 视觉同步（fill 宽度、caret、光标闪烁）
+/// 每帧可变且写点分散——v1 不枚举其输入，直接永不命中缓存（控件稀疏，代价可接受）。
+fn never_cache_kind(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Toggle
+            | NodeKind::RadioButton
+            | NodeKind::Slider
+            | NodeKind::ProgressBar
+            | NodeKind::Dropdown
+            | NodeKind::OptionItem
+            | NodeKind::TextField
+            | NodeKind::TextArea
+            | NodeKind::NumberField
+    )
+}
+
+/// A2 增量 build 的单节点输入指纹：命中 → 跳过 render_one_node，整段复用上帧产物。
+///
+/// 输入枚举（漏一项 = 陈旧帧，A/B 对拍测试兜底）：
+/// - `render_input_version`：style 实际改写（rematch 值比较）/ set_src。
+/// - `layout_rect` 宽高（0.25px 量化，同 text_fingerprint 桶纪律）：几何随尺寸变。
+///   x/y 不进——纯平移节点 rect.x/y = wm 平移分量（wm 已含），非纯平移恒 (0,0)。
+/// - `world_transforms` 全量 + 累积 alpha：v1 正确性优先——动的节点重建（不劣于全量
+///   路径），静态场景全命中（增量 build 的目标态：稳态帧零几何重建）。
+/// - `text_layout_versions`：TextLayout 重算而 style 未变的通道（约束宽变导致重测）。
+/// - `anim` 烘进 mesh 的通道（bg_color/text_color/box_shadow）；opacity/transform 经
+///   alpha/wm 覆盖，width/height/flex_grow 经 layout_rect 覆盖，不重复进键。
+/// - `res_gen`（宿主资源代数）：image_sizes / 字体注册表变更全局失效。
+/// - `rich_text_block` 位：容器臂选择（折 inline flow vs 常规子树）。
+/// - `image_srcs`：Image intrinsic 几何源（set_src 也 bump version，双保险）。
+pub fn render_input_fp(n: &Node, scene: &Scene, alpha: f32, res_gen: u64, frame_no: u64) -> u64 {
+    let mut h = DefaultHasher::new();
+    if never_cache_kind(n.kind) {
+        // 控件壳：每帧唯一值（frame_no 单调）→ 永不命中。
+        0xC0FF_EE00u64.hash(&mut h);
+        frame_no.hash(&mut h);
+        return h.finish();
+    }
+    n.render_input_version.hash(&mut h);
+    ((n.layout_rect.w * 4.0).round() as i64).hash(&mut h);
+    ((n.layout_rect.h * 4.0).round() as i64).hash(&mut h);
+    n.rich_text_block.hash(&mut h);
+    for &v in scene
+        .world_transforms
+        .get(n.id.index())
+        .copied()
+        .unwrap_or(crate::transform::IDENTITY)
+        .iter()
+    {
+        v.to_le_bytes().hash(&mut h);
+    }
+    alpha.to_le_bytes().hash(&mut h);
+    scene
+        .text_layout_versions
+        .get(n.id.index())
+        .copied()
+        .unwrap_or(0)
+        .hash(&mut h);
+    if let Some(anim) = scene.anim.get(n.id) {
+        // Some/None 判别必须进键：Some([0;4])（动画到透明黑）≠ None（退回 CSS 色）。
+        match anim.bg_color {
+            Some(c) => {
+                1u8.hash(&mut h);
+                for &x in c.iter() {
+                    x.to_le_bytes().hash(&mut h);
+                }
+            }
+            None => 0u8.hash(&mut h),
+        }
+        match anim.text_color {
+            Some(c) => {
+                1u8.hash(&mut h);
+                for &x in c.iter() {
+                    x.to_le_bytes().hash(&mut h);
+                }
+            }
+            None => 0u8.hash(&mut h),
+        }
+        match &anim.box_shadow {
+            Some(shadows) => {
+                1u8.hash(&mut h);
+                shadows.len().hash(&mut h);
+                for s in shadows {
+                    for &f in [s.ox, s.oy, s.spread, s.blur].iter() {
+                        f.to_le_bytes().hash(&mut h);
+                    }
+                    for &c in s.color.iter() {
+                        c.to_le_bytes().hash(&mut h);
+                    }
+                    s.inset.hash(&mut h);
+                }
+            }
+            None => 0u8.hash(&mut h),
+        }
+    }
+    res_gen.hash(&mut h);
+    if let Some(src) = scene.image_srcs.get(&n.id) {
+        src.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// 跨帧 render build 缓存（Stage 持有）。present-set 签名不等（增删/换父/display 翻转/
+/// popup 开合/fold 变化——任何改变「哪些节点进渲染」的事件）→ 整表清空兜底。
+#[derive(Default)]
+pub struct RenderBuildCache {
+    pub entries: std::collections::HashMap<crate::scene::node::NodeId, CachedNodeBuild>,
+    pub structure_sig: u64,
+    /// 诊断/测试观测：指纹命中数与重建数（含结构兜底清空后的重建）。
+    pub hits: u64,
+    pub misses: u64,
+}
+
+/// 单 scene 节点的上帧产物（含全部合成层：text 子页 / 外阴影 / 行内图）。
+pub struct CachedNodeBuild {
+    pub input_fp: u64,
+    /// 该节点产出的全部 RenderNode（顺序 = 产出序）。replay 整段 clone。
+    pub nodes: Vec<RenderNode>,
+    /// primary（真 node_id）在 nodes 内的下标（id_to_pos 注册用）。
+    pub primary_idx: usize,
+    /// 外阴影合成对（primary_id, synth_id）——replay 续接 sort 传播。
+    pub back_pairs: Vec<(u64, u64)>,
+    /// 富文本行内图合成对。
+    pub inline_pairs: Vec<(u64, u64)>,
+    /// 与 nodes 对齐的 payload_hash（存入时算好；命中行 hash 定级 pass 免重算几何 hash）。
+    pub phs: Vec<u64>,
+}
 
 /// 几何轴 hash：payload 全量（verts/uvs/colors/indices/image_path/program/color_matrix
 /// 或 font_size/color/全量 glyph）。不含 world_matrix/alpha/sort/mask（那是 header_hash）。
