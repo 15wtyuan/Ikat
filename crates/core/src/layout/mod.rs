@@ -671,7 +671,11 @@ pub fn solve(
                                 }
                                 // measure memo：fingerprint 命中 → 复用 TextLayout 跳过 shaping。
                                 // 两槽：mw=None→intrinsic（max-content），mw=Some→constrained（换行）。
-                                // fingerprint 含 content hash → set_text / slot 换内容自动 miss。
+                                // fingerprint 含 content hash → set_text / slot 换内容自动 miss；
+                                // color / 字体解析链也进键（两者烙进 TextLayout，缺席 = 陈旧缓存）。
+                                let font_ids: Vec<u32> = std::iter::once(stack.primary_id)
+                                    .chain(stack.fallbacks.iter().map(|(_, id)| *id))
+                                    .collect();
                                 let fp = crate::text::layout::text_fingerprint(
                                     content,
                                     *font_size,
@@ -681,6 +685,8 @@ pub fn solve(
                                     *wrap,
                                     *font_weight,
                                     family.as_deref(),
+                                    *color,
+                                    &font_ids,
                                     mw,
                                 );
                                 let layout = if let Some(sid) = sid_opt {
@@ -1802,6 +1808,61 @@ mod tests {
         let r = &scene.get(id).unwrap().layout_rect;
         assert!((r.w - 500.0).abs() < 0.1, "50vw @1000 -> 500, got {}", r.w);
         assert!((r.h - 50.0).abs() < 0.1, "10vh @500 -> 50, got {}", r.h);
+    }
+
+    /// #109 地基回归：MeasureContext::Text 含 color，但 text_fingerprint 曾缺席 →
+    /// 只改 style.color 时二次 solve 命中 measure 缓存，text_layouts 的 run.color
+    /// （纯文本上屏唯一通道，烙进 mesh 顶点色）保持旧色。指纹补 color 后必 miss 重测。
+    #[test]
+    fn text_layout_refreshes_on_color_only_change() {
+        let mut red = ResolvedStyle::default();
+        red.color = [1.0, 0.2, 0.2, 1.0];
+        let entries = [
+            (
+                None,
+                NodeKind::Container,
+                ResolvedStyle::default(),
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                Some(0),
+                NodeKind::TextNode,
+                red,
+                Vec::new(),
+                None,
+                false,
+                None,
+                None,
+                Some("hi".into()),
+                None,
+            ),
+        ];
+        let mut scene = Scene::build(&entries);
+        let fonts = font_table().expect("need font");
+        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        let tid = scene.get(scene.roots[0]).unwrap().children[0];
+        let run_color = |scene: &Scene| {
+            scene.text_layouts[tid.index()]
+                .as_ref()
+                .expect("text node measured")
+                .lines[0]
+                .runs[0]
+                .color
+        };
+        assert_eq!(run_color(&scene), [1.0, 0.2, 0.2, 1.0]);
+        scene.get_mut(tid).unwrap().style.color = [0.2, 1.0, 0.2, 1.0];
+        solve(&mut scene, &fonts, (800.0, 600.0), &HashMap::new());
+        assert_eq!(
+            run_color(&scene),
+            [0.2, 1.0, 0.2, 1.0],
+            "只改 color 也必须重测（指纹含 color 前：命中缓存 → 旧色陈旧）"
+        );
     }
 
     /// #64 取证：Tripawd 地图链 .screen{overflow:hidden, flex column} >

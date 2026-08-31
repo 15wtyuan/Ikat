@@ -564,8 +564,14 @@ pub struct TextMeasureCache {
     pub constrained: Option<(u64, TextLayout)>,
 }
 
-/// 文本测量 fingerprint：content + style + 约束宽（0.25px 量化）→ u64。同 fp → measure_text
-/// 结果同 → 可复用。`mw` None/Some 区分 intrinsic/constrained 两槽（discriminator 进 hash）。
+/// 文本测量 fingerprint：content + style + color + 字体解析链 + 约束宽（0.25px 量化）→ u64。
+/// 同 fp → measure_text 结果同 → 可复用。`mw` None/Some 区分 intrinsic/constrained 两槽
+/// （discriminator 进 hash）。
+///
+/// `color` 与 `font_ids` 必须进键：两者都烙进 TextLayout（GlyphRun.color / Glyph.font_id）
+/// 且是纯文本颜色上屏的唯一通道——不进键时「只改色」「字体重注册换 id」会命中旧缓存，
+/// 顶点色/字形面全部陈旧（宿主分离让 id 变为 host 全局后尤其如此）。`font_ids` =
+/// 解析后的 [primary, fallbacks...] id 链，id 在表/host 生命周期内不复用，重注册必 miss。
 ///
 /// 用 `DefaultHasher::new()`（固定 key，跨进程确定性）——不能用 `RandomState`（每进程随机 →
 /// 持久缓存跨 tick 失效）。CJK content 是主要成本，hash ~µs/节点，vs shaping ~100µs/节点。
@@ -579,6 +585,8 @@ pub fn text_fingerprint(
     wrap: WrapControl,
     font_weight: u16,
     family: Option<&str>,
+    color: [f32; 4],
+    font_ids: &[u32],
     mw: Option<f32>,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -591,6 +599,11 @@ pub fn text_fingerprint(
     wrap.hash(&mut h);
     font_weight.hash(&mut h);
     family.hash(&mut h);
+    // color 是 [f32;4] → 逐通道 to_bits（f32 不 impl Hash）。
+    for c in color.iter() {
+        c.to_bits().hash(&mut h);
+    }
+    font_ids.hash(&mut h);
     match mw {
         // None/Some 用 discriminator 区分；Some 的 w 量化到 0.25px 桶——静止时 max_width
         // 稳定（tween 不动 layout），桶稳定 → 命中；resize 时桶短暂漂移后收敛。
@@ -2078,6 +2091,8 @@ mod tests {
             wc_normal(),
             400,
             None,
+            [1.0, 1.0, 1.0, 1.0],
+            &[],
             None,
         );
         let b = text_fingerprint(
@@ -2089,6 +2104,8 @@ mod tests {
             wc_normal(),
             400,
             None,
+            [1.0, 1.0, 1.0, 1.0],
+            &[],
             None,
         );
         assert_eq!(a, b, "同输入必同 fingerprint（DefaultHasher 固定 key）");
@@ -2105,6 +2122,8 @@ mod tests {
             wc_normal(),
             400,
             None,
+            [1.0, 1.0, 1.0, 1.0],
+            &[],
             None,
         );
         let b = text_fingerprint(
@@ -2116,6 +2135,8 @@ mod tests {
             wc_normal(),
             400,
             None,
+            [1.0, 1.0, 1.0, 1.0],
+            &[],
             None,
         );
         assert_ne!(
@@ -2136,6 +2157,8 @@ mod tests {
                 WrapControl::default(),
                 400,
                 None,
+                [1.0, 1.0, 1.0, 1.0],
+                &[],
                 None,
             )
         };
@@ -2150,10 +2173,58 @@ mod tests {
                 WrapControl::default(),
                 fw,
                 None,
+                [1.0, 1.0, 1.0, 1.0],
+                &[],
                 None,
             )
         };
         assert_ne!(w(400), w(700), "font_weight 变 → fp 变");
+    }
+
+    #[test]
+    fn fingerprint_differs_on_color() {
+        let c = |color: [f32; 4]| {
+            text_fingerprint(
+                "hi",
+                16.0,
+                1.5,
+                0.0,
+                TextAlign::Left,
+                wc_normal(),
+                400,
+                None,
+                color,
+                &[1],
+                None,
+            )
+        };
+        assert_ne!(
+            c([1.0, 1.0, 1.0, 1.0]),
+            c([1.0, 0.0, 0.0, 1.0]),
+            "color 变 → fp 变（run.color 烙进 TextLayout 且是纯文本上屏唯一通道，缺席 = 改色吃旧缓存）"
+        );
+    }
+
+    #[test]
+    fn fingerprint_differs_on_font_id_chain() {
+        let f = |ids: &[u32]| {
+            text_fingerprint(
+                "hi",
+                16.0,
+                1.5,
+                0.0,
+                TextAlign::Left,
+                wc_normal(),
+                400,
+                None,
+                [1.0, 1.0, 1.0, 1.0],
+                ids,
+                None,
+            )
+        };
+        assert_ne!(f(&[1]), f(&[2]), "主字体 id 变 → fp 变（同 family 重注册换 id 必 miss）");
+        assert_ne!(f(&[1]), f(&[1, 2]), "fallback 链变 → fp 变（解析结果不同）");
+        assert_eq!(f(&[1]), f(&[1]), "同链同 fp");
     }
 
     #[test]
@@ -2167,6 +2238,8 @@ mod tests {
             wc_normal(),
             400,
             None,
+            [1.0, 1.0, 1.0, 1.0],
+            &[],
             None,
         );
         let constrained = text_fingerprint(
@@ -2178,6 +2251,8 @@ mod tests {
             wc_normal(),
             400,
             None,
+            [1.0, 1.0, 1.0, 1.0],
+            &[],
             Some(200.0),
         );
         assert_ne!(intrinsic, constrained, "None vs Some 必区分（两槽各自键）");
@@ -2195,6 +2270,8 @@ mod tests {
                 wc_normal(),
                 400,
                 None,
+                [1.0, 1.0, 1.0, 1.0],
+                &[],
                 Some(w),
             )
         };
