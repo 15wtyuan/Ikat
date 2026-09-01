@@ -69,6 +69,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
 ### Fixed
+- **HTML `draggable="true"` 打包即丢——声明式拖拽使能无效（#75 验收批）**：组件
+  展开路径（真实打包编排 `bridge_with_components`）的元素构造把 `draggable`
+  硬编码 false——旧 `bridge()` 只有单测在用，测试绿但所有页面节点打进 pkg
+  都是 false，运行时永远拖不动（声明式拖块纹丝不动；运行时 `Node.Draggable`
+  开关走 FFI 直写不受影响）。现页面元素与组件 host 两个构造点都按 bridge
+  主路径同款口径提取（fence 值域 true|false，非 "true" 按 false 兜底）。
+- **文本框删空后屏幕残留最后一个字符（#76 验收批）**：layout 期的控件文本
+  measure 在显示串变空时跳过缓存写入但不清旧缓存——渲染层的 lazy fallback
+  只在缓存为空时触发，读到上帧 value 的残留 TextLayout，已删除的旧文本继续
+  上屏（长按 Backspace 删空后 'a' 留在框里）。现空显示串回落 placeholder
+  同源缓存（无 placeholder 才清缓存）：删空即画 placeholder（此前删空后
+  placeholder 也不显示，同一根因），布局测高继续读缓存算行高（不变）。
 - **进播放时的 URP「camera overlay no longer exists」警告消除（#109 验收批）**：
   编辑态（`[ExecuteAlways]`）Driver 把 DontSave 相机挂进宿主 Base 相机的
   cameraStack——该 stack 随场景序列化，而 DontSave 相机不随场景进播放副本，
