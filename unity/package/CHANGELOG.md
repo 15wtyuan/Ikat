@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **拖拽使能双通道（#75）**：HTML `draggable="true|false"`（全局属性，缺省
+  false；浏览器枚举值 `auto` 在自绘引擎无对应物，围栏报错）+ 运行时
+  `Node.Draggable`。使能节点参与 drag_target 候选，pointer-down 过阈值后
+  DragStart/DragMove/DragEnd 事件链启动（此前事件链全通但产品面无任何
+  使能入口）。
+- **TabList 手动激活模型（#13）**：`data-activation="manual"`（tablist 上
+  值域 manual|automatic，缺省 automatic）+ 运行时 `TabList.Activation`。
+  manual = 方向键只移焦点（roving tabindex，焦点移动发 FocusIn/FocusOut，
+  `:focus` 样式跟随）、Enter/Space 才提交选中；automatic = 方向键即时选中
+  **且焦点跟随**（对齐 WAI-ARIA，修正旧实现不移焦点的偏差）。roving 步进
+  做成通用积木（clamp 不 wrap），后续 Tree 复用。
+- **键盘按住自动重复（#76）**：长按 Backspace/Delete/方向键等连续生效
+  （连删/连续导航）。Unity 两代输入系统都不发 OS 键盘重复事件，collector
+  按 OS 节律合成重复 keydown（0.5s 初始延迟 + 0.03s 间隔，固定常量）；
+  最后按下的键优先、keyup 即停、失焦清状态。仅重发 keydown 通道——
+  可打印字符不重复插字（KeyCode→char 映射键盘布局相关，不做）。
 - **多 Stage 隔离：共享相机 + 排序基址 + 输入独占路由（#109）**：同场景多
   Driver 并存不再互相打爆——per-Scene 引用计数共享 `IkatUICamera`（按名
   认领存量相机先于新建，编辑器重编译幸存相机不再积累重复）；各 Stage

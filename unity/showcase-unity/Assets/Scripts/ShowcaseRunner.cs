@@ -1393,6 +1393,101 @@ public class ShowcaseRunner : MonoBehaviour
                 linkQuest.Clicked += () => { linkRead.TextContent = linkQuest.Href; };
                 linkCustom.Clicked += () => { linkRead.TextContent = linkCustom.Href; };
             }
+            // lab #21 拖拽使能（#75）：声明式块（draggable="true"）DragMove 增量施加 user
+            // transform + 读数计 start 次/累计位移；运行时开关块按钮翻 Node.Draggable；
+            // 对照块订阅 DragStart 但永不使能——读数翻动即失败信号。
+            if (page.TryGet<Container>("drag-a", out var dragA)
+                && page.TryGet<TextElement>("drag-a-read", out var dragARead))
+            {
+                int starts = 0; float ax = 0f, ay = 0f;
+                dragA.On<DragStartEvent>(_ => { starts++; });
+                dragA.On<DragMoveEvent>(e =>
+                {
+                    ax += e.DeltaX; ay += e.DeltaY;
+                    dragA.Transform.Position = new IkatVector2(ax, ay);
+                    dragARead.TextContent = "拖拽 " + starts + " 次 · 累计 " + (int)ax + "," + (int)ay;
+                });
+            }
+            if (page.TryGet<Container>("drag-b", out var dragB)
+                && page.TryGet<Button>("drag-b-btn", out var dragBBtn)
+                && page.TryGet<TextElement>("drag-b-read", out var dragBRead))
+            {
+                float bx = 0f, by = 0f;
+                dragBBtn.Clicked += () =>
+                {
+                    dragB.Draggable = !dragB.Draggable;
+                    dragBBtn.TextContent = dragB.Draggable ? "关闭拖拽" : "开启拖拽";
+                    dragBRead.TextContent = dragB.Draggable ? "已开启（现在能拖）" : "已关闭";
+                };
+                dragB.On<DragMoveEvent>(e =>
+                {
+                    bx += e.DeltaX; by += e.DeltaY;
+                    dragB.Transform.Position = new IkatVector2(bx, by);
+                    dragBRead.TextContent = "拖动中 · 累计 " + (int)bx + "," + (int)by;
+                });
+            }
+            if (page.TryGet<Container>("drag-c", out var dragC)
+                && page.TryGet<TextElement>("drag-c-read", out var dragCRead))
+            {
+                // 未使能节点不参与 drag 仲裁——DragStart 不应到达；读数翻动即失败。
+                dragC.On<DragStartEvent>(_ => { dragCRead.TextContent = "!! 不应触发"; });
+            }
+            // lab #22 TabList 激活模型（#13）：manual 组方向键只移焦点（FocusEvent 读数跟随）、
+            // Enter/Space 才提交选中（SelectionChanged 只在提交时发）；auto 组焦点与选中同步。
+            if (page.TryGet<TabList>("mtab-manual", out var mTabs)
+                && page.TryGet<Tab>("mt-m1", out var m1)
+                && page.TryGet<Tab>("mt-m2", out var m2)
+                && page.TryGet<Tab>("mt-m3", out var m3)
+                && page.TryGet<TextElement>("mtab-manual-read", out var mRead))
+            {
+                string mFocus = "—";
+                string ManualSel() => m1.Selected ? "甲" : m2.Selected ? "乙" : m3.Selected ? "丙" : "—";
+                void RefreshManual() { mRead.TextContent = "焦点 " + mFocus + " / 选中 " + ManualSel(); }
+                m1.On<FocusEvent>(_ => { mFocus = "甲"; RefreshManual(); });
+                m2.On<FocusEvent>(_ => { mFocus = "乙"; RefreshManual(); });
+                m3.On<FocusEvent>(_ => { mFocus = "丙"; RefreshManual(); });
+                mTabs.SelectionChanged += _ => RefreshManual();
+                RefreshManual();
+            }
+            if (page.TryGet<TabList>("mtab-auto", out var aTabs)
+                && page.TryGet<Tab>("mt-a1", out var a1)
+                && page.TryGet<Tab>("mt-a2", out var a2)
+                && page.TryGet<Tab>("mt-a3", out var a3)
+                && page.TryGet<TextElement>("mtab-auto-read", out var aRead))
+            {
+                string aFocus = "—";
+                string AutoSel() => a1.Selected ? "A" : a2.Selected ? "B" : a3.Selected ? "C" : "—";
+                void RefreshAuto() { aRead.TextContent = "焦点 " + aFocus + " / 选中 " + AutoSel(); }
+                a1.On<FocusEvent>(_ => { aFocus = "A"; RefreshAuto(); });
+                a2.On<FocusEvent>(_ => { aFocus = "B"; RefreshAuto(); });
+                a3.On<FocusEvent>(_ => { aFocus = "C"; RefreshAuto(); });
+                aTabs.SelectionChanged += _ => RefreshAuto();
+                RefreshAuto();
+            }
+            // lab #23 按住重复（#76）：长按 Backspace 连删到空（文字变短计数），方向键
+            // 重复不产 ValueChanged——判据主体是框内文字连续消失，计数是辅助读数。
+            if (page.TryGet<TextField>("kr-input", out var krInput)
+                && page.TryGet<Button>("kr-fill", out var krFill)
+                && page.TryGet<TextElement>("kr-count", out var krCount))
+            {
+                int deletes = 0; string last = krInput.Value;
+                krInput.ValueChanged += _ =>
+                {
+                    if (krInput.Value.Length < last.Length)
+                    {
+                        deletes++;
+                        krCount.TextContent = "删除计数 " + deletes;
+                    }
+                    last = krInput.Value;
+                };
+                krFill.Clicked += () =>
+                {
+                    krInput.Value = "abcdefghijk l";
+                    last = krInput.Value;
+                    deletes = 0;
+                    krCount.TextContent = "删除计数 0";
+                };
+            }
         }
         if (pageName == "settings")
         {

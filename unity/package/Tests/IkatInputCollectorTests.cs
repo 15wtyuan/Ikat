@@ -70,5 +70,76 @@ namespace Ikat.Tests
                 Assert.AreEqual(d.y, back.y, 0.001f, $"round-trip dy 失败（design={d}, screen={screen}）");
             }
         }
+
+        // —— key repeat 状态机（#76）：OS 节律合成重复 keydown ——
+        // Unity 两代输入系统都不发 OS 键盘重复；collector 用 KeyRepeatState 合成
+        // （0.5s 初始延迟 + 0.03s 间隔，最后按下优先，keyup 即停）。纯逻辑直测。
+
+        [Test]
+        public void KeyRepeat_FiresAfterInitialDelayThenInterval()
+        {
+            var st = new KeyRepeatState();
+            const uint backspace = 8;   // KeyCode.Backspace
+            st.OnKeyDown(backspace);
+
+            // 延迟期内不重发（9 帧 × 0.05s = 0.45s < 0.5s）。
+            for (int i = 0; i < 9; i++)
+                Assert.AreEqual(0u, st.Advance(0.05f), "初始延迟期内不重发");
+
+            // 延迟耗尽（累计 0.5s）→ 首次重发；此后每 0.03s 一次。
+            Assert.AreEqual(backspace, st.Advance(0.05f), "初始延迟耗尽 → 首次重发");
+            Assert.AreEqual(0u, st.Advance(0.02f), "间隔未满不发");
+            Assert.AreEqual(backspace, st.Advance(0.01f), "间隔满 → 再重发");
+        }
+
+        [Test]
+        public void KeyRepeat_KeyUpStopsAndClearStops()
+        {
+            var st = new KeyRepeatState();
+            const uint left = 276;      // KeyCode.LeftArrow
+            st.OnKeyDown(left);
+            Assert.AreEqual(left, st.Advance(0.5f), "延迟耗尽首发");
+
+            st.OnKeyUp(left);
+            Assert.AreEqual(0u, st.Key, "keyup 清目标");
+            Assert.AreEqual(0u, st.Advance(0.5f), "keyup 后不再重发");
+
+            // Clear（失焦路径）同理。
+            st.OnKeyDown(left);
+            st.Clear();
+            Assert.AreEqual(0u, st.Advance(1f), "Clear 后不再重发");
+        }
+
+        [Test]
+        public void KeyRepeat_LastPressedKeyWinsAndOlderKeyUpDoesNotStop()
+        {
+            var st = new KeyRepeatState();
+            const uint left = 276, right = 275;
+            st.OnKeyDown(left);
+            st.Advance(0.2f);
+            // 按下第二键：重复目标切换 + 计时重置（最后按下优先，OS 同感）。
+            st.OnKeyDown(right);
+            Assert.AreEqual(0u, st.Advance(0.4f), "换键后重新走初始延迟");
+            Assert.AreEqual(right, st.Advance(0.1f), "重发的是最新键");
+
+            // 释放更早的键（left）不打断最新键的重复。
+            st.OnKeyUp(left);
+            Assert.AreEqual(right, st.Advance(KeyRepeatState.Interval), "旧键 keyup 不打断新键重复");
+            // 释放当前目标键才停。
+            st.OnKeyUp(right);
+            Assert.AreEqual(0u, st.Advance(KeyRepeatState.Interval), "目标键 keyup 停止");
+        }
+
+        [Test]
+        public void KeyRepeat_LongFrameDoesNotBurst()
+        {
+            // 超长帧（断点/卡顿 5s）：只发一次 + 计时重置整周期，不连发补帧。
+            var st = new KeyRepeatState();
+            const uint del = 323;       // KeyCode.Delete
+            st.OnKeyDown(del);
+            Assert.AreEqual(del, st.Advance(5f), "超长帧只发一次");
+            Assert.AreEqual(0u, st.Advance(0.01f), "计时重置整周期（不补帧）");
+            Assert.AreEqual(del, st.Advance(KeyRepeatState.Interval), "下个整周期再发");
+        }
     }
 }

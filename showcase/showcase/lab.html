@@ -486,6 +486,78 @@
         </div>
       </div>
 
+      <div class="section">
+        <div class="section-title">21 · 拖拽使能（draggable · #75）</div>
+        <div class="section-desc">验收（长按拖动，肉眼判据）：① 按住「声明式拖块」（HTML draggable="true"）拖动——块本身跟随指针移动（运行时把 DragMove 增量施加到 user transform），读数累计 DragStart 次数与总位移，持续跟随变动。② 按住「运行时开关拖块」拖动——初始纹丝不动（draggable 未开）；点「开启拖拽」按钮后再拖——开始跟随且读数翻动（Node.Draggable 运行时开关生效）。③ 「不可拖对照」块按住拖动——始终不动、读数不翻（未使能节点不参与 drag 仲裁）。</div>
+        <style>
+          .drag-box { width:120px; height:64px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:13px; }
+        </style>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">声明式（draggable="true"）</span>
+            <div draggable="true" id="drag-a" class="drag-box" style="background-color:#1a2f45;color:#dfe8f2;border-width:0 0 0 3px;border-style:solid;border-color:#2a5a75">拖我</div>
+            <span id="drag-a-read" style="color:#e0e6ec;font-size:13px;min-width:220px">—</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">运行时开关（Node.Draggable）</span>
+            <div style="display:flex;flex-direction:row;gap:6px;align-items:center">
+              <div id="drag-b" class="drag-box" style="background-color:#3a2f1a;color:#f2e8df;border-width:0 0 0 3px;border-style:solid;border-color:#8a6a2b">先开开关</div>
+              <button id="drag-b-btn" style="padding:8px 14px;background-color:#2b4a6b;color:#dfe8f2;border-radius:6px">开启拖拽</button>
+            </div>
+            <span id="drag-b-read" style="color:#e0e6ec;font-size:13px;min-width:220px">—</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">不可拖对照（未使能）</span>
+            <div id="drag-c" class="drag-box" style="background-color:#33383f;color:#aeb6c2">纹丝不动</div>
+            <span id="drag-c-read" style="color:#e0e6ec;font-size:13px;min-width:220px">—</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">22 · TabList 手动激活（data-activation="manual" · #13）</div>
+        <div class="section-desc">验收（键盘操作，肉眼判据）：点击上方 tablist 任一 tab 聚焦后——① 按方向键：焦点框（蓝色高亮）移到相邻 tab，「焦点」读数立即跟随，但「选中」读数**保持不变**（manual 模式方向键只移焦点不选中）。② 按 Enter（或 Space）：「选中」读数才变为焦点所在 tab（SelectionChanged 只在提交时发）。③ 下方自动激活对照组（缺省行为）：按方向键——焦点与选中同步移动（焦点到哪选中到哪）。④ 手动组点鼠标某个 tab——直接选中该 tab（鼠标语义不受激活模型影响）。</div>
+        <style>
+          .mtab-row { display:flex; flex-direction:row; gap:8px; padding:6px; background-color:#101c28; border-radius:8px; }
+          .mtab { padding:10px 22px; border-radius:6px; font-size:14px; color:#9aa0b4; background-color:#00000000; border-width:2; border-style:solid; border-color:#00000000; }
+          .mtab[aria-selected="true"] { background-color:#2b4a6b; color:#ffffff; }
+          .mtab:focus { border-color:#5fb4d4; }
+        </style>
+        <div class="specimen" style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">手动激活（方向键移焦点 · Enter 提交）</span>
+            <div class="mtab-row" role="tablist" data-activation="manual" id="mtab-manual">
+              <button class="mtab" role="tab" aria-selected="true" id="mt-m1">甲</button>
+              <button class="mtab" role="tab" aria-selected="false" id="mt-m2">乙</button>
+              <button class="mtab" role="tab" aria-selected="false" id="mt-m3">丙</button>
+            </div>
+            <span id="mtab-manual-read" style="color:#e0e6ec;font-size:13px">焦点 — / 选中 —</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <span style="color:#9aa0b4;font-size:12px">自动激活对照（缺省 · 焦点即选中）</span>
+            <div class="mtab-row" role="tablist" id="mtab-auto">
+              <button class="mtab" role="tab" aria-selected="true" id="mt-a1">A</button>
+              <button class="mtab" role="tab" aria-selected="false" id="mt-a2">B</button>
+              <button class="mtab" role="tab" aria-selected="false" id="mt-a3">C</button>
+            </div>
+            <span id="mtab-auto-read" style="color:#e0e6ec;font-size:13px">焦点 — / 选中 —</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">23 · 按住自动重复（key repeat · #76）</div>
+        <div class="section-desc">验收（键盘操作，肉眼判据）：① 点击文本框获得焦点（光标闪烁）——框内预置 12 个字符。② 按住 Backspace 不放——字符**连续**快速删除直到清空（只删一个字符即失败；约半秒后开始、此后高速连删，与 OS 长按删字同感）。③ 重新点「填入文字」按钮补回文字，按住左方向键不放——删除计数读数连续增长（方向键同样自动重复；每次 ValueChanged 事件 +1）。</div>
+        <style>
+          .kr-box { background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; color:#e0e6ec; font-size:15px; padding:10px 14px; border-radius:6px; caret-color:#5fb4d4; min-width:280px; }
+        </style>
+        <div class="specimen" style="display:flex;flex-direction:row;gap:16px;flex-wrap:wrap;align-items:center">
+          <div role="textbox" id="kr-input" class="kr-box">abcdefghijk l</div>
+          <button id="kr-fill" style="padding:8px 14px;background-color:#2b4a6b;color:#dfe8f2;border-radius:6px">填入文字</button>
+          <span id="kr-count" style="color:#e0e6ec;font-size:13px">删除计数 0</span>
+        </div>
+      </div>
+
     </div>
   </div>
 </body>

@@ -8,6 +8,58 @@ using UnityEngine.InputSystem.LowLevel;
 
 namespace Ikat
 {
+    /// key repeat 状态机（#76）：长按非修饰键按 OS 节律合成重复 keydown。
+    /// Unity Input System 与旧输入都不发 OS 键盘重复事件（与设备 keydown 不同构），
+    /// collector 归口合成（先例：IME composition 也归 collector）。节律 = 初始延迟
+    /// ~0.5s + 间隔 ~0.03s，固定常量（OS 用户设置拿不到，不做配置面）；最后按下的键
+    /// 优先（新 keydown 重置计时并切换重复目标，OS 同感）；keyup 即停。纯逻辑 struct
+    /// （无 Unity 依赖），EditMode 单测直测。
+    /// 注意：只重发 keydown 事件通道——控制键（Backspace/方向/…）经 process_keys 进
+    /// 编辑内核/控件路由，重复即生效；可打印字符走 textinput 通道（onTextInput 事件），
+    /// 字符级重复需 KeyCode→char 映射（键盘布局相关，不做）——长按字母只重发 keydown，
+    /// 不重复插字，与游戏 UI 场景（删字/连续导航）对齐。
+    public struct KeyRepeatState
+    {
+        public const float InitialDelay = 0.5f;
+        public const float Interval = 0.03f;
+
+        uint _key;      // 0 = 无 hold（KeyCode.None == 0）
+        float _timer;   // 距下次重发的剩余秒
+
+        /// 当前 hold 中的键（0=无）。
+        public uint Key => _key;
+
+        /// 非修饰键 keydown：接管重复目标（最后按下优先）+ 重置初始延迟。
+        public void OnKeyDown(uint keyCode)
+        {
+            if (keyCode == 0) return;
+            _key = keyCode;
+            _timer = InitialDelay;
+        }
+
+        /// keyup：仅当释放的是当前重复目标时停止（释放更早按下的键不打断最新键的重复，OS 同感）。
+        public void OnKeyUp(uint keyCode)
+        {
+            if (keyCode == _key) _key = 0;
+        }
+
+        /// 全清（失焦 / 组件禁用 / PlayMode 停止）。
+        public void Clear() => _key = 0;
+
+        /// 每帧推进（wall-clock dt，unscaled——OS 键盘重复不看游戏时间缩放）。
+        /// 返回本帧应重发的 key_code（0=无）。帧长超过剩余延迟只发一次（同帧重复键幂等，
+        /// 补发多份无意义）；超长帧（断点/卡顿）后重置到整周期防负值堆积连发。
+        public uint Advance(float dt)
+        {
+            if (_key == 0) return 0;
+            _timer -= dt;
+            if (_timer > 0f) return 0;
+            _timer += Interval;
+            if (_timer <= 0f) _timer = Interval;
+            return _key;
+        }
+    }
+
     /// 输入采集：Unity 指针（鼠标+触摸）→ PointerEvent[] → ikat_stage_set_input。
     /// screen→design 映射 + y-flip（Unity 左下原点 → Ikat 左上原点 design）。
     /// 兼容新旧输入系统：ENABLE_INPUT_SYSTEM 宏（Player Settings Active Input Handling=New/Both）走
@@ -47,6 +99,9 @@ namespace Ikat
         /// WebGL IME 状态切换昂贵）。ulong.MaxValue = 无聚焦（#26 u64 INVALID）。
         private ulong _lastFocused = ulong.MaxValue;   // #26 u64 INVALID
 
+        /// key repeat 状态机（#76）：长按非修饰键合成重复 keydown，节律见 struct 注释。
+        KeyRepeatState _repeat;
+
 #if ENABLE_INPUT_SYSTEM
         /// 本帧字符输入缓冲：Keyboard.onTextInput 逐字符事件触发（两帧之间可多次），
         /// CollectText 每帧消费后清空。替代旧路径 Input.inputString 的帧轮询。
@@ -70,6 +125,14 @@ namespace Ikat
         {
             InputSystem.onDeviceChange -= OnDeviceChange;
             Unsubscribe();
+            _repeat.Clear();
+        }
+
+        /// 应用失焦（alt-tab / 切窗口）：keyup 可能不再投递，重复状态机必须清——
+        /// 否则回焦后凭空连发。wall-clock 计时同样不该跨失焦期继续。
+        void OnApplicationFocus(bool focus)
+        {
+            if (!focus) _repeat.Clear();
         }
 
         /// 键盘设备变更（热插拔/重连/切布局等）：Keyboard.current 可能换新实例，事件挂实例上，
@@ -236,6 +299,9 @@ namespace Ikat
         /// KeyCode 数值（core key_code=(uint)KeyCode 契约，FFI 语义不随工程输入配置变——
         /// InputSystem.Key 与 KeyCode 数值不同，不能直发）。本帧无键事件 →
         /// set_key_input(null,0)（core 无键盘输入）。
+        /// 长按重复（#76）：Unity 两代输入系统都不合成 OS 键盘重复，这里用 KeyRepeatState
+        /// 按 OS 节律重发 keydown（控制键经 core process_keys 即连续生效——长按 Backspace
+        /// 连删、方向键连续移动）。
         public void CollectKeys(System.IntPtr stage)
         {
             if (stage == System.IntPtr.Zero) return;
@@ -250,6 +316,8 @@ namespace Ikat
                     var ctrl = kb[NewKeyList[i]];
                     bool down = ctrl.wasPressedThisFrame;
                     bool up = ctrl.wasReleasedThisFrame;
+                    if (down) _repeat.OnKeyDown((uint)KeyList[i]);
+                    if (up) _repeat.OnKeyUp((uint)KeyList[i]);
                     if (down || up)
                         keys.Add(new Bindings.KeyEvent { key_code = (uint)KeyList[i], modifiers = mods, is_down = down, pad0 = 0, pad1 = 0 });
                 }
@@ -259,10 +327,16 @@ namespace Ikat
             {
                 bool down = UnityEngine.Input.GetKeyDown(kc);
                 bool up = UnityEngine.Input.GetKeyUp(kc);
+                if (down) _repeat.OnKeyDown((uint)kc);
+                if (up) _repeat.OnKeyUp((uint)kc);
                 if (down || up)
                     keys.Add(new Bindings.KeyEvent { key_code = (uint)kc, modifiers = mods, is_down = down, pad0 = 0, pad1 = 0 });
             }
 #endif
+            // 重复 keydown 与真实事件同批送 core（unscaled dt：OS 键盘重复是 wall-clock）。
+            uint rpt = _repeat.Advance(Time.unscaledDeltaTime);
+            if (rpt != 0)
+                keys.Add(new Bindings.KeyEvent { key_code = rpt, modifiers = mods, is_down = true, pad0 = 0, pad1 = 0 });
             if (keys.Count == 0)
             {
                 Native.ikat_stage_set_key_input((Bindings.StageHandle*)stage, null, 0);
