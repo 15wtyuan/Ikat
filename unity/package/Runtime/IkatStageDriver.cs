@@ -91,6 +91,9 @@ namespace Ikat
         /// hub 输入路由探测：当前屏幕指针落点映射进本 stage design 系后是否命中可交互
         /// 内容（Context.Pick）。画布外（letterbox 黑边）不算命中。读上帧变换（与 tick
         /// 内 hit 同源、同 1 帧延迟语义）。
+        /// 注意：Pick 按 CSS 语义命中可命中盒（含铺满画布的普通容器）——覆盖全画布的
+        /// 高层 Stage 页面根须声明 pointer-events:none（交互面板再 auto），否则本探测
+        /// 在全画布命中、低层 Stage 的输入被整体饿死（showcase mini-hud 实锤）。
         /// </summary>
         internal bool PointerHitProbe()
         {
@@ -1027,7 +1030,7 @@ namespace Ikat
                 cam.orthographic = true;
                 cam.orthographicSize = sh / 2f;   // 不变（覆盖全屏，root 映射进 safe 区）
                 cam.cullingMask = 1 << IkatUILayer;
-                cam.clearFlags = CameraClearFlags.Depth;
+                cam.clearFlags = ComputeUiClearFlags(cam);
                 // 正交相机允许负 near：裁剪窗口须以 UI 平面（z=0）为中心前后对称——
                 // NativeHost 3D 内容按 design px 归一化（~520px 高 × root scale 即数千
                 // 世界单位），居中摆位时深度会越过 UI 平面向后延伸到相机（z=-10）之后；
@@ -1040,6 +1043,37 @@ namespace Ikat
                 cam.transform.localPosition = new Vector3(0f, 0f, -10f);
                 cam.transform.localRotation = Quaternion.identity;
             }
+        }
+
+        /// <summary>
+        /// UI 相机 clearFlags 决策（「UI 叠在宿主 3D 相机之上」的跨管线行为）。
+        ///
+        /// 有更深的宿主相机先渲染（天幕/3D 场景打底）→ UI 须保色叠加：
+        /// - Built-in：Depth（只清深度保留颜色，经典叠加语义）
+        /// - URP：Nothing。URP 17 起 Base 相机对 CameraClearFlags.Depth 会把颜色也清成
+        ///   backgroundColor（整帧抹掉宿主 3D 输出、场景不可见——世界锚点页实锤）；
+        ///   Nothing（Uninitialized）实测保色，UI 正确叠在 3D 之上。
+        /// 无打底相机（纯 UI 游戏、本相机是最底层）→ SolidColor 清自己的底色：
+        /// 不清色的首相机读到未初始化缓冲（残影/垃圾）。
+        /// SRP 判别走 GraphicsSettings.currentRenderPipeline（非 null = URP/HDRP 激活），
+        /// 不反射具体管线类型。
+        /// </summary>
+        static CameraClearFlags ComputeUiClearFlags(Camera self)
+        {
+            bool hasUnderlay = false;
+#if UNITY_2023_1_OR_NEWER
+            foreach (var c in UnityEngine.Object.FindObjectsByType<Camera>(UnityEngine.FindObjectsInactive.Exclude))
+#else
+            foreach (var c in FindObjectsOfType<Camera>())
+#endif
+            {
+                if (c == self || !c.isActiveAndEnabled || c.depth >= self.depth) continue;
+                hasUnderlay = true;
+                break;
+            }
+            if (!hasUnderlay) return CameraClearFlags.SolidColor;
+            bool srp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            return srp ? CameraClearFlags.Nothing : CameraClearFlags.Depth;
         }
 
         /// <summary>

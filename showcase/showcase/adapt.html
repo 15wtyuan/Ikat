@@ -15,13 +15,13 @@
 
   /* env() 避让条：fit 贴物理边时让开 notch/home indicator（预览选 iPhone 设备
      生效；桌面编辑器 inset=0 贴边）。读数条自带 env padding，正文不再让。 */
-  .safe-strip { position:relative; display:flex; flex-direction:row; align-items:center; gap:1.5vmin;
+  .safe-strip { position:relative; z-index:0; display:flex; flex-direction:row; align-items:center; gap:1.5vmin;
                 padding:1vmin 2vmin env(safe-area-inset-top) env(safe-area-inset-left);
                 background-color:#1b2b3fdd; }
   .strip-label { color:#8ec5d8; font-size:1.4vmin; }
   .readout { color:#ffd479; font-size:1.4vmin; font-weight:700; }
 
-  .body { position:relative; display:flex; flex-direction:column; flex-grow:1;
+  .body { position:relative; z-index:0; display:flex; flex-direction:column; flex-grow:1;
           padding:2vmin 3vmin; gap:2vmin; overflow-y:hidden; }
 
   /* 响应式字号：vmin 分母 = 画布短边——拖窗口整体缩放（肉眼强信号） */
@@ -64,6 +64,7 @@
 </head>
 <body>
   <div class="root">
+    <page-top id="page-top"><span slot="title" class="pt-title" style="color:#e0e6ec;font-size:20px;font-weight:700">全屏覆盖适配</span></page-top>
     <div class="safe-strip">
       <span class="strip-label">env() 避让条（safe inset 让位）</span>
       <span class="readout" id="adapt-readout">letterbox</span>

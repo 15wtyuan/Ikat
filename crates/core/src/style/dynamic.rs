@@ -783,6 +783,14 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
             node.style = new_style;
             node.render_input_version += 1;
         }
+        // pointer-events（style.touchable）级联终态回写 interaction——hit_test 判据在
+        // interaction（建节点时从 base_style 拷贝一次），类规则驱动的 pointer-events
+        // 只落 style 层的话永远到不了命中（mini-hud 根 pointer-events:none 不吞命中的
+        // 实锤）。运行时 set_node_touchable 写的是 base_style（重起源），此处随级联
+        // 同步不与其冲突。inline 声明路径不经过此分叉（打包期 bake 进 base_style）。
+        if node.interaction.touchable != node.style.touchable {
+            node.interaction.touchable = node.style.touchable;
+        }
         if display_decl_seen && node.style.display_mode == DisplayMode::Flex && node.rich_text_block
         {
             node.rich_text_block = false;

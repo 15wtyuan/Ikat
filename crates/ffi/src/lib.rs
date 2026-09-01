@@ -107,4 +107,6 @@ mod abi_tests;
 #[cfg(test)]
 mod golden_tests;
 #[cfg(test)]
+mod set_node_visible_ffi_test;
+#[cfg(test)]
 mod test_helpers;

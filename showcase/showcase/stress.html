@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <title>Ikat 靶子冻结 Showcase · 压测 500</title>
   <style>
-  .root {display:flex;flex-direction:column; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; }
+  /* 根透明：3D 场景（500 方块 + Main Camera 天幕）从 UI 底下透出——压测页与世界锚点页
+     同款宿主形态（3D 相机 depth -1 先画，UI 相机保色叠加）。 */
+  .root {display:flex;flex-direction:column; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e162000; }
   .body {display:flex; flex-direction:row; gap:24px; padding:24px; overflow:hidden; }
   .panel {display:flex;flex-direction:column; width:340px; gap:14px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:24px; align-self:flex-start; }
   .panel-title { color:#8ec5d8; font-size:16px; font-weight:700; }
@@ -27,10 +29,11 @@
       </div>
     </div>
     <!-- 压测血条模板：根 absolute + left/top 0 直挂页根——静止网格与投影跟随都经
-         Transform.Position 写绝对设计坐标（网格 = 一次性摆放；跟随 = 锚点每帧重投影）。 -->
+         Transform.Position 写绝对设计坐标（网格 = 一次性摆放；跟随 = 锚点每帧重投影）。
+         pointer-events:none：纯展示条不参与命中——500 条铺满视口时不抢面板按钮的点击。 -->
     <template id="st-bar">
-      <div role="listitem" style="position:absolute;left:0;top:0;width:96px;height:8px;background-color:#1a2836;border-radius:4px">
-        <div id="st-fill" style="position:absolute;left:0;top:0;width:96px;height:100%;background-color:#5fb4d4;border-radius:4px"></div>
+      <div role="listitem" style="position:absolute;left:0;top:0;width:96px;height:8px;background-color:#1a2836;border-radius:4px;pointer-events:none">
+        <div id="st-fill" style="position:absolute;left:0;top:0;width:96px;height:100%;background-color:#5fb4d4;border-radius:4px;pointer-events:none"></div>
       </div>
     </template>
   </div>

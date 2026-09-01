@@ -1940,9 +1940,9 @@ fn ffi_stage_hit_test_basic() {
     let mut out = u64::MAX;
     assert_eq!(ikat_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
     assert_eq!(out, node, "子节点区域命中子");
-    // 子外 root 区域 → root。
-    assert_eq!(ikat_stage_hit_test(h, 150.0, 90.0, &mut out), 0);
-    assert_eq!(out, root, "root 区域命中 root");
+    // 子外 root 区域 → 无命中（文档根是宿主容器，不可命中——多 Stage 输入路由依赖
+    // 「空白处 = 无命中」，可命中的全画布根会把底层 Stage 输入饿死）→ rc=1。
+    assert_eq!(ikat_stage_hit_test(h, 150.0, 90.0, &mut out), 1);
     // 画布外 → rc=1。
     assert_eq!(ikat_stage_hit_test(h, 500.0, 500.0, &mut out), 1);
     // null out 指针（防御）→ -1。
@@ -1991,12 +1991,12 @@ fn ffi_node_touchable_roundtrip_and_hit() {
     let mut out = u64::MAX;
     assert_eq!(ikat_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
     assert_eq!(out, node);
-    // set false → 自身不命中，点落到 root（父 fallback）。
+    // set false → 自身不命中；文档根不可命中（宿主容器），点落到无命中（rc=1）。
     ikat_stage_set_node_touchable(h, node, false);
     assert_eq!(ikat_stage_get_node_touchable(h, node, &mut b), 0);
     assert_eq!(b, 0, "untouchable now");
-    assert_eq!(ikat_stage_hit_test(h, 20.0, 20.0, &mut out), 0);
-    assert_eq!(out, root, "untouchable node skipped, hit falls to root");
+    assert_eq!(ikat_stage_hit_test(h, 20.0, 20.0, &mut out), 1);
+    assert_eq!(out, node, "no hit（rc=1）不写 out——保留上次命中值");
     // 恢复 → 命中回归。
     ikat_stage_set_node_touchable(h, node, true);
     assert_eq!(ikat_stage_hit_test(h, 20.0, 20.0, &mut out), 0);

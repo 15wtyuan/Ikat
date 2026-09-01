@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <title>Ikat 靶子冻结 Showcase · 首页</title>
   <style>
-  .root {display:flex;flex-direction:column; width:100vw; height:100vh; background-color:#0e1620; background-image:radial-gradient(1100px 560px at 82% -12%, rgba(95,180,212,0.10), transparent 60%); padding:48px; gap:32px; }
+  /* fit-width 全屏覆盖适配（#110）：nav-grid flex-grow 吸收画布富余高度（行组垂直居中、
+     footer 落底——拖高窗口不再留大片死区）；窗口拖矮（画布 < 内容）时 root 滚动兜底，
+     底部列表不再被屏幕裁掉（浏览器「内容超视口即滚动」同款语义）。 */
+  .root {display:flex;flex-direction:column; width:100vw; height:100vh; background-color:#0e1620; background-image:radial-gradient(1100px 560px at 82% -12%, rgba(95,180,212,0.10), transparent 60%); padding:48px; gap:32px; overflow-y:auto; }
   .hero {display:flex; flex-direction:row; align-items:center; gap:24px; }
   .hero-logo { width:92px; height:92px; }
   .hero-title { color:#e6ebf2; font-size:46px; font-weight:800; letter-spacing:-0.92px; }
@@ -15,7 +18,7 @@
   .btn-ghost { background-color:rgba(95,180,212,0.06); color:#8ec5d8; font-size:17px; font-weight:600; padding:14px 30px; border-radius:10px; box-shadow:inset 0 0 0 1px rgba(95,180,212,0.22); }
   .btn-primary:hover { filter:brightness(1.08); transform:translateY(-1px); }
   .btn-ghost:hover { background-color:rgba(95,180,212,0.12); box-shadow:inset 0 0 0 1px rgba(95,180,212,0.42); }
-  .nav-grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:20px; }
+  .nav-grid {display:flex; flex-direction:row; flex-wrap:wrap; gap:20px; flex-grow:1; align-content:center; }
   .nav-card {display:flex; width:420px; background-color:rgba(21,36,51,0.72); border-radius:10px; padding:22px; gap:14px; flex-direction:row; align-items:center; box-shadow:inset 0 0 0 1px rgba(95,180,212,0.10), inset 0 1px 0 rgba(255,255,255,0.04); transition:transform .18s, background-color .18s, box-shadow .18s; }
   .nav-card:hover { transform:translateY(-3px); background-color:rgba(26,47,69,0.85); box-shadow:inset 0 0 0 1px rgba(95,180,212,0.34), inset 0 1px 0 rgba(255,255,255,0.06); }
   .nav-card-icon { width:52px; height:52px; }

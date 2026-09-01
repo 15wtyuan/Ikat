@@ -53,6 +53,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
 ### Fixed
+- **URP 下 UI 相机不再抹掉宿主 3D 场景（#109 验收批）**：URP 17 起 Base 相机对
+  `CameraClearFlags.Depth` 会把颜色也清成自身 backgroundColor——叠在宿主 3D
+  相机之上的 UI 相机每帧整屏抹掉 3D 输出（世界锚点/压测页"看不到 3D 场景"）。
+  clearFlags 改为按管线与打底相机分流：有更深的宿主相机时 Built-in 用
+  Depth（经典保色叠加）、SRP（URP/HDRP）用 Nothing；无打底相机（纯 UI）用
+  SolidColor（不清色的首相机会读到未初始化缓冲）。
+- **滚动/世界锚点跟随的渲染增量冻结（#109 验收批）**：mesh 合并批此前矩阵恒
+  IDENTITY + 成员 payload hash 为局部系位移不变量——纯滚动 / Transform
+  平移变更下批的双轴 hash 全不变，整批被判 Skip，后端镜像冻结在旧位置（拖动
+  滚动容器时布局错乱、世界锚点跟随一卡一卡）。合并批改为持 anchor 平移矩阵
+  （同质批平移 → Header 级只挪 GO）+ 整批 payload hash 定级（混合批净位移 →
+  Full 重传），滚动中所有合并批严格跟手；稳态帧仍全 Skip（增量效率不变）。
+- **`SetNodeRenderVisible` 同值重复写不再触发挥重建（#109 验收批）**：世界锚点
+  路径每帧对屏内节点调 `visible=true`——旧实现每帧 bump
+  `render_input_version`，增量渲染指纹全部 miss（缓存失效 churn）。同值写入
+  幂等短路。
+- **运行时第二 Driver（双 Stage）此前收不到任何输入（#109 验收批）**：运行时
+  `AddComponent<IkatStageDriver>` 拉起的小窗 GO 上没挂 `IkatInputCollector`——
+  hub 路由探测（`PointerHitProbe`）与输入采集都吃它，缺 collector 时小窗永远
+  轮不到输入所有权，点击全部穿透到底层 Stage 的按钮。小窗 GO 现在配好自己的
+  collector。配套：**stage 文档根不可命中**（`create_root` 建的宿主容器
+  `touchable=false`）——根铺满画布且可命中时，「点到空白处」会命中根，多 Stage
+  输入路由据此把指针下所有底层 Stage 饿死（小窗外的按钮也点不动）；overlay 类
+  Stage 的页面根另应声明 `pointer-events:none`（交互面板再 `auto`），把命中面
+  收窄到真正的交互内容。
+- **showcase：压测页不再遮挡场景与按钮（#109 验收批）**：页根背景改透明（3D
+  场景从 UI 底下透出，与世界锚点页同款）；500 血条网格让开左侧面板区且模板根
+  `pointer-events:none`（纯展示条不抢命中——此前整片网格盖住面板，隐藏/跟随
+  按钮点不到）；生成血条同步生成 500 个 3D 方块（血条的 3D 对应物，投影跟随
+  是否正确肉眼可辨）。
+- **showcase：适配页补返回栏、首页全屏覆盖适配（#110 验收批）**：adapt 页补
+  `<page-top>` 返回首页（其余页同款）；首页 nav-grid 吸收画布富余高度（footer
+  落底，拖高窗口不再留死区）+ 页根允许滚动（窗口拖矮时底部列表被屏幕裁掉 →
+  改为可滚动）。
 - **IkatUICamera 裁剪窗扩为 UI 平面中心的前后对称大窗（#102）**：此前
   `near=0.1 / far=100`——NativeHost 3D 内容按 design px 归一化（数百 px
   高 × root scale 即数千世界单位深），居中摆位时深度越过 UI 平面向后延

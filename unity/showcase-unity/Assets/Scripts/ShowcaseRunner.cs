@@ -124,9 +124,7 @@ public class ShowcaseRunner : MonoBehaviour
     float _miniSpawnTime;
     int _probeClicks;
 
-    // ── stress 页：500 血条压测（blob v15 + 增量渲染 + 投影跟随 + 渲染隐藏）──
-    readonly System.Collections.Generic.List<Container> _stressBars = new();
-    bool _stressFollow, _stressHidden;
+    // ── stress 页字段见 WireStressPage 区（_stressBars/_stressCubes/_stressStageRoot 等）──
 
     void Update()
     {
@@ -788,27 +786,27 @@ public class ShowcaseRunner : MonoBehaviour
         }
     }
 
-    /// 双 Stage 普查读数：Driver 数 + 场景内 IkatUICamera 数（共享 = 恒 1）。
+    /// 双 Stage 普查读数：Driver 数 + 存活 IkatUICamera 数（共享 = 恒 1）。
+    /// 自建相机带 DontSaveInEditor hideFlags，FindObjectsByType 不可见（曾数出「相机 0」
+    /// 假读数）——用 Resources.FindObjectsOfTypeAll 连隐藏对象一起数。
     string StageCensusText()
     {
         int cams = 0;
-#if UNITY_2023_1_OR_NEWER
-        // FindObjectsInactive 重载：SortMode 版在 6000.5+ 也进废弃名单，FindObjectsOfType
-        // 在 2023.1+ 是 obsolete 警告源——此重载全周期可用。
-        foreach (var c in FindObjectsByType<Camera>(UnityEngine.FindObjectsInactive.Exclude))
-#else
-        foreach (var c in FindObjectsOfType<Camera>())
-#endif
-            if (c.name == "IkatUICamera") cams++;
+        foreach (var c in Resources.FindObjectsOfTypeAll<Camera>())
+            if (c != null && c.name == "IkatUICamera" && c.gameObject.scene.IsValid()) cams++;
         return "Driver " + IkatStageHub.DriverCount + " · 相机 " + cams;
     }
 
     /// 拉起第二 Driver：inactive GO 上配好共享宿主/层序再激活（Awake 在 SetActive 时跑），
     /// 加载同一 showcase 包 + 实例化 mini-hud 小窗。字体走共享宿主（A3：注册一次复用）。
+    /// 输入采集器必须同 GO 挂上：hub 路由探测（PointerHitProbe）与 backend.CollectInput
+    /// 都吃它——缺 collector 时小窗永远输不了路由（点击全穿透到底层 Stage，双 Stage
+    /// 验收期实锤）。Awake 里 GetComponent 找的就是它。
     void SpawnMiniStage(TextElement stageRead)
     {
         var go = new GameObject("IkatMiniStage");
         go.SetActive(false);
+        go.AddComponent<IkatInputCollector>();
         var d = go.AddComponent<IkatStageDriver>();
         d.ConfigureStage(1, true);   // 高序：画在主 Stage 之上，输入探测优先（Awake 前配好）
         go.SetActive(true);
@@ -920,10 +918,40 @@ public class ShowcaseRunner : MonoBehaviour
     }
 
     // ── stress 页：500 血条压测（blob v15 + 增量渲染 + 投影跟随 + 渲染隐藏）──
-    //
-    // 血条 = absolute+left/top:0 直挂页根：静止网格 = 一次性写 Transform.Position 摆位；
-    // 投影跟随 = 每帧 SetWorldAnchor 重投影（世界点绕相机前方的波浪面运动，出屏自动
-    // 整条隐藏——继承语义 + 后端保留对象不闪重建）。
+    // 血条 = absolute+left/top:0 直挂页根（模板根 pointer-events:none——纯展示条不抢
+    // 命中，否则整片网格盖住左侧面板按钮，隐藏/跟随按钮点不到）。静止网格 = 一次性写
+    // Transform.Position 摆位（让开面板区：18 列从 x=388 起）；投影跟随 = 每帧
+    // SetWorldAnchor 重投影。场景侧同步生成 500 个小方块（血条的 3D 对应物——跟随
+    // 是否正确肉眼可辨：每条血条悬在对应方块头顶）。
+    readonly System.Collections.Generic.List<Container> _stressBars = new();
+    // 方块与血条同序（index 对应）：静止 = 面前平铺网格；跟随 = 波浪世界点。
+    readonly System.Collections.Generic.List<Transform> _stressCubes = new();
+    GameObject _stressStageRoot;
+    bool _stressFollow, _stressHidden;
+    const int StressCols = 18;                    // 18×78 + 96 = 1488 ≤ 1920-388-24
+    const float StressGridX0 = 388f, StressGridY0 = 120f, StressCellW = 78f, StressCellH = 30f;
+
+    static IkatVector2 StressGridPos(int i)
+    {
+        return new IkatVector2(StressGridX0 + (i % StressCols) * StressCellW,
+            StressGridY0 + (i / StressCols) * StressCellH);
+    }
+
+    /// 血条 i 的波浪世界点（相机 (0,1,-10) 平视 +z 前方的体积波）。
+    static Vector3 StressWavePos(float t, int i)
+    {
+        return new Vector3(
+            Mathf.Sin(t * 0.7f + i * 0.13f) * 5.5f,
+            1.2f + Mathf.Sin(t * 1.1f + i * 0.37f) * 3.5f,
+            3f + Mathf.Cos(t * 0.5f + i * 0.13f) * 4f);
+    }
+
+    /// 方块静止停放：相机前平铺网格（25×20，间距 0.55/0.35）。
+    static Vector3 StressParkPos(int i)
+    {
+        return new Vector3((i % 25) * 0.55f - 7.4f, 0.35f, 3f + (i / 25) * 0.35f);
+    }
+
     void WireStressPage(Container page, string pageName)
     {
         if (pageName != "stress") return;
@@ -941,18 +969,27 @@ public class ShowcaseRunner : MonoBehaviour
         {
             foreach (var b in _stressBars) b.Dispose();
             _stressBars.Clear();
+            TeardownStressCubes();
             var tpl = page.GetTemplate("st-bar");
+            _stressStageRoot = new GameObject("IkatStressStage");
             for (int i = 0; i < 500; i++)
             {
                 var bar = tpl.Instantiate();
                 page.AddChild(bar);
-                // 静止网格：24 列 × 78px（宽 1872）× 21 行 × 30px（y 从 120 起）。
-                bar.Transform.Position = new IkatVector2((i % 24) * 78 + 22, (i / 24) * 30 + 120);
+                bar.Transform.Position = StressGridPos(i);
                 _stressBars.Add(bar);
+                // 3D 对应物：无碰撞体、不投影（500 方块纯视觉负载，别再叠物理/阴影成本）。
+                var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                var col = cube.GetComponent<Collider>();
+                if (col != null) Destroy(col);
+                cube.transform.SetParent(_stressStageRoot.transform, false);
+                cube.transform.localScale = Vector3.one * 0.3f;
+                cube.transform.localPosition = StressParkPos(i);
+                _stressCubes.Add(cube.transform);
             }
             _stressFollow = false;
             _stressHidden = false;
-            read.TextContent = "500 · 静止网格（右上角 FPS 读数）";
+            read.TextContent = "500 · 静止网格 + 500 方块（右上角 FPS 读数）";
         };
 
         followBtn.Clicked += () =>
@@ -961,15 +998,15 @@ public class ShowcaseRunner : MonoBehaviour
             _stressFollow = !_stressFollow;
             if (!_stressFollow)
             {
-                // 回静止：清锚点登记 + 恢复网格摆位。
+                // 回静止：清锚点登记 + 恢复网格摆位 + 方块回停放网格。
                 for (int i = 0; i < _stressBars.Count; i++)
                 {
                     _driver.ClearWorldAnchor(_stressBars[i]);
-                    _stressBars[i].Transform.Position =
-                        new IkatVector2((i % 24) * 78 + 22, (i / 24) * 30 + 120);
+                    _stressBars[i].Transform.Position = StressGridPos(i);
+                    _stressCubes[i].localPosition = StressParkPos(i);
                 }
             }
-            read.TextContent = _stressFollow ? "500 · 投影跟随中（波浪 + 出屏自动隐藏）" : "500 · 静止网格";
+            read.TextContent = _stressFollow ? "500 · 投影跟随中（血条悬在方块头顶 · 出屏自动隐藏）" : "500 · 静止网格";
         };
 
         hideBtn.Clicked += () =>
@@ -982,7 +1019,8 @@ public class ShowcaseRunner : MonoBehaviour
         };
     }
 
-    /// 投影跟随：500 世界点绕相机前方波浪运动，每帧重锚（P6 场景的引擎侧实跑）。
+    /// 投影跟随：500 世界点绕相机前方波浪运动，血条锚在方块头顶（上抬 0.35 世界单位
+    /// + 设计 offset 居中），每帧重锚（P6 场景的引擎侧实跑）。
     void UpdateStressFollow()
     {
         if (!_stressFollow || _stressBars.Count == 0) return;
@@ -991,11 +1029,20 @@ public class ShowcaseRunner : MonoBehaviour
         float t = Time.time;
         for (int i = 0; i < _stressBars.Count; i++)
         {
-            Vector3 p = new Vector3(
-                Mathf.Sin(t * 0.7f + i * 0.13f) * 5.5f,
-                1.2f + Mathf.Sin(t * 1.1f + i * 0.37f) * 3.5f,
-                3f + Mathf.Cos(t * 0.5f + i * 0.13f) * 4f);
-            _driver.SetWorldAnchor(_stressBars[i], cam, p, new Vector2(-48f, -20f));
+            Vector3 p = StressWavePos(t, i);
+            _stressCubes[i].localPosition = p;
+            _driver.SetWorldAnchor(_stressBars[i], cam, p + Vector3.up * 0.35f,
+                new Vector2(-48f, -20f));
+        }
+    }
+
+    void TeardownStressCubes()
+    {
+        _stressCubes.Clear();
+        if (_stressStageRoot != null)
+        {
+            Destroy(_stressStageRoot);
+            _stressStageRoot = null;
         }
     }
 
@@ -1004,6 +1051,7 @@ public class ShowcaseRunner : MonoBehaviour
         foreach (var b in _stressBars)
             if (b != null) _driver.ClearWorldAnchor(b);
         _stressBars.Clear();
+        TeardownStressCubes();
         _stressFollow = false;
         _stressHidden = false;
     }

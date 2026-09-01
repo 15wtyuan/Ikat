@@ -150,6 +150,17 @@ pub fn create_root(scene: &mut Scene, kind: &str, css: &str) -> Result<NodeId, S
         n.interaction
             .flags
             .insert(NodeFlags::SCOPE_ROOT | NodeFlags::LOOKUP_SCOPE);
+        // 裸 div 文档根不可命中（hit 探测基础设施层不吃点击）：driver 建的宿主根铺满
+        // 画布，可命中会让「点到空白处」返回根而非 null——多 Stage 输入路由（Pick 命中
+        // 即独占）据此把指针下所有底层 Stage 饿死。仅限 Container（div）——消费者经
+        // FFI 以 button 等交互 kind 建根是显式意图，保持可命中。三处同写（style 层是
+        // rematch 的重起源 + 派生起点；interaction 是 hit 判据——单写 interaction 会被
+        // rematch 的级联回写冲掉，同 set_node_touchable 的双写纪律）。
+        if n.kind == crate::scene::node::NodeKind::Container {
+            n.interaction.touchable = false;
+            n.base_style.touchable = false;
+            n.style.touchable = false;
+        }
     }
     Ok(id)
 }
@@ -482,6 +493,11 @@ pub fn set_text(scene: &mut Scene, node: NodeId, text: &str) -> Result<(), Strin
 /// 命中，只控渲染行 visible 位（后端保留镜像对象、SetActive(false)）。node 不 live → Err。
 pub fn set_node_render_hidden(scene: &mut Scene, node: NodeId, hidden: bool) -> Result<(), String> {
     let n = scene.get_mut(node).ok_or("node not live")?;
+    // 幂等短路：同值重复写不 bump render_input_version。世界锚点路径每帧对屏内节点
+    // 调 SetNodeRenderVisible(true)——bump 会让增量渲染指纹每帧 miss（缓存全失效 churn）。
+    if n.render_hidden == hidden {
+        return Ok(());
+    }
     n.render_hidden = hidden;
     n.render_input_version += 1;
     Ok(())

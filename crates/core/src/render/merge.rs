@@ -78,9 +78,9 @@ pub fn merge_meshes(
     merge_meshes_tracked(control_ids, nodes).0
 }
 
-/// <see cref="merge_meshes"/> 的生产入口：额外返回 merged 锚 → 批成员 node_id 表（push 序）。
-/// 增量定级消费：merged 行的 payload 是批内多行 concat，锚自身单行 hash 不代表批内容
-/// （非锚成员变更不可见）——须按成员 ph 拼合重算（见 build_render_nodes_cached 定级 pass）。
+/// <see cref="merge_meshes"/> 的生产入口：额外返回 merged 锚 → 批成员 node_id 表。
+/// 增量定级消费（build_render_nodes_cached）：merged 行的 ph 须对整批 payload 直接
+/// hash（成员 ph 是位移不变量，拼合会漏检纯滚动），成员表用于把锚路由到批 hash 分支。
 pub fn merge_meshes_tracked(
     control_ids: &std::collections::HashSet<u64>,
     nodes: Vec<RenderNode>,
@@ -124,9 +124,23 @@ pub fn merge_meshes_tracked(
 }
 
 /// 把一组同 DrawState Mesh 节点拼成单个 merged Mesh payload。
+///
+/// 坐标约定（滚动/transform 增量的正确性根基）：批持有 **anchor 的世界平移矩阵**
+/// T(t_anchor)，成员顶点保持世界系绝对坐标 concat（blob emit 侧按矩阵 tx/ty 统一
+/// re-base，与独立行同契约）。这样纯滚动/user_transform 变更只改矩阵 → header_hash
+/// 变（Header 级，后端只挪 GO 不重传 mesh），payload_hash（成员 ph concat，成员局部
+/// 系）保持 scroll 不变量。旧实现矩阵恒 IDENTITY + 绝对顶点：滚动时 header_hash/
+/// payload_hash 双不变 → 整批 Skip → 镜像冻结在旧滚动位（拖动布局全乱、世界锚点
+/// 跟随跳变的根因）。
 fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
-    let anchor = batch.iter().map(|&i| nodes[i].node_id).min().unwrap();
+    let anchor_idx = *batch.iter().min_by_key(|&&i| nodes[i].node_id).unwrap();
+    let anchor = nodes[anchor_idx].node_id;
     let last = &nodes[*batch.last().unwrap()]; // 取 texture/program/mask_context/sort_key 模板
+                                               // anchor 的世界平移（成员均纯平移——mesh_key 门控）：批矩阵的 re-base 基准。
+    let (tax, tay) = (
+        nodes[anchor_idx].world_matrix[4],
+        nodes[anchor_idx].world_matrix[5],
+    );
     let mut verts: Vec<[f32; 2]> = Vec::new();
     let mut uvs: Vec<[f32; 2]> = Vec::new();
     let mut colors: Vec<[f32; 4]> = Vec::new();
@@ -159,7 +173,9 @@ fn merge_batch(nodes: &[RenderNode], batch: &[usize]) -> RenderNode {
         visible: last.visible,
         alpha: last.alpha, // merged alpha=子 alpha（同 key 保证一致；走 _Alpha uniform）
         color_tint: [1.0; 4],
-        world_matrix: crate::transform::IDENTITY,
+        // anchor 平移矩阵（非 IDENTITY）：滚动/transform 增量经此走 header_hash → Header
+        // 级（blob Mtx/Mty 列刷新，GO 挪位；mesh anchor 局部不变不重传）。
+        world_matrix: crate::transform::from_translate(tax, tay),
         blend: last.blend,
         mask_context: last.mask_context,
         sort_key: last.sort_key,

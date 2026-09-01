@@ -998,20 +998,14 @@ pub fn build_render_nodes_cached(
     let mut new_hashes = std::collections::HashMap::with_capacity(nodes.len());
     for rn in &mut nodes {
         let hh = crate::render::dirty::header_hash(rn);
-        // merged 行的 payload 是批内多行 concat——锚自身单行 hash 不代表批内容（非锚
-        // 成员变更会漏检成 Skip → 旧 mesh 上屏）。按成员 ph（各自便宜且已算好）拼合
-        // 重算：任一成员几何变 / 批成员集变（拆批/并批）→ 批 hash 必变。
-        let ph = if let Some(members) = merged_members.get(&rn.node_id) {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            0x4D45_5247u64.hash(&mut h); // "MERG" 判别——与单行 payload hash 空间区分
-            for &m in members {
-                // ph_reuse 按构造含全部 pre-merge 行（hit 回放缓存 phs / miss 存 emitted
-                // phs）；缺项回退 id 自身（两帧同值 → 退化为 Skip 判定，不误伤）。
-                let member_ph = ph_reuse.get(&m).copied().unwrap_or(m);
-                member_ph.hash(&mut h);
-            }
-            h.finish()
+        // merged 行的 payload 是批内多行 concat（世界绝对顶点，行内 hash 按自身矩阵
+        // re-base）——对整批 payload 直接 hash：成员几何变 / 拆并批 / 混合批（静态
+        // anchor + 滚动成员）的净位移都会变 ph → Full。旧实现用成员 ph（各自局部系、
+        // 位移不变量）拼合——纯滚动下双轴全不变 → 整批 Skip → 镜像冻结在旧滚动位
+        //（拖动布局乱/世界锚点跟随跳位的根因）。同质批（全员随 anchor 平移）ph 不变、
+        // 仅矩阵变 → Header 级：blob 只刷 Mtx/Mty 列，后端挪 GO 不重传 mesh。
+        let ph = if merged_members.contains_key(&rn.node_id) {
+            crate::render::dirty::payload_hash(rn)
         } else {
             ph_reuse
                 .get(&rn.node_id)
