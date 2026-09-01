@@ -490,7 +490,7 @@ impl<'a> Walker<'a> {
             parent_idx: parent_tpl,
             classes: extract_classes(el),
             id_attr: attr(el, "id"),
-            draggable: false,
+            draggable: attr(el, "draggable").is_some_and(|v| v == "true"),
             disabled: false,
             tabindex: attr(el, "tabindex").and_then(|s| s.parse::<i32>().ok()),
             content: None,
@@ -620,7 +620,9 @@ impl<'a> Walker<'a> {
             parent_idx: parent_tpl,
             classes: extract_classes(el),
             id_attr: attr(el, "id"),
-            draggable: false,
+            // draggable：与 bridge 主路径同款提取口径（HTML 全局属性，fence 值域
+            // true|false，非 "true" 一律按 false 兜底）。
+            draggable: attr(el, "draggable").is_some_and(|v| v == "true"),
             // 组件模板内部的元素同样可带 HTML disabled（fence 内容属性按元素校验，
             // 与页面同规则）——照 bridge 主路径同款 presence 语义提取。
             disabled: attr(el, "disabled").is_some(),
@@ -1274,6 +1276,45 @@ mod tests {
         assert!(
             ra.w > 0.0 && ra.h > 0.0,
             "行元素必须有实际盒（修前 div 行被 rich 折叠跳过、0x0 隐身）: {ra:?}"
+        );
+    }
+
+    /// draggable 属性经组件展开路径（bridge_with_components）烙进 pkg——页面元素与
+    /// 组件 host 两个构造点都提取。修前：expand 路径所有节点 draggable 硬编码
+    /// false（旧 bridge() 只有单测在用），HTML `draggable="true"` 打包即丢，
+    /// 运行时永远拖不动（#75 验收实锤）。缺省与 "false" 保持关。
+    #[test]
+    fn draggable_imprinted_through_expand_path() {
+        let reg = registry_with(CARD_HTML);
+        let pr = pack_page(
+            &reg,
+            r#"<div>
+  <div draggable="true" id="page-drag">拖我</div>
+  <div draggable="false" id="page-off"></div>
+  <div id="page-dft"></div>
+  <game-item-card draggable="true" id="host-drag"></game-item-card>
+</div>"#,
+        );
+        let pkg = ikat_core::asset::read_package(&pr.bytes).expect("read back");
+        let find = |id: &str| -> Option<bool> {
+            pkg.components.values().find_map(|c| {
+                c.nodes
+                    .iter()
+                    .find(|n| n.id_attr.as_deref() == Some(id))
+                    .map(|n| n.draggable)
+            })
+        };
+        assert_eq!(
+            find("page-drag"),
+            Some(true),
+            "页面元素 draggable=true 须烙进 pkg（修前 expand 路径硬编码 false）"
+        );
+        assert_eq!(find("page-off"), Some(false));
+        assert_eq!(find("page-dft"), Some(false));
+        assert_eq!(
+            find("host-drag"),
+            Some(true),
+            "组件 host 上声明的 draggable 须烙进 pkg"
         );
     }
 }

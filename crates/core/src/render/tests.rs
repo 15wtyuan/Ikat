@@ -4659,6 +4659,57 @@ fn textfield_empty_value_renders_placeholder() {
     );
 }
 
+/// 删空后文字 mesh 必须消失（#76 验收：长按 Backspace 删到空，屏幕残留最后一个
+/// 字符）。根因：measure_text_controls 在 value 变空时跳过缓存写入但不清旧缓存，
+/// render 的 `unwrap_or_else` 只在缓存为 None 时触发 → 上帧 layout 残留 → 旧字形
+/// 继续上屏。本测试锁「删空 → 缓存清 → 无文字 mesh」全链。
+#[test]
+fn textfield_value_emptied_clears_stale_text_mesh() {
+    let (mut scene, id) = make_scene_with_text_control(
+        NodeKind::TextField,
+        ControlState::TextField(EditState::from_init("a".into(), "".into(), 0, false)),
+    );
+    let fonts = test_font_table().expect("need test font");
+    // 帧 1：value="a" 正常缓存（模拟删除中途中间帧）。
+    crate::scene::control::measure_text_controls(&mut scene, &fonts);
+    assert!(
+        scene.text_layouts[id.index()].is_some(),
+        "非空 value 应填 text_layouts 缓存"
+    );
+    // 帧 2：Backspace 删空（delete_char 边界：cursor=1 → 空串）。
+    if let Some(ControlState::TextField(e)) = scene.controls.get_mut(id) {
+        assert!(crate::scene::control::delete_char(
+            e,
+            NodeKind::TextField,
+            true
+        ));
+    } else {
+        panic!("TextField 控件态必须在");
+    }
+    crate::scene::control::measure_text_controls(&mut scene, &fonts);
+    assert!(
+        scene.text_layouts[id.index()].is_none(),
+        "value 删空后必须清缓存（修前残留上帧 layout → render 画已删字符）"
+    );
+    // 帧 2 渲染：无 placeholder → 不得有任何文字字形 mesh。
+    crate::scene::transform::compute_world_transforms(&mut scene);
+    let (frame, _, _) = build_render_nodes(
+        &scene,
+        &fonts,
+        &std::collections::HashMap::new(),
+        &empty_sizes(),
+        &mut test_glyph_atlas(),
+    );
+    let has_text = frame.nodes.iter().any(|rn| {
+        text_sub_primary_id(rn.node_id) == id.0
+            && matches!(&rn.payload, NodePayload::Mesh { program: 1, verts, .. } if !verts.is_empty())
+    });
+    assert!(
+        !has_text,
+        "删空的 TextField（无 placeholder）不得残留文字 mesh"
+    );
+}
+
 #[test]
 fn textarea_renders_value_text() {
     // TextArea 多行输入也渲染 value。

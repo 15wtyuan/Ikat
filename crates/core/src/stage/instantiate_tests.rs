@@ -1682,3 +1682,156 @@ fn pkg_disabled_bit_defaults_false() {
     let tn = &pkg.components["comp1"].nodes[0];
     assert!(!tn.disabled, "未声明的 disabled 位读出 false");
 }
+
+/// #13/#75 验收批（P2）：方向键移动 TabList 选中后，aria-selected 属性选择器驱动的
+/// 样式必须在**新旧两个 tab** 上都翻转——新 tab 上色 + 旧 tab 褪色，且两侧
+/// render_input_version 都 bump（增量渲染指纹失效，不 skip）。Unity 实测现场
+/// （F8 dump）曾见多 tab 同时带选中背景 mesh：新选中上色生效、旧选中褪色丢失。
+/// 本测试锁全链：pkg → instantiate → tick(rematch) → 键盘方向键 → tick →
+/// 两 tab 的 style 与 version 终态。
+#[test]
+fn tablist_arrow_selection_flips_aria_selected_both_directions() {
+    let tablist_style = {
+        let mut st = ResolvedStyle::default();
+        crate::scene::dynamic::apply_css(&mut st, "display:flex;flex-direction:row");
+        st
+    };
+    let mk_tab = |i: usize| TemplateNode {
+        kind: NodeKind::Tab,
+        style: ResolvedStyle::default(),
+        parent_idx: Some(0),
+        classes: vec!["t".to_string()],
+        id_attr: Some(format!("t{i}")),
+        draggable: false,
+        disabled: false,
+        tabindex: None,
+        content: None,
+        src: None,
+        href: None,
+        control_init: None,
+        role: Some("tab".to_string()),
+        data_slot: None,
+        attrs: vec![],
+        rich_text_block: false,
+        custom_tag: None,
+        component_scope: false,
+    };
+    let nodes = vec![
+        TemplateNode {
+            kind: NodeKind::TabList,
+            style: tablist_style,
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            disabled: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            href: None,
+            control_init: Some(crate::asset::ControlInit::TabList {
+                selected_index: 0,
+                manual: false,
+            }),
+            role: Some("tablist".to_string()),
+            data_slot: None,
+            attrs: vec![],
+            rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
+        },
+        mk_tab(0),
+        mk_tab(1),
+        mk_tab(2),
+    ];
+    let rules = crate::style::dynamic::DynamicRuleTable {
+        rules: vec![DynamicRule {
+            // 属性选择器手构（core 测试不依赖 fence 解析器）：.t[aria-selected="true"]。
+            selector: ParsedSelector {
+                raw: ".t[aria-selected=\"true\"]".to_string(),
+                compound: vec![Compound {
+                    tag: None,
+                    id: None,
+                    classes: vec!["t".to_string()],
+                    combinator: Combinator::Descendant,
+                    pseudo_hover: false,
+                    pseudo_active: false,
+                    pseudo_disabled: false,
+                    pseudo_focus: false,
+                    pseudo_nth_child: None,
+                    attrs: vec![crate::style::dynamic::AttrSelector {
+                        name: "aria-selected".to_string(),
+                        op: crate::style::dynamic::AttrOp::Eq,
+                        value: Some("true".to_string()),
+                    }],
+                }],
+                specificity: Specificity(0, 1, 0),
+            },
+            declarations: vec![Declaration {
+                prop: "background-color".to_string(),
+                value: "#2b4a6b".to_string(),
+            }],
+        }],
+    };
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &crate::asset::write_package(&input))
+        .unwrap();
+    let tl = s.instantiate("bag", "c").unwrap();
+    {
+        let scene = s.scene.as_mut().unwrap();
+        let root = scene.roots[0];
+        crate::scene::dynamic::append_child(scene, root, tl).unwrap();
+    }
+    s.tick_and_render();
+    let (t0, t1) = {
+        let scene = s.scene.as_ref().unwrap();
+        let tabs = scene.get(tl).unwrap().children.to_vec();
+        (tabs[0], tabs[1])
+    };
+    let sel_color = [43.0 / 255.0, 74.0 / 255.0, 107.0 / 255.0, 1.0];
+    {
+        let scene = s.scene.as_ref().unwrap();
+        assert_eq!(
+            scene.get(t0).unwrap().style.background_color,
+            Some(sel_color),
+            "初始 sel=0：t0 应被 aria-selected 规则上色"
+        );
+        assert_eq!(
+            scene.get(t1).unwrap().style.background_color,
+            None,
+            "初始 t1 未选中无背景"
+        );
+    }
+    // 聚焦 t0 → 右方向键（automatic：选中即时移动到 t1）。
+    s.request_focus(t0);
+    s.tick_and_render();
+    s.set_key_input(&[crate::input::KeyEvent {
+        key_code: crate::input::KEY_RIGHT,
+        modifiers: 0,
+        is_down: true,
+        pad: [0, 0],
+    }]);
+    s.tick_and_render();
+    s.set_key_input(&[crate::input::KeyEvent {
+        key_code: crate::input::KEY_RIGHT,
+        modifiers: 0,
+        is_down: false,
+        pad: [0, 0],
+    }]);
+    s.tick_and_render();
+    let scene = s.scene.as_ref().unwrap();
+    assert_eq!(
+        scene.get(t1).unwrap().style.background_color,
+        Some(sel_color),
+        "方向键后 t1（新选中）应上色"
+    );
+    assert_eq!(
+        scene.get(t0).unwrap().style.background_color,
+        None,
+        "方向键后 t0（旧选中）必须褪色——褪色丢失 = 屏幕多 tab 同时高亮"
+    );
+}

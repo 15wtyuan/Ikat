@@ -100,11 +100,28 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
         // （缓存 layout 与 render 显示同源，掩码下 caret/hit 走 display 字节空间 + 换算）。
         let mask = n.style.text_security.map(mask_char);
         let (display, _comp_range) = display_value_masked(e, mask);
-        // value 为空时跳过缓存——render 阶段会用 placeholder 重测（空串 TextLayout 零高，
-        // 缓存后 render 的 unwrap_or_else 不触发，placeholder 无法显示）。
-        if display.is_empty() {
-            continue;
-        }
+        // 空显示串回落 placeholder（与 render 的 display 选择同源）：缓存 placeholder 的
+        // TextLayout——布局测高读它算 intrinsic size（跳过不缓存 = padding-only 塌高），
+        // render 读同源缓存直接画 placeholder。写缓存的另一职责是**覆盖旧 value 的残留
+        // layout**：跳过而不写会让 render 的 unwrap_or_else 不触发，屏幕继续显示已删除
+        // 的旧文本（删空框残留最后一个字符）。无 placeholder（回落串也空）才清缓存。
+        let (display, placeholder_color) = if display.is_empty() {
+            let ph = e.placeholder.clone();
+            if ph.is_empty() {
+                scene.text_layouts[id.index()] = None;
+                if id.index() < scene.text_layout_versions.len() {
+                    scene.text_layout_versions[id.index()] += 1;
+                }
+                continue;
+            }
+            let c = crate::style::resolved::placeholder_render_color(
+                n.style.placeholder_color,
+                n.style.color,
+            );
+            (ph, c)
+        } else {
+            (display, n.style.color)
+        };
         let s = &n.style;
         let stack = fonts.stack_for(s.font_family.as_deref());
         let off_left = crate::render::resolve_lp(s.taffy_style.border.left)
@@ -121,7 +138,7 @@ pub fn measure_text_controls(scene: &mut Scene, fonts: &crate::text::layout::Fon
             crate::style::resolved::control_wrap_control(s),
             Some(content_w),
             &stack,
-            s.color,
+            placeholder_color,
             crate::text::rich::weight_from_font_weight(s.font_weight),
         );
         scene.text_layouts[id.index()] = Some(layout);
