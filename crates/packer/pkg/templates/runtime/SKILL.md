@@ -4,9 +4,12 @@ description: |
   Integrate Ikat UI into Unity game code — mount the stage driver,
   load build artifacts, instantiate pages, look up typed nodes by id,
   wire control events, drive UI from gameplay, gate 3D input on the UI,
-  and embed 3D content in UI. Use for ANY C#/Unity task that touches
-  IkatStageDriver, pages, nodes, or UI events; also when adding or
-  renaming element ids in HTML (ids are the C# API surface).
+  embed 3D content in UI, pin UI to the 3D world (world anchors for
+  damage numbers / health bars, world-space mounts for panels attached
+  to 3D transforms), and run multiple UI stages in one scene. Use for
+  ANY C#/Unity task that touches IkatStageDriver, pages, nodes, or UI
+  events; also when adding or renaming element ids in HTML (ids are the
+  C# API surface).
 ---
 
 # Ikat Runtime Integration (Unity)
@@ -31,7 +34,9 @@ with 3D. The design side (HTML/CSS fence authoring) is the
 
 - Ikat UI is its own fullscreen camera-space layer: a dedicated
   orthographic UI camera composites with your 3D camera by depth. No uGUI
-  Canvas, no URP overlay stack, no EventSystem.
+  Canvas, no URP overlay stack, no EventSystem. (World-attached UI —
+  anchors and mounts — builds on top of this layer; see UI ↔ 3D
+  interop below.)
 - The UI scene is a typed C# object tree (`Container`, `Button`,
   `Slider`, `ListView`, ...). Game code reads and drives that tree; it
   never touches meshes or materials.
@@ -236,10 +241,26 @@ safe rect (content never flows into a notch); letterbox fits inside it.
   transparent queue; materials auto-clone to URP transparent). The GO's
   own hierarchy, scale and animations remain yours. Unbind with
   `driver.UnbindNativeHost(node)`; disposing the node auto-hides it.
-- **Not supported — world-space UI.** The UI is always fullscreen
-  camera-space; it cannot be pinned to a 3D transform or camera plane.
-  The supported direction is the inverse (3D embedded in UI via
-  NativeHost).
+- **UI pinned to the 3D world** (#109) — two routes, pick by need:
+  - **World anchors (projection route)** — HUD elements that track a 3D
+    point: `driver.SetWorldAnchor(node, camera, worldPos, offsetPx)`
+    re-projects every frame and writes the node's transform; off-screen
+    or behind the camera auto-hides the subtree (render-only, layout and
+    hit-testing untouched). Damage numbers = anchor + `TweenChannel.
+    Opacity` fade; health bars = anchor re-Set with the moving entity.
+    The anchored node must be a page-root child styled
+    `position:absolute; left:0; top:0` (layout slot (0,0) → transform
+    acts as absolute coords).
+  - **World-space mounts** — a whole panel rendered under a business 3D
+    transform: `driver.BindWorldMount(node, worldParent)` re-bases the
+    subtree's rows into the mount root's local frame and parents the
+    mirror objects through a y-flip container (scene camera renders
+    them; depth testing gives real 3D occlusion). Layout and hit-testing
+    stay in screen space. v1 constraints: mount root declares a
+    z-index; no dropdowns / scroll containers / overflow clip inside
+    the mounted subtree.
+  Full signatures: `references/api-reference.md` § "World anchoring &
+  world-space mounts".
 
 ## Serving artifacts from AssetBundles / Addressables
 
@@ -300,6 +321,7 @@ _driver.SetCursorTexture(1u, handTexture, new Vector2(12f, 1f));
   this file — it mirrors the shipped C# signatures, so you never need
   the Ikat repository.
 - **Complete working example**: `unity/showcase-unity/` in the Ikat
-  repository (driver mounted, nine pages wired from
-  `ShowcaseRunner.cs`). Optional copy-paste source, not required
+  repository (driver mounted, every showcase page wired from
+  `ShowcaseRunner.cs` — including the world-anchor / mount / multi-stage
+  / stress demo pages). Optional copy-paste source, not required
   reading.
