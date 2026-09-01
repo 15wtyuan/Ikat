@@ -81,6 +81,27 @@ elements carry live attributes (`aria-valuenow`, `aria-expanded`,
 `aria-checked`); mutate them and dispatch the matching Event the way the
 A-layer wiring does.
 
+## Adaptation check (full-bleed + notch) — run before handing off a page
+
+The toolbar has a match-mode switcher and device presets with four-way
+safe-area values; the dashed guides and the simulated `env()` values come
+from the same table. For each page (new or restyled):
+
+1. Mode `fit-width` (the common game base). Pick a notched preset
+   (iPhone 14 / 16 PM) with safe-area guides on → the root background
+   must reach the physical frame while interactive content sits inside
+   the guide lines. Content outside the guides = missing root
+   `env(safe-area-inset-*)` padding.
+2. Switch to a different-ratio preset (4:3, 21:9, iPad mini) → content
+   must reflow (scroll long pages, resize `vh`-sized stages), never clip
+   or float; `vmin`-sized type scales with the frame.
+3. Mode `letterbox` → the frame locks to the design resolution and black
+   bars appear; env() values drop to 0 (the bars already yield). Use as
+   the fixed-canvas control group.
+4. Any fixed-px stage (model slots, effect slots) should be a `vh`
+   height so it tracks the window; a px stage under fit modes is a bug
+   the guides will not show — check the element list or resize.
+
 ## Trust list (what a preview can and cannot show)
 
 - **Trustworthy**: flex layout, gap, px sizes, colors, gradient subset,

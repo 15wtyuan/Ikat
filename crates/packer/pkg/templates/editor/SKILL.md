@@ -95,13 +95,26 @@ trust the build message.
     static siblings regardless of DOM order. Lift overlaid content explicitly
     with `position: relative` + `z-index`. `z-index` never affects flex
     order — that is `order`.
-14. **Ids are the game-code API** (see `ikat-runtime`): keep interactive
+14. **Size roots against the workspace `match_mode`** (see
+    `ikat.workspace.json`; set via `ikat design`). Under `fit-width` /
+    `fit-height` (full-bleed cover — the common game choice) the runtime
+    canvas deforms to the physical screen: page roots must use
+    `100vw` / `100vh`, never fixed design px (a fixed root under fit
+    modes floats or clips instead of covering). Notch/rounded-corner
+    avoidance is CSS-level: give the root four-way
+    `padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left)` so the
+    background bleeds to the physical edge while content yields. Fixed
+    design px is correct only under `letterbox`. Responsive type and
+    spacing use viewport units (`2vmin`); stages that must scale with
+    the window use `vh` heights, not px.
+15. **Ids are the game-code API** (see `ikat-runtime`): keep interactive
     ids stable and semantic (`btn-start`, `hp-fill`). Renaming an id
     silently breaks C#. Ids must be unique per template scope;
     `aria-controls`/`aria-labelledby` must point at existing ids.
-15. Initial values go into ARIA (`aria-valuenow`, `aria-checked`, ...) or
+16. Initial values go into ARIA (`aria-valuenow`, `aria-checked`, ...) or
     `data-*`; a plain `value` attribute is legal only on `role=option`.
-16. Never edit files under the output directory — they are regenerated.
+17. Never edit files under the output directory — they are regenerated.
 
 Full lookup tables (tags, attributes, the 15-role registry, the CSS
 whitelist, canonical control CSS) are in `references/` — load them on
@@ -128,8 +141,20 @@ demand, not upfront.
    instance reports the same URL; also recorded in
    `.ikat/preview.json`), give the human the URL, and iterate on their
    feedback — they refresh to see each fix. Self-check the same way if
-   in doubt: the preview workbench renders at the design resolution
-   under `match_mode` scaling and never reflows. Trust: flex layout,
+   in doubt. The workbench follows the workspace `match_mode`
+   (switchable in the toolbar): `letterbox` locks the frame to the
+   design resolution; `fit-width` / `fit-height` size the frame to the
+   runtime root, so the free axis reflows exactly like the engine.
+   **Adaptation self-check (do this before handing off any page):**
+   switch the device preset to a notched phone (e.g. iPhone 14) with
+   safe-area guides on and to one different-ratio screen (4:3 or 21:9),
+   and verify — no black bars or uncovered bands under fit modes; the
+   root background reaches the physical edge while interactive content
+   stays inside the guide lines (root env padding working); content
+   reflows rather than clipping when the free axis changes; responsive
+   sizes (`vmin`/`vh` declarations) track the frame. The env() values
+   and the guide lines come from the same preset table, so what the
+   guides show is what the runtime insets will be. Trust: flex layout,
    `gap`, px, colors, gradients subset, `position:absolute`,
    `border-radius`, `@keyframes` timing. Distrust: the
    browser-difference list in `references/css-reference.md` — the build
@@ -151,6 +176,9 @@ demand, not upfront.
 - [ ] Preview simulation written (step 4) — no `PreviewDataFillWithoutSim`.
 - [ ] Human previewed the page via `ikat preview` and approved (or
       explicitly waived preview); artifacts rebuilt if sources changed.
+- [ ] Adaptation self-check passed (workflow step 5): full-bleed cover
+      under fit modes, notch guides respected, reflow on ratio change —
+      for every new or restyled page.
 
 ## Failure patterns
 

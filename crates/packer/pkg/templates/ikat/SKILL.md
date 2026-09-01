@@ -173,6 +173,11 @@ one run. Fix them ALL in one editing pass, then re-run `check`.
    [--match letterbox|fit-width|fit-height]` — one-time per workspace.
    Skipping it leaves adaptation to the engine-side fallback (Unity:
    Driver Inspector) and preview falls back to its built-in 1920x1080.
+   For game UI prefer `fit-width` / `fit-height` (full-bleed cover, no
+   black bars) and author pages against that model: roots `100vw`/`100vh`
+   + four-way `env(safe-area-inset-*)` padding for notch avoidance,
+   viewport units for responsive sizes (the ikat-editor skill has the
+   rule).
 4. **No fonts yet? Ask the user for a font file first** (rendering needs
    one), then `ikat font add <file> --family <name> --default`.
    Swapping the default later: `ikat font default <family>`; removing a
@@ -182,7 +187,9 @@ one run. Fix them ALL in one editing pass, then re-run `check`.
    lives under some atlas dir — the packer cross-validates.
 6. Write HTML/CSS per the ikat-editor skill (the fence rulebook).
 7. `ikat check --format json` → fix ALL diagnostics in one pass → repeat
-   until exit 0.
+   until exit 0. Then run the preview adaptation self-check (switch
+   device presets + match mode per the ikat-editor skill workflow) —
+   full-bleed cover and notch avoidance are part of done, not polish.
 8. Ask the user whether to publish; on approval run `ikat build --format
    json` and report the artifact paths from `report`.
 
