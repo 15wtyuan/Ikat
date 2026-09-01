@@ -82,6 +82,7 @@ namespace Ikat
         /// <summary>
         /// 取本场景的共享 UI 相机（引用计数 +1）。优先级：用户指派（Driver 自持，不经此）
         /// &gt; 按名认领存量 &gt; 新建。须与 <see cref="ReleaseCamera"/> 成对。
+        /// 认领/新建后跑孤儿清扫（<see cref="SweepOrphanedCameras"/>）。
         /// </summary>
         public static Camera AcquireCamera(Component caller)
         {
@@ -94,7 +95,31 @@ namespace Ikat
                 s_cameras[scene] = shared;
             }
             shared.Refs++;
+            SweepOrphanedCameras(shared.Camera);
             return shared.Camera;
+        }
+
+        /// <summary>
+        /// 孤儿共享相机清扫。Driver 是 [ExecuteAlways]：编辑态 Awake 也建相机
+        /// （DontSaveInEditor），domain reload 不跑 OnDestroy——幸存相机被 Unity 挪进
+        /// 无效场景（scene 无效，不属任何已加载场景），<see cref="FindExisting"/> 按
+        /// caller 场景根扫描永远认领不到。孤儿以 Base 型 + depth 0 压在宿主 3D 相机
+        /// （depth 更小、先渲染）之上每帧重渲染：clear 走 Depth 抹掉宿主 3D 输出
+        /// （「世界锚点页看不到 3D 场景」），目标未初始化时整屏垃圾色（「相机一片黄」）。
+        /// 合法 IkatUICamera 只有两种形态：本次共享相机本体（跳过）、其它已加载场景里
+        /// 的（scene 有效，跳过——多场景各自持有一台）。其余 = 遗留垃圾，即刻销毁。
+        /// 用户手建的（无 DontSaveInEditor 标记）尊重不动。
+        /// </summary>
+        static void SweepOrphanedCameras(Camera keep)
+        {
+            foreach (var c in Resources.FindObjectsOfTypeAll<Camera>())
+            {
+                if (c == keep || c.name != CameraName) continue;
+                if (c.gameObject.scene.IsValid()) continue;
+                if ((c.hideFlags & HideFlags.DontSaveInEditor) == 0) continue;
+                if (Application.isPlaying) Object.Destroy(c.gameObject);
+                else Object.DestroyImmediate(c.gameObject);
+            }
         }
 
         /// <summary>释放共享相机引用；本场景最后一个引用释放时销毁相机。</summary>

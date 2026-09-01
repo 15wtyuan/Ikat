@@ -129,6 +129,10 @@ namespace Ikat
         /// <summary>自建相机是否来自 hub 共享池（OnDestroy 走 Release 而非直接销毁）。</summary>
         bool _cameraFromHub;
 
+        /// <summary>URP cameraStack 归属的宿主 Base 相机（ConfigureTransforms 挂上，
+        /// OnDestroy 摘除——UI 相机销毁后残留 stack 条目会让宿主相机每帧渲染报错）。</summary>
+        Camera _urpBaseCamera;
+
         /// <summary>生效共享宿主（Awake 解析）。null = 自建独占宿主（单 Stage 行为）。</summary>
         IkatResourceHost _sharedHost;
 
@@ -872,6 +876,15 @@ namespace Ikat
             _backend = null;
             // 自建相机 DontSaveInEditor = Unity 不接管回收：不主动销毁会跨场景泄漏（#108）。
             // hub 共享相机走引用计数 Release（最后一个引用者释放）；IsPlaying/Destroy 分流在 hub。
+            // URP overlay 先摘：UI 相机（无论销毁与否）不能再留在宿主 Base 的 cameraStack 里。
+            if (_urpBaseCamera != null)
+            {
+                var data = _urpBaseCamera != null ? UrpData(_urpBaseCamera) : null;
+                var stackProp = data != null ? data.GetType().GetProperty("cameraStack") : null;
+                if (stackProp?.GetValue(data) is System.Collections.Generic.List<Camera> stack)
+                    stack.Remove(UiCamera);
+                _urpBaseCamera = null;
+            }
             if (_selfCamera != null)
             {
                 if (_cameraFromHub) IkatStageHub.ReleaseCamera(this);
@@ -1030,7 +1043,6 @@ namespace Ikat
                 cam.orthographic = true;
                 cam.orthographicSize = sh / 2f;   // 不变（覆盖全屏，root 映射进 safe 区）
                 cam.cullingMask = 1 << IkatUILayer;
-                cam.clearFlags = ComputeUiClearFlags(cam);
                 // 正交相机允许负 near：裁剪窗口须以 UI 平面（z=0）为中心前后对称——
                 // NativeHost 3D 内容按 design px 归一化（~520px 高 × root scale 即数千
                 // 世界单位），居中摆位时深度会越过 UI 平面向后延伸到相机（z=-10）之后；
@@ -1042,25 +1054,35 @@ namespace Ikat
                 cam.transform.SetParent(null, false);
                 cam.transform.localPosition = new Vector3(0f, 0f, -10f);
                 cam.transform.localRotation = Quaternion.identity;
+
+                // 「UI 叠在宿主 3D 相机之上」按管线分派（见 TryAttachUrpOverlay 注释）。
+                _urpBaseCamera = null;
+                Camera underlay = FindUnderlayCamera(cam);
+                if (underlay != null && TryAttachUrpOverlay(cam, underlay))
+                {
+                    _urpBaseCamera = underlay;   // OnDestroy 从 stack 摘除
+                }
+                else if (underlay != null)
+                {
+                    // Built-in / 反射失败回退：经典保色叠加（只清深度）。
+                    ResetToBaseRenderType(cam);
+                    cam.clearFlags = CameraClearFlags.Depth;
+                }
+                else
+                {
+                    // 无打底相机（纯 UI 游戏、本相机是最底层）：清自己的底色——
+                    // 不清色的首相机会读到未初始化缓冲（残影/垃圾）。
+                    ResetToBaseRenderType(cam);
+                    cam.clearFlags = CameraClearFlags.SolidColor;
+                }
             }
         }
 
-        /// <summary>
-        /// UI 相机 clearFlags 决策（「UI 叠在宿主 3D 相机之上」的跨管线行为）。
-        ///
-        /// 有更深的宿主相机先渲染（天幕/3D 场景打底）→ UI 须保色叠加：
-        /// - Built-in：Depth（只清深度保留颜色，经典叠加语义）
-        /// - URP：Nothing。URP 17 起 Base 相机对 CameraClearFlags.Depth 会把颜色也清成
-        ///   backgroundColor（整帧抹掉宿主 3D 输出、场景不可见——世界锚点页实锤）；
-        ///   Nothing（Uninitialized）实测保色，UI 正确叠在 3D 之上。
-        /// 无打底相机（纯 UI 游戏、本相机是最底层）→ SolidColor 清自己的底色：
-        /// 不清色的首相机读到未初始化缓冲（残影/垃圾）。
-        /// SRP 判别走 GraphicsSettings.currentRenderPipeline（非 null = URP/HDRP 激活），
-        /// 不反射具体管线类型。
-        /// </summary>
-        static CameraClearFlags ComputeUiClearFlags(Camera self)
+        /// <summary>最深的打底相机（depth &lt; 本相机、enabled、URP 下 renderType=Base）。
+        /// 无则 null。Overlay 型相机不作打底候选（它自己依附别的 Base）。</summary>
+        Camera FindUnderlayCamera(Camera self)
         {
-            bool hasUnderlay = false;
+            Camera best = null;
 #if UNITY_2023_1_OR_NEWER
             foreach (var c in UnityEngine.Object.FindObjectsByType<Camera>(UnityEngine.FindObjectsInactive.Exclude))
 #else
@@ -1068,12 +1090,84 @@ namespace Ikat
 #endif
             {
                 if (c == self || !c.isActiveAndEnabled || c.depth >= self.depth) continue;
-                hasUnderlay = true;
-                break;
+                if (!IsUrpBaseCamera(c)) continue;
+                if (best == null || c.depth > best.depth) best = c;
             }
-            if (!hasUnderlay) return CameraClearFlags.SolidColor;
-            bool srp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
-            return srp ? CameraClearFlags.Nothing : CameraClearFlags.Depth;
+            return best;
+        }
+
+        static readonly string UrpCameraDataType =
+            "UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime";
+
+        /// <summary>URP 相机数据组件（无 URP / 组件缺席返 null）。反射避免硬引用管线程序集
+        /// （Built-in 工程里 URP 程序集不存在，编译期引用直接炸）。</summary>
+        static UnityEngine.Component UrpData(Camera c)
+        {
+            var t = System.Type.GetType(UrpCameraDataType);
+            return t != null ? c.GetComponent(t) : null;
+        }
+
+        /// <summary>URP 下该相机是否 Base 型（可作打底）。非 URP 工程恒 true。</summary>
+        static bool IsUrpBaseCamera(Camera c)
+        {
+            var data = UrpData(c);
+            if (data == null) return true;   // Built-in：无 URP 数据，全算候选
+            var rtProp = data.GetType().GetProperty("renderType");
+            if (rtProp == null) return true;
+            // CameraRenderType.Base = 0（Overlay = 1）。枚举直接比 int 值，不依赖类型名。
+            return Convert.ToInt32(rtProp.GetValue(data)) == 0;
+        }
+
+        /// <summary>
+        /// URP 叠加路：UI 相机配成 Overlay 挂进宿主 Base 相机的 cameraStack。URP 的
+        /// Base 相机没有「保色叠加」语义——CameraClearFlags.Depth 实测把颜色也清成
+        /// backgroundColor（宿主 3D 整帧抹掉、场景不可见），Nothing 更糟（读到未初始化
+        /// 缓冲整屏垃圾色）。cameraStack 是 URP 唯一的跨相机合成通道：Base 先画（天幕/
+        /// 3D），Overlay 后画且不碰颜色/深度初值——正是「UI 叠 3D」的管线原生形态。
+        /// 成功返 true；非 URP / 宿主缺 URP 数据返 false（调用方走 Built-in 回退）。
+        /// 共享 hub 相机多 Driver 重复调用安全（Contains 幂等）。
+        /// </summary>
+        static bool TryAttachUrpOverlay(Camera ui, Camera baseCam)
+        {
+            var t = System.Type.GetType(UrpCameraDataType);
+            if (t == null) return false;
+            var uiData = UrpData(ui);
+            if (uiData == null) uiData = ui.gameObject.AddComponent(t);
+            var baseData = baseCam.GetComponent(t);
+            if (baseData == null) return false;   // 宿主相机无 URP 数据（异常形态），走回退
+            try
+            {
+                var rtProp = t.GetProperty("renderType");
+                var overlay = System.Enum.Parse(rtProp.PropertyType, "Overlay");
+                rtProp.SetValue(uiData, overlay);
+                var stackProp = t.GetProperty("cameraStack");
+                if (stackProp.GetValue(baseData) is System.Collections.Generic.List<Camera> stack)
+                {
+                    if (!stack.Contains(ui)) stack.Add(ui);
+                    return true;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[IkatStageDriver] URP overlay attach failed, fallback to Depth clear: {e.Message}");
+            }
+            return false;
+        }
+
+        /// <summary>Overlay 配置失败/无打底时把 UI 相机还原成独立 Base 相机
+        /// （悬挂的 Overlay 型不在任何 stack 里 = 整相机不渲染）。</summary>
+        static void ResetToBaseRenderType(Camera ui)
+        {
+            var data = UrpData(ui);
+            var rtProp = data != null ? data.GetType().GetProperty("renderType") : null;
+            if (rtProp == null) return;
+            try
+            {
+                var baseType = System.Enum.Parse(rtProp.PropertyType, "Base");
+                if (Convert.ToInt32(rtProp.GetValue(data)) != Convert.ToInt32(baseType))
+                    rtProp.SetValue(data, baseType);
+            }
+            catch { /* 非 URP / 枚举缺失：Base 是缺省，无需还原 */ }
         }
 
         /// <summary>

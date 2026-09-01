@@ -53,12 +53,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
 ### Fixed
-- **URP 下 UI 相机不再抹掉宿主 3D 场景（#109 验收批）**：URP 17 起 Base 相机对
-  `CameraClearFlags.Depth` 会把颜色也清成自身 backgroundColor——叠在宿主 3D
-  相机之上的 UI 相机每帧整屏抹掉 3D 输出（世界锚点/压测页"看不到 3D 场景"）。
-  clearFlags 改为按管线与打底相机分流：有更深的宿主相机时 Built-in 用
-  Depth（经典保色叠加）、SRP（URP/HDRP）用 Nothing；无打底相机（纯 UI）用
-  SolidColor（不清色的首相机会读到未初始化缓冲）。
+- **孤儿共享相机清扫——「看不到 3D 场景 / 相机一片黄」的真根因（#109 验收批）**：
+  Driver 是 `[ExecuteAlways]`，编辑态 Awake 也会建 `IkatUICamera`
+  （DontSaveInEditor）；domain reload 不跑 OnDestroy，幸存相机被 Unity 挪进无
+  效场景，hub 的按名认领（扫 caller 场景根）永远看不到它。孤儿以 Base 型 +
+  depth 0 压在宿主 3D 相机之上每帧重渲染：clear=Depth 时把宿主 3D 输出整帧抹
+  成自己的底色（世界锚点/压测页看不到 3D 场景），渲染目标未初始化时整屏垃圾
+  色（相机一片黄）。`AcquireCamera` 现在认领/新建后清扫：销毁无效场景里的
+  DontSave 同名相机（其它已加载场景的合法共享相机与用户手建的尊重不动）。
+- **UI 相机叠加改走 URP cameraStack（#109 验收批）**：URP 的 Base 相机没有
+  「保色叠加」语义——Depth 把颜色也清掉，Nothing 读到未初始化缓冲。有宿主打
+  底相机时 UI 相机配成 Overlay 挂进宿主 Base 相机的 cameraStack（Base 先画
+  天幕/3D，Overlay 后画不碰颜色/深度初值），反射操作不硬引用管线程序集；
+  Built-in 回退经典 Depth；无打底相机（纯 UI）用 SolidColor。OnDestroy 从
+  stack 摘除，避免悬挂条目。
 - **滚动/世界锚点跟随的渲染增量冻结（#109 验收批）**：mesh 合并批此前矩阵恒
   IDENTITY + 成员 payload hash 为局部系位移不变量——纯滚动 / Transform
   平移变更下批的双轴 hash 全不变，整批被判 Skip，后端镜像冻结在旧位置（拖动
