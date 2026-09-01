@@ -139,6 +139,20 @@ namespace Ikat
             }
         }
 
+        /// <summary>
+        /// 本场景共享相机是否仍被 caller 之外的 Driver 持有（Refs &gt; 1，含 caller 自身未释放的
+        /// 那份）。Driver OnDestroy 的 URP overlay 摘除判据用：相机还有别的使用者时只能减引用，
+        /// 不得把它从宿主 Base 的 cameraStack 摘掉——摘掉 = 幸存 Stage 的全部屏幕 UI 整体消失
+        /// （Overlay 相机不在任何 stack = 不渲染；showcase 关 stage2 小窗实锤）。用户指派相机
+        /// （不经 hub）无此计数，多 Driver 共用用户相机的配置自担（ConfigureTransforms 的
+        /// Contains 幂等挂载在 resize 时会补挂回来）。
+        /// </summary>
+        public static bool CameraHeldByOthers(Component caller)
+        {
+            return s_cameras.TryGetValue(caller.gameObject.scene, out var shared)
+                && shared.Refs > 1;
+        }
+
         /// <summary>按名认领存量共享相机（编辑器重编译幸存者）。只搜本场景根对象。</summary>
         static Camera FindExisting(UnityEngine.SceneManagement.Scene scene)
         {

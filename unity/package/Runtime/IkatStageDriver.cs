@@ -877,12 +877,19 @@ namespace Ikat
             // 自建相机 DontSaveInEditor = Unity 不接管回收：不主动销毁会跨场景泄漏（#108）。
             // hub 共享相机走引用计数 Release（最后一个引用者释放）；IsPlaying/Destroy 分流在 hub。
             // URP overlay 先摘：UI 相机（无论销毁与否）不能再留在宿主 Base 的 cameraStack 里。
+            // 但 hub 共享相机可能还有别的 Driver 在用（多 Stage 同场景引用计数）——只有最后
+            // 持有者才摘：先行销毁者摘掉会把幸存 Stage 的相机踢出 stack，全部屏幕 UI 整体消失
+            // （Overlay 不在任何 stack = 不渲染），直到下一次 resize 触发 ConfigureTransforms
+            // 重挂才恢复（showcase「关 stage2 后界面全没了」实锤）。
             if (_urpBaseCamera != null)
             {
-                var data = _urpBaseCamera != null ? UrpData(_urpBaseCamera) : null;
-                var stackProp = data != null ? data.GetType().GetProperty("cameraStack") : null;
-                if (stackProp?.GetValue(data) is System.Collections.Generic.List<Camera> stack)
-                    stack.Remove(UiCamera);
+                if (!(_cameraFromHub && IkatStageHub.CameraHeldByOthers(this)))
+                {
+                    var data = UrpData(_urpBaseCamera);
+                    var stackProp = data != null ? data.GetType().GetProperty("cameraStack") : null;
+                    if (stackProp?.GetValue(data) is System.Collections.Generic.List<Camera> stack)
+                        stack.Remove(UiCamera);
+                }
                 _urpBaseCamera = null;
             }
             if (_selfCamera != null)

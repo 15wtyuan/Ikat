@@ -53,6 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
 ### Fixed
+- **关闭双 Stage 小窗不再清空整个屏幕 UI（#109 验收批）**：两个 Driver 共享
+  同一台 hub `IkatUICamera`，但小窗 Driver 销毁时无条件把相机从宿主 Base 的
+  URP cameraStack 摘除——Overlay 相机不在任何 stack = 整机不渲染，主 Stage
+  的面板/血条/全部屏幕 UI 消失（3D 挂载面板走场景相机幸存），直到 resize
+  触发重配才恢复。摘除现在带引用计数判据：相机仍被其它 Driver 持有时只减
+  引用不摘 stack（`IkatStageHub.CameraHeldByOthers`），最后持有者随相机销毁
+  摘除。
 - **孤儿共享相机清扫——「看不到 3D 场景 / 相机一片黄」的真根因（#109 验收批）**：
   Driver 是 `[ExecuteAlways]`，编辑态 Awake 也会建 `IkatUICamera`
   （DontSaveInEditor）；domain reload 不跑 OnDestroy，幸存相机被 Unity 挪进无
