@@ -95,6 +95,7 @@ public abstract class Node {
 
     public bool Touchable { get; set; }
     public bool Focusable { get; set; }        // 运行时改可获焦性（对齐 fgui focusable）
+    public bool Draggable { get; set; }        // 运行时改拖拽使能（HTML draggable 属性的运行时面）
     public ClassList Classes { get; }
 
     public bool IsDisposed { get; }
@@ -299,7 +300,7 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 
 ### 6.1 拖拽
 
-注册拖拽事件即参与仲裁，无 `Draggable` 属性。框架管阈值/捕获/仲裁，用户施加 delta。拖放是逻辑层模式，不提供——用 `DragEnd` + `ui.Pick(position)` 找 drop target，drop 逻辑用户自己搭。
+拖拽需**显式使能**：设计期 `draggable="true"`（HTML 全局属性，值域 `true|false`）或运行时 `Node.Draggable`（双通道，与 tabindex 先例一致）。使能节点参与 drag_target 候选（pointer-down 命中链上最近的 draggable 节点），框架管阈值/捕获/仲裁，用户施加 delta。拖放是逻辑层模式，不提供——用 `DragEnd` + `ui.Pick(position)` 找 drop target，drop 逻辑用户自己搭。
 
 `DragMoveEvent.DeltaX/DeltaY` 是**逐 Move 增量**（自上一条 DragMove；首条含阈值前行程——累加后元素精确贴指针）。累计偏移不进载荷：`DragStartEvent.StartPosition` + `DragMoveEvent.Position` 可推导。**路由指引**：视口平移/滚动（大内容小视口）用 `overflow:auto` 滚动容器（拖拽/滚轮/惯性/钳制/点击取消全自带，零拖拽数学）；Drag 事件 API 是对象拖拽（标题栏、拖道具入格）的低层积木。
 
@@ -323,7 +324,7 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 | div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged（open 时方向键移高亮**不提交**、跳过 disabled 项；Enter 与展开时刻快照**净变才发**事件——点已选项不发；Esc/外部点击/header 再点 = 取消回滚、不发事件） |
 | div role=progressbar | ProgressBar : Node | Value, Max（float，0 基底）, IsIndeterminate |
 | div role=option | OptionItem : Container | Value, Selected（只读）, Disabled, Index（只读，父 Dropdown 内序号） |
-| div role=tablist | TabList : Container | SelectedIndex, SelectionChanged（方向键/click 切换；方向轴按 tablist 的 `flex-direction` 选轴、`*-reverse` 翻转方向、clamp 不 wrap；panel 靠 `aria-controls` 关联） |
+| div role=tablist | TabList : Container | SelectedIndex, Activation, SelectionChanged（方向轴按 tablist 的 `flex-direction` 选轴、`*-reverse` 翻转方向、clamp 不 wrap；panel 靠 `aria-controls` 关联。激活模型 `data-activation` 声明 / `Activation` 运行时改：automatic（缺省）方向键即时选中且焦点跟随；manual 方向键只移焦点、Enter/Space 才提交） |
 | div role=tab | Tab : Container | （`aria-selected` 由父 TabList.SelectedIndex 跨节点合成，非字面存储） |
 | a（富文本内） | Link : Container | Href（只读）, Clicked（复用既有语义事件） |
 

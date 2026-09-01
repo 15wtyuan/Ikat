@@ -256,7 +256,7 @@ fn cs_summary(cs: &ControlState) -> String {
                 value, min, max, indeterminate
             )
         }
-        ControlState::TabList { selected_index } => {
+        ControlState::TabList { selected_index, .. } => {
             format!("TabList{{sel={}}}", selected_index)
         }
     }

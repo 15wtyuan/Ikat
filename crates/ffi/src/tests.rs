@@ -1197,6 +1197,7 @@ fn make_tablist_stage(selected: usize) -> (*mut StageHandle, u64) {
         NodeId(node),
         ControlState::TabList {
             selected_index: selected,
+            manual_activation: false,
         },
     );
     if let Some(n) = scene.get_mut(NodeId(node)) {
@@ -2008,6 +2009,73 @@ fn ffi_node_touchable_roundtrip_and_hit() {
         ikat_stage_get_node_touchable(h, node, std::ptr::null_mut()),
         -1
     );
+    ikat_stage_free(h);
+}
+
+/// set/get_node_draggable round-trip：默认关；开/关往返；drag_target 候选联动
+/// （input.rs drag 检测读 interaction.draggable——开了才有 DragStart 链）。
+/// 越界节点 / null out → -1。
+#[test]
+fn ffi_node_draggable_roundtrip() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = ikat_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    let node = ikat_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(node, u64::MAX);
+    ikat_stage_append_child(h, root, node);
+    // 初始默认关（drag 事件链需要显式使能）。
+    let mut b = 9u8;
+    assert_eq!(ikat_stage_get_node_draggable(h, node, &mut b), 0);
+    assert_eq!(b, 0, "default not draggable");
+    // 开 → round-trip 回 1；再关回 0。
+    ikat_stage_set_node_draggable(h, node, true);
+    assert_eq!(ikat_stage_get_node_draggable(h, node, &mut b), 0);
+    assert_eq!(b, 1, "draggable now");
+    ikat_stage_set_node_draggable(h, node, false);
+    assert_eq!(ikat_stage_get_node_draggable(h, node, &mut b), 0);
+    assert_eq!(b, 0, "drag disabled again");
+    // 越界节点 / null out → -1。
+    let mut n2 = 0u8;
+    assert_eq!(ikat_stage_get_node_draggable(h, u64::MAX, &mut n2), -1);
+    assert_eq!(
+        ikat_stage_get_node_draggable(h, node, std::ptr::null_mut()),
+        -1
+    );
+    // null 句柄 set = no-op（不 panic）。
+    ikat_stage_set_node_draggable(std::ptr::null_mut(), node, true);
+    ikat_stage_free(h);
+}
+
+/// set/get_tab_activation round-trip：TabList 节点读默认 automatic(0)、set manual(1)
+/// 往返；非 TabList 节点（普通 div）→ -1。
+#[test]
+fn ffi_tab_activation_roundtrip() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let root = ikat_stage_create_root(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    // tablist 节点：直塞 ControlState（绕过 pkg instantiate，聚焦 FFI 读写面）。
+    let tl = ikat_stage_create_node(h, b"div".as_ptr(), 3, b"".as_ptr(), 0);
+    assert_ne!(tl, u64::MAX);
+    ikat_stage_append_child(h, root, tl);
+    {
+        let sh = unsafe { &mut *h };
+        let scene = sh.stage.scene.as_mut().expect("scene built");
+        scene.controls.ensure(
+            NodeId(tl),
+            ikat_core::scene::node::ControlState::TabList {
+                selected_index: 0,
+                manual_activation: false,
+            },
+        );
+    }
+    let mut b = 9u8;
+    assert_eq!(ikat_stage_get_tab_activation(h, tl, &mut b), 0);
+    assert_eq!(b, 0, "default automatic");
+    ikat_stage_set_tab_activation(h, tl, true);
+    assert_eq!(ikat_stage_get_tab_activation(h, tl, &mut b), 0);
+    assert_eq!(b, 1, "manual now");
+    // 非 TabList 节点 → -1。
+    let mut n2 = 0u8;
+    assert_eq!(ikat_stage_get_tab_activation(h, root, &mut n2), -1);
+    assert_eq!(ikat_stage_set_tab_activation(h, root, true), -1);
     ikat_stage_free(h);
 }
 

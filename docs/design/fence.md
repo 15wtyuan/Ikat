@@ -109,7 +109,7 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `textbox` | TextField（默认）/ TextArea（`aria-multiline=true`） | — |
 | `list` | ListView | `role=listitem` 子（或 `template > role=listitem` 蓝图） |
 | `listitem` | ListItem | — |
-| `tablist` | TabList | `role=tab` 子（panel 靠 `aria-controls` 关联，非 role） |
+| `tablist` | TabList | `role=tab` 子（panel 靠 `aria-controls` 关联，非 role）。可选 `data-activation="manual"`（值域 `manual` \| `automatic`，缺省 automatic；写坏值报 `FenceBadAttrValue`——语义消费的 data-* 在消费位校验）：manual = 方向键只移焦点、Enter/Space 才提交选中；automatic = 方向键即时选中且焦点跟随 |
 | `tab` | Tab | — |
 | `tabpanel` | Container（`div` tag 回退，非 role 分派） | — |
 | `dialog` | Container（`div` tag 回退，非 role 分派——模态弹层容器） | — |
@@ -203,6 +203,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `slot` | 投影到父组件的具名 slot |
 | `hidden` | 隐藏元素 |
 | `tabindex` | 焦点顺序 |
+| `draggable` | 拖拽使能（值域 `true` \| `false`，缺省 `false`；浏览器枚举值 `auto` 的原生拖拽语义在自绘引擎无对应物，报 `FenceBadAttrValue`）。`true` = 节点成为 drag_target 候选，pointer-down 后按位移阈值启动 DragStart/DragMove/DragEnd 事件链 |
 | `type` | 通用类型提示（`input[type]` 结构分派已退役，现作普通全局属性透传） |
 | `role` | WAI-ARIA 角色（白名单校验：注册表 12 role + `textbox` + `tabpanel` + `dialog`，未知值报 `FenceUnknownRole`——拼错的 role 静默回退成基础标签类型会跳过全部控件校验，故拒绝） |
 | `aria-*` | WAI-ARIA 状态/属性（打包期校验 IdRef 关系） |

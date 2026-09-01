@@ -479,6 +479,15 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_get_node_touchable(StageHandle* h, ulong node_id, byte* @out);
 
         /// <summary>
+        ///  读节点 draggable（interaction.draggable，drag_target 候选判据同源）。
+        ///  null 句柄 / 无 scene / 节点缺失 → -1（不与 false 混淆）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_get_node_draggable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_get_node_draggable(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
         ///  读节点 LOOKUP_SCOPE 查找边界标记（组件展开域 host / ListView slot 根 / 实例根打此位）。
         ///  C# Query&amp;lt;T&amp;gt;/Query(selector) 的 DFS 剪枝用——遇此标记的子节点 visit 后不下钻
         /// （Get/TryGet 走 core find_node_by_id_in_subtree 已内置剪枝，本 FFI 补 Query 的 C# 侧路径）。
@@ -649,6 +658,16 @@ namespace Ikat.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_stage_set_node_touchable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void ikat_stage_set_node_touchable(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool touchable);
+
+        /// <summary>
+        ///  设节点 draggable（公共 Node.Draggable 的后端；HTML `draggable` 属性的运行时面）。
+        ///  true = 参与 drag_target 候选，pointer-down 后按位移阈值启动 DragStart/Move/End。
+        ///  只写 interaction.draggable（无 rematch 通道）。null 句柄 / 节点缺失 → no-op。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_node_draggable", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void ikat_stage_set_node_draggable(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool draggable);
 
         /// <summary>
         ///  设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=0（Tab 链 0 组）；
@@ -1075,6 +1094,26 @@ namespace Ikat.Bindings
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_stage_set_number_value", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int ikat_stage_set_number_value(StageHandle* h, ulong node_id, float value);
+
+        /// <summary>
+        ///  读 TabList 激活模型（公共 TabList.Activation 的后端）。out：1 = manual（方向键只移
+        ///  焦点、Enter/Space 提交），0 = automatic（缺省，焦点跟随选中）。非 TabList /
+        ///  null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_get_tab_activation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_get_tab_activation(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  设 TabList 激活模型（HTML `data-activation="manual"` 属性的运行时面）。
+        ///  manual=true：方向键只移焦点、Enter/Space 才提交选中；false：automatic（缺省）。
+        ///  非 TabList / null 句柄 / 节点缺失 → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_tab_activation", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_set_tab_activation(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool manual);
 
         /// <summary>
         ///  注入本帧字符输入（UTF-32 codepoints 数组，已 shift-mapped 的可打印字符）。tick 前调。

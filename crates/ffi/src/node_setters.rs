@@ -41,6 +41,26 @@ pub extern "C" fn ikat_stage_set_node_touchable(
     })
 }
 
+/// 设节点 draggable（公共 Node.Draggable 的后端；HTML `draggable` 属性的运行时面）。
+/// true = 参与 drag_target 候选，pointer-down 后按位移阈值启动 DragStart/Move/End。
+/// 只写 interaction.draggable（无 rematch 通道）。null 句柄 / 节点缺失 → no-op。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_node_draggable(
+    h: *mut StageHandle,
+    node_id: u64,
+    draggable: bool,
+) {
+    ffi_guard((), || {
+        if h.is_null() {
+            return;
+        }
+        let sh = unsafe { &mut *h };
+        sh.stage.set_node_draggable(NodeId(node_id), draggable);
+    })
+}
+
 /// 设节点运行时可获焦性（公共 Node.Focusable 后端）。true → tabindex=0（Tab 链 0 组）；
 /// false → tabindex=-1（Tab 链/点击聚焦排除，编程 Focus() 仍可用——DOM 语义）。
 /// null 句柄 / 节点缺失 → no-op。

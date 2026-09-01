@@ -45,9 +45,15 @@ structure).
 ## Global attributes
 
 Every element accepts: `id`, `class`, `style`, `slot`, `hidden`,
-`tabindex`, `type`, `role`, plus any `aria-*`, `data-*`, and CSS custom
-property `--*`. `id` must be unique within a template scope;
-`aria-controls` / `aria-labelledby` must point at existing ids.
+`tabindex`, `type`, `role`, `draggable`, plus any `aria-*`, `data-*`,
+and CSS custom property `--*`. `id` must be unique within a template
+scope; `aria-controls` / `aria-labelledby` must point at existing ids.
+
+`draggable="true"` opts the element into the drag event chain
+(`DragStart` / `DragMove` / `DragEnd` fire after pointer-down passes the
+movement threshold). Only `true` and `false` are accepted — the browser
+enum value `auto` is a build error (there is no native drag to inherit
+from in a self-drawn engine); default is `false`.
 
 ## Custom elements
 
@@ -94,7 +100,7 @@ in an intermediate div fails the check); the only exception is the
 | `textbox` | TextField, or TextArea with `aria-multiline="true"` | none |
 | `list` | ListView | `role=listitem` child, or a `template` whose first element child is `role=listitem` |
 | `listitem` | ListItem | none |
-| `tablist` | TabList | `role=tab` children |
+| `tablist` | TabList | `role=tab` children; optional `data-activation="manual"` (values `manual` / `automatic`, default `automatic`, anything else is a build error). `manual` = arrow keys move focus only, Enter/Space commits the selection; `automatic` = arrows select immediately with focus following |
 | `tab` | Tab | none (may also be written `button role=tab`) |
 | `tabpanel` | plain Container | none — a panel is a div a tab points at via `aria-controls`; hiding inactive panels is the TabList runtime's job, never author `display:none` (it bakes into the packed base style and keeps the active panel invisible — `FenceTabpanelHiddenByAuthor`) |
 | `dialog` | plain Container | none — a modal overlay layer |

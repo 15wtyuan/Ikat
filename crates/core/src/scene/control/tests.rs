@@ -730,7 +730,10 @@ fn tablist_panel_display_follows_selected_index() {
         &mut scene,
         NodeKind::TabList,
         ResolvedStyle::default(),
-        Some(ControlInit::TabList { selected_index: 0 }),
+        Some(ControlInit::TabList {
+            selected_index: 0,
+            manual: false,
+        }),
     );
     let _t0 = make_tab_child(&mut scene, tl, "pa");
     let _t1 = make_tab_child(&mut scene, tl, "pb");
@@ -750,7 +753,7 @@ fn tablist_panel_display_follows_selected_index() {
     );
 
     // 切到第 2 个 tab，再 sync：显隐反转（pa 被 none 剪枝，pb 的覆写 bit 交还）。
-    if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tl) {
+    if let Some(ControlState::TabList { selected_index, .. }) = scene.controls.get_mut(tl) {
         *selected_index = 1;
     }
     sync_control_visuals(&mut scene, tl, 0.0);
@@ -775,7 +778,10 @@ fn tablist_r1_missing_aria_controls_and_missing_panel_skip_cleanly() {
         &mut scene,
         NodeKind::TabList,
         ResolvedStyle::default(),
-        Some(ControlInit::TabList { selected_index: 0 }),
+        Some(ControlInit::TabList {
+            selected_index: 0,
+            manual: false,
+        }),
     );
     // tab0：role=tab 但无 aria-controls（make_role_child 只设 role）→ 跳过。
     let _t_no_controls = make_role_child(&mut scene, tl, ROLE_TAB);
@@ -809,6 +815,7 @@ fn tablist_click_scene(num_tabs: usize, selected_index: usize) -> (Scene, NodeId
         NodeKind::TabList,
         ResolvedStyle::default(),
         Some(ControlInit::TabList {
+            manual: false,
             selected_index: selected_index as u32,
         }),
     );
@@ -837,7 +844,10 @@ fn click_tab_sets_selected_index_and_emits() {
     assert!(
         matches!(
             s.controls.get(tl),
-            Some(ControlState::TabList { selected_index: 1 })
+            Some(ControlState::TabList {
+                selected_index: 1,
+                ..
+            })
         ),
         "点 tab1 → selected_index=1"
     );
@@ -858,7 +868,10 @@ fn click_active_tab_emits_no_event() {
     assert!(
         matches!(
             s.controls.get(tl),
-            Some(ControlState::TabList { selected_index: 0 })
+            Some(ControlState::TabList {
+                selected_index: 0,
+                ..
+            })
         ),
         "点已激活 tab0 → selected_index 不变（仍 0）"
     );
@@ -877,7 +890,10 @@ fn click_tablist_padding_noop() {
     assert!(
         matches!(
             s.controls.get(tl),
-            Some(ControlState::TabList { selected_index: 0 })
+            Some(ControlState::TabList {
+                selected_index: 0,
+                ..
+            })
         ),
         "点 tablist padding → selected_index 不变"
     );
@@ -1140,14 +1156,17 @@ fn tab_selected_derives_from_parent_tablist() {
         &mut scene,
         NodeKind::TabList,
         ResolvedStyle::default(),
-        Some(ControlInit::TabList { selected_index: 1 }),
+        Some(ControlInit::TabList {
+            selected_index: 1,
+            manual: false,
+        }),
     );
     let t0 = make_role_child(&mut scene, tl, ROLE_TAB);
     let t1 = make_role_child(&mut scene, tl, ROLE_TAB);
     assert_eq!(tab_selected(&scene, t0), Some(false));
     assert_eq!(tab_selected(&scene, t1), Some(true));
     // 切换父 selected_index → 合成值跟随（非字面存储）。
-    if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tl) {
+    if let Some(ControlState::TabList { selected_index, .. }) = scene.controls.get_mut(tl) {
         *selected_index = 0;
     }
     assert_eq!(tab_selected(&scene, t0), Some(true));

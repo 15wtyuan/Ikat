@@ -3,11 +3,11 @@ use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap, SourceLocation};
 use crate::ir::{IrElement, IrNode, IrNodeKind, IrTree, Span};
 use crate::schema::attr::{
     find_structural_attr, is_content_attr, is_global_attr, is_semantic_content_attr,
-    AttrValueDomain,
+    AttrValueDomain, GLOBAL_ATTR_ENUMS,
 };
 use crate::schema::css::{find_css_prop, find_shorthand};
 use crate::schema::tag::{
-    find_tag, is_known_role, is_shell_tag, known_roles_list, resolve_semantic,
+    find_tag, is_known_role, is_shell_tag, known_roles_list, resolve_semantic, SemanticKind,
 };
 
 /// Run Stage 3 (Fence Gate): validate every element against the schema.
@@ -77,6 +77,43 @@ fn validate_element(
                          control validations, so the fence rejects it here.",
                         attr.value,
                         known_roles_list()
+                    ),
+                    loc(file, attr.span.start, line_map),
+                ));
+            } else if let Some((name, allowed)) = GLOBAL_ATTR_ENUMS
+                .iter()
+                .find(|(name, _)| *name == attr.name)
+            {
+                // 值域受枚举约束的全局属性（draggable 等）。HTML 标准里的 `auto` 等
+                // 浏览器原生语义在自绘引擎无对应物，静默吞掉会埋「写了没生效」的坑。
+                if !allowed.contains(&attr.value.as_str()) {
+                    diagnostics.push(Diagnostic::error(
+                        DiagnosticCode::FenceBadAttrValue,
+                        format!(
+                            "value \"{}\" for attribute \"{}\" is not allowed (expected one of: \
+                             {}). The browser-default value \"auto\" has no self-drawn \
+                             equivalent — set \"true\" or \"false\" explicitly.",
+                            attr.value,
+                            name,
+                            allowed.join(" | ")
+                        ),
+                        loc(file, attr.span.start, line_map),
+                    ));
+                }
+            } else if semantic == Some(SemanticKind::TabList)
+                && attr.name == "data-activation"
+                && attr.value != "manual"
+                && attr.value != "automatic"
+            {
+                // 语义消费的 data-* 属性在消费位校验值域（data-* 在别处是自由透传，
+                // 只有消费它的 role 才校验——坏值会静默关掉一个行为，必须报错）。
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceBadAttrValue,
+                    format!(
+                        "value \"{}\" for attribute \"data-activation\" is not allowed on a \
+                         tablist (expected \"manual\" | \"automatic\"); manual = arrow keys move \
+                         focus only, Enter/Space commits the selection",
+                        attr.value
                     ),
                     loc(file, attr.span.start, line_map),
                 ));
@@ -286,4 +323,56 @@ mod tests {
             errors
         );
     }
+
+    #[test]
+    fn draggable_true_false_pass() {
+        let ok = gate(r#"<div draggable="true" id="d1"></div><span draggable="false"></span>"#);
+        let errors: Vec<_> = ok
+            .iter()
+            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "draggable=true/false: {errors:?}");
+    }
+
+    #[test]
+    fn draggable_auto_and_bad_values_rejected() {
+        // HTML 标准有 auto（浏览器原生拖拽），自绘引擎无对应物——围栏收窄到 true|false。
+        for bad in ["auto", "TRUE", "1", ""] {
+            let diags = gate(&format!(r#"<div draggable="{bad}"></div>"#));
+            assert!(
+                diags
+                    .iter()
+                    .any(|d| d.code == DiagnosticCode::FenceBadAttrValue
+                        && d.message.contains("draggable")),
+                "draggable=\"{bad}\" must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn data_activation_validated_on_tablist_only() {
+        // tablist 上值域 manual|automatic；写坏值报错（静默关掉激活模型是坑）。
+        let ok = gate(
+            r#"<div role="tablist" data-activation="manual"><button role="tab">a</button></div>"#,
+        );
+        let errors: Vec<_> = ok
+            .iter()
+            .filter(|d| d.severity == crate::diagnostic::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "manual passes: {errors:?}");
+
+        let bad = gate(
+            r#"<div role="tablist" data-activation="auto"><button role="tab">a</button></div>"#,
+        );
+        assert!(bad
+            .iter()
+            .any(|d| d.code == DiagnosticCode::FenceBadAttrValue
+                && d.message.contains("data-activation")));
+
+        // 非 tablist 上的 data-activation 是自由透传 data-*（不校验、不报错）。
+        let elsewhere = gate(r#"<div data-activation="whatever"></div>"#);
+        assert!(
+            elsewhere.is_empty(),
+            "free-form data-* elsewhere: {elsewhere:?}"
+        );    }
 }

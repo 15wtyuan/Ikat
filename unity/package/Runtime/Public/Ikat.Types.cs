@@ -88,6 +88,11 @@ namespace Ikat
     // text-align 的 computed 读值（Style 写层无此 prop——围栏子集 text-align 走 CSS 声明）。
     public enum TextAlign { Left, Center, Right }
 
+    /// <summary>TabList 激活模型（HTML `data-activation` 的运行时面）。Automatic（缺省）=
+    /// 方向键即时选中、焦点跟随；Manual = 方向键只移焦点，Enter/Space 才提交选中
+    /// （WAI-ARIA manual activation——延迟加载 tab 内容等场景）。</summary>
+    public enum TabActivation { Automatic, Manual }
+
     // —— tween builder 面（#9 契约；判别值与 core TweenProp / ease_ffi 对齐，勿重排）——
 
     /// <summary>tween 动画通道（core TweenProp 镜像）。Transform = TRS 五元组

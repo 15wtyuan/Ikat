@@ -25,11 +25,15 @@ pub struct AttrSpec {
 pub fn is_global_attr(name: &str) -> bool {
     matches!(
         name,
-        "id" | "class" | "style" | "slot" | "hidden" | "tabindex" | "role" | "type"
+        "id" | "class" | "style" | "slot" | "hidden" | "tabindex" | "role" | "type" | "draggable"
     ) || name.starts_with("aria-")
         || name.starts_with("data-")
         || name.starts_with("--")
 }
+
+/// Value domains for global attributes whose values the fence validates.
+/// Attributes not listed here (id/class/data-*/…) are free-form.
+pub const GLOBAL_ATTR_ENUMS: &[(&str, &[&str])] = &[("draggable", &["true", "false"])];
 
 /// Look up a structural attribute on a tag spec by name.
 pub fn find_structural_attr(
@@ -76,6 +80,7 @@ mod tests {
         assert!(is_global_attr("data-foo"));
         assert!(is_global_attr("--my-var"));
         assert!(is_global_attr("aria-label"));
+        assert!(is_global_attr("draggable"));
         // `type` is a plain global attribute now that input[type] structural
         // dispatch is retired (role drives control semantics instead).
         assert!(is_global_attr("type"));

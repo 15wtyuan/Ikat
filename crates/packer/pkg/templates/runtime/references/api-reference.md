@@ -48,6 +48,7 @@ public abstract class Node {
 
     public bool Touchable { get; set; }
     public bool Focusable { get; set; }
+    public bool Draggable { get; set; }        // runtime face of the HTML draggable attr
     public ClassList Classes { get; }
 
     public bool IsDisposed { get; }
@@ -199,9 +200,12 @@ handles (`On<T>`, `OnUpdate`, `StyleSheet.Add`) — dispose to withdraw;
 semantic events use `+=`/`-=`. `On<T>(..., once: true)` auto-withdraws
 after one fire (prevents "wait for end event" leaks).
 
-Drag & drop: registering a drag event opts the node into arbitration
-(there is no `Draggable` property); the framework handles threshold /
-capture / arbitration, you apply the delta. Drop targets are a user
+Drag & drop: dragging must be enabled explicitly — either
+`draggable="true"` in the HTML (global attribute, values `true` /
+`false`, default `false`) or `Node.Draggable` at runtime. An enabled
+node joins the drag_target candidates (nearest draggable node on the
+pointer-down hit chain); the framework handles threshold / capture /
+arbitration, you apply the delta. Drop targets are a user
 pattern: `DragEnd` + `ui.Pick(position)`.
 
 `DragMoveEvent.DeltaX/DeltaY` is the **per-move increment** since the
@@ -236,7 +240,7 @@ arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
 | div role=radio | RadioButton : Node | IsChecked, Name (readonly), Disabled, CheckedChanged |
 | div role=combobox | Dropdown : Node | SelectedIndex, SelectedValue, Disabled, SelectionChanged |
 | div role=progressbar | ProgressBar : Node | Value, Min, Max (float), IsIndeterminate, AnimateValue |
-| div role=tablist | TabList : Container | SelectedIndex, SelectionChanged (arrow keys/click; panels linked via `aria-controls`) |
+| div role=tablist | TabList : Container | SelectedIndex, Activation, SelectionChanged (arrow axis follows `flex-direction`, clamped no wrap; panels linked via `aria-controls`. Activation model — `data-activation="manual"` in HTML or `Activation` at runtime: `Automatic` (default) selects as arrows move focus; `Manual` moves focus only, Enter/Space commits) |
 | div role=tab | Tab : Container | (`aria-selected` synthesized from TabList.SelectedIndex) |
 | a (inside rich text) | Link : Container | Href (readonly), Clicked |
 

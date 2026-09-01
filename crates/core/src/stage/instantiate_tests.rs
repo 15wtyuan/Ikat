@@ -984,7 +984,10 @@ fn instantiate_tablist_control_init_maps_to_state() {
     use crate::scene::node::ControlState;
     let pkg = make_control_pkg(
         NodeKind::TabList,
-        crate::asset::ControlInit::TabList { selected_index: 2 },
+        crate::asset::ControlInit::TabList {
+            selected_index: 2,
+            manual: false,
+        },
     );
     let mut s = Stage::new_for_test();
     s.create_root("div", "").unwrap();
@@ -994,7 +997,10 @@ fn instantiate_tablist_control_init_maps_to_state() {
     assert!(
         matches!(
             scene.controls.get(id),
-            Some(ControlState::TabList { selected_index: 2 })
+            Some(ControlState::TabList {
+                selected_index: 2,
+                ..
+            })
         ),
         "ControlInit::TabList{{selected_index:2}} → ControlState::TabList{{selected_index:2}}"
     );
@@ -1017,7 +1023,10 @@ fn instantiate_copies_aria_controls_into_role_info() {
         content: None,
         src: None,
         href: None,
-        control_init: Some(crate::asset::ControlInit::TabList { selected_index: 0 }),
+        control_init: Some(crate::asset::ControlInit::TabList {
+            selected_index: 0,
+            manual: false,
+        }),
         role: Some("tablist".to_string()),
         data_slot: None,
         aria_controls: Some("panel-1".to_string()),

@@ -64,6 +64,34 @@ pub extern "C" fn ikat_stage_get_node_touchable(
     })
 }
 
+/// 读节点 draggable（interaction.draggable，drag_target 候选判据同源）。
+/// null 句柄 / 无 scene / 节点缺失 → -1（不与 false 混淆）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_get_node_draggable(
+    h: *const StageHandle,
+    node_id: u64,
+    out: *mut u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.get(NodeId(node_id)) {
+            Some(n) => {
+                unsafe { *out = u8::from(n.interaction.draggable) };
+                0
+            }
+            None => -1,
+        }
+    })
+}
+
 /// 读节点 LOOKUP_SCOPE 查找边界标记（组件展开域 host / ListView slot 根 / 实例根打此位）。
 /// C# Query&lt;T&gt;/Query(selector) 的 DFS 剪枝用——遇此标记的子节点 visit 后不下钻
 ///（Get/TryGet 走 core find_node_by_id_in_subtree 已内置剪枝，本 FFI 补 Query 的 C# 侧路径）。

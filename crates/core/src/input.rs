@@ -84,6 +84,7 @@ pub const KEY_TAB: u32 = 9;
 /// 取 Unity 公开文档的编辑键块值（UpArrow=273…LeftArrow=276…Home=278,End=279）。
 pub const KEY_BACKSPACE: u32 = 8;
 pub const KEY_RETURN: u32 = 13; // Unity KeyCode.Return（主回车；KeypadEnter=271 另算）
+pub const KEY_SPACE: u32 = 32; // Unity KeyCode.Space（manual TabList 的 Space 提交键）
 pub const KEY_ESCAPE: u32 = 27;
 pub const KEY_DELETE: u32 = 323; // Unity KeyCode.Delete（C# CollectKeys 传 (uint)KeyCode；旧值 127=ASCII DEL 与 Unity 不匹配 → Delete 键失效）
 pub const KEY_LEFT: u32 = 276; // LeftArrow
@@ -693,10 +694,11 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                 {
                     continue; // 路由键被消费，不发 keydown
                 }
-                // TabList 键盘路由（automatic-activation）：焦点在 TabList 子树（Tab 是
-                // focusable 元素，TabList 自身不聚焦）→ 向上找 ControlState::TabList 祖先，
-                // 方向键按 flex-direction 选轴移动 selected_index（clamp 不 wrap）+ 发
-                // SelectionChanged。互斥于 Dropdown（Dropdown 非 TabList）。
+                // TabList 键盘路由（激活模型见 ControlState::TabList::manual_activation）：
+                // 焦点在 TabList 子树（Tab 是 focusable 元素，TabList 自身不聚焦）→ 向上找
+                // ControlState::TabList 祖先，方向键按 flex-direction 选轴移动焦点（roving
+                // tabindex）+ 按激活模型定选中是否跟随（automatic：即时选中；manual：只移
+                // 焦点，Enter/Space 才提交）。互斥于 Dropdown（Dropdown 非 TabList）。
                 //
                 // 与 TextField 的隔离靠 panel 跨树不变量，而非 is_text 消费方向键：TextArea
                 // 在文本路由消费 Up/Down（routed=true，见上方 KEY_UP/KEY_DOWN 臂）；单行框

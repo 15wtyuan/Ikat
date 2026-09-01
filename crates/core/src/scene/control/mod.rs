@@ -23,6 +23,7 @@ mod dropdown;
 mod edit;
 mod pointer;
 mod roles;
+mod roving;
 mod tablist;
 mod visuals;
 
@@ -33,6 +34,7 @@ pub use dropdown::*;
 pub use edit::*;
 pub use pointer::*;
 pub use roles::*;
+pub(crate) use roving::*;
 pub use tablist::*;
 pub use visuals::*;
 

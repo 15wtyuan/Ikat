@@ -5391,6 +5391,7 @@ fn tablist_keyboard_scene(
         NodeKind::TabList,
         ResolvedStyle::default(),
         Some(ControlInit::TabList {
+            manual: false,
             selected_index: selected_index as u32,
         }),
     );
@@ -5425,7 +5426,7 @@ fn tablist_keyboard_scene(
 /// 取 TabList 的 selected_index。
 fn tablist_selected(scene: &Scene, tl: NodeId) -> usize {
     match scene.controls.get(tl) {
-        Some(ControlState::TabList { selected_index }) => *selected_index,
+        Some(ControlState::TabList { selected_index, .. }) => *selected_index,
         _ => panic!("not a TabList"),
     }
 }
@@ -5583,6 +5584,133 @@ fn tablist_column_reverse_inverts_vertical_arrows() {
         tablist_selected(&s, tl),
         2,
         "column-reverse: Up 应递增（1→2）"
+    );
+}
+
+// 手动激活（data-activation="manual"）：方向键只移焦点（roving tabindex），选中不动；
+// Enter/Space 才把选中提交到焦点所在 tab。对照 automatic（缺省）：焦点跟随选中。
+
+/// 把 TabList 控件态切到 manual（摆台后直改，模拟 data-activation="manual" 打包烙印）。
+fn tablist_set_manual(s: &mut Scene, tl: NodeId) {
+    match s.controls.get_mut(tl) {
+        Some(ControlState::TabList {
+            manual_activation, ..
+        }) => *manual_activation = true,
+        _ => panic!("not a TabList"),
+    }
+}
+
+#[test]
+fn manual_tablist_arrows_move_focus_not_selection() {
+    // manual + row + selected 0、焦点 tab0：Right → 焦点到 tab1（发 FocusOut@tab0 +
+    // FocusIn@tab1），selected_index 保持 0、不发 SelectionChanged。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
+    tablist_set_manual(&mut s, tl);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(s.focused_node, Some(tabs[1]), "Right → 焦点移到 tab1");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == tabs[1].0),
+        "FocusIn@tab1（焦点移动是可观察事件）"
+    );
+    assert_eq!(tablist_selected(&s, tl), 0, "manual：选中不动");
+    assert!(
+        !out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+        "manual：方向键不发 SelectionChanged"
+    );
+
+    // 再 Right → 焦点 tab2；Left 回 tab1（种子 = 当前焦点 tab）。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(s.focused_node, Some(tabs[2]), "Right → 焦点 tab2");
+    process_keys(&mut s, &[key_down(KEY_LEFT)], &mut out);
+    assert_eq!(
+        s.focused_node,
+        Some(tabs[1]),
+        "Left → 焦点回 tab1（种子=焦点 tab）"
+    );
+}
+
+#[test]
+fn manual_tablist_enter_and_space_commit_focused_tab() {
+    // manual：Right 移焦点到 tab1（选中仍 0）→ Enter 提交选中 1（发 SelectionChanged
+    // touch_id=1）→ Space 在已选中 tab 上再提交（净变为零，不发事件）。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
+    tablist_set_manual(&mut s, tl);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 0, "移焦点期间选中不动");
+
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RETURN)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Enter 提交焦点所在 tab");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_SELECTION_CHANGED && e.node_id == tl.0 && e.touch_id == 1),
+        "Enter 发 SelectionChanged@tablist，touch_id=1"
+    );
+
+    // Space 同为提交键；已选中 → 净变为零 → 不发事件。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_SPACE)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Space 提交同一 tab");
+    assert!(
+        !out.iter().any(|e| e.event_type == EVT_SELECTION_CHANGED),
+        "净变为零 → 不发事件（HTML change 语义）"
+    );
+}
+
+#[test]
+fn automatic_tablist_focus_follows_selection() {
+    // automatic（缺省）：Right → 选中 1 且焦点同步到 tab1（WAI-ARIA automatic activation：
+    // 焦点与选中一起移动）。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
+    focus_node(&mut s, Some(tabs[0]), &mut Vec::new());
+    let mut out = Vec::new();
+
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 1, "Right → 选中 1");
+    assert_eq!(s.focused_node, Some(tabs[1]), "焦点跟随选中移到 tab1");
+    assert!(
+        out.iter()
+            .any(|e| e.event_type == EVT_FOCUS_IN && e.node_id == tabs[1].0),
+        "FocusIn@tab1"
+    );
+}
+
+#[test]
+fn manual_tablist_enter_not_consumed_without_tab_focus() {
+    // 焦点在 tablist 的非 tab 后代（如 tab 内嵌装饰 div）上：Enter 不被 tablist 路由
+    // （无 focused tab 可提交）→ 透传为普通 keydown（不误吞宿主控件的 Enter）。
+    let (mut s, tl, tabs) = tablist_keyboard_scene(3, 0, taffy::FlexDirection::Row);
+    tablist_set_manual(&mut s, tl);
+    let inner =
+        create_node_from_template(&mut s, NodeKind::Container, ResolvedStyle::default(), None);
+    append_child(&mut s, tabs[0], inner).expect("inner attach");
+    focus_node(&mut s, Some(inner), &mut Vec::new());
+    let mut out = Vec::new();
+
+    process_keys(&mut s, &[key_down(KEY_RETURN)], &mut out);
+    assert_eq!(tablist_selected(&s, tl), 0, "Enter 不改选中");
+    assert!(
+        out.iter().any(|e| e.event_type == EVT_KEY_DOWN
+            && e.node_id == inner.0
+            && e.touch_id == KEY_RETURN as i32),
+        "Enter 透传为普通 keydown@inner"
+    );
+
+    // 方向键仍可从 selected 种子起步移焦点（首次按方向键、焦点不在 tab 上的回落路径）。
+    out.clear();
+    process_keys(&mut s, &[key_down(KEY_RIGHT)], &mut out);
+    assert_eq!(
+        s.focused_node,
+        Some(tabs[1]),
+        "种子回落 selected_index=0，+1 → tab1"
     );
 }
 

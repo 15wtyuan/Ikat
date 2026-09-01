@@ -484,7 +484,7 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
         }
         let tablist_id = tablist_id?;
         let selected_index = match scene.controls.get(tablist_id) {
-            Some(ControlState::TabList { selected_index }) => *selected_index,
+            Some(ControlState::TabList { selected_index, .. }) => *selected_index,
             _ => return None,
         };
         // 本 Tab 在父 TabList 的 role=tab 子里的 0 基序号（与 selected_index 同尺度）。
@@ -3075,8 +3075,13 @@ mod tests {
                 },
             );
         }
-        s.controls
-            .ensure(tl_id, ControlState::TabList { selected_index });
+        s.controls.ensure(
+            tl_id,
+            ControlState::TabList {
+                selected_index,
+                manual_activation: false,
+            },
+        );
         (s, tl_id, tab_ids)
     }
 

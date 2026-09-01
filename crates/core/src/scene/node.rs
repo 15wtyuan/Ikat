@@ -572,11 +572,15 @@ pub enum ControlState {
         step: f32,
     },
     /// WAI-ARIA `role="tablist"`。selected_index=当前激活 tab 序号（aria-selected 不存储于
-    /// 各 Tab 子节点，由 synth_aria_value 从父 selected_index 派生）。无 value_lock
+    /// 各 Tab 子节点，由 synth_aria_value 从父 selected_index 派生）。manual_activation=
+    /// 手动激活模型（data-activation="manual" 打包期烙印 / TabList.Activation 运行时改）：
+    /// true=方向键只移焦点、Enter/Space 才提交选中；false=方向键即时选中并带焦点
+    /// （WAI-ARIA automatic activation，缺省）。无 value_lock
     /// （aria-selected 是只读合成，无回写环——区别于 Dropdown）。panel 显隐据
     /// RoleInfo.aria_controls 解析 panel id 后切换，不在此枚举存 panel_ids。
     TabList {
         selected_index: usize,
+        manual_activation: bool,
     },
 }
 

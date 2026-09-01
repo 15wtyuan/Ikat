@@ -156,6 +156,13 @@ namespace Ikat
             get { ThrowIfDisposed(); return GetNodeFocusable(); }
             set { ThrowIfDisposed(); SetNodeFocusable(value); }
         }
+        // 运行时改拖拽使能（HTML `draggable` 属性的运行时面）。true = 本节点成为
+        // drag_target 候选，pointer-down 后按位移阈值启动 DragStart/DragMove/DragEnd 事件链。
+        public bool Draggable
+        {
+            get { ThrowIfDisposed(); return GetNodeDraggable(); }
+            set { ThrowIfDisposed(); SetNodeDraggable(value); }
+        }
 
         // 投影层：lazy 造 ClassList 挂本 Node。同 Style/Transform 模式：同一 Node 多次访问
         // Classes 返同一实例——node.Classes.Add("a") 与 .Contains("a") 必须作用同一 ClassList
@@ -651,6 +658,19 @@ namespace Ikat
             byte b = 0;
             int rc = Native.ikat_stage_get_node_focusable(h, _id, &b);
             if (rc != 0) throw new InvalidOperationException($"get_node_focusable failed (node {_id})");
+            return b != 0;
+        }
+        void SetNodeDraggable(bool v)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.ikat_stage_set_node_draggable(h, _id, v);
+        }
+        bool GetNodeDraggable()
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte b = 0;
+            int rc = Native.ikat_stage_get_node_draggable(h, _id, &b);
+            if (rc != 0) throw new InvalidOperationException($"get_node_draggable failed (node {_id})");
             return b != 0;
         }
     }
@@ -2721,6 +2741,13 @@ namespace Ikat
             get { ThrowIfDisposed(); return (int)GetTabListSelectedIndex(); }
             set { ThrowIfDisposed(); SetTabListSelectedIndex((uint)value); }
         }
+        // Activation：激活模型（HTML data-activation 属性的运行时面）。Manual = 方向键只移
+        // 焦点、Enter/Space 提交选中；Automatic（缺省）= 方向键即时选中且焦点跟随。
+        public TabActivation Activation
+        {
+            get { ThrowIfDisposed(); return GetTabActivation() ? TabActivation.Manual : TabActivation.Automatic; }
+            set { ThrowIfDisposed(); SetTabActivation(value == TabActivation.Manual); }
+        }
         // Disabled：伪类源 + active/click 抑制（set_node_disabled）。getter 读 NodeFlags::DISABLED
         // （通用 node flag 通道，与 Dropdown / Slider 一致）。
         public bool Disabled { set { ThrowIfDisposed(); SetNodeDisabled(value); } get { ThrowIfDisposed(); return GetNodeDisabled(); } }
@@ -2763,6 +2790,19 @@ namespace Ikat
             StageHandle* h = Handle();
             int rc = Native.ikat_stage_set_tablist_selected_index(h, _id, v);
             if (rc != 0) throw new InvalidOperationException($"set_tablist_selected_index failed (node {_id})");
+        }
+        bool GetTabActivation()
+        {
+            StageHandle* h = Handle();
+            byte b = 0; int rc = Native.ikat_stage_get_tab_activation(h, _id, &b);
+            if (rc != 0) throw new InvalidOperationException($"get_tab_activation failed (node {_id})");
+            return b != 0;
+        }
+        void SetTabActivation(bool manual)
+        {
+            StageHandle* h = Handle();
+            int rc = Native.ikat_stage_set_tab_activation(h, _id, manual);
+            if (rc != 0) throw new InvalidOperationException($"set_tab_activation failed (node {_id})");
         }
         void SetNodeDisabled(bool v)
         {

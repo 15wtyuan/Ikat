@@ -1,7 +1,11 @@
-use crate::input::{EventRecord, EVT_SELECTION_CHANGED, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_UP};
+use crate::input::{
+    focus_node, EventRecord, EVT_SELECTION_CHANGED, KEY_DOWN, KEY_LEFT, KEY_RETURN, KEY_RIGHT,
+    KEY_SPACE, KEY_UP,
+};
 use crate::scene::node::{ControlState, NodeId, Scene};
 
 use super::roles::ROLE_TAB;
+use super::{roving_items, roving_step};
 
 /// 从 `from` 沿 parent 链上溯找最近的 TabList 控件节点。tab 是 tablist 直接子
 /// （结构契约），从 tab 或其后代起调一次即命中；限深防环。
@@ -55,10 +59,10 @@ pub(super) fn set_tablist_selected_index(
     out: &mut Vec<EventRecord>,
 ) {
     let changed = match scene.controls.get(tablist) {
-        Some(ControlState::TabList { selected_index }) => *selected_index != new_index,
+        Some(ControlState::TabList { selected_index, .. }) => *selected_index != new_index,
         _ => false, // 防御：控件态消失 → 不改、不发
     };
-    if let Some(ControlState::TabList { selected_index }) = scene.controls.get_mut(tablist) {
+    if let Some(ControlState::TabList { selected_index, .. }) = scene.controls.get_mut(tablist) {
         *selected_index = new_index;
     }
     if changed {
@@ -93,30 +97,39 @@ pub(crate) fn find_tablist_ancestor(scene: &Scene, start: Option<NodeId>) -> Opt
     None
 }
 
-/// TabList 键盘交互路由（automatic-activation）。返回是否消费了该键（消费 → 不发普通 keydown）。
+/// TabList 键盘路由（激活模型见 [`ControlState::TabList::manual_activation`]）。
+/// 返回是否消费了该键（消费 → 不发普通 keydown）。
 ///
 /// - 方向键按 TabList 的 `flex-direction` 选轴：row/row-reverse → Left/Right，
 ///   column/column-reverse → Up/Down；row-reverse/column-reverse 翻转 delta 符号。
-/// - clamp 到 `[0, tab_count-1]`，**不 wrap**。
-/// - 改变 selected_index 即发 SelectionChanged（automatic-activation：方向键即时提交，
-///   与 Dropdown 的 seek 不提交不同——TabList 无展开/提交语义）。
+/// - roving tabindex：方向键移动**焦点**到相邻 tab（clamp 不 wrap，种子 = 焦点所在
+///   tab 序号、回落 selected_index——见 [`super::roving`]）。选中是否跟随由激活模型定：
+///   - **automatic**（缺省，WAI-ARIA 推荐）：焦点与选中同步移动，方向键即时提交
+///     SelectionChanged（与 Dropdown 的 seek 不提交不同——TabList 无展开/提交语义）。
+///   - **manual**（`data-activation="manual"`）：方向键只移焦点不改选中；Enter/Space
+///     才把选中提交到焦点所在 tab。
+/// - 边缘步进折返自身：焦点/选中净变为零，事件照「仅净变才发」纪律不发，键仍消费。
 ///
-/// 非 TabList / 非路由键（含跨轴键，如 row 方向按 Up）/ 0 tab → false（让调用方走普通 keydown）。
-/// 由 `process_keys` 在焦点落在 TabList 子树时调用。
+/// 非 TabList / 非路由键（含跨轴键，如 row 方向按 Up；manual 外的 Enter/Space）/
+/// 0 tab → false（让调用方走普通 keydown）。由 `process_keys` 在焦点落在 TabList
+/// 子树时调用。
 pub(crate) fn on_tablist_key(
     scene: &mut Scene,
     tablist: NodeId,
     key_code: u32,
     out: &mut Vec<EventRecord>,
 ) -> bool {
-    // 读当前 selected_index + flex_direction（一次不可变借，释放后再改）。
-    let (current, flex_dir) = match scene.get(tablist) {
+    // 读当前 selected_index + 激活模型 + flex_direction（一次不可变借，释放后再改）。
+    let (current, manual, flex_dir) = match scene.get(tablist) {
         Some(n) => {
-            let cur = match scene.controls.get(tablist) {
-                Some(ControlState::TabList { selected_index }) => *selected_index,
+            let (cur, manual) = match scene.controls.get(tablist) {
+                Some(ControlState::TabList {
+                    selected_index,
+                    manual_activation,
+                }) => (*selected_index, *manual_activation),
                 _ => return false, // 非 TabList 控件态 → 不路由
             };
-            (cur, n.style.taffy_style.flex_direction)
+            (cur, manual, n.style.taffy_style.flex_direction)
         }
         None => return false, // 控件不 live → 不路由
     };
@@ -129,20 +142,41 @@ pub(crate) fn on_tablist_key(
         (taffy::FlexDirection::Column, KEY_DOWN) => 1,
         (taffy::FlexDirection::ColumnReverse, KEY_UP) => 1,
         (taffy::FlexDirection::ColumnReverse, KEY_DOWN) => -1,
-        _ => return false, // 跨轴键 / 非方向键 → 不路由
+        // manual 模式的提交键：焦点在 tab 上才消费（焦点在 tablist 后代非 tab 节点上
+        // 时 Enter 是普通 keydown，不误吞——如 tab 内嵌输入框）。
+        (.., KEY_RETURN) | (.., KEY_SPACE) if manual => {
+            return match focused_tab_index(scene, tablist) {
+                Some(idx) => {
+                    set_tablist_selected_index(scene, tablist, idx, out);
+                    true
+                }
+                None => false,
+            }
+        }
+        _ => return false, // 跨轴键 / 非路由键 → 不路由
     };
-    // 按 DOM 序数 role=tab 直接子（与 sync_control_visuals / aria-selected 同口径）。
-    let tab_count = scene
-        .get(tablist)
-        .map(|n| n.children.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
-        .count();
-    if tab_count == 0 {
+    // roving items = role=tab 直接子按 DOM 序（与 sync_control_visuals / aria-selected 同口径）。
+    let items = roving_items(scene, tablist, ROLE_TAB);
+    // 种子：焦点在本 tablist 的 tab 上 = 该 tab 序号；否则回落 selected_index。
+    let seed = focused_tab_index(scene, tablist).unwrap_or(current);
+    let Some(target) = roving_step(&items, seed, delta) else {
         return false; // 无 tab → 不消费（让普通 keydown 透传）
+    };
+    let target_idx = items
+        .iter()
+        .position(|&t| t == target)
+        .expect("roving_step returns an item");
+    if !manual {
+        // automatic：焦点跟随选中（WAI-ARIA automatic activation）。
+        set_tablist_selected_index(scene, tablist, target_idx, out);
     }
-    let new = (current as i64 + delta).max(0).min(tab_count as i64 - 1) as usize;
-    set_tablist_selected_index(scene, tablist, new, out);
+    // 两模型共同：焦点移到目标 tab（manual 只做这步；automatic 与选中同步）。
+    focus_node(scene, Some(target), out);
     true
+}
+
+/// 焦点节点若是本 tablist 的 tab → 其序号。焦点不在 tab 上 / 属其它 tablist / 无焦点 → None。
+fn focused_tab_index(scene: &Scene, tablist: NodeId) -> Option<usize> {
+    let (owner, idx) = tab_index(scene, scene.focused_node?)?;
+    (owner == tablist).then_some(idx)
 }

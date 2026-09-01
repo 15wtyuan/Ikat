@@ -326,7 +326,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
         // 激活 panel unset inline display 回落作者 CSS——显隐所有权归控件，但激活态的
         // 布局方式（flex/grid/…）归作者，core 不覆写（浏览器 tab 库同语义：JS 只管
         // ''/none 切换，激活布局由作者样式表决定）。
-        ControlState::TabList { selected_index } => {
+        ControlState::TabList { selected_index, .. } => {
             // 按 DOM 序遍历 role=tab 子节点（selected_index 是 tab 的序号）。clone children
             // 释放不可变借，供循环内 set_inline_override 取 &mut scene。
             let tab_ids: Vec<NodeId> = scene

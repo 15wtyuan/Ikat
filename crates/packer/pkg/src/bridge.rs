@@ -72,7 +72,9 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     parent_idx: parent_tpl,
                     classes: extract_classes(el),
                     id_attr: attr(el, "id"),
-                    draggable: false,
+                    // draggable：HTML 全局属性（fence 值域 true|false，缺省 false）。
+                    // 运行时映射 interaction.draggable，开关 drag 事件链（DragStart/Move/End）。
+                    draggable: attr(el, "draggable").is_some_and(|v| v == "true"),
                     // HTML 布尔属性 disabled（fence 内容属性，button）：presence = true
                     //（与浏览器一致，disabled="false" 也算 disabled）。运行时映射
                     // NodeFlags::DISABLED。
@@ -385,6 +387,9 @@ pub(crate) fn extract_control_init(
                 .iter()
                 .position(|t| bool_attr(t, "aria-selected"))
                 .unwrap_or(0) as u32,
+            // 激活模型：data-activation="manual" → 手动（方向键只移焦点、Enter/Space 提交）；
+            // 缺省/automatic → 自动。fence gate 已在 tablist 语义上校验值域。
+            manual: attr(el, "data-activation").is_some_and(|v| v == "manual"),
         }),
         NodeKind::NumberField => {
             let edit =
@@ -654,6 +659,30 @@ mod tests {
     }
 
     #[test]
+    fn draggable_mapped_from_html_attr() {
+        // draggable=true 打开 drag 事件链（HTML 声明面）；缺省与 "false" 都是关。
+        // auto 等非法值在 fence gate 已拒，bridge 侧非 "true" 一律按 false 兜底。
+        let nodes = bridged(
+            r#"<div><div draggable="true" id="d">drag me</div><div draggable="false" id="n"></div><div id="dft"></div></div>"#,
+        );
+        let on = nodes
+            .iter()
+            .find(|n| n.id_attr.as_deref() == Some("d"))
+            .unwrap();
+        let off = nodes
+            .iter()
+            .find(|n| n.id_attr.as_deref() == Some("n"))
+            .unwrap();
+        let default = nodes
+            .iter()
+            .find(|n| n.id_attr.as_deref() == Some("dft"))
+            .unwrap();
+        assert!(on.draggable);
+        assert!(!off.draggable);
+        assert!(!default.draggable);
+    }
+
+    #[test]
     fn role_and_data_slot_extracted_into_template_node() {
         // role 驱动语义分派 + data-slot 标识控件视觉部件：两个属性都须从 HTML 提取进 TemplateNode，
         // 供 runtime RoleTable 查表。验证 bridge 是 HTML→pkg 的唯一入口不丢这两列。
@@ -698,7 +727,10 @@ mod tests {
             .expect("TabList node bridged");
         assert_eq!(
             tablist.control_init,
-            Some(ControlInit::TabList { selected_index: 1 })
+            Some(ControlInit::TabList {
+                selected_index: 1,
+                manual: false
+            })
         );
         // 每个 tab 的 aria_controls 落到各自 TemplateNode（按 aria-controls 值定位，避免 DFS 序硬编码）。
         let tab_a = nodes
@@ -732,7 +764,52 @@ mod tests {
             .expect("TabList node bridged");
         assert_eq!(
             tablist.control_init,
-            Some(ControlInit::TabList { selected_index: 0 })
+            Some(ControlInit::TabList {
+                selected_index: 0,
+                manual: false
+            })
+        );
+    }
+
+    #[test]
+    fn tablist_manual_activation_extracted() {
+        // data-activation="manual" → ControlInit::TabList.manual（运行时激活模型烙印）；
+        // 显式 automatic 与缺省同值（false）。
+        let manual = bridged(
+            r#"<style>[role="tab"]{color:#ff0000}</style>
+            <div><div role="tablist" data-activation="manual" style="display:flex">
+              <button role="tab" aria-selected="true">A</button>
+              <button role="tab">B</button>
+            </div></div>"#,
+        );
+        let manual_tl = manual
+            .iter()
+            .find(|n| n.kind == NodeKind::TabList)
+            .expect("TabList bridged");
+        assert_eq!(
+            manual_tl.control_init,
+            Some(ControlInit::TabList {
+                selected_index: 0,
+                manual: true
+            })
+        );
+
+        let auto = bridged(
+            r#"<style>[role="tab"]{color:#ff0000}</style>
+            <div><div role="tablist" data-activation="automatic" style="display:flex">
+              <button role="tab" aria-selected="true">A</button>
+            </div></div>"#,
+        );
+        let auto_tl = auto
+            .iter()
+            .find(|n| n.kind == NodeKind::TabList)
+            .expect("TabList bridged");
+        assert_eq!(
+            auto_tl.control_init,
+            Some(ControlInit::TabList {
+                selected_index: 0,
+                manual: false
+            })
         );
     }
 }

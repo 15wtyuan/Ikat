@@ -395,6 +395,48 @@ impl Stage {
         }
     }
 
+    /// 业务设节点 draggable（公共 Node.Draggable 的后端；HTML `draggable` 属性的
+    /// 运行时面）。true = 节点参与 drag_target 候选（pointer-down 后 DragStart/Move/End
+    /// 事件链的使能开关）。只写 interaction：draggable 无 rematch 通道（规则层不
+    /// 重起源），运行时值不被伪类重匹配冲掉。悬空 NodeId 静默跳过。
+    pub fn set_node_draggable(&mut self, node_id: NodeId, draggable: bool) {
+        if let Some(scene) = self.scene.as_mut() {
+            if let Some(n) = scene.get_mut(node_id) {
+                n.interaction.draggable = draggable;
+            }
+        }
+    }
+
+    /// 业务设 TabList 激活模型（公共 TabList.Activation 的后端；HTML
+    /// `data-activation="manual"` 属性的运行时面）。true = manual（方向键只移焦点、
+    /// Enter/Space 提交选中）；false = automatic（缺省，焦点跟随选中即时提交）。
+    /// 返回是否生效（非 TabList 控件态 / 悬空 NodeId → false）。
+    pub fn set_tab_activation(&mut self, node_id: NodeId, manual: bool) -> bool {
+        if let Some(scene) = self.scene.as_mut() {
+            if let Some(crate::scene::node::ControlState::TabList {
+                manual_activation, ..
+            }) = scene.controls.get_mut(node_id)
+            {
+                *manual_activation = manual;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 读 TabList 激活模型（manual=true / automatic=false）。非 TabList 控件态 /
+    /// 悬空 NodeId → None。
+    pub fn get_tab_activation(&self, node_id: NodeId) -> Option<bool> {
+        self.scene
+            .as_ref()
+            .and_then(|s| match s.controls.get(node_id) {
+                Some(crate::scene::node::ControlState::TabList {
+                    manual_activation, ..
+                }) => Some(*manual_activation),
+                _ => None,
+            })
+    }
+
     /// 按 CSS id 属性查节点（首个匹配）。无 scene / 无匹配 → None。
     /// 供 FFI find_node_by_id：业务用 id 定位节点（注册 listener / 设 disabled）。
     pub fn find_node_by_id(&self, id: &str) -> Option<NodeId> {

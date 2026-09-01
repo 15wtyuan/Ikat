@@ -840,7 +840,7 @@ pub extern "C" fn ikat_stage_get_tablist_selected_index(
             return -1;
         };
         match scene.controls.get(NodeId(node_id)) {
-            Some(ControlState::TabList { selected_index }) => {
+            Some(ControlState::TabList { selected_index, .. }) => {
                 unsafe { *out = *selected_index as u32 };
                 0
             }
@@ -868,7 +868,7 @@ pub extern "C" fn ikat_stage_set_tablist_selected_index(
         let Some(scene) = sh.stage.scene.as_mut() else {
             return -1;
         };
-        if let Some(ControlState::TabList { selected_index }) =
+        if let Some(ControlState::TabList { selected_index, .. }) =
             scene.controls.get_mut(NodeId(node_id))
         {
             *selected_index = index as usize;
@@ -1023,4 +1023,54 @@ fn format_number(v: f32) -> String {
             trimmed.to_string()
         }
     }
+}
+
+/// 读 TabList 激活模型（公共 TabList.Activation 的后端）。out：1 = manual（方向键只移
+/// 焦点、Enter/Space 提交），0 = automatic（缺省，焦点跟随选中）。非 TabList /
+/// null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_get_tab_activation(
+    h: *const StageHandle,
+    node_id: u64,
+    out: *mut u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        match sh.stage.get_tab_activation(NodeId(node_id)) {
+            Some(manual) => {
+                unsafe { *out = u8::from(manual) };
+                0
+            }
+            None => -1,
+        }
+    })
+}
+
+/// 设 TabList 激活模型（HTML `data-activation="manual"` 属性的运行时面）。
+/// manual=true：方向键只移焦点、Enter/Space 才提交选中；false：automatic（缺省）。
+/// 非 TabList / null 句柄 / 节点缺失 → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_tab_activation(
+    h: *mut StageHandle,
+    node_id: u64,
+    manual: bool,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        if sh.stage.set_tab_activation(NodeId(node_id), manual) {
+            0
+        } else {
+            -1
+        }
+    })
 }

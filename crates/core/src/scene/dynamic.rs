@@ -303,8 +303,12 @@ pub fn create_node_from_template(
                 max,
                 step,
             },
-            ControlInit::TabList { selected_index } => ControlState::TabList {
+            ControlInit::TabList {
+                selected_index,
+                manual,
+            } => ControlState::TabList {
                 selected_index: selected_index as usize,
+                manual_activation: manual,
             },
         };
         scene.controls.ensure(id, state);

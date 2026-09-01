@@ -15,10 +15,10 @@ use ikat_pkg::build::{pack_components, Component, PackResult};
 const HTML: &str = include_str!("fixtures/schema-lock.html");
 
 /// 当前布局的登记哈希。改 pkg 布局（有意 bump 版本）时同步更新此值。
-/// v50 taffy 0.14（#82：taffy Style serde 格式变，min/max_size 分型 LPA 等）；
-/// v49 progress min（#97 ARIA 填充域）；#101 后夹具 #root 补 position:relative
-/// （E1 门下 static+z 非法），内容变更非布局变更，哈希随之更新。
-const LOCKED_HASH: u64 = 0x81dd_c6c8_3eeb_d7c8;
+/// v52 ControlInit::TabList 加 manual（#13 手动激活模型）；v50 taffy 0.14（#82：taffy Style
+/// serde 格式变，min/max_size 分型 LPA 等）；v49 progress min（#97 ARIA 填充域）；
+/// #101 后夹具 #root 补 position:relative（E1 门下 static+z 非法），内容变更非布局变更，哈希随之更新。
+const LOCKED_HASH: u64 = 0xb69c_d540_f0d4_a446;
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
