@@ -66,6 +66,13 @@ pub enum SemanticKind {
     /// WAI-ARIA `role="tab"` — 单个 tab（→ NodeKind::Tab）。无状态，选中态从
     /// 父 TabList.selected_index 派生（aria-selected 是只读 synth，见 ControlState）。
     Tab,
+    /// WAI-ARIA `role="tree"`（#8）— 层级列表容器（→ NodeKind::Tree）。子节点是
+    /// role=treeitem；嵌套 = treeitem 内直接嵌 treeitem（围栏不认 group 包装层）。
+    Tree,
+    /// WAI-ARIA `role="treeitem"`（#8）— 树条目（→ NodeKind::TreeItem）。内容模型 =
+    /// label 内容 + 可选嵌套 treeitem（有嵌套 = branch 可展开/折叠；无 = leaf）。
+    /// 选中态从所属 Tree.selected 派生（跨节点 synth），展开态是自身 ControlState。
+    TreeItem,
     /// `<a>` 富文本链接（#74 → NodeKind::Link）。inline 元素，仅 rich-text-block
     /// 上下文合法（rich 外出现围栏报 FenceLinkOutsideRich）；子内容只许文本与
     /// 非 flex span。href 是 opaque 标识符（无 URI 解析语义）。
@@ -112,6 +119,8 @@ pub const ROLE_TO_SEMANTIC: &[(&str, SemanticKind)] = &[
     ("listitem", SemanticKind::ListItem),
     ("tablist", SemanticKind::TabList),
     ("tab", SemanticKind::Tab),
+    ("tree", SemanticKind::Tree),
+    ("treeitem", SemanticKind::TreeItem),
 ];
 
 /// Resolve the [`SemanticKind`] of an element from its tag and, when present,

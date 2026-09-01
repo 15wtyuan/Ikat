@@ -12,6 +12,12 @@ pub const ROLE_TABLIST: &str = "tablist";
 /// TabList 内的单个 tab role（`role="tab"`）。带 `aria-controls="<panel-id>"` 指向其关联
 /// panel（跨树，非 tablist 子）；sync_control_visuals 据此 find_by_id_attr 解析 panel 切显隐。
 pub const ROLE_TAB: &str = "tab";
+/// Tree 容器 role（`role="tree"`，#8）。持有 ControlState::Tree{selected}；子树内任意深度
+/// 的 role=treeitem 是条目（直接嵌套声明，无 group 包装层）。
+pub const ROLE_TREE: &str = "tree";
+/// Tree 内的单个条目 role（`role="treeitem"`，#8）。branch（含嵌套 treeitem）持
+/// ControlState::TreeItem{expanded}；选中态从所属 Tree.selected 跨节点派生。
+pub const ROLE_TREEITEM: &str = "treeitem";
 /// ProgressBar 的填充条 / Slider 的可选视觉填充（`data-slot="fill"`，width:% 由 value 驱动）。
 pub const SLOT_FILL: &str = "fill";
 /// Slider 的滑块头（`data-slot="thumb"`，位移走 transform，拖拽高频）。

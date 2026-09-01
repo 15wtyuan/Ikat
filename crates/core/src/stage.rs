@@ -1088,6 +1088,7 @@ impl Stage {
         // Dropdown NodeId 收集：建树循环后 reparent 其 option 子节点进 role=listbox
         // （运行时结构；option 是模板里 combobox 的 DOM 子节点，先被挂到 combobox）。
         let mut dropdown_ids: Vec<NodeId> = Vec::new();
+        let mut tree_ids: Vec<NodeId> = Vec::new();
         // no-panic 契约：parent_idx 来自 pkg.bin（运行时读，可能 corrupt），不能信任"父先于子"。
         // pidx >= i 同时覆盖前向引用（父排在子后）与越界（pidx >= len，因 i < len）→ Err，不 panic。
         for (i, tn) in template.nodes.iter().enumerate() {
@@ -1135,7 +1136,9 @@ impl Stage {
                 // Tab 镜像 Button：role=tab 隐式可聚焦（WAI-ARIA），补默认 tabindex=0
                 // 让 click-to-focus / 键盘 Tab 链能命中（箭头键导航依赖）。
                 // TabList 是容器（镜像 ListView），自身不聚焦 → 落 _ => None。
-                | NodeKind::Tab => Some(0),
+                // TreeItem 同 Tab（roving tabindex 的 item 持焦点）；Tree 容器不聚焦。
+                | NodeKind::Tab
+                | NodeKind::TreeItem => Some(0),
                 _ => None,
             });
             if let Some(c) = &tn.content {
@@ -1170,6 +1173,10 @@ impl Stage {
             if tn.kind == NodeKind::Dropdown {
                 dropdown_ids.push(node_id);
             }
+            // 记 Tree，供建树后把 ControlInit 的文档序选中项解析成 NodeId（见下方遍）。
+            if tn.kind == NodeKind::Tree {
+                tree_ids.push(node_id);
+            }
             // 按 parent_idx 串子树（根 parent_idx=None 不串）
             if let Some(pidx) = tn.parent_idx {
                 let parent = id_map[pidx].expect("parent built before child (parent_idx < i)");
@@ -1188,6 +1195,13 @@ impl Stage {
         // 不影响作用域边界（option 仍在 combobox 实例子树内）。
         for sel in &dropdown_ids {
             crate::scene::control::reparent_options_into_popup(scene, *sel);
+        }
+
+        // Tree 初始选中解析（#8）：ControlInit::Tree.selected_item 是文档序（DFS）序号，
+        // 此处子树建满、Node 身份已定，解析成 NodeId 写回 ControlState::Tree.selected。
+        // 与 bridge 侧 treeitem 文档序计数同口径（先序遍历，含折叠隐藏条目）。
+        for tree in &tree_ids {
+            crate::scene::control::resolve_tree_initial_selection(scene, *tree);
         }
 
         // 实例根 = 作用域根（Shadow DOM 风格）。

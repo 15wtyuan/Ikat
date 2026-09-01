@@ -1116,6 +1116,49 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_set_tab_activation(StageHandle* h, ulong node_id, [MarshalAs(UnmanagedType.U1)] bool manual);
 
         /// <summary>
+        ///  读 Tree 当前选中项节点 id。out 恒写（0 = 无选中）。rc：0=有选中、1=无选中、
+        ///  -1=非 Tree / null 句柄 / 节点缺失 / null out。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_get_tree_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_get_tree_selected(StageHandle* h, ulong node_id, ulong* @out);
+
+        /// <summary>
+        ///  设 Tree 选中项（程序化，不发 SelectionChanged）。item 须是本 tree 子树内的
+        ///  treeitem（按文档序校验），否则 -1（静默选中他树条目是最隐蔽的串台）。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_tree_selected", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_set_tree_selected(StageHandle* h, ulong node_id, ulong item_id);
+
+        /// <summary>
+        ///  读 treeitem 展开态（branch）。非 branch treeitem（leaf 无控件态）/ null → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_get_treeitem_expanded", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_get_treeitem_expanded(StageHandle* h, ulong node_id, byte* @out);
+
+        /// <summary>
+        ///  设 treeitem 展开态（branch，程序化，不发 ExpandChanged）。非 branch → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_set_treeitem_expanded", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_set_treeitem_expanded(StageHandle* h, ulong node_id, byte expanded);
+
+        /// <summary>
+        ///  全部 branch 条目统一展开/折叠（ExpandAll/CollapseAll 的 core 面，程序化批量，
+        ///  不发事件）。空树 / 无 branch 也算成功（幂等）。非 Tree → -1。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_tree_set_all_expanded", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_tree_set_all_expanded(StageHandle* h, ulong node_id, byte expanded);
+
+        /// <summary>
         ///  注入本帧字符输入（UTF-32 codepoints 数组，已 shift-mapped 的可打印字符）。tick 前调。
         ///
         ///  与 `set_key_input` 互补：keydown 通道走物理键（KeyEvent），textinput 通道走已映射好的

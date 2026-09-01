@@ -73,6 +73,11 @@ namespace Ikat
                 NodeKind.TabList        => new TabList(ctx, id),
                 NodeKind.Tab            => new Tab(ctx, id),
 
+                // Tree = <div role=tree>（#8 层级列表，单选+展开折叠）；TreeItem = <div role=treeitem>
+                //（branch 有 Expanded，leaf 只读选中派生）。容器型，继承 Container（同 TabList/Tab 模式）。
+                NodeKind.Tree           => new Tree(ctx, id),
+                NodeKind.TreeItem       => new TreeItem(ctx, id),
+
                 // Link = <a>（#74）：富文本内链接，href 打包期烙印（Href 只读 getter）；
                 // 点击走既有 Clicked（命中细化到 a 节点）。仅 rich 上下文合法——运行时 create_node 不产。
                 NodeKind.Link           => new Link(ctx, id),

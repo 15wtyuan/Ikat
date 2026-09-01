@@ -1074,3 +1074,167 @@ pub extern "C" fn ikat_stage_set_tab_activation(
         }
     })
 }
+
+// ===== Tree（role=tree/treeitem，#8）=====
+// 程序化读写面。事件（SelectionChanged/ExpandChanged）在 tick 交互路径发射
+//（on_pointer_down / on_tree_key），本组 setter 是 host 驱动改态不发事件——
+// 与 TabList setter 同哲学（见 ikat_stage_set_tablist_selected_index 注释）。
+
+/// 读 Tree 当前选中项节点 id。out 恒写（0 = 无选中）。rc：0=有选中、1=无选中、
+/// -1=非 Tree / null 句柄 / 节点缺失 / null out。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_get_tree_selected(
+    h: *const StageHandle,
+    node_id: u64,
+    out: *mut u64,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::Tree { selected }) => {
+                unsafe { *out = selected.map(|id| id.0).unwrap_or(0) };
+                if selected.is_some() {
+                    0
+                } else {
+                    1
+                }
+            }
+            _ => -1,
+        }
+    })
+}
+
+/// 设 Tree 选中项（程序化，不发 SelectionChanged）。item 须是本 tree 子树内的
+/// treeitem（按文档序校验），否则 -1（静默选中他树条目是最隐蔽的串台）。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_tree_selected(
+    h: *mut StageHandle,
+    node_id: u64,
+    item_id: u64,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        if !matches!(
+            scene.controls.get(NodeId(node_id)),
+            Some(ControlState::Tree { .. })
+        ) {
+            return -1;
+        }
+        let item = NodeId(item_id);
+        let in_tree = ikat_core::scene::control::tree_items_document_order(scene, NodeId(node_id))
+            .contains(&item);
+        if !in_tree {
+            return -1;
+        }
+        if let Some(ControlState::Tree { selected }) = scene.controls.get_mut(NodeId(node_id)) {
+            *selected = Some(item);
+            0
+        } else {
+            -1
+        }
+    })
+}
+
+/// 读 treeitem 展开态（branch）。非 branch treeitem（leaf 无控件态）/ null → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_get_treeitem_expanded(
+    h: *const StageHandle,
+    node_id: u64,
+    out: *mut u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || out.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &*h };
+        let Some(scene) = sh.stage.scene.as_ref() else {
+            return -1;
+        };
+        match scene.controls.get(NodeId(node_id)) {
+            Some(ControlState::TreeItem { expanded }) => {
+                unsafe { *out = *expanded as u8 };
+                0
+            }
+            _ => -1,
+        }
+    })
+}
+
+/// 设 treeitem 展开态（branch，程序化，不发 ExpandChanged）。非 branch → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_set_treeitem_expanded(
+    h: *mut StageHandle,
+    node_id: u64,
+    expanded: u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        if let Some(ControlState::TreeItem { expanded: e }) =
+            scene.controls.get_mut(NodeId(node_id))
+        {
+            *e = expanded != 0;
+            0
+        } else {
+            -1
+        }
+    })
+}
+
+/// 全部 branch 条目统一展开/折叠（ExpandAll/CollapseAll 的 core 面，程序化批量，
+/// 不发事件）。空树 / 无 branch 也算成功（幂等）。非 Tree → -1。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_tree_set_all_expanded(
+    h: *mut StageHandle,
+    node_id: u64,
+    expanded: u8,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        if !matches!(
+            scene.controls.get(NodeId(node_id)),
+            Some(ControlState::Tree { .. })
+        ) {
+            return -1;
+        }
+        for item in ikat_core::scene::control::tree_items_document_order(scene, NodeId(node_id)) {
+            if let Some(ControlState::TreeItem { expanded: e }) = scene.controls.get_mut(item) {
+                *e = expanded != 0;
+            }
+        }
+        0
+    })
+}

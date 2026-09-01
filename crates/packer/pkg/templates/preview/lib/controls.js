@@ -261,6 +261,63 @@ export function wireTabs() {
   if (initial) applyTabState(initial);
 }
 
+// role=tree/treeitem → 树语义（镜像 core scene/control/tree，#8）：单击条目 = 选中 +
+// branch 折叠/展开互切；选中/展开/层级是 synth aria（作者 HTML 不写 aria-selected/
+// aria-expanded=false/aria-level——运行时合成），浏览器里由本函数补戳同名属性使
+// [aria-selected]/[aria-expanded]/[aria-level] 选择器与 core 命中一致。
+// 初始态：aria-expanded="true" 的 branch 展开、其余折叠；初始选中 = 首个
+// aria-selected="true" 条目（作者写）或首个条目（缺省，core ControlInit 同语义）。
+export function wireTrees() {
+  const isItem = (el) => el && el.getAttribute('role') === 'treeitem';
+  const directItems = (el) => Array.from(el.children).filter(isItem);
+  const itemsInOrder = (root) => {
+    const out = [];
+    const walk = (el) => {
+      for (const c of el.children) {
+        if (isItem(c)) { out.push(c); walk(c); }
+        else walk(c);
+      }
+    };
+    walk(root);
+    return out;
+  };
+  const branchOf = (item) => directItems(item).length > 0;
+  const setExpanded = (item, expanded) => {
+    item.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    directItems(item).forEach((c) => { c.style.display = expanded ? '' : 'none'; });
+  };
+  const select = (item) => {
+    const tree = item.closest('[role="tree"]');
+    if (!tree) return;
+    itemsInOrder(tree).forEach((i) => i.setAttribute('aria-selected', 'false'));
+    item.setAttribute('aria-selected', 'true');
+  };
+  document.querySelectorAll('[role="tree"]').forEach((tree) => {
+    const items = itemsInOrder(tree);
+    // aria-level 补戳（层级 = 嵌套深度，顶层 = 1——core tree_item_level 同口径）。
+    const stampLevel = (el, level) => {
+      for (const c of el.children) {
+        if (isItem(c)) { c.setAttribute('aria-level', String(level)); stampLevel(c, level + 1); }
+        else stampLevel(c, level);
+      }
+    };
+    stampLevel(tree, 1);
+    // 初始选中（作者 aria-selected 或首项）。
+    const initial = tree.querySelector('[role="treeitem"][aria-selected="true"]') || items[0];
+    if (initial) select(initial);
+  });
+  document.querySelectorAll('[role="treeitem"]').forEach((item) => {
+    // 初始折叠剪枝（aria-expanded 缺省 = 折叠，core ControlInit 同语义）。
+    if (branchOf(item)) setExpanded(item, item.getAttribute('aria-expanded') === 'true');
+    item.addEventListener('click', (e) => {
+      // 命中在 label/图标子上也归条目（core find_control_at 上溯同语义）。
+      e.stopPropagation();
+      select(item);
+      if (branchOf(item)) setExpanded(item, item.getAttribute('aria-expanded') !== 'true');
+    });
+  });
+}
+
 export function wireDialogs() {
   document.querySelectorAll('[data-open-dialog]').forEach((btn) => {
     btn.addEventListener('click', () => {

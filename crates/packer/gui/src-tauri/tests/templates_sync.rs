@@ -87,7 +87,7 @@ fn every_registered_role_appears_in_templates() {
     roles.push("textbox");
     roles.push("tabpanel");
     roles.push("dialog");
-    assert_eq!(roles.len(), 15, "role universe changed — update this test");
+    assert_eq!(roles.len(), 17, "role universe changed — update this test");
     for role in &roles {
         assert!(
             EDITOR_SCHEMA_MD.contains(&format!("`{role}`")),

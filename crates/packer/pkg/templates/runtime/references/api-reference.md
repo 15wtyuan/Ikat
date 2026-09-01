@@ -242,6 +242,8 @@ arrow/gamepad navigation is the user-level pattern (`On<KeyDown>` +
 | div role=progressbar | ProgressBar : Node | Value, Min, Max (float), IsIndeterminate, AnimateValue |
 | div role=tablist | TabList : Container | SelectedIndex, Activation, SelectionChanged (arrow axis follows `flex-direction`, clamped no wrap; panels linked via `aria-controls`. Activation model — `data-activation="manual"` in HTML or `Activation` at runtime: `Automatic` (default) selects as arrows move focus; `Manual` moves focus only, Enter/Space commits) |
 | div role=tab | Tab : Container | (`aria-selected` synthesized from TabList.SelectedIndex) |
+| div role=tree | Tree : Container | SelectedItem (TreeItem, null when empty), ExpandAll(), CollapseAll(), SelectionChanged (fires on click / keyboard interaction only — programmatic SelectedItem set does not emit; read SelectedItem at event time for the current item) |
+| div role=treeitem | TreeItem : Container | IsBranch, Expanded (branch only — leaf reads/writes throw InvalidOperationException), Selected (derived from owning Tree), Level (aria-level: top = 1), Select(), ExpandedChanged (interaction only), Clicked (hit resolution lands on the treeitem) |
 | a (inside rich text) | Link : Container | Href (readonly), Clicked |
 
 - Numeric control values are `float`.

@@ -157,6 +157,17 @@ pub fn on_pointer_down(scene: &mut Scene, id: NodeId, pos: [f32; 2]) -> Vec<Even
                 }
             }
         }
+        // Tree 条目（#8）：命中即激活——选中 + branch 折叠/展开互切（APG：branch 激活
+        // = 切换展开态）。id 是 treeitem 自身（find_control_at 从命中的 label/图标子上
+        // 溯到最近控件态 = branch treeitem；嵌套子条目是更深层的 treeitem，先命中）。
+        // pos 不用（命中条目已由 hit_test 定位，无需 AABB 复验——区别于 TabList 因
+        // tablist 容器是 control、条目无态须按 rect 分摊；treeitem 有态即目标）。
+        ControlState::TreeItem { .. } => {
+            super::tree::activate_tree_item(scene, id, &mut out);
+        }
+        // Tree 容器（#8）：条目有自身控件态先被 find_control_at 命中；落到容器本体
+        //（点 padding/间隙）无操作。
+        ControlState::Tree { .. } => {}
     }
     out
 }

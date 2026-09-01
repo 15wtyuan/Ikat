@@ -152,6 +152,15 @@ pub enum NodeKind {
     /// 打包期烙 UA 默认（color #0000EE + text-decoration:underline，作者声明可覆盖）。
     /// 键盘聚焦/Enter 激活归 #13（键盘交互语义补全）。
     Link,
+    /// WAI-ARIA `role="tree"`（#8）— 层级列表容器。ControlState::Tree{selected}。
+    /// 子树内的 role=treeitem（任意嵌套深度）是条目；嵌套声明 = treeitem 内直接嵌
+    /// treeitem（无 group 包装层）。容器型（镜像 ListView/TabList），自身不聚焦。
+    Tree,
+    /// WAI-ARIA `role="treeitem"`（#8）— 树条目。容器型（label 内容 + 可选嵌套
+    /// treeitem，镜像 Tab 持 label 子）。有嵌套 treeitem = branch（展开/折叠态在
+    /// ControlState::TreeItem{expanded}），无 = leaf（无控件态）。选中态从所属
+    /// Tree.selected 跨节点派生（aria-selected 是只读 synth）。
+    TreeItem,
 }
 
 impl NodeKind {
@@ -181,6 +190,8 @@ impl NodeKind {
             19 => Some(NodeKind::TabList),
             20 => Some(NodeKind::Tab),
             21 => Some(NodeKind::Link),
+            22 => Some(NodeKind::Tree),
+            23 => Some(NodeKind::TreeItem),
             _ => None,
         }
     }
@@ -200,6 +211,8 @@ impl NodeKind {
                 | Self::CustomElement
                 | Self::TabList
                 | Self::Tab
+                | Self::Tree
+                | Self::TreeItem
                 | Self::Link
         )
     }
@@ -214,6 +227,7 @@ impl NodeKind {
             self,
             Self::Button
                 | Self::Tab
+                | Self::TreeItem
                 | Self::Toggle
                 | Self::RadioButton
                 | Self::Slider
@@ -261,6 +275,8 @@ const _: () = {
             | NodeKind::Template
             | NodeKind::TabList
             | NodeKind::Tab
+            | NodeKind::Tree
+            | NodeKind::TreeItem
             | NodeKind::Link => {}
         }
     }
@@ -581,6 +597,21 @@ pub enum ControlState {
     TabList {
         selected_index: usize,
         manual_activation: bool,
+    },
+    /// WAI-ARIA `role="tree"`（#8）。selected=当前选中 treeitem 的 NodeId（单选，
+    /// APG 单选树焦点移动即选中模型）。NodeId 而非序号：树条目任意嵌套、展开/折叠
+    /// 使可见序漂移，Node 身份稳定。None 仅 instantiate 解析初值前的瞬态（stage
+    /// 后置遍把 ControlInit::Tree.selected_item 文档序解析成 NodeId）；空树恒 None。
+    /// 选中条目的 aria-selected 由 synth 跨节点派生（镜像 Tab 从 TabList 派生）。
+    Tree {
+        selected: Option<NodeId>,
+    },
+    /// WAI-ARIA `role="treeitem"` 且为 branch（有嵌套 treeitem，#8）。expanded=
+    /// 展开/折叠态；false 时 sync_control_visuals 对其直接 treeitem 子写
+    /// display:none（折叠剪枝），true 时清 inline display 回落作者 CSS（镜像
+    /// TabList panel 切换）。leaf 条目（无嵌套）无控件态。
+    TreeItem {
+        expanded: bool,
     },
 }
 
@@ -1257,11 +1288,13 @@ mod repr_tests {
             NodeKind::TabList,
             NodeKind::Tab,
             NodeKind::Link,
+            NodeKind::Tree,
+            NodeKind::TreeItem,
         ];
         for &k in &all {
             assert_eq!(NodeKind::from_u8(k as u8), Some(k));
         }
-        assert_eq!(NodeKind::from_u8(22), None); // 越界（Link=21 是最后合法判别值）
+        assert_eq!(NodeKind::from_u8(24), None); // 越界（TreeItem=23 是最后合法判别值，#8）
         assert_eq!(NodeKind::from_u8(255), None);
     }
 

@@ -155,6 +155,9 @@ pub const EVT_SUBMITTED: u8 = 25;
 /// EventRecord 现有字段：touch_id 装新 selected_index（usize 转 i32；dropdown 项数远小
 /// i32 范围，无损）。与 CHECKED_CHANGED（布尔选中态）区分——Dropdown 是多选一索引变更。
 pub const EVT_SELECTION_CHANGED: u8 = 26;
+/// Tree branch 条目展开/折叠（#8，30——27/28 被 event.rs 动画 key/hook 占）。发在 treeitem 节点上，touch_id = 展开新态
+///（1=展开 / 0=折叠）。镜像 EVT_SELECTION_CHANGED 的「仅净变才发」纪律。
+pub const EVT_EXPAND_CHANGED: u8 = 30;
 
 const CLICK_THRESHOLD_MOUSE: f32 = 10.0; // per-axis click 容忍（鼠标）
 const CLICK_THRESHOLD_TOUCH: f32 = 50.0; // per-axis click 容忍（触摸）
@@ -709,6 +712,21 @@ pub(crate) fn process_keys(scene: &mut Scene, keys: &[KeyEvent], out: &mut Vec<E
                     if let Some(tl) = crate::scene::control::find_tablist_ancestor(scene, Some(fid))
                     {
                         if crate::scene::control::on_tablist_key(scene, tl, ke.key_code, out) {
+                            continue; // 路由键被消费，不发 keydown
+                        }
+                    }
+                }
+                // Tree 键盘路由（#8，APG Tree View 核心档）：焦点恰在 treeitem 上
+                //（roving tabindex——条目持焦点）才路由；treeitem 后代内嵌的控件（按钮/
+                // 输入框）拥有自己的键，不误吞（精确判焦点自身，不走祖先链——嵌套树里
+                // 祖先链会误触）。方向键/Home/End/Enter/Space 见 on_tree_key；方向键连发
+                //（key repeat #76）逐发步进。互斥于 TabList/Dropdown（控件态类型互斥）。
+                if ke.is_down
+                    && scene.get(fid).map(|n| n.kind)
+                        == Some(crate::scene::node::NodeKind::TreeItem)
+                {
+                    if let Some(tree) = crate::scene::control::tree_owner(scene, fid) {
+                        if crate::scene::control::on_tree_key(scene, tree, ke.key_code, out) {
                             continue; // 路由键被消费，不发 keydown
                         }
                     }

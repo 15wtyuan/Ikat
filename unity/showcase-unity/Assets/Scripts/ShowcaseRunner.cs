@@ -31,6 +31,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-anim", "m2-animation"),
         ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
+        ("nav-tree", "tree"),
         ("nav-fx", "effects"),
         ("nav-world", "world"),
         ("nav-stress", "stress"),
@@ -1251,6 +1252,37 @@ public class ShowcaseRunner : MonoBehaviour
     /// 控件事件流演示：settings 滑块拖动更新旁边数值、character 训练按钮给 EXP 进度条加经验。
     /// 只验证 ValueChanged / Clicked → ProgressBar.Value 的端到端事件链，不构建完整逻辑。
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
+    // tree 页 helper（#8）：条目自身 label——branch 取 .row 第二子（首子是折叠箭头 span），
+    // leaf 直接取 TextNode 文本。非预期结构回落层级描述（读数仍可辨）。
+    static string OwnTreeLabel(TreeItem item)
+    {
+        if (item.ChildCount == 0) return item.Level + " 级条目";
+        var first = item.GetChildAt(0);
+        if (first is TextNode tn) return tn.Text;
+        if (first is Container row && row.ChildCount >= 2 && row.GetChildAt(1) is TextElement lbl)
+            return lbl.TextContent;
+        return item.Level + " 级条目";
+    }
+
+    static int CountExpanded(Tree tree)
+    {
+        int CountBranch(Container n)
+        {
+            int total = 0;
+            for (int i = 0; i < n.ChildCount; i++)
+            {
+                if (n.GetChildAt(i) is TreeItem ti && ti.IsBranch)
+                {
+                    if (ti.Expanded) total++;
+                    total += CountBranch(ti);
+                }
+                else if (n.GetChildAt(i) is Container c) total += CountBranch(c);
+            }
+            return total;
+        }
+        return CountBranch(tree);
+    }
+
     void WireControls(Container page, string pageName)
     {
         if (pageName == "effects")
@@ -1271,6 +1303,30 @@ public class ShowcaseRunner : MonoBehaviour
                     fxRead.TextContent = _fxPaused ? "已暂停" : "播放中";
                     Debug.Log($"[Showcase] fx toggle -> {_fxBindings.Count} systems, paused={_fxPaused}");
                 };
+            }
+        }
+        if (pageName == "tree")
+        {
+            // tree 页（#8）：HTML 摆台（树 + 全展开/全折叠按钮 + 读数），事件路由证据 = 读数翻转。
+            // 选中读数 = 选中条目自身 label（branch 取 .row 第二子 span——首子是折叠箭头；
+            // leaf 直接取 TextNode 文本）；展开读数 = 展开态 branch 计数（遍历树条目）。
+            if (page.TryGet<Tree>("inv-tree", out var tree)
+                && page.TryGet<TextElement>("sel-readout", out var selRead)
+                && page.TryGet<TextElement>("expand-readout", out var expRead))
+            {
+                // 展开读数：DFS 数展开态 branch（程序化批量后刷新读数用）。
+                var countExpanded = () => CountExpanded(tree);
+                tree.SelectionChanged += e =>
+                {
+                    var item = e.SelectedItem;
+                    selRead.TextContent = item != null ? OwnTreeLabel(item) : "（空）";
+                    Debug.Log($"[Showcase] tree selection -> {selRead.TextContent}");
+                };
+                if (page.TryGet<Button>("btn-tree-expand-all", out var expBtn)) expBtn.Clicked += () => { tree.ExpandAll(); expRead.TextContent = countExpanded().ToString(); };
+                if (page.TryGet<Button>("btn-tree-collapse-all", out var colBtn)) colBtn.Clicked += () => { tree.CollapseAll(); expRead.TextContent = countExpanded().ToString(); };
+                // 初始读数（HTML 初值对齐：默认选中首项「武器」、展开分组 2 个）。
+                selRead.TextContent = tree.SelectedItem != null ? OwnTreeLabel(tree.SelectedItem) : "（空）";
+                expRead.TextContent = countExpanded().ToString();
             }
         }
         if (pageName == "lab")

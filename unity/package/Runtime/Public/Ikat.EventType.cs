@@ -65,5 +65,9 @@ namespace Ikat
         /// 静态可见端点已被围栏在打包期拒绝，看到本日志 = 运行时 add_class 组合漏网）。
         /// payload：click_count = TweenProp 判别值。
         TransitionSnap = 29,
+        /// Tree branch 条目展开/折叠（core EVT_EXPAND_CHANGED = 30，#8）。payload = 展开新态
+        ///（touch_id 1/0），node_id 指向 treeitem。仅净变才发（点击/键盘交互路径；程序化
+        /// setter 不发）。
+        ExpandChanged = 30,
     }
 }

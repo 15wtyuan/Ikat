@@ -21,6 +21,7 @@ const NAV = {
   'nav-lab': 'lab',
   'nav-anim': 'm2-animation',
   'nav-infra': 'api-infra',
+  'nav-tree': 'tree',
 };
 
 wireNav();

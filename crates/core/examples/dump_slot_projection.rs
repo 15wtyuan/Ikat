@@ -97,6 +97,8 @@ fn kind_str(k: NodeKind) -> &'static str {
         NodeKind::ListItem => "listitem",
         NodeKind::TabList => "tablist",
         NodeKind::Tab => "tab",
+        NodeKind::Tree => "tree",
+        NodeKind::TreeItem => "treeitem",
         NodeKind::Slot => "slot",
         NodeKind::CustomElement => "custom",
         NodeKind::Template => "template",

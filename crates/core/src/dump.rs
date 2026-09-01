@@ -46,6 +46,7 @@ pub fn kind_to_html_tag(k: NodeKind) -> &'static str {
         NodeKind::Template => "template",
         NodeKind::TabList => "div",
         NodeKind::Tab => "button",
+        NodeKind::Tree | NodeKind::TreeItem => "div",
         NodeKind::Link => "a",
     }
 }
@@ -76,6 +77,8 @@ pub const ALL_NODE_KINDS: &[NodeKind] = &[
     NodeKind::TabList,
     NodeKind::Tab,
     NodeKind::Link,
+    NodeKind::Tree,
+    NodeKind::TreeItem,
 ];
 
 /// 整树 JSON：每节点 {node_id, parent, tag, id, classes, kind, layout, world_matrix, visible}。
@@ -112,6 +115,8 @@ pub fn dump_scene_json(scene: &Scene) -> String {
             NodeKind::TabList => ("div", "TabList".into()),
             NodeKind::Tab => ("button", "Tab".into()),
             NodeKind::Link => ("a", "Link".into()),
+            NodeKind::Tree => ("div", "Tree".into()),
+            NodeKind::TreeItem => ("div", "TreeItem".into()),
         };
         let id = json_escape(n.id_attr.as_deref().unwrap_or(""));
         let classes = n
@@ -347,6 +352,7 @@ fn kind_tag(k: NodeKind) -> &'static str {
         NodeKind::Container => "div",
         NodeKind::TextNode | NodeKind::TextElement => "span",
         NodeKind::Button | NodeKind::Tab => "button",
+        NodeKind::Tree | NodeKind::TreeItem => "div",
         NodeKind::Image => "img",
         NodeKind::TextField
         | NodeKind::NumberField
@@ -437,6 +443,8 @@ mod tests {
             (NodeKind::Template, "template"),
             (NodeKind::TabList, "div"),
             (NodeKind::Tab, "button"),
+            (NodeKind::Tree, "div"),
+            (NodeKind::TreeItem, "div"),
             (NodeKind::Link, "a"),
         ];
         for (k, tag) in expected {

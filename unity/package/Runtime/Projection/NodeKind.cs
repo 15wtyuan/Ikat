@@ -37,5 +37,9 @@ namespace Ikat
         TabList = 19,
         Tab     = 20,
         Link    = 21,
+        // Tree = <div role=tree>（#8 层级列表容器，ControlState::Tree{selected}）；
+        // TreeItem = <div role=treeitem>（branch 持 ControlState::TreeItem{expanded}，leaf 无态）。
+        Tree     = 22,
+        TreeItem = 23,
     }
 }

@@ -17,6 +17,8 @@
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;
 
 mod clipboard;
 mod dropdown;
@@ -25,6 +27,7 @@ mod pointer;
 mod roles;
 mod roving;
 mod tablist;
+mod tree;
 mod visuals;
 
 // 路径稳定：crate 内引用点与外部消费者经 `crate::scene::control::X` 取全部导出面
@@ -36,6 +39,7 @@ pub use pointer::*;
 pub use roles::*;
 pub(crate) use roving::*;
 pub use tablist::*;
+pub use tree::*;
 pub use visuals::*;
 
 pub(crate) use dropdown::{close_dropdown, on_dropdown_key};

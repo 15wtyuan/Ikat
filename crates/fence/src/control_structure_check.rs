@@ -39,6 +39,7 @@ pub const REQUIRED_CHILDREN: &[(&str, &[CheckSpec])] = &[
     ("progressbar", &[CheckSpec::Slot("fill")]),
     ("list", &[CheckSpec::Role("listitem")]),
     ("tablist", &[CheckSpec::Role("tab")]),
+    ("tree", &[CheckSpec::Role("treeitem")]),
 ];
 
 /// 读元素的 `role` 属性值（若存在）。
@@ -134,6 +135,7 @@ fn structure_hint(role: &str) -> Option<&'static str> {
         }
         "list" => "a `<div role=\"list\">` needs at least one `role=\"listitem\"` child",
         "tablist" => "a `<div role=\"tablist\">` needs at least one `role=\"tab\"` child (panels link via aria-controls)",
+        "tree" => "a `<div role=\"tree\">` needs at least one `role=\"treeitem\"` child (items nest directly inside treeitem — no group wrapper)",
         _ => return None,
     })
 }
@@ -309,6 +311,23 @@ mod tests {
         let diags = struct_diags(r#"<div role="list"></div>"#);
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(diags[0].message.contains("listitem"));
+    }
+
+    #[test]
+    fn tree_without_treeitem_child_is_error() {
+        // role=tree 无直接 role=treeitem 子 → error（Tree 结构契约，#8）
+        let diags = struct_diags(r#"<div role="tree"><div>placeholder</div></div>"#);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("treeitem"));
+    }
+
+    #[test]
+    fn tree_with_treeitem_child_passes() {
+        // 直接子含 treeitem → 过；嵌套深度不设限（treeitem 内直接嵌 treeitem 是声明契约）
+        let diags = struct_diags(
+            r#"<div role="tree"><div role="treeitem"><div>A</div><div role="treeitem">B</div></div></div>"#,
+        );
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]

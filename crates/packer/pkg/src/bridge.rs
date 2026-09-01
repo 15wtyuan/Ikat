@@ -272,6 +272,8 @@ pub fn semantic_to_kind(s: SemanticKind) -> NodeKind {
         SemanticKind::ListItem => NodeKind::ListItem,
         SemanticKind::TabList => NodeKind::TabList,
         SemanticKind::Tab => NodeKind::Tab,
+        SemanticKind::Tree => NodeKind::Tree,
+        SemanticKind::TreeItem => NodeKind::TreeItem,
         SemanticKind::Link => NodeKind::Link,
         SemanticKind::Slot => NodeKind::Slot,
         SemanticKind::CustomElement => NodeKind::CustomElement,
@@ -406,6 +408,17 @@ pub(crate) fn extract_control_init(
             // 缺省/automatic → 自动。fence gate 已在 tablist 语义上校验值域。
             manual: attr(el, "data-activation").is_some_and(|v| v == "manual"),
         }),
+        // Tree 初始选中项（#8）= 首个 aria-selected="true" 的 treeitem 的**文档序序号**
+        //（先序 DFS 全子树，含折叠隐藏的）；无则 0（默认首项，与 Dropdown/TabList 同语义）。
+        // 序号口径与 runtime `tree_items_document_order` 对偶（两侧必须同步演化）。
+        NodeKind::Tree => Some(ControlInit::Tree {
+            selected_item: tree_selected_item(ir_idx, tree),
+        }),
+        // Tree branch 条目初始展开态（#8）：aria-expanded="true" 烘焙，缺省 false（ARIA
+        // 可折叠元素缺省折叠）。仅当元素有嵌套 treeitem 后代才产 init——leaf 无态。
+        NodeKind::TreeItem => has_nested_treeitem(ir_idx, tree).then(|| ControlInit::TreeItem {
+            expanded: bool_attr(el, "aria-expanded"),
+        }),
         NodeKind::NumberField => {
             let edit =
                 extract_edit_init_with_value(el, attr(el, "aria-valuenow").unwrap_or_default());
@@ -530,6 +543,45 @@ fn tab_children(parent_idx: usize, tree: &IrTree) -> Vec<&IrElement> {
             _ => None,
         })
         .collect()
+}
+
+/// Tree 子树内全量 treeitem 的先序 DFS 序（#8）。runtime 侧
+/// `tree_items_document_order` 的打包期对偶——两侧遍历口径（先序、含折叠隐藏条目、
+/// 非 treeitem 中间层也下钻）必须一致，否则初始选中序号解析错位。
+fn tree_items_preorder(root_idx: usize, tree: &IrTree, out: &mut Vec<usize>) {
+    for c in &tree.nodes[root_idx].children {
+        let idx = c.0;
+        if let IrNodeKind::Element(el) = &tree.nodes[idx].kind {
+            if attr(el, "role").as_deref() == Some("treeitem") {
+                out.push(idx);
+            }
+        }
+        tree_items_preorder(idx, tree, out);
+    }
+}
+
+/// 首个 aria-selected="true" treeitem 的文档序序号；无则 0。
+fn tree_selected_item(root_idx: usize, tree: &IrTree) -> u32 {
+    let mut items = Vec::new();
+    tree_items_preorder(root_idx, tree, &mut items);
+    items
+        .iter()
+        .position(|&i| match &tree.nodes[i].kind {
+            IrNodeKind::Element(el) => bool_attr(el, "aria-selected"),
+            _ => false,
+        })
+        .unwrap_or(0) as u32
+}
+
+/// 元素是否有直接 treeitem 子（#8）——branch 判定的打包期口径。与 runtime
+/// `is_branch`（直接 treeitem 子）严格同口径：声明契约是直接嵌套（无 group 包装层），
+/// 包了 wrapper 的嵌套条目两致判 leaf（静态渲染、无展开语义），不产生「打包认 branch、
+/// 运行时判 leaf」的分裂。
+fn has_nested_treeitem(root_idx: usize, tree: &IrTree) -> bool {
+    tree.nodes[root_idx].children.iter().any(|c| {
+        matches!(&tree.nodes[c.0].kind, IrNodeKind::Element(el)
+            if attr(el, "role").as_deref() == Some("treeitem"))
+    })
 }
 
 pub(crate) fn extract_classes(el: &IrElement) -> Vec<String> {
@@ -764,6 +816,79 @@ mod tests {
             .find(|n| n.kind == NodeKind::Tab && attr_of(n, "aria-controls") == Some("pb"))
             .expect("tab B bridged with aria-controls=pb");
         assert_eq!(tab_b.role.as_deref(), Some("tab"));
+    }
+
+    #[test]
+    fn tree_init_extracts_selected_ordinal_and_branch_expansion() {
+        // 文档序（先序 DFS）：0=武器(expanded) 1=剑 2=弓 3=防具(collapsed) 4=盾。
+        // aria-selected="true" 在「弓」（序 2）→ ControlInit::Tree{selected_item:2}；
+        // branch aria-expanded 烘焙（武器 true / 防具缺省 false）；leaf（剑/弓/盾）无 init。
+        let nodes = bridged(
+            // branch 的 label 走子元素（block 全边）——branch 条目宿主嵌套条目为 block 子，
+            // 纯文本 label 会触发 FenceMixedInlineBlock（真实树的 label 行也要组箭头/徽章，
+            // wrapper div 是自然写法）；leaf 纯文本天然合法。
+            r#"<style>[role="treeitem"]{color:#888}</style>
+            <div role="tree">
+              <div role="treeitem" aria-expanded="true">
+                <div>武器</div>
+                <div role="treeitem">剑</div>
+                <div role="treeitem" aria-selected="true">弓</div>
+              </div>
+              <div role="treeitem">
+                <div>防具</div>
+                <div role="treeitem">盾</div>
+              </div>
+            </div>"#,
+        );
+        let tree = nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Tree)
+            .expect("Tree node bridged");
+        assert_eq!(
+            tree.control_init,
+            Some(ControlInit::Tree { selected_item: 2 }),
+            "aria-selected=true 的 treeitem 文档序序号进初始选中"
+        );
+        // branch 展开/折叠烘焙：branch 判定 = 有直接 treeitem 子（label 在 wrapper div 里
+        // 不影响）。按 aria-expanded 声明 + 内容文本定位 leaf。
+        let branches: Vec<&ikat_core::asset::TemplateNode> = nodes
+            .iter()
+            .filter(|n| matches!(n.control_init, Some(ControlInit::TreeItem { .. })))
+            .collect();
+        assert_eq!(
+            branches.len(),
+            2,
+            "两个 branch（武器/防具）烘 TreeItem init"
+        );
+        assert!(branches
+            .iter()
+            .any(|n| n.control_init == Some(ControlInit::TreeItem { expanded: true })));
+        assert!(branches
+            .iter()
+            .any(|n| n.control_init == Some(ControlInit::TreeItem { expanded: false })));
+        // leaf（剑/弓/盾）无嵌套 treeitem → 无控件态；文本在各自 TextNode 子上。
+        let leaves = nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::TreeItem && n.control_init.is_none())
+            .count();
+        assert_eq!(leaves, 3, "三个 leaf 无 TreeItem init");
+    }
+
+    #[test]
+    fn tree_init_selected_defaults_to_first_item() {
+        // 无 aria-selected="true" → 默认第 0 项（与 Dropdown/TabList 同语义）。
+        let nodes = bridged(
+            r#"<style>[role="treeitem"]{color:#888}</style>
+            <div role="tree"><div role="treeitem">A</div><div role="treeitem">B</div></div>"#,
+        );
+        let tree = nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Tree)
+            .expect("Tree node bridged");
+        assert_eq!(
+            tree.control_init,
+            Some(ControlInit::Tree { selected_item: 0 })
+        );
     }
 
     #[test]

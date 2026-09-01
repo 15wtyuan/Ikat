@@ -21,7 +21,9 @@
     "TextElement": "span",
     "TextField": "input",
     "TextNode": "#text",
-    "Toggle": "input"
+    "Toggle": "input",
+    "Tree": "div",
+    "TreeItem": "div"
   },
   "role": {
     "combobox": "select",
@@ -36,6 +38,8 @@
     "switch": "input",
     "tab": "button",
     "tablist": "div",
-    "textbox": "input"
+    "textbox": "input",
+    "tree": "div",
+    "treeitem": "div"
   }
 }

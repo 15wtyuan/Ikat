@@ -21,6 +21,7 @@ import {
   wireSpinbuttons,
   wireSwitchesAndRadios,
   wireTabs,
+  wireTrees,
   wireTextboxes,
 } from './controls.js';
 
@@ -34,6 +35,7 @@ async function boot() {
     if (Object.keys(reg).length) expandComponents(reg);
   } catch (_) {}
   wireTabs();
+  wireTrees();
   wireDialogs();
   wireProgressbars();
   wireSliders();

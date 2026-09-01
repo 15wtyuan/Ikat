@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat 靶子冻结 Showcase · 分类树</title>
+  <style>
+  /* Tree 页（#8）：role=tree/treeitem 标准树，旗舰场景 = 背包分类（深度 2），
+     「材料 > 金属 > 铁锭」小节顺带验证任意深度（同一台机器，深度只是内容属性）。
+     样式钩子全是 synth aria 属性选择器（core 从 ControlState 合成，作者 HTML 不写）：
+     [aria-selected] 选中高亮 / [aria-expanded] 折叠箭头旋转 / [aria-level] 缩进层级。 */
+  .root {display:flex; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; flex-direction:row; }
+  .sidebar {display:flex;flex-direction:column; width:280px; background-color:rgba(21,36,51,0.72); padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-style:solid; border-color:#2a5a75; }
+  .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
+  .side-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:8px; }
+  .side-desc { color:#6c7080; font-size:12px; margin-bottom:20px; }
+  .readout-label { color:#6c7080; font-size:12px; margin-top:14px; }
+  .readout { color:#8ec5d8; font-size:15px; }
+  .api-row {display:flex; flex-direction:row; gap:10px; margin-top:18px; }
+  .api-btn { color:#e0e6ec; font-size:13px; padding:8px 14px; border-radius:8px; background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; }
+  .api-btn:hover { border-color:#5fb4d4; color:#5fb4d4; }
+  .tree-pane {display:flex;flex-direction:column; width:320px; padding:32px 8px; gap:4px; overflow-y:auto; }
+  .pane-title { color:#e0e6ec; font-size:18px; font-weight:700; padding:0 12px 12px 12px; }
+  /* 树条目：branch 的 label 走 .row 子元素（箭头 + 文字 + 计数徽章）——branch 宿主
+     嵌套条目为 block 子，纯文本 label 会触发 FenceMixedInlineBlock；leaf 纯文本合法。 */
+  .tree {display:flex;flex-direction:column; gap:2px; }
+  [role="treeitem"] {display:flex;flex-direction:column; color:#9aa0b4; font-size:15px; border-radius:8px; }
+  .row {display:flex;flex-direction:row; align-items:center; gap:8px; padding:10px 12px; border-radius:8px; }
+  [role="treeitem"]:hover .row { background-color:rgba(26,47,69,0.85); }
+  [role="treeitem"][aria-selected="true"] .row { background-color:rgba(26,47,69,0.85); color:#5fb4d4; font-weight:700; }
+  /* 折叠箭头：▸ 旋转 90° 表展开（transform transition 顺带演示过渡）。 */
+  .chev { color:#6c7080; font-family:"DejaVuSans",serif; font-size:12px; transition:transform .15s; }
+  [role="treeitem"][aria-expanded="true"] .chev { transform:rotate(90deg); color:#5fb4d4; }
+  .cnt { color:#6c7080; font-size:12px; }
+  [role="treeitem"][aria-selected="true"] .cnt { color:#5fb4d4; }
+  /* 层级缩进走 [aria-level]（synth：顶层=1，嵌套深度即层级——作者不手写 class）。 */
+  [role="treeitem"][aria-level="2"] .row { padding-left:36px; }
+  [role="treeitem"][aria-level="3"] .row { padding-left:60px; }
+  .main {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:16px; }
+  .main-title { color:#e0e6ec; font-size:36px; font-weight:700; }
+  .grid {display:flex;flex-direction:row; flex-wrap:wrap; gap:12px; }
+  .slot {display:flex;flex-direction:column; width:96px; height:96px; background-color:rgba(21,36,51,0.72); border-width:0 0 0 2px; border-style:solid; border-color:#1a2f45; border-radius:8px; }
+  .slot-icon { flex-grow:1; margin:14px; background-color:rgba(42,90,117,0.6); border-radius:6px; }
+  .slot-name { color:#9aa0b4; font-size:12px; text-align:center; margin:0 0 10px 0; }
+  .hint { color:#6c7080; font-size:13px; margin-top:12px; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="sidebar">
+      <button class="side-back" id="back-home">← 返回首页</button>
+      <div class="side-title">背包分类</div>
+      <div class="side-desc">role=tree/treeitem · 单选 · 折叠分组</div>
+      <div class="readout-label">当前选中</div>
+      <div class="readout" id="sel-readout">武器</div>
+      <div class="readout-label">展开的分组数</div>
+      <div class="readout" id="expand-readout">2</div>
+      <div class="api-row">
+        <button class="api-btn" id="btn-tree-expand-all">全展开</button>
+        <button class="api-btn" id="btn-tree-collapse-all">全折叠</button>
+      </div>
+      <div class="hint">键盘：↑↓ 移动 · → 展开/进子项 · ← 折叠/回父项 · Home/End 首末 · Enter 激活</div>
+    </div>
+    <div class="tree-pane">
+      <div class="pane-title">分类</div>
+      <div class="tree" role="tree" id="inv-tree">
+        <div role="treeitem" aria-expanded="true">
+          <div class="row"><span class="chev">▸</span><span>武器</span><span class="cnt">12 件</span></div>
+          <div role="treeitem">剑</div>
+          <div role="treeitem">弓</div>
+        </div>
+        <div role="treeitem" aria-expanded="true">
+          <div class="row"><span class="chev">▸</span><span>防具</span><span class="cnt">8 件</span></div>
+          <div role="treeitem">头盔</div>
+          <div role="treeitem">护胸</div>
+        </div>
+        <div role="treeitem">
+          <div class="row"><span class="chev">▸</span><span>消耗品</span><span class="cnt">23 件</span></div>
+          <div role="treeitem">药水</div>
+          <div role="treeitem">卷轴</div>
+        </div>
+        <div role="treeitem">
+          <div class="row"><span class="chev">▸</span><span>材料</span><span class="cnt">41 件</span></div>
+          <div role="treeitem">
+            <div class="row"><span class="chev">▸</span><span>金属</span></div>
+            <div role="treeitem">铁锭</div>
+            <div role="treeitem">秘银</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="main">
+      <div class="main-title">物品栏</div>
+      <div class="grid">
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">铁剑</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">长弓</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">皮盔</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">板甲</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">红药</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">回城卷</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">铁锭</div></div>
+        <div class="slot"><div class="slot-icon"></div><div class="slot-name">秘银锭</div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

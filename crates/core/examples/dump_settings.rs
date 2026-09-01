@@ -189,6 +189,8 @@ fn kind_short(k: NodeKind) -> &'static str {
         NodeKind::Template => "Template",
         NodeKind::TabList => "TabList",
         NodeKind::Tab => "Tab",
+        NodeKind::Tree => "Tree",
+        NodeKind::TreeItem => "TreeItem",
         NodeKind::Link => "Link",
     }
 }
@@ -258,6 +260,12 @@ fn cs_summary(cs: &ControlState) -> String {
         }
         ControlState::TabList { selected_index, .. } => {
             format!("TabList{{sel={}}}", selected_index)
+        }
+        ControlState::Tree { selected } => {
+            format!("Tree{{sel={:?}}}", selected)
+        }
+        ControlState::TreeItem { expanded } => {
+            format!("TreeItem{{expanded={}}}", expanded)
         }
     }
 }

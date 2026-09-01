@@ -83,11 +83,11 @@ namespace Ikat.HeadlessTests
         // ── 结构不变量：变体数 + 紧凑 0..N-1（无空洞、无跳号）──────────
 
         /// <summary>
-        /// C# 投影当前 21 个公共变体（Rust 侧另有 Template=18 不进公共类型树）。Rust 加/删变体未同步
+        /// C# 投影当前 23 个公共变体（Rust 侧另有 Template=18 不进公共类型树）。Rust 加/删变体未同步
         /// C# → 此测红，提醒看护 ABI 对齐（同步两侧 enum）。
         /// </summary>
         [Fact]
-        public void VariantCountMatchesRust() => Assert.Equal(21, Enum.GetNames<NodeKind>().Length);
+        public void VariantCountMatchesRust() => Assert.Equal(23, Enum.GetNames<NodeKind>().Length);
 
         /// <summary>
         /// 显式赋值防隐式错位。Template=18 在 Rust 存在但 C# 不暴露（display:none 蓝图，不实例化为 live
@@ -99,7 +99,7 @@ namespace Ikat.HeadlessTests
         {
             var values = (byte[])Enum.GetValuesAsUnderlyingType<NodeKind>();
             // 期望判别值集：0..17 + 19 + 20 + 21（Template=18 故意跳过）。
-            var expected = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21 };
+            var expected = new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23 };
             Assert.Equal(expected.Length, values.Length);
             Array.Sort(values);
             for (int i = 0; i < expected.Length; i++)

@@ -309,6 +309,8 @@ pub fn compound_matches_node(c: &Compound, node_id: NodeId, scene: &Scene) -> bo
                 // 作者几乎不靠 tag 选择器选 tab，role/class 选择器不受影响。
                 NodeKind::TabList => "div",
                 NodeKind::Tab => "button",
+                // role 驱动的树控件（#8）同 TabList 宿主 div（作者写 <div role=tree/treeitem>）。
+                NodeKind::Tree | NodeKind::TreeItem => "div",
                 // `<a>` 链接：tag 选择器 `a { ... }` / `a:hover { ... }` 命中 Link 节点。
                 NodeKind::Link => "a",
                 // input 变体：type 在 parse 期固化为独立 kind，tag 统一为 "input"
@@ -442,7 +444,7 @@ fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
 /// aria-* 的当前值必须由控件状态派生。返回 None = 该 aria 对本节点无语义（选择器不命中）。
 ///
 /// - `aria-checked`：Toggle / Radio 的 `checked`（"true"/"false"）。
-/// - `aria-expanded`：Dropdown 的 `open`。
+/// - `aria-expanded`：Dropdown 的 `open`；Tree branch 条目的 `expanded`（#8）。
 /// - `aria-valuenow`：Progress / Slider 的 `value`（f32）或 NumberField 的数值文本。
 /// - `aria-valuemin`：Progress / Slider 的 `min`（f32；运行时改 min 后属性选择器同拍镜像）。
 /// - `aria-indeterminate`：Progress 的 `indeterminate`（"true"/"false"；入口 = 打包期
@@ -451,8 +453,10 @@ fn type_matches_nodekind(scene: &Scene, id: NodeId, val: &str) -> bool {
 ///   与 TextField 共用 EditState，多行属性由标签（textarea vs input）决定而非运行时状态。
 /// - `aria-selected`：**跨节点**——Tab 无自身 ControlState，选中态从父 TabList.selected_index
 ///   派生（Tab 在 TabList 的 role=tab 子里的 0 基序号 == selected_index → "true"，否则 "false"）。
-///   这是首个跨节点 aria 合成（其它 aria 都直读本节点 ControlState）；分支须在下面
-///   `let cs = scene.controls.get(id)?` 之前，否则 Tab 因无 cs 直接返 None。
+///   TreeItem 同理从所属 Tree.selected 的 NodeId 恒等派生（#8）。分支须在下面
+///   `let cs = scene.controls.get(id)?` 之前，否则 Tab / leaf TreeItem 因无 cs 直接返 None。
+/// - `aria-level`：TreeItem 的层级（顶层=1，#8）——结构派生（嵌套深度即层级），不依赖
+///   ControlState。作者用 [aria-level="2"] 一类选择器做缩进层级样式。
 fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
     // aria-multiline 静态：按 NodeKind 判（TextArea vs TextField），不依赖 ControlState。
     if aria == "multiline" {
@@ -461,11 +465,15 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             _ => None,
         };
     }
-    // aria-selected：Tab 的选中态从父 TabList.selected_index 跨节点派生。Tab 无自身
-    // ControlState（与 OptionItem 同是无状态条目），故本分支必须在下面 `let cs = ...` 之前。
-    // 非 Tab 节点：aria-selected 无语义（返 None）。
+    // aria-selected：Tab / TreeItem 的选中态跨节点派生（二者皆无自身选中存储）。
+    // Tab 从父 TabList.selected_index 序号比；TreeItem 从所属 Tree.selected 的 NodeId
+    // 恒等比。本分支必须在下面 `let cs = ...` 之前（Tab/leaf TreeItem 无 cs）。
+    // 其它 kind：aria-selected 无语义（返 None）。
     if aria == "selected" {
         let node = scene.get(id)?;
+        if node.kind == NodeKind::TreeItem {
+            return crate::scene::control::tree_item_selected(scene, id).map(|b| b.to_string());
+        }
         if node.kind != NodeKind::Tab {
             return None;
         }
@@ -497,12 +505,20 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
             .position(|&c| c == id)?;
         return Some((my_index == selected_index).to_string());
     }
+    // aria-level（#8）：TreeItem 的层级（ARIA：顶层=1）。结构派生（嵌套深度即层级），
+    // 不依赖 ControlState（leaf 无态），故在 `let cs` 之前。
+    if aria == "level" {
+        return crate::scene::control::tree_item_level(scene, id).map(|l| l.to_string());
+    }
     let cs = scene.controls.get(id)?;
     Some(match (aria, cs) {
         ("checked", ControlState::Toggle { checked } | ControlState::Radio { checked, .. }) => {
             checked.to_string()
         }
         ("expanded", ControlState::Dropdown { open, .. }) => open.to_string(),
+        // Tree branch 条目的展开态（#8）：作者用 [aria-expanded="true"] 折叠箭头旋转/
+        // 高亮等定样式（leaf 无控件态 → 该属性无语义，不命中）。
+        ("expanded", ControlState::TreeItem { expanded }) => expanded.to_string(),
         ("valuenow", ControlState::Progress { value, .. } | ControlState::Slider { value, .. }) => {
             // f32 Display 用最短往返表示（50.0→"50"、33.5→"33.5"）。CSS 作者按量化后的值写选择器。
             value.to_string()

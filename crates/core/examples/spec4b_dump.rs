@@ -143,6 +143,8 @@ fn print_diagnostic_row(n: &Node, scene: &Scene, s: &Stage) {
         NodeKind::TextNode => "#text",
         NodeKind::TabList => "tablist",
         NodeKind::Tab => "tab",
+        NodeKind::Tree => "tree",
+        NodeKind::TreeItem => "treeitem",
         _ => "?",
     };
     let class = n.classes.join(",");

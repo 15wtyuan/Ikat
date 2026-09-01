@@ -2860,6 +2860,221 @@ namespace Ikat
         static NotImplementedException NE() => new NotImplementedException();
     }
 
+    // Tree = <div role="tree"> 的 typed 投影（#8，WAI-ARIA 层级列表容器，单选树）。
+    // 继承 Container（条目是子树内任意深度的 role=treeitem，直接嵌套声明无 group 包装层）。
+    //
+    // ControlState::Tree{selected}：选中项 NodeId（打包期 aria-selected="true" 烘焙初值，
+    // 无则首项）。交互（click / APG 核心档键盘）与本 setter 改写；aria-selected 由 core synth
+    // 到各条目。事件：交互路径发 EVT_SELECTION_CHANGED@tree（payload 无身份——NodeId 64 位
+    // 不进 i32，事件只作「变了」信号，SelectedItem 读 FFI 取当前值）。
+    public unsafe class Tree : Container
+    {
+        internal Tree(UIContext ctx, ulong id) : base(ctx, id) { }
+
+        /// <summary>当前选中条目；空树 / 无选中 → null。rc=1（无选中）映射 null，非异常。</summary>
+        public TreeItem SelectedItem
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                ulong item = 0;
+                int rc = Native.ikat_stage_get_tree_selected(h, _id, &item);
+                if (rc < 0)
+                    throw new InvalidOperationException($"get_tree_selected failed (node {_id}: not a tree)");
+                if (rc == 1 || item == 0) return null;
+                return (TreeItem)_ctx._registry.GetOrCreate(item);
+            }
+            set
+            {
+                ThrowIfDisposed();
+                if (value == null) throw new ArgumentNullException("value");
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int rc = Native.ikat_stage_set_tree_selected(h, _id, value._id);
+                if (rc != 0)
+                    throw new InvalidOperationException($"set_tree_selected failed (node {_id}: item {value._id} not in this tree)");
+            }
+        }
+
+        /// <summary>全部 branch 条目统一展开（程序化批量，不发 ExpandChanged）。</summary>
+        public void ExpandAll() { SetAllExpanded(true); }
+        /// <summary>全部 branch 条目统一折叠（程序化批量，不发 ExpandChanged）。</summary>
+        public void CollapseAll() { SetAllExpanded(false); }
+        void SetAllExpanded(bool expanded)
+        {
+            ThrowIfDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            int rc = Native.ikat_stage_tree_set_all_expanded(h, _id, expanded ? (byte)1 : (byte)0);
+            if (rc != 0)
+                throw new InvalidOperationException($"tree_set_all_expanded failed (node {_id})");
+        }
+
+        // SelectionChanged：core EVT_SELECTION_CHANGED@tree（交互路径：点击条目 / 键盘移动）。
+        // 翻译为 TreeSelectionChangedEvent——SelectedItem 在事件时点读 FFI 取当前选中（core 事件
+        // 不携身份）。程序化 SelectedItem=value 不发事件（同 TabList.SelectedIndex 语义）。
+        [NonSerialized] Dictionary<Action<TreeSelectionChangedEvent>, EventRegistration> _selectionChangedBacking;
+        public event Action<TreeSelectionChangedEvent> SelectionChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_selectionChangedBacking == null)
+                    _selectionChangedBacking = new Dictionary<Action<TreeSelectionChangedEvent>, EventRegistration>();
+                if (_selectionChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlSelectionChangedEvent>(e => value(new TreeSelectionChangedEvent { _tree = this }));
+                _selectionChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_selectionChangedBacking != null && _selectionChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _selectionChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+    }
+
+    /// <summary>Tree 选中变更事件（#8）。SelectedItem 在事件时点读 core 现值。</summary>
+    public sealed class TreeSelectionChangedEvent
+    {
+        internal Tree _tree;
+        /// <summary>发出事件的 Tree。</summary>
+        public Tree Tree { get { return _tree; } }
+        /// <summary>事件时点的选中条目（core 现值；空树为 null）。</summary>
+        public TreeItem SelectedItem { get { return _tree.SelectedItem; } }
+    }
+
+    // TreeItem = <div role="treeitem"> 的 typed 投影（#8）。容器型（label 内容 + 可选嵌套
+    // treeitem——branch 有展开/折叠态，leaf 无）。结构上镜像 Tab（条目持 label 子）。
+    //
+    // Selected 从所属 Tree.selected 跨节点派生（aria-selected synth 同源）；Expanded 是
+    // branch 自身 ControlState（leaf 读/写抛 InvalidOperationException——先用 IsBranch 判）。
+    public unsafe class TreeItem : Container
+    {
+        internal TreeItem(UIContext ctx, ulong id) : base(ctx, id) { }
+
+        /// <summary>是否 branch（有嵌套 treeitem，可展开/折叠）。leaf 无展开态。</summary>
+        public bool IsBranch
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                byte b = 0;
+                int rc = Native.ikat_stage_get_treeitem_expanded(h, _id, &b);
+                return rc == 0;
+            }
+        }
+
+        /// <summary>branch 的展开/折叠态。leaf 读写均抛 InvalidOperationException（先用 IsBranch 判）。
+        /// setter 是程序化改态（不发 ExpandChanged——交互路径才发，展开剪枝由 core visuals 同步）。</summary>
+        public bool Expanded
+        {
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                byte b = 0;
+                int rc = Native.ikat_stage_get_treeitem_expanded(h, _id, &b);
+                if (rc != 0)
+                    throw new InvalidOperationException($"get_treeitem_expanded failed (node {_id}: leaf has no expansion)");
+                return b != 0;
+            }
+            set
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                int rc = Native.ikat_stage_set_treeitem_expanded(h, _id, value ? (byte)1 : (byte)0);
+                if (rc != 0)
+                    throw new InvalidOperationException($"set_treeitem_expanded failed (node {_id}: leaf has no expansion)");
+            }
+        }
+
+        /// <summary>是否当前选中（所属 Tree.selected 恒等派生）。无 Tree 祖先 → false。</summary>
+        public bool Selected
+        {
+            get
+            {
+                ThrowIfDisposed();
+                Tree owner = OwnerTree();
+                return owner != null && owner.SelectedItem != null && owner.SelectedItem._id == _id;
+            }
+        }
+
+        /// <summary>层级（ARIA aria-level：顶层=1）。数到 Tree 根的 TreeItem 祖先数 +1；无 Tree 祖先 → 0。</summary>
+        public int Level
+        {
+            get
+            {
+                ThrowIfDisposed();
+                int level = 1;
+                Node cur = Parent;
+                for (int i = 0; i < 100000 && cur != null; i++)
+                {
+                    if (cur is Tree) return level;
+                    if (cur is TreeItem) level++;
+                    cur = cur.Parent;
+                }
+                return 0;
+            }
+        }
+
+        /// <summary>程序化选中本条目（所属 Tree.SelectedItem = this；无 Tree 祖先 → InvalidOperationException）。</summary>
+        public void Select()
+        {
+            ThrowIfDisposed();
+            Tree owner = OwnerTree() ?? throw new InvalidOperationException($"treeitem {_id} has no tree ancestor");
+            owner.SelectedItem = this;
+        }
+
+        Tree OwnerTree()
+        {
+            Node cur = Parent;
+            for (int i = 0; i < 100000 && cur != null; i++)
+            {
+                if (cur is Tree t) return t;
+                cur = cur.Parent;
+            }
+            return null;
+        }
+
+        // ExpandedChanged：core EVT_EXPAND_CHANGED@treeitem（交互路径：点击 branch /
+        // Enter/Space/Right/Left 键）。程序化 Expanded=value 不发。
+        [NonSerialized] Dictionary<Action<ExpandChangedEvent>, EventRegistration> _expandedChangedBacking;
+        public event Action<ExpandChangedEvent> ExpandedChanged
+        {
+            add
+            {
+                if (value == null) return;
+                if (_expandedChangedBacking == null)
+                    _expandedChangedBacking = new Dictionary<Action<ExpandChangedEvent>, EventRegistration>();
+                if (_expandedChangedBacking.ContainsKey(value)) return;
+                var reg = On<ControlExpandChangedEvent>(e => value(new ExpandChangedEvent { _item = this, _expanded = e.Expanded }));
+                _expandedChangedBacking[value] = reg;
+            }
+            remove
+            {
+                if (_expandedChangedBacking != null && _expandedChangedBacking.TryGetValue(value, out var reg))
+                {
+                    _expandedChangedBacking.Remove(value);
+                    reg.Dispose();
+                }
+            }
+        }
+    }
+
+    /// <summary>Tree branch 条目展开/折叠事件（#8）。交互路径（点击/键盘）才发；程序化 setter 不发。</summary>
+    public sealed class ExpandChangedEvent
+    {
+        internal TreeItem _item;
+        internal bool _expanded;
+        /// <summary>展开/折叠的条目。</summary>
+        public TreeItem Item { get { return _item; } }
+        /// <summary>新态（true=展开 / false=折叠）。</summary>
+        public bool Expanded { get { return _expanded; } }
+    }
+
     public unsafe class ProgressBar : Node
     {
         internal ProgressBar(UIContext ctx, ulong id) : base(ctx, id) { }

@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Tree 复合控件（#8）**：`<div role="tree">` / `<div role="treeitem">`
+  WAI-ARIA 标准树。条目直接嵌套（treeitem 内嵌 treeitem，无 group 包装层），
+  任意深度；branch（有直接 treeitem 子）可展开/折叠（`aria-expanded="true"`
+  烘焙初值、缺省折叠），leaf 纯文本。单选树（焦点移动即选中，APG 单选模型），
+  初始选中 = 首个 `aria-selected="true"` 条目（无则首项）。键盘 = APG Tree
+  View 核心档：↑↓ 可见项间移动、→ 展开/进首子项、← 折叠/回父项、Home/End
+  首末可见项、Enter/Space 激活（选中 + branch 折叠互切）；方向键长按连发
+  （key repeat）。样式钩子（synth aria，作者 HTML 不写）：`[aria-selected="true"]`、
+  `[aria-expanded="true"]`、`[aria-level="N"]`（层级缩进用，顶层=1）。运行时
+  API：`Tree.SelectedItem` / `ExpandAll()` / `CollapseAll()` / `SelectionChanged`、
+  `TreeItem.IsBranch` / `Expanded` / `Selected` / `Level` / `Select()` /
+  `ExpandedChanged`。围栏结构门：tree 缺直接 treeitem 子报
+  `FenceMissingControlChild`。branch 的 label 走子元素（wrapper div）——branch
+  宿主嵌套条目为 block 子，纯文本 label 触发 `FenceMixedInlineBlock`；leaf
+  纯文本合法。
+- **attrs β 通用属性仓（#8/#22）**：per-Node 白名单 HTML 属性持久化
+  （现 `aria-controls` / `aria-labelledby`），pkg v53 起退役 aria_controls
+  专列、单一路径入仓；`aria-labelledby` 端到端打通（fence 校验 → pkg →
+  RoleInfo），运行时关联机制 `Scene::attr_idrefs`（逐 id 本作用域解析，
+  与 aria-controls 同路）。
 - **拖拽使能双通道（#75）**：HTML `draggable="true|false"`（全局属性，缺省
   false；浏览器枚举值 `auto` 在自绘引擎无对应物，围栏报错）+ 运行时
   `Node.Draggable`。使能节点参与 drag_target 候选，pointer-down 过阈值后

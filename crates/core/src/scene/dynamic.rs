@@ -310,6 +310,10 @@ pub fn create_node_from_template(
                 selected_index: selected_index as usize,
                 manual_activation: manual,
             },
+            // Tree：selected 暂置 None（文档序序号须等子树建满才能解析成 NodeId，
+            // stage instantiate 的后置遍接手——见 stage.rs tree_ids 遍）。
+            ControlInit::Tree { .. } => ControlState::Tree { selected: None },
+            ControlInit::TreeItem { expanded } => ControlState::TreeItem { expanded },
         };
         scene.controls.ensure(id, state);
         // 控件视觉子结构由作者自写（role/data-slot），core 不注入——见 sync_control_visuals。

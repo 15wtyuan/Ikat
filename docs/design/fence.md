@@ -111,6 +111,8 @@ AI 对标准 HTML/CSS 有海量训练数据先验。因此围栏只用标准 HTM
 | `listitem` | ListItem | — |
 | `tablist` | TabList | `role=tab` 子（panel 靠 `aria-controls` 关联，非 role）。可选 `data-activation="manual"`（值域 `manual` \| `automatic`，缺省 automatic；写坏值报 `FenceBadAttrValue`——语义消费的 data-* 在消费位校验）：manual = 方向键只移焦点、Enter/Space 才提交选中；automatic = 方向键即时选中且焦点跟随 |
 | `tab` | Tab | — |
+| `tree` | Tree | `role=treeitem` 子（任意嵌套深度——嵌套声明 = treeitem 内直接嵌 treeitem，围栏不认 group 包装层）。单选树（焦点移动即选中，APG 单选树模型）；键盘 APG Tree View 核心档：Up/Down 可见项间移动、Right 展开/进首子项、Left 折叠/回父项、Home/End 首末可见项、Enter/Space 激活（选中 + branch 折叠展开互切）。typeahead（APG optional）defer |
+| `treeitem` | TreeItem | 有直接 `role=treeitem` 子 = branch（展开/折叠态，`aria-expanded="true"` 烘焙初值、缺省折叠；无 aria-expanded 的 branch 是合法折叠态）；无 = leaf。选中态从所属 Tree.selected 派生（`aria-selected` synth），初始选中 = 首个 `aria-selected="true"` 条目（无则首项）。branch 的 label 走子元素（wrapper div）——branch 宿主嵌套条目为 block 子，纯文本 label 会触发 `FenceMixedInlineBlock`；leaf 纯文本天然合法。样式钩子：`[aria-selected="true"]`、`[aria-expanded="true"]`、`[aria-level="N"]`（层级结构派生，顶层=1，缩进样式用） |
 | `tabpanel` | Container（`div` tag 回退，非 role 分派） | — |
 | `dialog` | Container（`div` tag 回退，非 role 分派——模态弹层容器） | — |
 
@@ -514,6 +516,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 - `progressbar` → 直接子含 `data-slot=fill`
 - `list` → 直接子含 `role=listitem`
 - `tablist` → 直接子含 `role=tab`（panel 靠 `aria-controls` 跨树关联，不在此校验）
+- `tree` → 直接子含 `role=treeitem`（嵌套条目直接嵌在 treeitem 内，无 group 包装层）
 
 `textbox`/`spinbutton`/`switch`/`radio`/`option`/`listitem`/`tab`/`tabpanel` 无必需子角色（不校验）。
 
@@ -557,7 +560,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `FenceControlWithoutCss` | role 驱动控件（`progressbar`/`slider`/`switch`/`radio`/`textbox`/`spinbutton`/`combobox`）无任何 `<style>` 规则命中。控件不带 UA 默认样式，无 CSS = 运行时空白；须为控件及其 `data-slot` 子节点提供 CSS（详见阶段 6.7） |
 | `FenceControlChildWithoutCss` | 控件的必需子节点（`data-slot=fill`/`thumb`/`value`、`role=listbox`/`option`/`listitem`/`tab`）无任何规则命中——本体命中不证明子部件被样式（隐形滑块头/隐形列表行）。每个实例都查（详见阶段 6.7） |
 | `FenceControlStructureCss` | 控件结构 CSS 契约缺失（当前契约：`combobox` 本体缺 `position:relative`，或其子树内 `role=listbox` 弹层缺 `position:absolute`）。视觉规则命中 ≠ 结构声明齐全，缺锚点/脱流到 PlayMode 才显形；详见阶段 6.7b |
-| `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`、`tablist` 缺 `role=tab`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
+| `FenceMissingControlChild` | role 驱动控件缺必需子角色/slot（`combobox` 缺 `role=listbox`、`listbox` 缺 `role=option`、`slider` 缺 `data-slot=thumb`、`progressbar` 缺 `data-slot=fill`、`list` 缺 `role=listitem`、`tablist` 缺 `role=tab`、`tree` 缺 `role=treeitem`）。控件结构由作者写，漏写 = 运行时半残控件；详见阶段 6.8 |
 | `FenceUnknownRole` | `role` 属性值不在 role 注册表（`ROLE_TO_SEMANTIC` + `textbox`/`tabpanel`/`dialog` 例外）。拼错防护：未知 role 若静默回退成基础标签类型，元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS），构建绿灯但运行时空白——「不静默降级」原则拒绝此类 |
 | `FenceStylesheetNotFound` | `<link rel="stylesheet">` 的外部 CSS 读取失败（href 相对所在 HTML 文件解析，报错带完整路径；静默丢样式是最难排查的降级形态） |
 | `FenceDisplayInline` | **warning**：显式 `display: inline` 声明。围栏没有 inline flow——inline 运行时映射为 flex 容器，与浏览器 inline（收缩宽 + 横排流）语义不同，显式声明多半是先验误用 |

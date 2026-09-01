@@ -46,6 +46,9 @@ namespace Ikat.HeadlessTests
             // Dropdown 选中项变更（Task 14）。payload=新 index（touch_id）——控件类 SelectionChanged
             // 访问器翻译为公共 SelectionChangedEvent。
             typeof(ControlSelectionChangedEvent),
+            // Tree branch 条目展开/折叠（#8）。payload=新态（touch_id 1/0）——TreeItem.ExpandedChanged
+            // 订阅翻译为公共 ExpandChangedEvent。
+            typeof(ControlExpandChangedEvent),
         };
 
         // 每个结构体映射到期望的 EventType 字节值见 EventTypeCases（xUnit MemberData 须 static，

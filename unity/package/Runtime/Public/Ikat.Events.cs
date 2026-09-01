@@ -573,4 +573,24 @@ namespace Ikat
         internal static byte EventType => (byte)IkatEventType.SelectionChanged;
         internal int NewIndex { get { return _newIndex; } }
     }
+
+    // Tree branch 条目展开/折叠（core EVT_EXPAND_CHANGED，touch_id=新态 1/0，#8）。
+    // TreeItem.ExpandedChanged 订阅本 route struct（demux 解 EVT_EXPAND_CHANGED 后派）。
+    internal struct ControlExpandChangedEvent : IRouteEvent, IRouteEventCore
+    {
+        internal RouteEventCore _core;
+        RouteEventCore IRouteEventCore.Core => _core;
+        internal bool _expanded;
+        public Node Target => _core.Target;
+        public Node CurrentTarget => _core.CurrentTarget;
+        public bool DefaultPrevented => _core._defaultPrevented;
+        public bool PropagationStopped => _core._propagationStopped;
+        public bool ImmediatePropagationStopped => _core._immediateStopped;
+        public void StopPropagation() => _core.StopPropagation();
+        public void PreventDefault() => _core.PreventDefault();
+        public void StopImmediatePropagation() => _core.StopImmediatePropagation();
+        internal static byte EventType => (byte)IkatEventType.ExpandChanged;
+        /// <summary>展开新态（true=展开 / false=折叠）。</summary>
+        public bool Expanded { get { return _expanded; } }
+    }
 }

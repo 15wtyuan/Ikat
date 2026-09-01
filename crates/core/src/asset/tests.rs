@@ -430,13 +430,13 @@ fn read_rejects_unknown_kind_tag() {
         "kind_tag offset sanity: patching to Button must read back Button"
     );
 
-    // 22 = from_u8 的首个 None 分支（Link=21 是最后合法判别值，#74）。
+    // 24 = from_u8 的首个 None 分支（TreeItem=23 是最后合法判别值，#8）。
     let mut patched_bad = bytes.clone();
-    patched_bad[kind_tag_off] = 22;
+    patched_bad[kind_tag_off] = 24;
     let err = read_package(&patched_bad).expect_err("unknown kind_tag must error");
     assert!(
-        matches!(err, PkgError::BadKind(22)),
-        "expected BadKind(22), got {err:?}"
+        matches!(err, PkgError::BadKind(24)),
+        "expected BadKind(24), got {err:?}"
     );
 
     // 0xFF = 远超判别值范围，同样必须 BadKind。防 from_u8 回归（如 off-by-one 把 25 误返 Some）。
@@ -790,8 +790,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 53,
-        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
+        PKG_FORMAT_VERSION, 54,
+        "pkg format version must be 54 after v54 ControlInit Tree/TreeItem variants (#8 tree control; v53 attrs store)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -862,8 +862,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 53,
-        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
+        PKG_FORMAT_VERSION, 54,
+        "pkg format version must be 54 after v54 ControlInit Tree/TreeItem variants (#8 tree control; v53 attrs store)"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -1010,8 +1010,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v46_roundtrip_preserves_link_href() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 53,
-        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
+        PKG_FORMAT_VERSION, 54,
+        "pkg format version must be 54 after v54 ControlInit Tree/TreeItem variants (#8 tree control; v53 attrs store)"
     );
     let mut root = tn(NodeKind::Container);
     root.rich_text_block = true;
@@ -1098,8 +1098,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 53,
-        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
+        PKG_FORMAT_VERSION, 54,
+        "pkg format version must be 54 after v54 ControlInit Tree/TreeItem variants (#8 tree control; v53 attrs store)"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

@@ -266,6 +266,12 @@ namespace Ikat
                         DispatchTyped(nodeId,
                             new ControlSelectionChangedEvent { _core = NewCore(nodeId), _newIndex = evt.touchId });
                         break;
+                    // Tree branch 条目展开/折叠（core EVT_EXPAND_CHANGED，30，#8）。payload = 新态
+                    //（touch_id 1/0），node_id 指向 treeitem。TreeItem.ExpandedChanged 订阅翻译。
+                    case (byte)EventType.ExpandChanged:
+                        DispatchTyped(nodeId,
+                            new ControlExpandChangedEvent { _core = NewCore(nodeId), _expanded = evt.touchId != 0 });
+                        break;
 
                     // 长按（core 按住 ≥1.5s 发 EVT_LONG_PRESS=9，与 Click 独立——长按后松手
                     // 是否还 Click 由业务定，配 Node.CancelClick(touchId) 显式取消）。
