@@ -609,7 +609,9 @@ public void SetNodeRenderVisible(Node node, bool visible);
 
 // Second-stage bootstrapping (runtime-spawned drivers): set layer order
 // and the shared-host flag BEFORE Awake — AddComponent on an inactive
-// GameObject, call this, then SetActive(true).
+// GameObject, call this, then SetActive(true). The spawned driver
+// GameObject also needs its own input collector for probe/collect to
+// see any input.
 public void ConfigureStage(int stageOrder, bool useSharedHost);
 
 // Mount route — a whole subtree renders under a business 3D transform:
@@ -626,6 +628,11 @@ public void UnbindWorldMount(Node mountRoot);
 // Damage numbers = business-side TweenBuilder x anchor combo (e.g.
 // TweenChannel.Opacity fade while the anchor offset floats upward).
 ```
+
+Multi-stage hit etiquette: the page document root is never a hit target,
+but a full-canvas overlay page should still declare `pointer-events: none`
+on its root (`auto` on the interactive panel) — otherwise its content area
+starves every stage below it of pointer input.
 
 ## Runtime diagnostics
 

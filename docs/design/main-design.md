@@ -430,7 +430,7 @@ node.On<PointerDownEvent>(OnPointerDown);
 
 ### 9.3 命中测试
 
-命中按等效绘制顺序逆序（后画的先命中）。命中几何：**点**经 world matrix 逆变换投到节点本地轴对齐 box 判定（transform 生效，旋转节点命中精确，非宽松 AABB）。`pointer-events:none` 跳过自身但继续测子（CSS 语义，不屏蔽子树）。disabled 节点仍参与命中与 hover diff（`:disabled` 需要 hover 反馈），但 Down/Up/Click/drag/longpress 全抑制；命中落在 disabled 子节点时祖先链 active 同步截断。优先级序：scrollbar grip > open dropdown popup > 正常内容。
+命中按等效绘制顺序逆序（后画的先命中）。命中几何：**点**经 world matrix 逆变换投到节点本地轴对齐 box 判定（transform 生效，旋转节点命中精确，非宽松 AABB）。`pointer-events:none` 跳过自身但继续测子（CSS 语义，不屏蔽子树）；class 规则的 `pointer-events` 与 inline 同源进级联终值（rematch 把 `style.touchable` 回写 `interaction.touchable`）。**stage 文档根不可命中**（`create_root` 建的宿主容器恒 touchable=false）——根铺满画布且可命中时「点到空白处」命中根，多 Stage 输入路由据此饿死指针下全部底层 Stage；overlay 类 Stage 的页面根应声明 `pointer-events:none`（交互面板再 `auto`）收窄命中面。disabled 节点仍参与命中与 hover diff（`:disabled` 需要 hover 反馈），但 Down/Up/Click/drag/longpress 全抑制；命中落在 disabled 子节点时祖先链 active 同步截断。优先级序：scrollbar grip > open dropdown popup > 正常内容。
 
 **软件指针形态（#93）**：鼠标主指槽每帧命中 → `Stage::cursor_intent`（箭头/手型/隐藏三态），宿主订阅 `CursorIntentChanged` 驱动 `Cursor.SetCursor`（去抖缓存，纹理消费侧注册）。判定沿命中节点祖先链叶→根单遍（rich 内联命中细化到 source 后上溯宿主控件——浏览器模型里「指针下的元素」是宿主而非文字节点）：先遇到的作者 `cursor` 声明（围栏定为不继承，最近者生效）或 pressable 控件定型；disabled/不可命中宿主给箭头并截断。HTML 布尔属性 `disabled`（button）经 pkg 烘入、instantiate 映射 `NodeFlags::DISABLED`——与运行时 disabled API 同一语义源。
 
@@ -597,11 +597,15 @@ anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不
 
 两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇 `clip_rect` 的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。mesh 合并锚：合并产物的 `node_id` 取 batch 内最小原始 id（后端 GO 复用防抖动）。排除项：控件节点（后端要建交互实体——控件排除点是「加新控件类型」的 dispatch 位置之一）、文本节点、非纯平移 transform、box-shadow 合成层，均不参与重排合并。
 
+合并批的增量语义（#109 起）：**批不跨渲染显隐、不跨 world-space 挂载**（合批键含这两维——merged 行的 GO 归属/显隐是整批属性，混批会互相绑架）。合并批**携带 anchor 的世界平移矩阵**且定级按**整批合并 payload 的哈希**：纯平移（滚动/Transform 位移）在 payload 顶点里不可见（位置编码在矩阵，顶点是局部系），批必须靠矩阵轴捕捉——同质批纯平移 → Header 级（只挪 GO 不重传 mesh），成员几何/批成员集变化 → Full 重传；稳态帧仍全批 Skip。
+
 ### 12.5 裁剪/遮罩
 
 **rect mask**：核心给 clip_box；后端自选实现。`mask_context` 是批合边界。嵌套 `overflow:hidden`：clip 区域取祖先 clip 链的交集。裁剪框是轴对齐的：clipper 自身 `border-radius` 非全零时裁剪框带四角半径（圆角裁子内容），但**祖先链圆角不传播**；transform 旋转不旋转裁剪框（作者可见限制）。soft clip/shape mask 未做（deferred）。
 
 **浮层机制**（通用模式，open dropdown 的 `role=listbox` 子树与 scrollbar thumb 共用）：跳出正常 DFS，render 末尾追加独立 DFS、sort_key 续 post-merge 最大值、mask 重赋脱离祖先裁剪链；命中层对应前置。画序单源 `scene::stacking::paint_order`（stacking context 全局分层，CSS Appendix E 语义：static 子树里的 opacity<1/transform/filter/定位+声明 z 后代会上提到所属 SC 的对应层，#96/#100）——主 DFS、浮层追加、hit 逆序三消费点共用同一份序，绘制与命中一致性由构造保证，无「多处手抄同步」面。
+
+**world-space 挂载与裁剪互斥**（#109 C8，v1）：挂载子树的渲染行在挂载根处脱离祖先 clip 链（mask 清 0）——clip 平面定义在屏幕系，行顶点已 re-base 到挂载根局部系（随业务 3D 容器变换），屏幕系裁剪框对它无意义。挂载子树内声明 overflow 裁剪在挂载登记时被拒（防「声明的裁剪静默失效」）；完整形态（clip 挪 design 系使挂载内可裁剪）见 deferred 票。
 
 ### 12.6 RenderNode 契约
 
@@ -609,7 +613,8 @@ anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不
 struct RenderNode {
     node_id: u64,                     // NodeId 位型（idx:32+gen:24+tag:8），build 直填 n.id.0
     parent_id: Option<u64>,
-    visible: bool,
+    mount_root_id: u32,               // world-space 挂载槽位（#109 C8）：0 = 屏幕空间；非 0 = 行顶点已 re-base 到挂载根局部系，后端按槽位路由 SetParent 到业务 3D 容器
+    visible: bool,                    // 渲染显隐：运行时 render_hidden 的累积值（CSS visibility:hidden 继承语义——隐藏祖先 = 整子树行 visible=0；与 display:none 正交，不剪子树不动布局）
     alpha: f32,
     // grayed: bool — deferred（灰化禁用节点渲染，待视觉束落地）
     color_tint: [f32; 4],
@@ -619,9 +624,9 @@ struct RenderNode {
     sort_key: u32,
     change_level: ChangeLevel,        // Skip=0 / Header=1 / Full=2
     reuse_key: u32,                   // MirrorPool GO 复用键
-    effect: EffectBlock,              // 文字效果参数（128B 定长）
-    shadow_params: [f32; 6],         // box-shadow SDF 参数（半宽/半高/圆角/σ/inset 标志/填充；偏移烘进几何；v12 blob 列）
-    gradient: GradientParams,         // 渐变参数（v13 blob 列；program 6/7 消费）
+    effect: EffectBlock,              // 文字效果参数（定长块，v15 起按需进 fat arena）
+    shadow_params: [f32; 6],         // box-shadow SDF 参数（半宽/半高/圆角/σ/inset 标志/填充；偏移烘进几何；v15 起按需进 fat arena）
+    gradient: GradientParams,         // 渐变参数（program 6/7 消费；v15 起按需进 fat arena）
     payload: NodePayload,
 }
 
@@ -634,6 +639,8 @@ enum NodePayload {
 > 注：`grayed` 灰化渲染待 visual beam 落地；`world_matrix: Affine2` 为 v1 过渡形态，终态替换为 `NodeTransform`（分解 Position/Scale/Rotation，对齐 public-api.md 三分模型）。
 
 `ChangeLevel::Skip/Header/Full` 表达本帧变化程度。
+
+**增量渲染构建**（#109 A2）：每节点维护**输入指纹**（style 实际改写版本 / layout 宽高量化 / 世界矩阵与累积 alpha 全量 / 文本布局代数 / anim 烘 mesh 通道 / 渲染显隐 / 挂载归属+槽位+量化原点 / 资源代数 / rich 折叠位 / 图 src），命中则**整段复用上帧产物**（含合成层与配对追踪）；在场节点集签名变化（增删/换父/显隐翻转/浮层开合）→ 缓存整表清空兜底；控件壳永不缓存。**纯平移不进 payload 顶点**（位置编码在矩阵、顶点是局部系）——凡按 payload 哈希判变更的路径必须单独覆盖平移轴（合并批的矩阵轴见 §12.4）。高频运行时 setter 须同值幂等（同值写不触指纹失效——否则逐帧 Set 的调用模式会打爆全缓存）。
 
 合成 `node_id` 命名空间：`NodeId` u64 位型 = index(32) + generation(24) + tag 字节(8)。真实节点 tag 恒 0；文本跨页子页、scrollbar thumb、TextField 合成层、box-shadow inset/outer 层各占 tag 字节区段——合成 id 与真 id 靠 tag 位型天然区分，无碰撞可能（区段分配真相源 = render 代码注释）。这是跨层 ABI 契约（MirrorPool 按 id 建 GO、命中按 tag 解码）。渲染 blob 不是节点状态查询通道：批合会让空/透明节点从 blob 消失，按 id 查状态（world matrix/sort_key/visible）必须走独立 FFI getter。
 
@@ -731,6 +738,10 @@ player/tween 可动**布局属性**：width / height / flex-grow（端点同域�
 
 「按包释放纹理」不是本架构的概念：`ikat.runtime.json` 的 packages 与 atlases 是 workspace 级平行列表，SpriteResolver 按 (atlasIdx, page) 全局懒缓存、与包注册表解耦（重载同名包不重载纹理），字体是 driver 级注册——`UnloadPackage` 只动模板注册表（上面的归零卸载模型属于核心 TexId 通用层，本架构的 Unity 侧不使用）。
 
+### 14.6 资源宿主与 Stage 实例分离（#109 A3）
+
+字体表/字形图集/包注册表/图尺寸表从 Stage 实例剥离进 **ResourceHost**（Stage 持共享句柄）：单 Stage 行为不变；多 Stage 共存时字体只注册一次（无 font id churn / 图集重光栅），字形图集脏页单点拉取（多后端各拉各清会饿死后拉者）。宿主侧写操作（注册字体/回落族/图尺寸/装包）不经场景 mutation——宿主持单调**代数（generation）**，Stage 每帧 tick 前对账：代数变了才清文本两缓存 + 标脏文本叶子（下帧 solve 重测）。字体字节的所有权在宿主（Stage 换代重注册不留泄漏）。
+
 ---
 
 ## 15. FFI 与引擎后端
@@ -748,21 +759,23 @@ player/tween 可动**布局属性**：width / height / flex-grow（端点同域�
 - 内存所有权严格隔离：跨边界传 POD/指针/扁平 buffer。
 - 高频调用用扁平数组（pin 或拷贝）。
 
-### 15.3 跨边界数据（SOA + per-frame arena）
+### 15.3 跨边界数据（SOA + per-frame arena + 段末增量）
 
 每帧 FFI 传：
-1. RenderNode 公共头 SOA（定长字段并行存储）。
-2. 按类型分区的 per-frame arena（mesh 顶点/UV/颜色/索引、path 表等）。
-3. ChangeLevel（Skip/Header/Full）：Skip/Header 不写 arena。
+1. RenderNode 公共头 SOA **lean 列**（定长字段并行存储；#109 v15 起胖参数块——color_matrix/effect/shadow/gradient——移出列进**按需 fat arena**：字节全零的块不写，行持 1-based 引用 + 子掩码）。
+2. 按类型分区的 per-frame arena（mesh 顶点/UV/颜色/索引、path 表、fat arena 等）。
+3. **段末 skip 段**（#109 v15）：定级 Skip 的行不再占 SOA 列，进段末极简条目（node_id + reuse_key + flags；parked keepalive 走此段，flags bit1）——全 Skip 帧的带宽从「每行全列」降到「每行极简条目」。skip 条目的 flags 与 lean 行 visible 列**不同义**（skip = 沿用上帧态，不传递显隐）。
+4. ChangeLevel（Skip/Header/Full）：Skip 进段末条目，Header/Full 在 lean 列；Skip/Header 不写 mesh arena。
 
-C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse`）做 stale-mark-sweep 镜像同步，O(n) 每帧。
+C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse`）做 stale-mark-sweep 镜像同步，O(n) 每帧（v15 起为双段遍历：skip 段先走保活，lean 段只余 Header/Full）。
 
-数据形态分工规则：定长 per-node 结构走 SOA 列（如文字效果参数定长块），变长几何走 arena——arena 索引不反映内容变化、哈希跨 arena 会破坏自包含性。控件 FFI 导出全值操作（clone ControlState → 改字段 → 回写）而非结构视图，控件内部结构演进不动 FFI 面。
+数据形态分工规则：定长 per-node 结构走 SOA 列，变长几何走 arena——arena 索引不反映内容变化、哈希跨 arena 会破坏自包含性；例外是「多数行恒零」的胖参数块（fat arena 按需化省的是带宽不是哈希语义，定级仍由 §12.6 指纹管）。控件 FFI 导出全值操作（clone ControlState → 改字段 → 回写）而非结构视图，控件内部结构演进不动 FFI 面。
 
 ### 15.4 渲染对象镜像生命周期
 
 - Rust 核心拥有场景图 + 渲染状态（真相源）；后端拥有渲染对象镜像（派生缓存）。
-- 每帧脏增量同步（三态）：全标 stale → 遍历 blob 节点 → **active** 命中清 stale 并按 change_level 更新；**parked**（虚拟列表离场 slot，`visible` 字节 bit1）清 stale 但 `SetActive(false)` 留 GO、不渲染（持久池，fgui dormant 模式）；仍 stale 的（**gone**）销毁。parked keepalive 条目由 build_blob 追加（render 管线不动）。
+- 每帧脏增量同步（四态）：全标 stale → skip 段先走（**parked** keepalive——虚拟列表离场 slot，flags bit1——清 stale 并保持隐藏，留 GO 不渲染；持久池，fgui dormant 模式）→ lean 段遍历（**active** 命中清 stale 并按 change_level 更新；**hidden** = 行 visible 0，运行时渲染显隐——清 stale 但**保留 GO 仅 SetActive(false)**，与世界锚点出屏自动隐藏配套）→ 仍 stale 的（**gone**）销毁。parked keepalive 条目由 build_blob 追加（render 管线不动）。
+- world-space 挂载行（mount 槽位非 0）镜像 GO 挂到业务 3D 容器（内层 y-flip，层随容器 → 场景相机渲染 + 深度测试吃 3D 遮挡）；解除挂载时镜像 GO 先行挂回屏幕根再销毁容器。
 - 无 double-free/use-after-free：Rust 只持整数 id。
 
 ### 15.5 原生库分发
@@ -798,8 +811,8 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
      q.  list collect_heights           ← ListView 高度回填（refresh_content_sizes 前）
      r.  refresh_content_sizes          ← scroll content_size 刷新
      s.  compute_world_transforms       ← DFS 累计 world matrix（含 Transform 渲染偏移，不触发 solve）
-     t.  build_render_nodes             ← 剪 display:none + dirty hash + 批合 + sort_key + 浮层末尾追加
-     u.  输出 Vec<RenderNode>（SOA blob）
+     t.  build_render_nodes             ← 剪 display:none + 输入指纹增量复用（命中整段复用上帧产物，见 §12.6）+ 批合 + sort_key + 浮层末尾追加 + 挂载行 re-base
+     u.  输出 Vec<RenderNode>（SOA lean 列 + 段末 skip 段 + fat arena blob，见 §15.3）
   4. 后端 borrow_frame → MirrorPool 同步镜像；borrow_events → 事件路由 → 业务回调
 ```
 

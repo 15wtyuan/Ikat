@@ -102,11 +102,17 @@
 - **fgui 的 mesh 合并实靠 Unity Dynamic Batching**（隐式、与 SRP Batcher 互斥——URP 下不可控）；SRP Batcher 只降 CPU 不降 draw call。要真 N→1 必须自己合并 mesh。
 - **csproj `<Link>` 引用带 UnityEngine/native 依赖的生产源进纯 net10.0 headless 项目编译失败**——`<Link>` 只拷文件不带依赖链；headless 测试用物理拷贝源文件。
 - **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `Ikat.Editor.EventType` 撞 `Ikat.EventType`），只能全限定名，alias 无用。
+- **Unity 新版把弃用 API 升级为编译 error（CS0619）**：`Scene.handle` 的 int 隐式转换（6.2+）、`FindObjectsOfType`（2023.1+ 弃用）、`FlareLayer` 类型（6000.5+ 挪出程序集）都会在对应版本直接编不过，而其「替代品」在旧版（如 2021 showcase 工程）又不存在——跨版本写法：按 `Scene` 本身做字典键（IEquatable）、`UNITY_2023_1_OR_NEWER` 门控 API 选择、按类型名字符串摘组件（`GetComponent(typeName)`）。升级 Unity 或写引擎兼容层时 grep 这批符号。
+- **纹理 `Apply(makeNoLongerReadable:true)` 与原地重上传互斥**：页式纹理（字形图集/atlas 页）走「同尺寸脏页 SetPixels 重传」路径，首次上传即弃 CPU 拷贝会让后续每次脏重传抛 "not readable" 且脏位永不清（帧循环中断 = UI 冻结）。须保持可读（`Apply(false, false)`）——光标纹理条目的 `Apply(_, true)` 是一次性消费场景，页纹理不是。
+- **URP 的 `CameraClearFlags.Depth` 连颜色一起清**（URP 17 起 Base 相机语义）：叠在宿主 3D 相机之上的 UI 相机用它会把 3D 场景整屏抹掉。clearFlags 须按管线分流：有更深打底相机时 Built-in 用 Depth、SRP 用 Nothing；无打底（纯 UI 首相机）用 SolidColor（不清色会读到未初始化缓冲）。
+- **序列化字段的默认值只对「没保存过该字段」的场景生效**：字段是场景保存之后新加的，旧场景反序列化吃字段初始化器；而改初始化器不影响任何已保存过该字段值的场景——两个方向都可能咬人（`_useSharedHost` 后加默认 false，老场景静默不吃共享宿主）。新序列化字段上线时审一遍默认值语义 + 老场景兼容。
 
 ## 4. 动态契约
 - **CSS 多声明分割必须括号感知**：`animation`/`transition` 等逗号多声明与函数参数逗号共用语法——`split(',')` 会把 `cubic-bezier(.3,0,.7,1)` 的参数切成独立声明，静默错位成默认值（解析不报错、行为不对）。统一走 `mapping::split_top_level_commas`（渐变/rgba 同款）；新收函数形属性（带参数的 CSS 函数值）先过它再分段。
 
 - **dirty hash 的「全量」是动态契约**：每给 RenderNode/Line 加视觉字段，必同步检 payload/header hash 是否覆盖新字段——漏一个 = 静默 stale（不崩、只是不更新）。历史上反复漏过（uvs / 圆角顶点 / line-height / reuse_key / baseline）。
+- **纯平移不进 payload 顶点（位置编码在矩阵、顶点是局部系）**：任何「按 payload 哈希判变更」的新路径（批合并定级/缓存复用/脏检测）都抓不住纯平移变化（滚动/Transform 位移）——必须把矩阵平移轴单独入键。merged 批的教训：成员局部 hash 拼合 + 恒 IDENTITY 矩阵 = 滚动拖拽整批冻结在旧位置。
+- **高频运行时 setter 必须同值幂等**：逐帧无条件 `Set(true)` 的调用形态（如世界锚点每帧确认可见）× 非幂等 setter（每次写都 bump 失效版本）= 全缓存逐帧 miss 的性能暗坑，且不崩不报。运行时态 setter 入口一律同值短路。
 - **查询缓存别缓存 miss**（除非确定源不变）——运行时资源可能后到，缓存 miss 会永久遮蔽后到的正确值。
 - **坐标空间劈叉**：`pos` 是世界坐标、`layout_rect` 是页面内容坐标，祖先滚动下两者劈叉——调试命中/滚动偏移先分清在哪个空间。
 - **keepalive 保留粒度必须对齐后端 GO 持有粒度**：MirrorPool 是扁平池（slot 根按 reuse_key、叶子按 node_id 独立持有）——core 只发 slot 根 keepalive 保不住叶子 GO，stale 销毁→reactivate 重建→churn 复发；keepalive 须发整子树超集。改 blob 契约或池模型任一侧都要重新对齐粒度。

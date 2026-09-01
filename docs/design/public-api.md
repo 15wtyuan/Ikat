@@ -153,7 +153,7 @@ public sealed class NodeStyle {
 - getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `IkatColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走只读 computed style 查询接口（时效：rematch 后有效、本帧 tick 后反映最新 cascade）。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
 - `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递。不提供 `GetVar`（var 不当状态存储读回）。
-- 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。）
+- 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。引擎集成层另有**运行时渲染隐**原语——visibility:hidden 继承语义、不动布局/命中，供世界锚点出屏自动隐藏等宿主机制用，见 §11.3，不进公共 Node API。）
 
 ### 3.2 Transform（可写，渲染层，不触发 solve）
 
@@ -230,6 +230,7 @@ buy.Get<TextElement>("price").TextContent = "200";   // 只动 span，兄弟 img
 |---|---|---|
 | `Style.Display = None` | 隐藏 + 不占位 + 不渲染 + 不命中 | 日常开关（窗口/面板反复显隐） |
 | `Style.Opacity = 0` | 隐藏 + 占位（加 `pointer-events:none` 不命中） | 占位隐藏（防布局跳动） |
+| 引擎层运行时渲染隐（driver 世界锚点自动隐藏，见 §11.3） | 隐藏 + 占位 + 布局/命中不动 + 整子树继承 | 3D 跟随 HUD 出屏自动隐藏（非公共 Node API） |
 | `Dispose()` | 永久销毁、释放 | 这个 UI 这辈子不再要了 |
 
 频繁开关的窗口用 `Display = None`，不用 Dispose。
@@ -570,6 +571,7 @@ fallback 到默认字体会给出误导性宽度）。
 - **世界锚点（投影路世界 UI）**：`IkatStageDriver.SetWorldAnchor(Node, Camera, Vector3 worldPos, Vector2 offsetPx)` / `ClearWorldAnchor(Node)`——Driver 每帧（Step 前）把世界点经相机投到屏幕 → 换算设计坐标写 `node.Transform.Position`（跟随 3D 实体；跳字/血条类 HUD 的官方路）。节点直挂 stage 根且 `position:absolute; left/top:0`（布局位 (0,0)，transform 即绝对坐标）。出屏/相机背后自动隐藏：core 侧 `ikat_stage_set_node_visible`（渲染层开关，与 `display:none` 正交——不动布局/命中；**继承语义**同 CSS `visibility:hidden`，隐藏祖先 = 整子树行 visible=0，后端保留镜像对象仅 SetActive(false)）。跳字动画 = 业务侧 TweenBuilder（如 Opacity 通道）× 锚点组合，无框架 helper。
 - **world-space 子树挂载（整棵子树进 3D 世界）**：`IkatStageDriver.BindWorldMount(Node mountRoot, Transform worldParent)` / `UnbindWorldMount(Node)`——core 把挂载子树渲染行顶点 re-base 到挂载根局部系（挂载根设计位置成为局部原点），行带 mount 槽位标注（blob `mount_id` 列），后端按槽位把镜像 GO SetParent 到业务 3D 变换（内层 y-flip 容器；行层随业务容器 → 场景相机渲染 + ZTest LEqual 吃 3D 深度遮挡）。布局/命中仍在屏幕系——挂载只改渲染归属。批不跨挂载（mesh_key 含挂载维）。v1 约束：**挂载根须成 stacking context（声明 z-index）；挂载内禁 dropdown / 滚动容器 / 外阴影根 / overflow clip**（clip 平面定义在屏幕系，挂到 3D 后无意义，core 在挂载根重置 mask）。
 - **光标指针 affordance**：意图是核心契约——core 沿 hover 命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none，含 `cursor` 声明），经 `IkatHost.CursorIntent` 属性 + `CursorIntentChanged` 事件（去抖，仅变化帧）交集成层；**渲染是引擎后端契约**，同纹理注册/NativeHost 一类。Unity 侧 `IkatStageDriver`：缺省 intent 0/1 = 系统光标（不内置皮肤），intent 2 = 内置全透明载体（藏指针是语义）；`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供业务按意图注册贴图（null = 清除；hotspot 从纹理左上角量；实现契约详见 projection-layer.md §3.3）。浏览器 preview 走原生 `cursor`，无此层。
+- **多 Stage 隔离（A4）**：同场景多 Driver 并存是集成层职责——per-Scene 引用计数共享 UI 相机（按名认领存量先于新建）；各 Stage `sortingOrder` 基址 = 层序 × 档宽（16 位预算，超出告警共用末档）；多 Driver 并存时指针输入按层序顶→底探测首个 Pick 命中者**独占本帧全部输入**（帧级仲裁 focus-follows-pointer；单 Driver 零开销直通；`_inputEnabled` per-Driver 退出路由）。运行时拉起第二 Driver：先在 inactive GO 上配好共享宿主/层序再激活（Awake 在 SetActive 时跑），且 GO 须自带输入采集器。**stage 文档根不可命中**（§9.3）——overlay 类 Stage 页面根声明 `pointer-events:none` 收窄命中面，否则铺满画布的根会饿死指针下全部底层 Stage。
 - **分辨率适配**：策略数学在核心（`ikat_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `ikat.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `IkatHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随）+ `IkatHost.SetSafeArea` 注入适配映射与屏幕 safe 矩形（core 单源算 root 伸进 unsafe 区的深度折 design px，作 CSS `env(safe-area-inset-*)` 的取值源；fit 贴物理边 → 真实值，letterbox → 恒 0），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
 
 ### 11.4 变长内容范式（替代预置满额）
