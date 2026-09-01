@@ -1150,6 +1150,11 @@ namespace Ikat
                 var stackProp = t.GetProperty("cameraStack");
                 if (stackProp.GetValue(baseData) is System.Collections.Generic.List<Camera> stack)
                 {
+                    // 先清悬挂条目再挂：编辑态（ExecuteAlways）挂上的 DontSave 相机在进播放的
+                    // 场景副本里变成 null 引用（DontSave 不随场景序列化），URP 首帧渲染 Base
+                    // 相机时报「overlay no longer exists」警告并自清。本方法在场景加载的 Awake
+                    // 期跑（先于首帧渲染），把死引用提前清掉——警告不外溢，stack 也不带尸体。
+                    stack.RemoveAll(c => c == null);
                     if (!stack.Contains(ui)) stack.Add(ui);
                     return true;
                 }

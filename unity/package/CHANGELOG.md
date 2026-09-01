@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 
 ### Fixed
+- **进播放时的 URP「camera overlay no longer exists」警告消除（#109 验收批）**：
+  编辑态（`[ExecuteAlways]`）Driver 把 DontSave 相机挂进宿主 Base 相机的
+  cameraStack——该 stack 随场景序列化，而 DontSave 相机不随场景进播放副本，
+  引用变悬挂；URP 首帧渲染 Base 相机时报一次警告并自清。挂载前先清 stack
+  里的死引用（场景加载 Awake 期执行，先于首帧渲染），警告不再外溢。
 - **关闭双 Stage 小窗不再清空整个屏幕 UI（#109 验收批）**：两个 Driver 共享
   同一台 hub `IkatUICamera`，但小窗 Driver 销毁时无条件把相机从宿主 Base 的
   URP cameraStack 摘除——Overlay 相机不在任何 stack = 整机不渲染，主 Stage
