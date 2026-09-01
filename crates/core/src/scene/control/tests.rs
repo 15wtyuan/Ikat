@@ -20,7 +20,7 @@ fn make_slot_child(scene: &mut Scene, parent: NodeId, slot: &str) -> NodeId {
         RoleInfo {
             role: None,
             slots: [(slot.to_string(), String::new())].into_iter().collect(),
-            aria_controls: None,
+            attrs: vec![],
         },
     );
     id
@@ -36,7 +36,7 @@ fn make_role_child(scene: &mut Scene, parent: NodeId, role: &str) -> NodeId {
         RoleInfo {
             role: Some(role.to_string()),
             slots: Default::default(),
-            aria_controls: None,
+            attrs: vec![],
         },
     );
     id
@@ -707,7 +707,7 @@ fn make_tab_child(scene: &mut Scene, parent: NodeId, aria_controls: &str) -> Nod
         RoleInfo {
             role: Some(ROLE_TAB.to_string()),
             slots: Default::default(),
-            aria_controls: Some(aria_controls.to_string()),
+            attrs: vec![("aria-controls".to_string(), aria_controls.to_string())],
         },
     );
     id

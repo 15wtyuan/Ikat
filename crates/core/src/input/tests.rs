@@ -4710,7 +4710,7 @@ fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, 
         RoleInfo {
             role: Some(ROLE_LISTBOX.to_string()),
             slots: Default::default(),
-            aria_controls: None,
+            attrs: vec![],
         },
     );
     let opt0 =
@@ -4937,7 +4937,7 @@ fn dropdown_scene(
         RoleInfo {
             role: Some(ROLE_LISTBOX.to_string()),
             slots: Default::default(),
-            aria_controls: None,
+            attrs: vec![],
         },
     );
 
@@ -5401,7 +5401,7 @@ fn tablist_keyboard_scene(
         RoleInfo {
             role: Some(ROLE_TABLIST.to_string()),
             slots: Default::default(),
-            aria_controls: None,
+            attrs: vec![],
         },
     );
     s.get_mut(tl).unwrap().style.taffy_style.flex_direction = flex_dir;
@@ -5414,7 +5414,7 @@ fn tablist_keyboard_scene(
             RoleInfo {
                 role: Some(ROLE_TAB.to_string()),
                 slots: Default::default(),
-                aria_controls: None,
+                attrs: vec![],
             },
         );
         tabs.push(tab);

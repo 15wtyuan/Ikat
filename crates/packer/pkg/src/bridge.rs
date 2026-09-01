@@ -64,8 +64,8 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                 // role 驱动语义分派（combobox/slider/...），data-slot 标识控件视觉部件（fill/thumb）。
                 let role = attr(el, "role");
                 let data_slot = attr(el, "data-slot");
-                // aria-controls：tab→panel 跨树关联的 panel id（TabList 专属）。None = 非关联节点。
-                let aria_controls = attr(el, "aria-controls");
+                // attrs 通用属性仓：白名单 aria 属性（aria-controls/labelledby）持久化。
+                let attrs = extract_attrs(el);
                 nodes.push(TemplateNode {
                     kind,
                     style: parsed.styles.get(ir_idx).cloned().unwrap_or_default(),
@@ -86,7 +86,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     control_init,
                     role,
                     data_slot,
-                    aria_controls,
+                    attrs,
                     rich_text_block: parsed.rich_text_blocks.contains(&ir_idx),
                     custom_tag: None,
                     component_scope: false,
@@ -111,7 +111,7 @@ pub fn bridge(parsed: &ParsedTemplate) -> Result<Vec<TemplateNode>, String> {
                     control_init: None,
                     role: None,
                     data_slot: None,
-                    aria_controls: None,
+                    attrs: vec![],
                     rich_text_block: false,
                     custom_tag: None,
                     component_scope: false,
@@ -296,6 +296,21 @@ pub(crate) fn attr(el: &IrElement, name: &str) -> Option<String> {
         .iter()
         .find(|a| a.name == name)
         .map(|a| a.value.clone())
+}
+
+/// attrs 通用属性仓（#8/#22）入库白名单：fence 校验过的 IDREF 型 aria 属性。
+/// 白名单定在打包侧单点（fence 认属性存在性/IDREF 有效性，这里定哪些进 pkg 持久化）。
+/// name 字典序排序保证打包字节确定性（同输入同字节，schema_lock 门的前提）。
+pub(crate) const ATTR_STORE_WHITELIST: &[&str] = &["aria-controls", "aria-labelledby"];
+
+/// 从 HTML 元素提取白名单属性进通用属性仓（name 排序）。
+pub(crate) fn extract_attrs(el: &IrElement) -> Vec<(String, String)> {
+    let mut attrs: Vec<(String, String)> = ATTR_STORE_WHITELIST
+        .iter()
+        .filter_map(|name| attr(el, name).map(|v| ((*name).to_string(), v)))
+        .collect();
+    attrs.sort_by(|a, b| a.0.cmp(&b.0));
+    attrs
 }
 
 /// 按 NodeKind 从 HTML 属性提取控件初始值（打包期 bake 进 pkg.bin，instantiate 时读出）。
@@ -732,15 +747,21 @@ mod tests {
                 manual: false
             })
         );
-        // 每个 tab 的 aria_controls 落到各自 TemplateNode（按 aria-controls 值定位，避免 DFS 序硬编码）。
+        // 每个 tab 的 aria-controls 落到 attrs 仓（按值定位 tab，避免 DFS 序硬编码）。
+        fn attr_of<'a>(n: &'a ikat_core::asset::TemplateNode, name: &str) -> Option<&'a str> {
+            n.attrs
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        }
         let tab_a = nodes
             .iter()
-            .find(|n| n.kind == NodeKind::Tab && n.aria_controls.as_deref() == Some("pa"))
+            .find(|n| n.kind == NodeKind::Tab && attr_of(n, "aria-controls") == Some("pa"))
             .expect("tab A bridged with aria-controls=pa");
         assert_eq!(tab_a.role.as_deref(), Some("tab"));
         let tab_b = nodes
             .iter()
-            .find(|n| n.kind == NodeKind::Tab && n.aria_controls.as_deref() == Some("pb"))
+            .find(|n| n.kind == NodeKind::Tab && attr_of(n, "aria-controls") == Some("pb"))
             .expect("tab B bridged with aria-controls=pb");
         assert_eq!(tab_b.role.as_deref(), Some("tab"));
     }

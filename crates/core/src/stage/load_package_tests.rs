@@ -20,7 +20,7 @@ fn make_test_pkg(_comp_name: &str) -> Vec<u8> {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         href: None,

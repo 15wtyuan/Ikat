@@ -141,7 +141,7 @@ pub enum NodeKind {
     /// its subtree to produce list slots.
     Template,
     /// WAI-ARIA `role="tablist"` — tab 容器。ControlState::TabList{selected_index}。
-    /// 子节点是 role=tab；panel 跨树靠 aria-controls 关联（RoleInfo.aria_controls）。
+    /// 子节点是 role=tab；panel 跨树靠 aria-controls 关联（RoleInfo.attrs 仓）。
     TabList,
     /// WAI-ARIA `role="tab"` — 单个 tab。无 ControlState，aria-selected 从父 TabList.selected_index 派生。
     /// 容器型（持 label 子节点），镜像 Button。
@@ -577,7 +577,7 @@ pub enum ControlState {
     /// true=方向键只移焦点、Enter/Space 才提交选中；false=方向键即时选中并带焦点
     /// （WAI-ARIA automatic activation，缺省）。无 value_lock
     /// （aria-selected 是只读合成，无回写环——区别于 Dropdown）。panel 显隐据
-    /// RoleInfo.aria_controls 解析 panel id 后切换，不在此枚举存 panel_ids。
+    /// RoleInfo.attrs 仓的 aria-controls 解析 panel id 后切换，不在此枚举存 panel_ids。
     TabList {
         selected_index: usize,
         manual_activation: bool,
@@ -623,7 +623,7 @@ impl ControlTable {
 /// （避免打包期初始值与运行时实时值双源）。aria-multiline 等派发提示在
 /// fence 阶段用完即弃，不进 pkg、不进此表。**例外**：`aria-controls`（TabList
 /// tab→panel 跨树关联字符串）不是从控件实时状态可派生的量，故作纯数据随模板
-/// 迁移：TemplateNode.aria_controls → RoleInfo.aria_controls（instantiate 拷贝）。
+/// 迁移：TemplateNode.attrs → RoleInfo.attrs（instantiate 拷贝）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RoleInfo {
     /// WAI-ARIA role（如 "combobox"/"slider"/"textbox"）。None = 普通 div，无控件语义。
@@ -631,16 +631,25 @@ pub struct RoleInfo {
     /// data-slot 值（如 "fill"/"thumb"）。ARIA 不覆盖控件内部视觉构造，用 HTML 标准的
     /// data-* 私有扩展机制表达「这是控件的哪个部件」。
     pub slots: std::collections::HashMap<String, String>,
-    /// WAI-ARIA `aria-controls`（TabList tab→panel 跨树关联的 panel id 字符串）。
-    /// None = 非关联节点。instantiate 从 TemplateNode.aria_controls 拷入；sync_control_visuals
-    /// 据此 find_node_by_id 解析 panel 切换显隐。
-    pub aria_controls: Option<String>,
+    /// per-Node 通用属性仓（attrs β，#8/#22）：持久化白名单 HTML 属性
+    /// （`aria-controls`/`aria-labelledby`）。instantiate 从 TemplateNode.attrs 拷入；
+    /// 业务按名取（tablist 的 panel 关联、未来的 labelledby 解析同机制——
+    /// idref 值 + `find_node_by_id` 惰性解析）。
+    pub attrs: Vec<(String, String)>,
 }
 
 impl RoleInfo {
-    /// 是否有任何 role/slot/aria-controls 信息（无则不入表，保持 RoleTable 稀疏）。
+    /// 是否有任何 role/slot/attrs 信息（无则不入表，保持 RoleTable 稀疏）。
     pub fn is_empty(&self) -> bool {
-        self.role.is_none() && self.slots.is_empty() && self.aria_controls.is_none()
+        self.role.is_none() && self.slots.is_empty() && self.attrs.is_empty()
+    }
+
+    /// 按名取属性值（attrs 条目 ≤2，线性扫足够；None = 无该属性）。
+    pub fn attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -1095,6 +1104,23 @@ impl Scene {
             cur = n.parent;
         }
         self.find_by_id_attr(id)
+    }
+
+    /// 解析节点 attrs 仓的 IDREF 型属性（`aria-controls`/`aria-labelledby`，HTML 语义
+    /// 值为空格分隔 id 列表）为节点 id 列表：逐 id 走本作用域解析（多实例安全），
+    /// 解析不到的 id 静默跳过（fence 期已校验存在，运行时动态缺则让过——与 tablist
+    /// panel 解析同容错）。attrs β 的运行时关联机制（#8/#22）：任何业务按名取
+    /// idref 属性并解析到节点，都走这一条路。
+    pub fn attr_idrefs(&self, node: NodeId, name: &str) -> Vec<NodeId> {
+        let Some(info) = self.roles.get(node) else {
+            return Vec::new();
+        };
+        let Some(raw) = info.attr(name) else {
+            return Vec::new();
+        };
+        raw.split_whitespace()
+            .filter_map(|id| self.find_node_by_id_in_own_scope(node, id))
+            .collect()
     }
 
     /// 在 root 子树内 DFS 查找 id 属性匹配的首个节点（self-exclusive：从 root

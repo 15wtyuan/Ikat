@@ -1162,7 +1162,7 @@ impl Stage {
                     .as_ref()
                     .map(|s| [(s.clone(), String::new())].into_iter().collect())
                     .unwrap_or_default(),
-                aria_controls: tn.aria_controls.clone(),
+                attrs: tn.attrs.clone(),
             };
             scene.roles.insert(node_id, info);
             id_map[i] = Some(node_id);

@@ -2,6 +2,7 @@
 //! Rust-internal（packager 写、runtime 读，C# 不解析）。
 //! 布局锁：同一 fixture 的打包字节哈希有 CI 门（packer `schema_lock.rs`）——
 //! 任何改变字节的布局改动都会翻转哈希，bump 版本时须同步更新登记值。
+//! v53：TemplateNode.aria_controls 专列退役 → attrs 通用属性仓（#8/#22）。NodeBlock 布局变，旧 v52 pkg 加载报 TooOld。
 //! v46：TemplateNode 加 href 列（`<a>` 链接目标，#74）+ ResolvedStyle 加 text_decoration 字段。布局变，旧 v45 pkg 加载报 TooOld。
 //! v45：ResolvedStyle 加 white_space/overflow_wrap/word_break/text_wrap 四字段 + InheritedSet u16→u64（#73 换行控制全集，bincode 布局变）。旧 v44 pkg 加载报 TooOld。
 //! v44：KeyframeStop 加 layout/box-shadow 通道（width/height 域+值、flex_grow、box_shadow 列表，#10 layout 动画）。手编 keyframes 布局变，旧 v43 pkg 加载报 TooOld。
@@ -49,13 +50,13 @@ use crate::style::resolved::ResolvedStyle;
 use crate::tween::{ease_from_ffi, Ease};
 
 pub const PKG_MAGIC: u32 = 0x474B504C; // 磁盘字节(LE) "LPKG"（不与 frame blob "LOOM" 撞）。两处魔数皆 LoomGUI 时代遗留：字节=格式兼容契约而非品牌，更名不改。
-pub const PKG_FORMAT_VERSION: u32 = 52; // v52: ControlInit::TabList 加 manual（#13 手动激活模型——data-activation="manual" 打包期烙印，bincode 布局变，旧包拒绝）。v51: ViewportStyle 扩槽进全长度属性（#110——font-size/padding/gap/letter-spacing/border-radius 延迟长度 + DeferredLength 合槽枚举化，bincode 布局变，旧包拒绝）。v50: taffy 0.12→0.14 升级（#82）——ResolvedStyle.taffy_style 随 taffy Style 序列化格式变（min_size/max_size 分型 LengthPercentageAuto、新增 contain 等），bincode 布局变，旧包拒绝。v49: ControlInit::Progress 加 min（#97 progressbar 填充比例 ARIA 语义化——(value-min)/(max-min)，bincode 布局变，旧包拒绝）。v48: ResolvedStyle 加 z_declared（#96 画序 CSS 语义化——paint_key 分层需要「z 是否声明」位，bincode 布局变，旧包拒绝）。v47: ResolvedStyle 加 cursor（#93，1 字节枚举，bincode 布局变，旧包拒绝）+ 同批 TemplateNode flags 字节新增 disabled 位（bit 0x08，HTML button disabled 属性载体，字节布局不变）。
+pub const PKG_FORMAT_VERSION: u32 = 53; // v53: TemplateNode.aria_controls 专列退役 → attrs 通用属性仓（#8/#22——NodeBlock 尾列 aria_controls_idx(u16) 换成 attr_count(u16)+[(name_idx,value_idx)] 对，布局变，旧包拒绝）。v52: ControlInit::TabList 加 manual（#13 手动激活模型——data-activation="manual" 打包期烙印，bincode 布局变，旧包拒绝）。v51: ViewportStyle 扩槽进全长度属性（#110——font-size/padding/gap/letter-spacing/border-radius 延迟长度 + DeferredLength 合槽枚举化，bincode 布局变，旧包拒绝）。v50: taffy 0.12→0.14 升级（#82）——ResolvedStyle.taffy_style 随 taffy Style 序列化格式变（min_size/max_size 分型 LengthPercentageAuto、新增 contain 等），bincode 布局变，旧包拒绝。v49: ControlInit::Progress 加 min（#97 progressbar 填充比例 ARIA 语义化——(value-min)/(max-min)，bincode 布局变，旧包拒绝）。v48: ResolvedStyle 加 z_declared（#96 画序 CSS 语义化——paint_key 分层需要「z 是否声明」位，bincode 布局变，旧包拒绝）。v47: ResolvedStyle 加 cursor（#93，1 字节枚举，bincode 布局变，旧包拒绝）+ 同批 TemplateNode flags 字节新增 disabled 位（bit 0x08，HTML button disabled 属性载体，字节布局不变）。
                                         // MIN 必须随 bump 同拍（历史不变量：每版都改 bincode 布局，旧包解不动）。MIN
                                         // 落后会让旧版包漏过版本门、以 Bincode 结构错配炸成「malformed」（rc -1 无指引），
                                         // 而非 TooOld 的「Unity 包与 ikat.exe 同版本重打」专属文案——v48 bump 漏拍 MIN 的
                                         // 实证（0.0.16 起 CI 红）。护栏：asset/tests 的 min_version_tracks_current。
-pub(crate) const MIN_VERSION: u32 = 52;
-pub(crate) const MAX_VERSION: u32 = 52;
+pub(crate) const MIN_VERSION: u32 = 53;
+pub(crate) const MAX_VERSION: u32 = 53;
 const NULL_IDX: u16 = 0xFFFF;
 
 /// 一个已加载的包（资源池条目）。`name` read 时填空串，由 `Stage::load_package(name, ..)` 覆盖。
@@ -168,9 +169,11 @@ pub struct TemplateNode {
     pub role: Option<String>,
     /// data-slot 值（"fill"/"thumb"）。控件视觉部件标识（HTML data-* 私有扩展机制）。
     pub data_slot: Option<String>,
-    /// WAI-ARIA `aria-controls`（TabList tab→panel 跨树关联的 panel id）。None = 非关联节点。
-    /// 运行时由 instantiate 拷进 RoleInfo.aria_controls，sync_control_visuals 据此 find_node_by_id 解析 panel。
-    pub aria_controls: Option<String>,
+    /// per-Node 通用属性仓（attrs β，#8/#22）：持久化白名单 HTML 属性（当前
+    /// `aria-controls`/`aria-labelledby`，bridge 侧定白名单）。name 字典序排序保证
+    /// 字节确定性。运行时由 instantiate 拷进 `RoleInfo.attrs`，业务按名取
+    /// （如 tablist 的 `aria-controls` panel 关联、未来的 labelledby 解析）。
+    pub attrs: Vec<(String, String)>,
     /// rich-text-block 容器根标记：`display:block` 容器且其直接子全是 inline 级
     /// （text/span/img）。打包期由 fence `rich_text_blocks`（ir_idx 集合）烘入，运行时
     /// compiler/solve/render 读此 flag 把 inline 子拍平成 RichRun 走 inline flow。
@@ -277,7 +280,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
     // 全局 NodeBlock 由各组件节点顺次拼接，root_node_idx = 该组件首节点在全局的位置。
     let mut comp_records: Vec<(u16, u32, u32, Vec<u8>, Vec<u8>)> =
         Vec::with_capacity(component_count);
-    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, aria_controls_idx, custom_tag_idx, href_idx)
+    // 每节点（全局）：(parent_idx:i32, kind_tag, style_blob, text_idx, src_idx, class_idx[], id_idx, flags, tabindex, control_init_blob, role_idx, data_slot_idx, attr_idx 对[], custom_tag_idx, href_idx)
     let mut node_records: Vec<(
         i32,
         u8,
@@ -291,7 +294,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
         Vec<u8>,
         u16,
         u16,
-        u16,
+        Vec<(u16, u16)>,
         u16,
         u16,
     )> = Vec::new();
@@ -364,13 +367,19 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
                 .as_ref()
                 .map(|s| intern(s, &mut strings, &mut idx_of))
                 .unwrap_or(NULL_IDX);
-            // aria_controls：Option<String> → StringTable 索引（同 role/data_slot 模式，NULL_IDX 表 None）。
-            let aria_controls_idx = tn
-                .aria_controls
-                .as_ref()
-                .map(|s| intern(s, &mut strings, &mut idx_of))
-                .unwrap_or(NULL_IDX);
-            // custom_tag：CustomElement 原始 hyphen 标签（同 role/data_slot/aria_controls 模式）。
+            // attrs 通用属性仓（#8/#22）：(name, value) 对逐项 intern（name 高频重复，
+            // StringTable 天然去重）。白名单与排序在 bridge 侧定，这里只搬运。
+            let attr_idx: Vec<(u16, u16)> = tn
+                .attrs
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        intern(name, &mut strings, &mut idx_of),
+                        intern(value, &mut strings, &mut idx_of),
+                    )
+                })
+                .collect();
+            // custom_tag：CustomElement 原始 hyphen 标签（同 role/data_slot 模式）。
             let custom_tag_idx = tn
                 .custom_tag
                 .as_ref()
@@ -395,7 +404,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
                 control_init_blob,
                 role_idx,
                 data_slot_idx,
-                aria_controls_idx,
+                attr_idx,
                 custom_tag_idx,
                 href_idx,
             ));
@@ -438,7 +447,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
     }
     // NodeBlock: 每节点 {parent_idx(i32), kind_tag(u8), style_len(u32)+style_blob, text_idx(u16), src_idx(u16),
     //   class_count(u16)+class_idx[], id_idx(u16), flags(u8), tabindex(i32), control_init_len(u32)+control_init_blob,
-    //   role_idx(u16), data_slot_idx(u16), aria_controls_idx(u16), custom_tag_idx(u16), href_idx(u16)}
+    //   role_idx(u16), data_slot_idx(u16), attr_count(u16)+[(name_idx(u16),value_idx(u16))], custom_tag_idx(u16), href_idx(u16)}
     for (
         parent_idx,
         kind_tag,
@@ -452,7 +461,7 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
         control_init_blob,
         role_idx,
         data_slot_idx,
-        aria_controls_idx,
+        attr_idx,
         custom_tag_idx,
         href_idx,
     ) in &node_records
@@ -474,7 +483,11 @@ pub fn write_package_with_scopes(input: &PackageInput, scopes: &[ComponentScopeI
         out.extend_from_slice(control_init_blob);
         out.extend_from_slice(&role_idx.to_le_bytes());
         out.extend_from_slice(&data_slot_idx.to_le_bytes());
-        out.extend_from_slice(&aria_controls_idx.to_le_bytes());
+        out.extend_from_slice(&(attr_idx.len() as u16).to_le_bytes());
+        for (name_idx, value_idx) in attr_idx {
+            out.extend_from_slice(&name_idx.to_le_bytes());
+            out.extend_from_slice(&value_idx.to_le_bytes());
+        }
         out.extend_from_slice(&custom_tag_idx.to_le_bytes());
         out.extend_from_slice(&href_idx.to_le_bytes());
     }
@@ -576,10 +589,20 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
         let control_init_len = r.u32("control_init_len")? as usize;
         let control_init: Option<ControlInit> =
             bincode::deserialize(r.take(control_init_len, "control_init_blob")?)?;
-        // role/data-slot/aria_controls：StringTable 索引（同 id_attr，NULL_IDX 表 None）。
+        // role/data-slot：StringTable 索引（同 id_attr，NULL_IDX 表 None）。
         let role_idx = r.u16("role_idx")?;
         let data_slot_idx = r.u16("data_slot_idx")?;
-        let aria_controls_idx = r.u16("aria_controls_idx")?;
+        // attrs 通用属性仓（#8/#22）：attr_count + (name_idx, value_idx) 对。
+        let attr_count = r.u16("attr_count")? as usize;
+        let mut attrs: Vec<(String, String)> = Vec::with_capacity(attr_count);
+        for _ in 0..attr_count {
+            let name_idx = r.u16("attr_name_idx")?;
+            let value_idx = r.u16("attr_value_idx")?;
+            attrs.push((
+                string_at(&strings, name_idx)?,
+                string_at(&strings, value_idx)?,
+            ));
+        }
         let custom_tag_idx = r.u16("custom_tag_idx")?;
         // href（#74）：`<a>` 链接目标（同 role 模式，NULL_IDX 表 None）。
         let href_idx = r.u16("href_idx")?;
@@ -592,11 +615,6 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             None
         } else {
             Some(string_at(&strings, data_slot_idx)?)
-        };
-        let aria_controls = if aria_controls_idx == NULL_IDX {
-            None
-        } else {
-            Some(string_at(&strings, aria_controls_idx)?)
         };
         let custom_tag = if custom_tag_idx == NULL_IDX {
             None
@@ -647,7 +665,7 @@ pub fn read_package(bytes: &[u8]) -> Result<Package, PkgError> {
             control_init,
             role,
             data_slot,
-            aria_controls,
+            attrs,
             rich_text_block,
             custom_tag,
             component_scope,

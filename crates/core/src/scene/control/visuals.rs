@@ -320,7 +320,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
         // NumberField: 纯数值输入控件，无视觉子节点 sync（数值约束 clamp + step 量化在 FFI 读写门执行）。
         ControlState::NumberField { .. } => {}
         // TabList: aria-selected 由 synth_aria_value 合成；panel 显隐据 selected_index
-        // + 各 tab 的 RoleInfo.aria_controls（panel id 串）切换——本 arm 实现 panel display。
+        // + 各 tab 的 attrs 仓 `aria-controls`（panel id 串）切换——本 arm 实现 panel display。
         // panel 跨树（非 tablist 子，靠 aria-controls + id 关联），区别于 Dropdown listbox
         // （combobox 直接子）。复用 display:none 剪枝：非激活 panel "display:none" 强制隐藏；
         // 激活 panel unset inline display 回落作者 CSS——显隐所有权归控件，但激活态的
@@ -337,10 +337,13 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
                 .filter(|&c| scene.roles.role_of(c) == Some(ROLE_TAB))
                 .collect();
             for (i, &tab) in tab_ids.iter().enumerate() {
-                // aria_controls 是 String，clone 出来释放对 roles 的不可变借，再 scope 内解析。
+                // attr 值 clone 出来释放对 roles 的不可变借，再 scope 内解析。
                 // 多实例安全：组件展开多份时各实例的 tab 只命中本实例的 panel
                 //（nearest LOOKUP_SCOPE 根内查找，不串全局首匹配）。
-                let Some(panel_id_str) = scene.roles.get(tab).and_then(|r| r.aria_controls.clone())
+                let Some(panel_id_str) = scene
+                    .roles
+                    .get(tab)
+                    .and_then(|r| r.attr("aria-controls").map(str::to_string))
                 else {
                     continue; // tab 未写 aria-controls：无 panel 可切
                 };

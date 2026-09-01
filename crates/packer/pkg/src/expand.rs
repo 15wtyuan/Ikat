@@ -14,7 +14,7 @@
 //!   同一展开域内 light 子 id 与组件模板 id 撞车 → 打包错误。
 
 use crate::bridge::{
-    attr, extract_classes, extract_control_init, map_semantic, translate_keyframes,
+    attr, extract_attrs, extract_classes, extract_control_init, map_semantic, translate_keyframes,
     validate_template_children,
 };
 use crate::diag::BuildFailure;
@@ -499,7 +499,7 @@ impl<'a> Walker<'a> {
             control_init: None,
             role: attr(el, "role"),
             data_slot: attr(el, "data-slot"),
-            aria_controls: attr(el, "aria-controls"),
+            attrs: extract_attrs(el),
             rich_text_block: false, // host 是容器壳，不是 rich-text-block 根
             custom_tag: Some(tag.clone()),
             component_scope: true,
@@ -638,7 +638,7 @@ impl<'a> Walker<'a> {
             control_init: extract_control_init(kind, el, ir_idx, &parsed.tree),
             role: attr(el, "role"),
             data_slot: attr(el, "data-slot"),
-            aria_controls: attr(el, "aria-controls"),
+            attrs: extract_attrs(el),
             rich_text_block: parsed.rich_text_blocks.contains(&ir_idx),
             custom_tag: None,
             component_scope: false,
@@ -670,7 +670,7 @@ impl<'a> Walker<'a> {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,

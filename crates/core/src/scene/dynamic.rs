@@ -1652,7 +1652,7 @@ mod tests {
                 crate::scene::node::RoleInfo {
                     role: Some("progressbar".into()),
                     slots: std::collections::HashMap::new(),
-                    aria_controls: None,
+                    attrs: vec![],
                 },
             );
             scene.roles.insert(
@@ -1660,7 +1660,7 @@ mod tests {
                 crate::scene::node::RoleInfo {
                     role: None,
                     slots: [("fill".to_string(), String::new())].into_iter().collect(),
-                    aria_controls: None,
+                    attrs: vec![],
                 },
             );
         }

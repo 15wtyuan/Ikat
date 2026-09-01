@@ -12,7 +12,7 @@ fn role_table_get_insert_remove() {
     let info = RoleInfo {
         role: Some("slider".into()),
         slots: [("thumb".into(), "".into())].into_iter().collect(),
-        aria_controls: None,
+        attrs: vec![],
     };
     t.insert(id, info.clone());
     assert_eq!(t.role_of(id), Some("slider"));

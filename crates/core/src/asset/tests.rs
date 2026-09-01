@@ -20,7 +20,7 @@ fn tn(kind: NodeKind) -> TemplateNode {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -57,7 +57,7 @@ fn write_package_panics_when_string_table_exhausted() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -348,7 +348,8 @@ fn read_rejects_cross_component_parent() {
     //   固定部分 = 22B + style_blob_len + 2*class_count（v19 删 dc_idx 2B，v18 的 24B 减 2B）。
     //   v24 加 control_init_len(4) + control_init_blob（None = 1B），故固定部分 +5B。
     //   v28 加 role_idx(2) + data_slot_idx(2) 于 control_init_blob 后，固定部分再 +4B。
-    //   v29 加 aria_controls_idx(2)（TabList），固定部分再 +2B。
+    //   v29 加 aria_controls_idx(2)（TabList），固定部分再 +2B；v53 换成 attr_count(2)
+    //   + (name_idx,value_idx) 对（零属性节点 +0B，布局同宽——固定部分不变）。
     //   v35 加 custom_tag_idx(2)（CustomElement 标签），固定部分再 +2B。
     //   v46 加 href_idx(2)（`<a>` 链接目标），固定部分再 +2B。
     let style_len_0 = u32::from_le_bytes(
@@ -484,7 +485,7 @@ fn template_node_content_src_roundtrip_via_pkg() {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         href: None,
@@ -551,7 +552,7 @@ fn v18_nontrivial_nodekinds_roundtrip() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -782,20 +783,24 @@ fn pkg_v27_rejects_v26() {
     );
 }
 
-/// v29: role/data-slot/aria_controls 三个 StringTable interning 字符串列经完整 pkg.bin
-/// 路径（write_package → read_package）往返保真。aria_controls 是 TabList 地基：
-/// 打包期提取 HTML aria-controls 属性，runtime instantiate 拷进 RoleInfo.aria_controls，
-/// sync_control_visuals 据此 find_node_by_id 解析 panel。
+/// v29→v53: role/data-slot/attrs 通用属性仓经完整 pkg.bin 路径（write_package →
+/// read_package）往返保真。attrs 仓（#8/#22）是 TabList panel 关联与 labelledby
+/// 解析的地基：打包期提取白名单 aria 属性，runtime instantiate 拷进 RoleInfo.attrs，
+/// 业务按名取值（tablist 的 aria-controls → find_node_by_id 解析 panel）。
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 52,
-        "pkg format version must be 52 after v52 ControlInit::TabList manual activation (#13; v51 ViewportStyle deferred-length)"
+        PKG_FORMAT_VERSION, 53,
+        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
     node.data_slot = Some("thumb".into());
-    node.aria_controls = Some("panel-audio".into());
+    // bridge 产出 name 字典序（aria-controls < aria-labelledby），read 保序往返。
+    node.attrs = vec![
+        ("aria-controls".into(), "panel-audio".into()),
+        ("aria-labelledby".into(), "tab-label".into()),
+    ];
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
@@ -805,13 +810,19 @@ fn pkg_v29_roundtrip_with_aria_controls() {
     let back = &pkg.components["c"].nodes[0];
     assert_eq!(back.role.as_deref(), Some("tab"));
     assert_eq!(back.data_slot.as_deref(), Some("thumb"));
-    assert_eq!(back.aria_controls.as_deref(), Some("panel-audio"));
+    assert_eq!(
+        back.attrs,
+        vec![
+            ("aria-controls".to_string(), "panel-audio".to_string()),
+            ("aria-labelledby".to_string(), "tab-label".to_string()),
+        ]
+    );
 }
 
 /// v29: 三个字符串列均缺省（None）也须往返保真（NULL_IDX 哨兵路径，多数节点走此分支）。
 #[test]
 fn pkg_v29_roundtrip_without_strings_defaults_none() {
-    let node = tn(NodeKind::Container); // role/data_slot/aria_controls 均默认 None
+    let node = tn(NodeKind::Container); // role/data_slot/attrs 均默认空
     let nodes = [node];
     let rules = empty_rules();
     let input = PackageInput {
@@ -825,8 +836,8 @@ fn pkg_v29_roundtrip_without_strings_defaults_none() {
         "no data-slot attr → None after roundtrip"
     );
     assert!(
-        back.aria_controls.is_none(),
-        "no aria-controls attr → None after roundtrip"
+        back.attrs.is_empty(),
+        "no whitelisted attr → empty attrs store after roundtrip"
     );
 }
 
@@ -851,8 +862,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 52,
-        "pkg format version must be 52 after v52 ControlInit::TabList manual activation (#13; v51 ViewportStyle deferred-length)"
+        PKG_FORMAT_VERSION, 53,
+        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -999,8 +1010,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v46_roundtrip_preserves_link_href() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 52,
-        "pkg format version must be 52 after v52 ControlInit::TabList manual activation (#13; v51 ViewportStyle deferred-length)"
+        PKG_FORMAT_VERSION, 53,
+        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
     );
     let mut root = tn(NodeKind::Container);
     root.rich_text_block = true;
@@ -1087,8 +1098,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 52,
-        "pkg format version must be 52 after v52 ControlInit::TabList manual activation (#13; v51 ViewportStyle deferred-length)"
+        PKG_FORMAT_VERSION, 53,
+        "pkg format version must be 53 after v53 attrs store replacing aria_controls column (#8/#22; v52 ControlInit::TabList manual activation)"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

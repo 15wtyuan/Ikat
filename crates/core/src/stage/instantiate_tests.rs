@@ -30,7 +30,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -50,7 +50,7 @@ fn make_test_pkg_with_subtree() -> Vec<u8> {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -80,7 +80,7 @@ fn make_control_pkg(kind: NodeKind, control_init: crate::asset::ControlInit) -> 
         control_init: Some(control_init),
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -153,7 +153,7 @@ fn instantiate_explicit_tabindex_minus_one_is_respected() {
         }),
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -263,7 +263,7 @@ fn instantiate_missing_pkg_or_comp_errors() {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -302,7 +302,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -322,7 +322,7 @@ fn instantiate_corrupt_parent_idx_returns_err_not_panic() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -440,7 +440,7 @@ fn pkg_with_root_rule(pkg_name: &str, flex_dir_val: &str) -> (String, Vec<u8>) {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -530,7 +530,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -550,7 +550,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -593,7 +593,7 @@ fn dynamic_rules_descendant_selector_not_cross_scope() {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -676,7 +676,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             }),
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -697,7 +697,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: Some("listbox".to_string()),
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -720,7 +720,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -741,7 +741,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -761,7 +761,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -781,7 +781,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -801,7 +801,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -821,7 +821,7 @@ fn instantiate_reparents_dropdown_options_into_listbox() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -900,7 +900,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             control_init: None,
             role: Some("slider".into()),
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -920,7 +920,7 @@ fn make_test_pkg_with_roles() -> Vec<u8> {
             control_init: None,
             role: None,
             data_slot: Some("thumb".into()),
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: false,
@@ -1029,7 +1029,7 @@ fn instantiate_copies_aria_controls_into_role_info() {
         }),
         role: Some("tablist".to_string()),
         data_slot: None,
-        aria_controls: Some("panel-1".to_string()),
+        attrs: vec![("aria-controls".to_string(), "panel-1".to_string())],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -1046,10 +1046,83 @@ fn instantiate_copies_aria_controls_into_role_info() {
     let scene = s.scene.as_ref().unwrap();
     let info = scene.roles.get(id).expect("role=tablist → RoleInfo 入表");
     assert_eq!(
-        info.aria_controls.as_deref(),
+        info.attr("aria-controls"),
         Some("panel-1"),
-        "instantiate 拷 TemplateNode.aria_controls 进 RoleInfo.aria_controls"
+        "instantiate 拷 TemplateNode.attrs 进 RoleInfo.attrs 仓"
     );
+}
+
+/// attrs β 运行时关联（#8/#22）：`aria-labelledby`（IDREF 列表，空格分隔）经
+/// instantiate 入 RoleInfo.attrs 仓后，`Scene::attr_idrefs` 逐 id 本作用域解析到
+/// 节点——与 aria-controls 同一条解析路（labelledby 现无业务消费方，机制在此
+/// 锁死，消费方出现即接线）。
+#[test]
+fn attr_idrefs_resolves_labelledby_targets() {
+    fn plain_container() -> TemplateNode {
+        TemplateNode {
+            kind: NodeKind::Container,
+            style: ResolvedStyle::default(),
+            parent_idx: None,
+            classes: vec![],
+            id_attr: None,
+            draggable: false,
+            disabled: false,
+            tabindex: None,
+            content: None,
+            src: None,
+            href: None,
+            control_init: None,
+            role: None,
+            data_slot: None,
+            attrs: vec![],
+            rich_text_block: false,
+            custom_tag: None,
+            component_scope: false,
+        }
+    }
+    let label_a = TemplateNode {
+        kind: NodeKind::Container,
+        id_attr: Some("label-a".to_string()),
+        content: Some("分类".to_string()),
+        parent_idx: Some(0),
+        ..plain_container()
+    };
+    let label_b = TemplateNode {
+        kind: NodeKind::Container,
+        id_attr: Some("label-b".to_string()),
+        content: Some("背包".to_string()),
+        parent_idx: Some(0),
+        ..plain_container()
+    };
+    let owner = TemplateNode {
+        kind: NodeKind::Container,
+        role: Some("tree".to_string()),
+        attrs: vec![("aria-labelledby".to_string(), "label-a label-b".to_string())],
+        ..plain_container()
+    };
+    let nodes = [owner, label_a, label_b];
+    let rules = crate::style::dynamic::DynamicRuleTable::default();
+    let input = PackageInput {
+        components: vec![("c", &nodes, &rules, &[])],
+    };
+    let pkg = crate::asset::write_package(&input);
+    let mut s = Stage::new_for_test();
+    s.create_root("div", "").unwrap();
+    s.load_package("bag", &pkg).unwrap();
+    let root = s.instantiate("bag", "c").unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let resolved = scene.attr_idrefs(root, "aria-labelledby");
+    let resolved_ids: Vec<&str> = resolved
+        .iter()
+        .filter_map(|&nid| scene.get(nid).and_then(|n| n.id_attr.as_deref()))
+        .collect();
+    assert_eq!(
+        resolved_ids,
+        vec!["label-a", "label-b"],
+        "labelledby IDREF 列表按序解析到目标节点"
+    );
+    // 无该属性 / 无 RoleInfo 条目 → 空列表（不 panic）。
+    assert!(scene.attr_idrefs(resolved[1], "aria-labelledby").is_empty());
 }
 
 // 树形：root(0, SCOPE_ROOT) + host(1, component_scope + custom_tag + class card-host)
@@ -1072,7 +1145,7 @@ fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) 
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -1092,7 +1165,7 @@ fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) 
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: Some("game-item-card".to_string()),
         component_scope: true,
@@ -1112,7 +1185,7 @@ fn component_scope_pkg(page_rules: &[DynamicRule], scope_rules: &[DynamicRule]) 
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -1441,7 +1514,7 @@ fn component_scoped_rules_style_projected_children() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: false,
             custom_tag: None,
             component_scope: true,
@@ -1461,7 +1534,7 @@ fn component_scoped_rules_style_projected_children() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             // 页面侧分类所烘（span 默认 rich_text；分类时看不到组件规则 display:flex）。
             rich_text_block: true,
             custom_tag: None,
@@ -1482,7 +1555,7 @@ fn component_scoped_rules_style_projected_children() {
             control_init: None,
             role: None,
             data_slot: None,
-            aria_controls: None,
+            attrs: vec![],
             rich_text_block: true,
             custom_tag: None,
             component_scope: false,
@@ -1555,7 +1628,7 @@ fn instantiate_maps_html_disabled_to_node_flag() {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
@@ -1595,7 +1668,7 @@ fn pkg_disabled_bit_defaults_false() {
         control_init: None,
         role: None,
         data_slot: None,
-        aria_controls: None,
+        attrs: vec![],
         rich_text_block: false,
         custom_tag: None,
         component_scope: false,
