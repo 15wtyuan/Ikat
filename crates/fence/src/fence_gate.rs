@@ -374,5 +374,6 @@ mod tests {
         assert!(
             elsewhere.is_empty(),
             "free-form data-* elsewhere: {elsewhere:?}"
-        );    }
+        );
+    }
 }
