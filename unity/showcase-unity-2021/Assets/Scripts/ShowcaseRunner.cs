@@ -30,6 +30,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-lab", "lab"),
         ("nav-anim", "m2-animation"),
         ("nav-infra", "api-infra"),
+        ("nav-rtcss", "runtime-css"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -88,6 +89,7 @@ public class ShowcaseRunner : MonoBehaviour
     {
         if (_shown == page) return;
         TeardownCharacterStage();   // 上一页若是 character：解绑 NativeHost + 销毁模型
+        TeardownRuntimeCssPage();   // 上一页若是 runtime-css：Dispose 注入句柄
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -723,8 +725,108 @@ public class ShowcaseRunner : MonoBehaviour
     /// 控件事件流演示：settings 滑块拖动更新旁边数值、character 训练按钮给 EXP 进度条加经验。
     /// 只验证 ValueChanged / Clicked → ProgressBar.Value 的端到端事件链，不构建完整逻辑。
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
+    // runtime-css 页（#11）当前 Add 句柄集——离页全 Dispose（注入规则不跨页泄漏）。
+    readonly List<IDisposable> _rtRegs = new();
+
+    /// 离开 runtime-css 页：Dispose 全部 Add 句柄（注入规则不跨页泄漏；主题 SetVar
+    /// 随页面节点销毁自然失效——node_vars 挂节点）。
+    void TeardownRuntimeCssPage()
+    {
+        foreach (var r in _rtRegs) r?.Dispose();
+        _rtRegs.Clear();
+    }
+
+    /// runtime-css 页（#11）：StyleSheet.Add/Dispose/Clear + SetVar/RemoveVar + var() 消费面。
+    /// 判据（肉眼强信号）：目标块变色/复原、同优先后 Add 赢、非法 CSS 异常读数带行列、
+    /// chips 组整组翻色/回落、嵌套链 swatch 变色、行内源 chip 恒橙（打包期通路回归）。
+    /// 环 warning 判据不在 PlayMode（走 ikat check 输出，agent 自测）。
+    void WireRuntimeCssPage(Container page)
+    {
+        var ui = _driver.Context;
+        var ss = ui.StyleSheet;
+        if (!page.TryGet<TextElement>("rt-status", out var status)) return;
+        void Say(string s) { status.TextContent = s; Debug.Log($"[Showcase] rt-css: {s}"); }
+        void DropRegs()
+        {
+            foreach (var r in _rtRegs) r?.Dispose();
+            _rtRegs.Clear();
+        }
+
+        // ① Add 生效 + Dispose 复原：注入 .rt-target 红规则。
+        if (page.TryGet<Button>("rt-add", out var addBtn))
+            addBtn.Clicked += () =>
+            {
+                DropRegs();
+                _rtRegs.Add(ss.Add(".rt-target { background-color: #c0392b; border-color: #c0392b; }"));
+                Say("已注入红");
+            };
+        if (page.TryGet<Button>("rt-dispose", out var disBtn))
+            disBtn.Clicked += () =>
+            {
+                DropRegs();
+                Say("已撤销");
+            };
+        // ② 同 specificity 后 Add 赢：连注绿→橙两条，橙（后者）胜出；撤销后回灰。
+        if (page.TryGet<Button>("rt-later", out var laterBtn))
+            laterBtn.Clicked += () =>
+            {
+                DropRegs();
+                _rtRegs.Add(ss.Add(".rt-target { background-color: #2ecc71; border-color: #2ecc71; }"));
+                _rtRegs.Add(ss.Add(".rt-target { background-color: #f39c12; border-color: #f39c12; }"));
+                Say("后Add赢·橙");
+            };
+        // ⑥ Clear 全清（pkg 规则不动——chips 边框色是 pkg 规则的 var 消费，Clear 后仍在）。
+        if (page.TryGet<Button>("rt-clear", out var clearBtn))
+            clearBtn.Clicked += () =>
+            {
+                DropRegs();
+                ss.Clear();
+                Say("已Clear");
+            };
+        // ③ 非法 CSS：at-rule 在注入通道全拒 → UIStyleException 带行列读数。
+        if (page.TryGet<Button>("rt-bad", out var badBtn))
+            badBtn.Clicked += () =>
+            {
+                try
+                {
+                    ss.Add("@keyframes fade { from { opacity: 0 } }");
+                    Say("未抛异常?");
+                }
+                catch (UIStyleException ex)
+                {
+                    Say($"UIStyleException L{ex.Line}C{ex.Column}");
+                }
+            };
+        // ④ SetVar 主题 + RemoveVar 回落 + ⑤ 嵌套链（同 rt-page 节点）。
+        if (page.TryGet<Container>("rt-page", out var rtPage))
+        {
+            if (page.TryGet<Button>("rt-theme", out var themeBtn))
+                themeBtn.Clicked += () =>
+                {
+                    rtPage.Style.SetVar("--rt-accent", new IkatColor(0.37f, 0.71f, 0.83f, 1f));
+                    Say("主题·亮青");
+                };
+            if (page.TryGet<Button>("rt-untheme", out var unthemeBtn))
+                unthemeBtn.Clicked += () =>
+                {
+                    rtPage.Style.RemoveVar("--rt-accent");
+                    Say("已回落");
+                };
+            if (page.TryGet<Button>("rt-chain", out var chainBtn))
+                chainBtn.Clicked += () =>
+                {
+                    rtPage.Style.SetVar("--rt-chain-b", new IkatColor(0.75f, 0.22f, 0.17f, 1f));
+                    Say("链·红");
+                };
+        }
+    }
+
     void WireControls(Container page, string pageName)
     {
+        if (pageName == "runtime-css")
+        {
+            WireRuntimeCssPage(page);
+        }
         if (pageName == "lab")
         {
             // lab #14 运行时 ZIndex：按钮把 B 片在 4（置顶）/ 0（回落 DOM 序）间切换——

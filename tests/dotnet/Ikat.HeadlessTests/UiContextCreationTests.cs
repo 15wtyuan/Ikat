@@ -295,25 +295,54 @@ namespace Ikat.HeadlessTests
         }
 
         [Fact]
-        public void StyleSheetAddThrowsNe()
+        public void StyleSheetAddValidCssReturnsDisposableHandle()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
-                var ss = ctx.StyleSheet;
-                Assert.Throws<NotImplementedException>(() => ss.Add("div { color: red; }"));
+                var reg = ctx.StyleSheet.Add(".rt { color: #ff0000 }");
+                reg.Dispose();   // 撤销句柄不抛
             }
             finally { StageHarness.Destroy(stage); }
         }
 
         [Fact]
-        public void StyleSheetClearThrowsNe()
+        public void StyleSheetAddAtRuleThrowsUIStyleExceptionWithLocation()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                // at-rule 在注入通道全拒（含 @keyframes——fail-loud 不静默跳过）。
+                var ex = Assert.Throws<UIStyleException>(() =>
+                    ctx.StyleSheet.Add("@keyframes fade { from{opacity:0} }"));
+                Assert.True(ex.Line >= 1 && ex.Column >= 1, $"行列在场: L{ex.Line} C{ex.Column}");
+                Assert.Contains("runtime stylesheet", ex.Message);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        [Fact]
+        public void StyleSheetAddBadSelectorThrowsUIStyleException()
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                var ex = Assert.Throws<UIStyleException>(() =>
+                    ctx.StyleSheet.Add(".a > .b { color: #fff }"));
+                Assert.Contains(".a > .b", ex.Message);
+            }
+            finally { StageHarness.Destroy(stage); }
+        }
+
+        [Fact]
+        public void StyleSheetClearNoThrow()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
                 var ss = ctx.StyleSheet;
-                Assert.Throws<NotImplementedException>(() => ss.Clear());
+                ss.Add(".rt { color: #ff0000 }");
+                ss.Clear();   // 已接线：清空运行时注入（pkg 规则不动），不抛
             }
             finally { StageHarness.Destroy(stage); }
         }

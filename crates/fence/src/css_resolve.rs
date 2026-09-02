@@ -129,6 +129,8 @@ pub fn resolve_inline_styles_with_diags(
         }
 
         if let Some(style_attr) = el.attributes.iter().find(|a| a.name == "style") {
+            // 本元素的 custom prop 声明收集（元素级环 warning 用）。
+            let mut el_customs: Vec<(String, String)> = Vec::new();
             for decl in style_attr.value.split(';') {
                 let decl = decl.trim();
                 if decl.is_empty() {
@@ -138,6 +140,27 @@ pub fn resolve_inline_styles_with_diags(
                     Some((p, v)) => (p.trim(), v.trim()),
                     None => continue,
                 };
+
+                // `--*` 自定义属性（#11 三源之「行内 style」）：值近乎自由，不烘焙进
+                // typed 字段——存 deferred_inline，运行时在 var 环境参与解析。
+                if crate::var_check::is_custom_prop(prop) {
+                    if let Some(msg) = crate::var_check::var_shape_error(value) {
+                        diagnostics.push(Diagnostic::error(
+                            DiagnosticCode::FenceBadCssValue,
+                            msg,
+                            line_map.source_location(node.span.start, file.to_string()),
+                        ));
+                    } else {
+                        styles[idx]
+                            .deferred_inline
+                            .push(ikat_core::style::dynamic::Declaration {
+                                prop: prop.to_string(),
+                                value: value.to_string(),
+                            });
+                        el_customs.push((prop.to_string(), value.to_string()));
+                    }
+                    continue;
+                }
 
                 let is_known = find_css_prop(prop).is_some() || find_shorthand(prop).is_some();
                 if !is_known {
@@ -149,6 +172,30 @@ pub fn resolve_inline_styles_with_diags(
                         format!("CSS property \"{}\": {}", prop, hint),
                         line_map.source_location(node.span.start, file.to_string()),
                     ));
+                    continue;
+                }
+
+                // 含 var() 的行内值（#11）：终值运行时在 var 环境解析（prop 名仍须合法，
+                // 值字面校验跳过、只做形状校验）。同存 deferred_inline——行内优先级
+                // 运行时重放；inline_declared 位在此标记，class 规则运行时不覆盖它。
+                if crate::var_check::value_has_var(value) {
+                    if let Some(msg) = crate::var_check::var_shape_error(value) {
+                        diagnostics.push(Diagnostic::error(
+                            DiagnosticCode::FenceBadCssValue,
+                            msg,
+                            line_map.source_location(node.span.start, file.to_string()),
+                        ));
+                        continue;
+                    }
+                    styles[idx]
+                        .deferred_inline
+                        .push(ikat_core::style::dynamic::Declaration {
+                            prop: prop.to_string(),
+                            value: value.to_string(),
+                        });
+                    if let Some(bit) = ikat_core::style::dynamic::inline_bit(prop) {
+                        styles[idx].inline_declared |= bit;
+                    }
                     continue;
                 }
 
@@ -264,6 +311,17 @@ pub fn resolve_inline_styles_with_diags(
                         styles[idx].inherited_set.0 |= bit;
                     }
                 }
+            }
+            // 元素级 custom prop 引用环 warning（#11 分层 fail-loud：同元素 style attr 内
+            // 静态可见的环）。与 <style> 块级检查（css_rules）同一真相源 var_check。
+            for msg in crate::var_check::custom_prop_cycle_warnings(
+                el_customs.iter().map(|(p, v)| (p.as_str(), v.as_str())),
+            ) {
+                diagnostics.push(Diagnostic::warning(
+                    DiagnosticCode::FenceCustomPropCycle,
+                    msg,
+                    line_map.source_location(node.span.start, file.to_string()),
+                ));
             }
         }
 

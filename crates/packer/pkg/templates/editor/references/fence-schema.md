@@ -46,8 +46,11 @@ structure).
 
 Every element accepts: `id`, `class`, `style`, `slot`, `hidden`,
 `tabindex`, `type`, `role`, `draggable`, plus any `aria-*`, `data-*`,
-and CSS custom property `--*`. `id` must be unique within a template
+and `--*`-prefixed attributes. `id` must be unique within a template
 scope; `aria-controls` / `aria-labelledby` must point at existing ids.
+A `--*` attribute is passthrough data (matchable by `[attr]` selectors)
+— the var() sources are `<style>` rules, inline `style`, and runtime
+`Style.SetVar` (see css-reference.md "Custom properties and var()").
 
 `draggable="true"` opts the element into the drag event chain
 (`DragStart` / `DragMove` / `DragEnd` fire after pointer-down passes the

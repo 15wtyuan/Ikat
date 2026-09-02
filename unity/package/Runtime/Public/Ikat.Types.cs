@@ -251,10 +251,22 @@ namespace Ikat
     // UIPackageException（包内部错）互补：UIStyleException 专指 CSS 值/规则解析失败。
     // 构造签名对齐 UIContractException（message + message/inner 双参），补无参默认 ctor 兼容
     // default-activation 抛出场景（异常体系共四种，本类补齐 frozen 异常体系）。
+    // #11 起 Line/Column 携带解析失败的 1-based 定位（0 = 无定位信息）——
+    // public-api §10.2「解析失败抛 UIStyleException 带行列信息」。
     public class UIStyleException : Exception
     {
+        /// <summary>CSS 解析失败的 1-based 行号（0 = 无定位信息）。</summary>
+        public uint Line { get; }
+        /// <summary>CSS 解析失败的 1-based 列号（0 = 无定位信息）。</summary>
+        public uint Column { get; }
+
         public UIStyleException() { }
         public UIStyleException(string message) : base(message) { }
         public UIStyleException(string message, Exception inner) : base(message, inner) { }
+        public UIStyleException(string message, uint line, uint column) : base(message)
+        {
+            Line = line;
+            Column = column;
+        }
     }
 }

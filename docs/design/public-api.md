@@ -35,7 +35,7 @@ CSS-flow 布局中心。Node 三分模型：
 ### 1.4 失败策略
 
 - 打包期：围栏外输入明确报错，不静默降级（见 [fence.md](fence.md)）。
-- 运行时：`UIContractException`（契约违反）/ `ObjectDisposedException`（操作已销毁节点）/ `UIStyleException`（运行时 CSS 解析失败）/ `UIPackageException`（包加载失败）。
+- 运行时：`UIContractException`（契约违反）/ `ObjectDisposedException`（操作已销毁节点）/ `UIStyleException`（运行时 CSS 解析失败，带 `Line`/`Column` 定位）/ `UIPackageException`（包加载失败）。
 
 ---
 
@@ -153,7 +153,7 @@ public sealed class NodeStyle {
 - Style 是**最高优先级的 inline override 层**，不是 cascade 的读取窗口。
 - getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `IkatColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走只读 computed style 查询接口（时效：rematch 后有效、本帧 tick 后反映最新 cascade）。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
-- `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递。不提供 `GetVar`（var 不当状态存储读回）。
+- `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递（继承沿祖先链，声明点解析）。`SetVar` 是 custom prop **最高优先级层**（高于行内 style 与样式表规则声明）；`RemoveVar` 只撤 SetVar 条目、回落 CSS 声明值。值格式化为 CSS 值串（`Length` → px/%、`IkatColor` → `#rrggbbaa`、`float` 不变文化十进制、`string` 原样）；名字须 `--` 前缀（否则 `UIContractException`）。不提供 `GetVar`（var 不当状态存储读回）。var() 消费语义（fallback/嵌套/环 invalid）见 fence.md §5.4。
 - 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。引擎集成层另有**运行时渲染隐**原语——visibility:hidden 继承语义、不动布局/命中，供世界锚点出屏自动隐藏等宿主机制用，见 §11.3，不进公共 Node API。）
 
 ### 3.2 Transform（可写，渲染层，不触发 solve）
@@ -499,7 +499,15 @@ public class StyleSheet {
 }
 ```
 
-解析失败抛 `UIStyleException`。与模板 CSS 同 cascade 优先级。
+- **语法**：围栏 CSS 子集（选择器 + 声明，含 `--*` 自定义属性与 `var()` 值——语义见
+  fence.md §5.4）；at-rule 一律拒（含 `@keyframes`）。解析失败抛 `UIStyleException`
+  **带行列**（`Line`/`Column` 属性，1-based）。
+- **cascade**：与模板 CSS 同优先级（同 specificity 后 Add 赢——注入按文档序追加）。
+- **作用域**：注入规则是全局规则，**跨作用域命中**——打包期组件内容墙不约束运行时
+  注入（字面匹配可及组件展开内部节点）。运行时注入是程序员工具而非 AI 编辑面；
+  打包期 CSS 的墙语义不变（`::part()` 通道另议，见 #57）。
+- **时效**：注入下一帧生效（rematch 每帧全量）；`Clear` 只清运行时注入，pkg 模板
+  CSS 不受影响。
 
 ### 10.3 禁止 !important
 

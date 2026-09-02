@@ -210,7 +210,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `role` | WAI-ARIA 角色（白名单校验：注册表 12 role + `textbox` + `tabpanel` + `dialog`，未知值报 `FenceUnknownRole`——拼错的 role 静默回退成基础标签类型会跳过全部控件校验，故拒绝） |
 | `aria-*` | WAI-ARIA 状态/属性（打包期校验 IdRef 关系） |
 | `data-*` | 自定义数据属性（透传，不做结构验证） |
-| `--*` | CSS 自定义属性（透传） |
+| `--*` | `--` 前缀属性（透传，可被 `[attr]` 选择器匹配；**不是** var() 解析来源——var 来源三模型见 §5.4：样式表规则 / 行内 `style` / 运行时 SetVar） |
 
 ### 4.2 结构属性（影响类型/核心行为，Fence Gate 校验值域）
 
@@ -384,6 +384,34 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 | `border-top/right/bottom/left` | — | FallThrough（单边） |
 | `background` | — | BackgroundShorthand |
 | `flex` | flex-grow, flex-shrink, flex-basis | FallThrough |
+
+### 5.4 自定义属性与 var()（#11）
+
+CSS 自定义属性 `--x` 与 `var()` 引用按 web 语义收窄进围栏。**来源模型（三源）**：
+①`<style>` 规则声明（`.theme { --accent: #f00 }`）②行内 `style="--accent: #f00"`
+③运行时 `Style.SetVar`（C#，最高优先级）。HTML 属性 `--*`（§4.1 表）是纯数据透传
+（可被 `[attr]` 选择器匹配），**不是** var() 解析来源——web 先验里行内 style 才是。
+
+- **声明**：`--` 前缀 + 名字（字母/数字/`-`/`_`），值近乎自由（CSS 规范行为：custom
+  prop 值不做关键字校验），仅做 `var()` 形状校验（括号配平、引用名合法 `--` 前缀）。
+- **消费**：`var(--x)` / `var(--x, fallback)` 可出现在**任意属性的值位**——含 var()
+  的值打包期跳过字面值校验（终值运行时才定），仅做形状校验；fallback 可嵌 var()
+  （递归解析）。继承沿祖先链、跨组件边界（main-design「`--*` 跨边界传递」）。
+- **解析语义**（core `style::vars`，CSS computed-value 收窄）：同节点先按级联选出每
+  名胜出声明、再对胜出集递归解析引用（声明顺序不影响引用可见性）；声明点解析
+  （`--a: var(--b)` 在声明 `--a` 的节点环境里解析，结果随继承传播）。优先级：规则
+  声明 < 行内 style < 运行时 SetVar。
+- **环与缺失（分层 fail-loud）**：引用环（`--a ↔ --b` 互指）与引用链断——运行时该
+  custom prop 为 invalid，消费声明**跳过**（有 fallback 用 fallback）、不抛异常（主题
+  系统不能变运行时炸弹），跳过事件 warn-once 进运行时 warnings；**打包期**对同块
+  （`<style>`）/同元素（style 属性）静态可见的环发 `FenceCustomPropCycle` warning
+  （非阻断——不同选择器命中的声明可能落在不同节点、运行时不成环）。目标缺失本身
+  合法不告警（运行时 SetVar 可注入，打包期无法预判）。
+- **运行时注入**（`UIContext.StyleSheet.Add`）：解析同围栏子集（选择器 + 声明），
+  **at-rule 一律拒**（含 `@keyframes`——运行时动画注入不在本通道）→ `UIStyleException`
+  带行列。注入规则是**全局规则**：与模板 CSS 同 cascade 优先级（同 specificity 后
+  注入赢）、跨作用域命中——**打包期组件内容墙不约束运行时注入**（字面匹配可及组件
+  展开内部节点；程序员工具非 AI 编辑面，public-api §10.2）。
 
 ---
 

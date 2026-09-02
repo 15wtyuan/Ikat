@@ -636,6 +636,67 @@ pub fn has_class(scene: &Scene, node: NodeId, name: &str) -> Option<bool> {
     scene.get(node).map(|n| n.classes.iter().any(|c| c == name))
 }
 
+/// 注入一批运行时全局规则（StyleSheet.Add 通道，#11）。规则由 FFI 层用 fence 解析
+/// （core 不依赖 fence——方向 core ← fence），此处只收结构。返回句柄 id（Dispose 按
+/// 此撤销）。rematch 每帧全量跑 → 注入自然下一帧生效，无 dirty 机制。
+pub fn style_sheet_add(scene: &mut Scene, rules: Vec<crate::style::dynamic::DynamicRule>) -> u64 {
+    let id = scene.next_rule_set_id.max(1);
+    scene.next_rule_set_id = id + 1;
+    scene
+        .runtime_rule_sets
+        .push(crate::style::dynamic::RuntimeRuleSet { id, rules });
+    id
+}
+
+/// 撤销一批注入规则（StyleSheet.Add 返回句柄的 Dispose）。句柄不存在 → false。
+pub fn style_sheet_remove(scene: &mut Scene, set_id: u64) -> bool {
+    let before = scene.runtime_rule_sets.len();
+    scene.runtime_rule_sets.retain(|rs| rs.id != set_id);
+    before != scene.runtime_rule_sets.len()
+}
+
+/// 清空全部运行时注入规则（StyleSheet.Clear）。pkg 规则不受影响。
+pub fn style_sheet_clear(scene: &mut Scene) {
+    scene.runtime_rule_sets.clear();
+}
+
+/// 运行时 SetVar（#11）：写 custom prop 最高优先级层。name 须 `--` 前缀（CSS 自定义
+/// 属性命名域，其他名字 Err——SetVar 管的就是 --*）；同名重复设 = 覆盖。node 不
+/// live → Err。rematch 下一帧生效（var 消费面全树重算）。
+pub fn node_set_var(
+    scene: &mut Scene,
+    node: NodeId,
+    name: &str,
+    value: &str,
+) -> Result<(), String> {
+    if !name.starts_with("--") || name.len() <= 2 {
+        return Err(format!(
+            "SetVar name \"{name}\" is not a custom property — names start with `--`"
+        ));
+    }
+    if scene.get(node).is_none() {
+        return Err("node not live".to_string());
+    }
+    let slot = scene.node_vars.entry(node).or_default();
+    match slot.iter_mut().find(|(n, _)| n == name) {
+        Some((_, v)) => *v = value.to_string(),
+        None => slot.push((name.to_string(), value.to_string())),
+    }
+    Ok(())
+}
+
+/// 运行时 RemoveVar（#11）：撤销 SetVar 条目、回落 CSS 声明值（行内/规则）。未设过
+/// no-op。node 不 live → Err（与 SetVar 对称；条目级缺失不是错误）。
+pub fn node_remove_var(scene: &mut Scene, node: NodeId, name: &str) -> Result<(), String> {
+    if scene.get(node).is_none() {
+        return Err("node not live".to_string());
+    }
+    if let Some(entries) = scene.node_vars.get_mut(&node) {
+        entries.retain(|(n, _)| n != name);
+    }
+    Ok(())
+}
+
 /// 设渲染复用键（虚拟列表 slot 用）。node 无效 → no-op（不 panic）。
 /// 顺手 bump render_input_version：reuse_key 是缓存行的输出字段（blob reuse_key 列），
 /// structure_sig 不含它——不 bump 会回放旧键值。

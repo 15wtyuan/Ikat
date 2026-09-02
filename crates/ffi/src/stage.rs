@@ -22,6 +22,9 @@ pub extern "C" fn ikat_stage_new(w: f32, h: f32) -> *mut StageHandle {
             dump_blob: CString::new("").unwrap(),
             tree_blob: CString::new("").unwrap(),
             warnings_blob: CString::new("").unwrap(),
+            style_err_blob: CString::new("").unwrap(),
+            style_err_line: 0,
+            style_err_col: 0,
         }))
     })
 }

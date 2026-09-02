@@ -342,7 +342,7 @@ fn take_ident(s: &str) -> (&str, &str) {
     (&s[..end], &s[end..])
 }
 
-/// 解析一段 `<style>` 文本 → (动态规则表, keyframes 规则表, 诊断)。
+/// 解析 `<style>` 文本 → (动态规则表, keyframes 规则表, 诊断)（打包期模式）。
 ///
 /// 文法（子集）：
 /// - 普通规则：`selector { decl_list }`，selector 为单选择器（不支持逗号）。
@@ -350,11 +350,24 @@ fn take_ident(s: &str) -> (&str, &str) {
 ///   其他 `@xxx` at-rule 不在围栏子集，整块丢弃 + 诊断。
 /// - `decl_list` = `prop: value;` 重复。CSS 注释 `/* ... */` 剥除。
 /// - 越界 selector / at-rule → 丢弃 + 诊断；声明 prop 名不在 schema（find_css_prop/find_shorthand）
-///   → 诊断（与 css_resolve 一致）。
+///   → 诊断（与 css_resolve 一致）。例外：`--*` 自定义属性放行（#11），值近乎自由。
+/// - 含 `var()` 的值只做形状校验（终值运行时在 var 环境解析）；同块 custom prop
+///   引用环发 warning（运行时该环上属性全 invalid）。
 ///
 /// @keyframes 解析后产出 KeyframesRule；packer bridge 将它翻译并序列化进 pkg.bin v30。
 pub fn parse_style_block(css: &str) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
     parse_style_block_named(css, "<style>")
+}
+
+/// 解析模式：打包期（环 warning + @keyframes 合法）vs 运行时注入（at-rule 全拒）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParseMode {
+    /// `<style>` 块打包期解析。
+    Pack,
+    /// `UIContext.StyleSheet.Add` 运行时注入解析（#11）：at-rule 一律拒
+    /// （含 @keyframes——运行时动画注入不在本通道），环不发 warning
+    /// （运行时解析自会 invalid 回退）。
+    Runtime,
 }
 
 /// [`parse_style_block`] 带来源文件标签：诊断的 file 字段指向 CSS 来源（内联
@@ -363,12 +376,36 @@ pub fn parse_style_block_named(
     css: &str,
     source_file: &str,
 ) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
+    parse_block(css, source_file, ParseMode::Pack)
+}
+
+/// 运行时 CSS 注入解析（`UIContext.StyleSheet.Add` 通道，#11）。
+/// Ok = 规则集（可注入 scene）；Err = 首条 Error 诊断（携带行列，C# 抛 UIStyleException）。
+/// 与打包期的差异见 [`ParseMode::Runtime`]。
+pub fn parse_runtime_css(css: &str) -> Result<Vec<DynamicRule>, Diagnostic> {
+    let (rules, _keyframes, diags) = parse_block(css, "<runtime-css>", ParseMode::Runtime);
+    if let Some(err) = diags
+        .iter()
+        .find(|d| d.severity == crate::diagnostic::Severity::Error)
+    {
+        return Err(err.clone());
+    }
+    Ok(rules)
+}
+
+fn parse_block(
+    css: &str,
+    source_file: &str,
+    mode: ParseMode,
+) -> (Vec<DynamicRule>, Vec<KeyframesRule>, Vec<Diagnostic>) {
     let stripped = strip_comments(css);
     // 诊断定位用（粗略）：strip_comments 后 offset 已不对应原文，但行号近似可用。
     let line_map = LineMap::new(&stripped);
     let mut rules = Vec::new();
     let mut keyframes = Vec::new();
     let mut diagnostics = Vec::new();
+    // 每条 custom prop 声明 (prop, value, 所在规则 loc)——块级环 warning 定位用。
+    let mut custom_decl_locs: Vec<(String, String, SourceLocation)> = Vec::new();
     let mut pos = 0;
     while pos < stripped.len() {
         let Some(brace_open_rel) = stripped[pos..].find('{') else {
@@ -382,6 +419,31 @@ pub fn parse_style_block_named(
 
         if prelude.starts_with('@') {
             let loc = line_map.source_location(sel_start, source_file.to_string());
+            if mode == ParseMode::Runtime {
+                // Add() 通道 at-rule 全拒（含 @keyframes）：fail-loud，不静默跳过
+                // （作者以为注入成功实际被丢 = 预览≠运行时静默差异）。
+                let at_name = prelude
+                    .trim_start_matches('@')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("");
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    format!(
+                        "at-rule @{at_name} is rejected by runtime stylesheet injection — \
+                         StyleSheet.Add accepts selector rules only (no @keyframes / @media; \
+                         declare them in the package CSS instead)"
+                    ),
+                    loc,
+                ));
+                // 消费掉整块（按深度找配平 `}`），继续解析后续规则。
+                if let Some((_, end_pos)) = find_matching_brace(&stripped, after_open) {
+                    pos = end_pos;
+                } else {
+                    break;
+                }
+                continue;
+            }
             // 找匹配的 `}`（@keyframes 体含嵌套大括号，必须按深度匹配）
             let Some((body, end_pos)) = find_matching_brace(&stripped, after_open) else {
                 break;
@@ -428,6 +490,11 @@ pub fn parse_style_block_named(
         if declarations.is_empty() {
             continue;
         }
+        for d in &declarations {
+            if d.prop.starts_with("--") {
+                custom_decl_locs.push((d.prop.clone(), d.value.clone(), loc.clone()));
+            }
+        }
         // 逗号 selector list：`a, b, c { decls }` → 每段独立 parse_selector，共享声明块。
         // parse_selector 自身仍拒逗号（越界），由这里先 split，每段不再含逗号。
         for sel_raw in prelude.split(',') {
@@ -446,6 +513,37 @@ pub fn parse_style_block_named(
                     loc.clone(),
                 )),
             }
+        }
+    }
+    // 同块 custom prop 引用环检测（#11 分层 fail-loud：打包期能静态查到的环发 warning；
+    // 运行时该环上属性全 invalid，静默会让「为什么这条声明没生效」无从查起）。
+    // 定位取环上首个声明成员所在规则的 loc。运行时模式不发（解析自会 invalid 回退）。
+    if mode == ParseMode::Pack
+        && custom_decl_locs
+            .iter()
+            .any(|(p, _, _): &(String, String, SourceLocation)| p.starts_with("--"))
+    {
+        for msg in crate::var_check::custom_prop_cycle_warnings(
+            custom_decl_locs
+                .iter()
+                .map(|(p, v, _)| (p.as_str(), v.as_str())),
+        ) {
+            // 定位：环上第一个在本块声明的名字 → 其首条声明的规则 loc。
+            let first_name = msg
+                .split("var(")
+                .nth(1)
+                .and_then(|rest| rest.split(')').next())
+                .unwrap_or("");
+            let loc = custom_decl_locs
+                .iter()
+                .find(|(p, _, _)| p == first_name)
+                .map(|(_, _, l)| l.clone())
+                .unwrap_or_else(|| line_map.source_location(0, source_file.to_string()));
+            diagnostics.push(Diagnostic::warning(
+                DiagnosticCode::FenceCustomPropCycle,
+                msg,
+                loc,
+            ));
         }
     }
     (rules, keyframes, diagnostics)
@@ -696,6 +794,40 @@ fn parse_declarations(
         let prop = prop.trim();
         let value = value.trim();
         if prop.is_empty() || value.is_empty() {
+            continue;
+        }
+        // `--*` 自定义属性（#11）：prop 白名单放行，值近乎自由（CSS 规范行为：custom
+        // prop 值不做关键字校验，坏值在 var() 消费端暴露为 invalid），只校验 var() 形状。
+        if crate::var_check::is_custom_prop(prop) {
+            if let Some(msg) = crate::var_check::var_shape_error(value) {
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    msg,
+                    loc.clone(),
+                ));
+            } else {
+                decls.push(Declaration {
+                    prop: prop.to_string(),
+                    value: value.to_string(),
+                });
+            }
+            continue;
+        }
+        // 含 var() 的普通属性值（#11）：终值运行时在 var 环境解析（SetVar 可注入目标），
+        // 打包期字面校验整条跳过、只做形状校验——与下面的 literal 门互斥。
+        if crate::var_check::value_has_var(value) {
+            if let Some(msg) = crate::var_check::var_shape_error(value) {
+                diagnostics.push(Diagnostic::error(
+                    DiagnosticCode::FenceBadCssValue,
+                    msg,
+                    loc.clone(),
+                ));
+            } else {
+                decls.push(Declaration {
+                    prop: prop.to_string(),
+                    value: value.to_string(),
+                });
+            }
             continue;
         }
         if find_css_prop(prop).is_none() && find_shorthand(prop).is_none() {
@@ -1211,5 +1343,85 @@ mod tests {
     fn parse_style_block_keyframes_over_100_pct_errors() {
         let (_rules, _kf, diags) = parse_style_block("@keyframes x { 150%{opacity:0} }");
         assert!(!diags.is_empty(), "百分比 > 100 应报错");
+    }
+
+    // ===== #11 custom props / var() / 运行时注入解析 =====
+
+    #[test]
+    fn parse_custom_prop_declarations_in_rules() {
+        let (rules, _kf, diags) =
+            parse_style_block(".theme { --accent: #ff0000; color: var(--accent) }");
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].declarations.len(), 2);
+        assert_eq!(rules[0].declarations[0].prop, "--accent");
+        assert_eq!(rules[0].declarations[1].value, "var(--accent)");
+    }
+
+    #[test]
+    fn parse_var_bad_shape_errors() {
+        // 名字缺 -- 前缀 / 括号不配平 → FenceBadCssValue
+        let (_r, _k, diags) = parse_style_block(".x { color: var(accent) }");
+        assert!(
+            diags.iter().any(|d| d.message.contains("custom property")),
+            "{diags:?}"
+        );
+        let (_r, _k, diags) = parse_style_block(".x { color: var(--a }");
+        assert!(
+            diags.iter().any(|d| d.message.contains("unbalanced")),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn parse_custom_prop_block_cycle_warns() {
+        // 同块静态可见的环 → warning（非 error，规则照常产出——运行时该环 invalid）
+        let (rules, _kf, diags) = parse_style_block("div { --a: var(--b) } div { --b: var(--a) }");
+        assert_eq!(rules.len(), 2, "环是 warning 不拦规则");
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.severity == crate::diagnostic::Severity::Warning
+                    && d.code == DiagnosticCode::FenceCustomPropCycle),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn runtime_css_parse_ok_and_at_rules_rejected() {
+        // 合面：普通规则 + custom prop + var 值全收。
+        let rules = parse_runtime_css(
+            ".rt { --accent: #ff0000 } .rt .target { color: var(--accent, #888) }",
+        )
+        .expect("合法注入应 Ok");
+        assert_eq!(rules.len(), 2);
+        // at-rule 全拒（含 @keyframes——合法打包期形态在注入通道也是错）。
+        for bad in [
+            "@keyframes fade { from{opacity:0} to{opacity:1} }",
+            "@media screen { .x { color:#fff } }",
+        ] {
+            let err = parse_runtime_css(bad).expect_err("at-rule 应被注入通道拒绝");
+            assert!(
+                err.message.contains("runtime stylesheet"),
+                "{}",
+                err.message
+            );
+            assert!(err.location.line >= 1, "行列信息在场");
+        }
+    }
+
+    #[test]
+    fn runtime_css_parse_bad_selector_and_prop_error_with_location() {
+        let err = parse_runtime_css(".a > .b { color: #fff }").expect_err("越界选择器");
+        assert!(err.message.contains(".a > .b"));
+        let err = parse_runtime_css(".a { colr: #fff }").expect_err("未知 prop");
+        assert!(err.message.contains("colr"));
+    }
+
+    #[test]
+    fn runtime_css_empty_rules_ok() {
+        // 空串/纯注释 → Ok(空规则集)（Clear 场景之外的空 Add 不算错）。
+        assert!(parse_runtime_css("").unwrap().is_empty());
+        assert!(parse_runtime_css("/* note */").unwrap().is_empty());
     }
 }

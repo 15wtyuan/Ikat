@@ -345,34 +345,41 @@ namespace Ikat.HeadlessTests
             }
         }
 
-        // ── ponytail defer：未实现的 prop throw NE（不静默丢）──────────────
+        // ── SetVar/RemoveVar（#11 已接线 FFI）─────────────────────────────
 
         /// <summary>
-        /// ZIndex/SetVar(4 overloads)/RemoveVar 在 core apply_decl 未实现（不在 inline_bit 表），
-        /// 调用必须抛 NotImplementedException（ponytail defer 显式失败，不静默丢）。
-        /// SetVar 4 overloads 逐个覆盖：保护未来把任一 overload 接上 mirror 时能被此门抓住。
-        /// （ZIndex 已接 mirror——行为测试见 ZIndexTests，不再属于 defer 集。）
+        /// SetVar 四重载 + RemoveVar 全链 FFI 不抛（#11 接通 node_vars 通道）；
+        /// 名字无 `--` 前缀抛 UIContractException（custom prop 命名域在投影层前置拦截）。
         /// </summary>
-        [Theory]
-        [InlineData(2)]
-        [InlineData(3)]
-        [InlineData(4)]
-        [InlineData(5)]
-        [InlineData(6)]
-        public void StyleDeferredPropsThrow(int which)
+        [Fact]
+        public void SetVarOverloadsAndRemoveVarCallFfiWithoutThrow()
         {
             var (stage, ctx) = StageHarness.Create();
             try
             {
                 Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
-                switch (which)
-                {
-                    case 2: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--x", Length.Px(10))); break;
-                    case 3: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--c", new IkatColor(1f, 0f, 0f, 1f))); break;
-                    case 4: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--f", 0.5f)); break;
-                    case 5: Assert.Throws<NotImplementedException>(() => n.Style.SetVar("--s", "literal")); break;
-                    case 6: Assert.Throws<NotImplementedException>(() => n.Style.RemoveVar("--x")); break;
-                }
+                n.Style.SetVar("--x", Length.Px(10));
+                n.Style.SetVar("--c", new IkatColor(1f, 0f, 0f, 1f));
+                n.Style.SetVar("--f", 0.5f);
+                n.Style.SetVar("--s", "literal");
+                n.Style.RemoveVar("--x");   // 未设过 no-op；设过撤销——均不抛
+            }
+            finally
+            {
+                StageHarness.Destroy(stage);
+            }
+        }
+
+        [Theory]
+        [InlineData("accent")]
+        [InlineData("--")]
+        public void SetVarNonCustomNameThrowsContract(string name)
+        {
+            var (stage, ctx) = StageHarness.Create();
+            try
+            {
+                Node n = ctx._registry.GetOrCreate(CreateRoot(stage, "div"));
+                Assert.Throws<UIContractException>(() => n.Style.SetVar(name, "1"));
             }
             finally
             {

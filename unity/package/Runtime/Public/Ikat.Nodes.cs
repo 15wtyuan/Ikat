@@ -932,15 +932,88 @@ namespace Ikat
             set => _mirror.Set("z-index", value);
         }
 
-        // SetVar/RemoveVar（--xxx）：core apply_decl 不处理 CSS 自定义属性。
-        // 保留 throw NE 防止静默丢：调用方期望 round-trip，prop-name 不在 inline_bit 表经 set_inline_override
-        // 会被 bit 检查前置静默忽略（ghost-state 防护）。补 core 支持后把这些 setter 接 _mirror 即可。
-        public void SetVar(string n, Length v) { throw NE(); }
-        public void SetVar(string n, IkatColor v) { throw NE(); }
-        public void SetVar(string n, float v) { throw NE(); }
-        public void SetVar(string n, string v) { throw NE(); }
-        public void RemoveVar(string n) { throw NE(); }   // 撤销 inline var，回落 CSS
-        static NotImplementedException NE() => new NotImplementedException();
+        // SetVar/RemoveVar（--xxx，#11 已接线）：CSS 自定义属性最高优先级层（高于行内 style
+        // 与样式表规则声明），供运行时主题切换。值格式化为 CSS 值字符串过 FFI（core 存
+        // node_vars）；rematch 每帧全量 → 下一帧 var() 消费面生效。RemoveVar 撤销本层条目、
+        // 回落 CSS 声明值。名字须 `--` 前缀（否则 UIContractException）。不进 _mirror
+        //（mirror 是 inline_bit 表内 prop 的便签层，--* 不在其域）。
+        public void SetVar(string n, Length v)
+        {
+            _owner.ThrowIfDisposed();
+            CallSetVar(n, FormatLength(v));
+        }
+        public void SetVar(string n, IkatColor v)
+        {
+            _owner.ThrowIfDisposed();
+            CallSetVar(n, FormatColor(v));
+        }
+        public void SetVar(string n, float v)
+        {
+            _owner.ThrowIfDisposed();
+            CallSetVar(n, v.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        public void SetVar(string n, string v)
+        {
+            _owner.ThrowIfDisposed();
+            CallSetVar(n, v ?? string.Empty);
+        }
+        /// <summary>撤销 SetVar 条目（回落 CSS 声明值：行内 style / 样式表规则）。</summary>
+        public void RemoveVar(string n)
+        {
+            _owner.ThrowIfDisposed();
+            FfiRemoveVar(_owner, n);
+        }
+
+        void CallSetVar(string name, string value)
+        {
+            if (string.IsNullOrEmpty(name) || !name.StartsWith("--", StringComparison.Ordinal) || name.Length <= 2)
+                throw new UIContractException($"SetVar name \"{name}\" is not a custom property — names start with `--`");
+            int rc = FfiSetVar(_owner, name, value);
+            if (rc != 0)
+                throw new InvalidOperationException("set_var FFI returned error (stale node).");
+        }
+
+        // 指针封送在独立 unsafe 静态方法（NodeStyle 类本体非 unsafe，公共签名保持不动）。
+        static unsafe int FfiSetVar(Node owner, string name, string value)
+        {
+            StageHandle* h = (StageHandle*)owner._ctx._stage.ToPointer();
+            byte[] nb = Encoding.UTF8.GetBytes(name);
+            byte[] vb = Encoding.UTF8.GetBytes(value);
+            fixed (byte* np = nb)
+            fixed (byte* vp = vb)
+                return Native.ikat_stage_node_set_var(h, owner._id, np, (nuint)nb.Length, vp, (nuint)vb.Length);
+        }
+
+        static unsafe void FfiRemoveVar(Node owner, string name)
+        {
+            StageHandle* h = (StageHandle*)owner._ctx._stage.ToPointer();
+            byte[] nb = Encoding.UTF8.GetBytes(name ?? string.Empty);
+            int rc;
+            fixed (byte* p = nb)
+                rc = Native.ikat_stage_node_remove_var(h, owner._id, p, (nuint)nb.Length);
+            if (rc != 0)
+                throw new InvalidOperationException("remove_var FFI returned error (stale node).");
+        }
+
+        // Length → CSS 值字符串（Px/Percent 直映；Auto/Unset 不是合法 var 值——
+        // 写它们当契约错抛，静默吞会让主题变量悄悄变空串）。
+        static string FormatLength(Length v)
+        {
+            return v.Unit switch
+            {
+                LengthUnit.Px => v.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "px",
+                LengthUnit.Percent => v.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "%",
+                _ => throw new UIContractException("SetVar(Length): Auto/Unset are not var() values — use Px/Pct"),
+            };
+        }
+
+        // IkatColor → #RRGGBBAA（fence/core parse_color 认的 hex 形）。
+        static string FormatColor(IkatColor c)
+        {
+            if (c.IsUnset) throw new UIContractException("SetVar(IkatColor): Unset is not a var() value");
+            static byte F2B(float f) => (byte)(Math.Clamp(f, 0f, 1f) * 255f + 0.5f);
+            return $"#{F2B(c.R):X2}{F2B(c.G):X2}{F2B(c.B):X2}{F2B(c.A):X2}";
+        }
     }
 
     // Transform = 渲染层，不触发 solve。回写走独立数值 FFI（set_transform，纯 f32）。
@@ -3824,12 +3897,84 @@ namespace Ikat
         }
     }
 
-    // StyleSheet 逃生舱：Add 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）。
-    public class StyleSheet
+    // StyleSheet 逃生舱（#11 运行时 CSS）：Add 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）。
+    // Add 的 CSS 文本由 FFI 层用 fence 解析（选择器/声明子集 + --* 自定义属性 + var()；at-rule 一律
+    // 拒——@keyframes 走包内 CSS），解析失败抛 UIStyleException 带行列。注入规则是**全局规则**：
+    // 与模板 CSS 同 cascade 优先级（同 specificity 后 Add 赢）、跨作用域命中——打包期组件内容墙
+    // 不约束运行时注入（public-api §10.2）；下一帧全量 rematch 生效。值类型按 Length/IkatColor/
+    // float/string 四重载的 SetVar 见 Node（custom props 最高优先级层）。
+    public unsafe class StyleSheet
     {
-        public IDisposable Add(string css) { throw NE(); }
-        public void Clear() { throw NE(); }
-        static NotImplementedException NE() => new NotImplementedException();
+        // 投影层内部：持有上下文。lazy 造时由 UIContext.StyleSheet 传 this；方法体经它取 stage 转调 FFI。
+        internal readonly UIContext _ctx;
+        internal StyleSheet(UIContext ctx) { _ctx = ctx; }
+
+        void ThrowIfCtxDisposed()
+        {
+            if (_ctx._stage == IntPtr.Zero)
+                throw new ObjectDisposedException(nameof(UIContext));
+        }
+
+        /// <summary>
+        /// 注入一段运行时 CSS 规则集（选择器 + 声明）。返回句柄，Dispose 撤销该批规则。
+        /// 解析失败（at-rule / 越界选择器 / 未知属性 / var() 坏形状）抛 UIStyleException 带行列。
+        /// </summary>
+        public IDisposable Add(string css) { ThrowIfCtxDisposed(); return DoAdd(css); }
+
+        /// <summary>清空全部运行时注入规则（包内模板 CSS 不受影响）。</summary>
+        public void Clear()
+        {
+            ThrowIfCtxDisposed();
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            Native.ikat_stage_style_sheet_clear(h);
+        }
+
+        RuleSetRegistration DoAdd(string css)
+        {
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            byte[] b = Encoding.UTF8.GetBytes(css ?? string.Empty);
+            ulong setId = 0;
+            int rc;
+            fixed (byte* p = b)
+                rc = Native.ikat_stage_style_sheet_add(h, p, (nuint)b.Length, &setId);
+            if (rc == 1)
+            {
+                uint line = 0, col = 0;
+                byte* msgPtr = Native.ikat_stage_style_sheet_last_error(h, &line, &col);
+                string msg = ReadUtf8Nul(msgPtr);
+                throw new UIStyleException(msg, line, col);
+            }
+            if (rc != 0)
+                throw new InvalidOperationException("style_sheet_add FFI returned error (null stage / non-UTF-8).");
+            return new RuleSetRegistration(_ctx, setId);
+        }
+
+        /// <summary>NUL 结尾 UTF-8 C 串 → string（Rust 拥有，立即消费）。</summary>
+        static string ReadUtf8Nul(byte* p)
+        {
+            if (p == null) return string.Empty;
+            int n = 0;
+            while (p[n] != 0) n++;
+            return n == 0 ? string.Empty : Encoding.UTF8.GetString(p, n);
+        }
+
+        /// <summary>Add 返回的撤销句柄：Dispose 调 style_sheet_remove。重复 Dispose no-op。</summary>
+        sealed class RuleSetRegistration : IDisposable
+        {
+            UIContext _ctx;
+            ulong _setId;
+            internal RuleSetRegistration(UIContext ctx, ulong setId) { _ctx = ctx; _setId = setId; }
+            public void Dispose()
+            {
+                if (_ctx == null) return;
+                if (_ctx._stage != IntPtr.Zero)
+                {
+                    StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                    Native.ikat_stage_style_sheet_remove(h, _setId);
+                }
+                _ctx = null;
+            }
+        }
     }
 
     public sealed unsafe class UITemplate
@@ -4189,7 +4334,7 @@ namespace Ikat
         internal readonly Dictionary<ulong, AnimationHandle> _animations = new Dictionary<ulong, AnimationHandle>();
 
         // lazy 创建的 StyleSheet 实例。同 Node.Style/Node.Transform 模式——未访问过 = null，
-        // 首次访问构造并挂本 context。StyleSheet.Add/Clear 方法体本身仍 throw NE（core 未接通）。
+        // 首次访问构造并挂本 context（#11 已接线 FFI）。
         StyleSheet _styleSheet;
 
         // 回调是 C# 闭包，core 的 C ABI 存不了——调度器整体住在投影层，PumpLogic 由
@@ -4453,15 +4598,14 @@ namespace Ikat
         }
 
         /// <summary>
-        /// 样式逃生舱（动态 CSS 规则注入）。lazy 造单一实例：同一 UIContext 多次访问返同一 StyleSheet。
-        /// StyleSheet.Add(string css) 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）。
-        /// StyleSheet.Add/Clear 方法体当前 throw NE——core 未接通动态 CSS 注入通道。
+        /// 样式逃生舱（动态 CSS 规则注入，#11）。lazy 造单一实例：同一 UIContext 多次访问返同一 StyleSheet。
+        /// Add(string css) 返回 IDisposable 句柄，撤销靠 Dispose（不靠原文匹配）；解析失败抛 UIStyleException 带行列。
         /// </summary>
         public StyleSheet StyleSheet
         {
             get
             {
-                _styleSheet ??= new StyleSheet();
+                _styleSheet ??= new StyleSheet(this);
                 return _styleSheet;
             }
         }

@@ -18,6 +18,7 @@ pub mod schema;
 pub mod structural;
 pub mod tree_builder;
 pub mod value_check;
+pub mod var_check;
 
 pub use diagnostic::Diagnostic;
 pub use ir::{IrElement, IrNode, IrNodeKind, IrTree};

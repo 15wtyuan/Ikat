@@ -1546,6 +1546,48 @@ namespace Ikat.Bindings
         [DllImport(__DllName, EntryPoint = "ikat_stage_font_atlas_clear_dirty", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void ikat_stage_font_atlas_clear_dirty(StageHandle* h);
 
+        /// <summary>
+        ///  注入一段运行时 CSS（UIContext.StyleSheet.Add）。css = UTF-8 字节。
+        ///
+        ///  返回：0 = ok（\*out_set_id 写入撤销句柄）；1 = 解析失败（ikat_stage_style_sheet_last_error
+        ///  读消息/行列，句柄无效）；-1 = 基础设施错（null 句柄/无 scene/非 UTF-8）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_style_sheet_add", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_style_sheet_add(StageHandle* h, byte* css, nuint css_len, ulong* out_set_id);
+
+        /// <summary>
+        ///  撤销一批注入规则（Add 返回句柄的 Dispose）。set_id 无效 / 基础设施错 → -1；ok → 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_style_sheet_remove", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_style_sheet_remove(StageHandle* h, ulong set_id);
+
+        /// <summary>
+        ///  清空全部运行时注入规则（StyleSheet.Clear；pkg 规则不动）。ok → 0；基础设施错 → -1。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_style_sheet_clear", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_style_sheet_clear(StageHandle* h);
+
+        /// <summary>
+        ///  读最近一次 Add 解析失败的信息（NUL 结尾 UTF-8；无失败记录返空串）。
+        ///  out_line/out_col 可为 null（只取消息）。返回指针由 StageHandle 拥有，下次 Add 失败前有效。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_style_sheet_last_error", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern byte* ikat_stage_style_sheet_last_error(StageHandle* h, uint* out_line, uint* out_col);
+
+        /// <summary>
+        ///  运行时 SetVar（#11）。name/value = UTF-8 字节。name 须 `--` 前缀（custom prop 命名域）。
+        ///  0 = ok；-1 = 基础设施错 / 名字非法 / 节点不 live。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_node_set_var", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_node_set_var(StageHandle* h, ulong node, byte* name, nuint name_len, byte* value, nuint value_len);
+
+        /// <summary>
+        ///  运行时 RemoveVar（#11，撤销 SetVar 条目回落 CSS 声明值）。name = UTF-8 字节。
+        ///  0 = ok（含未设过 no-op）；-1 = 基础设施错 / 节点不 live。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_node_remove_var", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_node_remove_var(StageHandle* h, ulong node, byte* name, nuint name_len);
+
 
     }
 

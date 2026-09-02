@@ -91,8 +91,15 @@ Lookup invariants:
   the CSS cascade). Getters return only what the C# setter wrote;
   unset properties return an `Unset` sentinel. Assign `Unset` to drop
   the override. `Style.SetVar(name, value)` / `RemoveVar(name)` manage
-  CSS custom properties `--*` (they cross scope roots; there is no
-  GetVar).
+  CSS custom properties `--*`: SetVar is the highest-priority custom
+  property layer (over inline style and stylesheet declarations);
+  RemoveVar drops the SetVar entry and falls back to the CSS value.
+  Names must start with `--` (else `UIContractException`); typed
+  overloads format to CSS value strings (`Length` → px/%, `IkatColor`
+  → `#rrggbbaa`, `float` → invariant decimal, `string` → raw). Custom
+  properties inherit across scope roots; there is no GetVar. var()
+  consumption semantics (fallback / nesting / cycle-invalid) lives in
+  the editor references (css-reference.md).
 - **Transform** — visual offset/scale/rotation/origin. Changing it does
   NOT trigger layout (no solve); it refreshes hit geometry and world
   matrices only. Final render position = layout position +
@@ -500,10 +507,18 @@ public sealed class ClassList {
     public void Replace(string oldName, string newName);
 }
 public class StyleSheet {
-    public IDisposable Add(string css);   // handle-based withdrawal; parse failure throws UIStyleException
+    public IDisposable Add(string css);   // handle-based withdrawal; parse failure throws UIStyleException (with Line/Column)
     public void Clear();
 }
 ```
+
+`Add` accepts the fence selector+declaration subset (custom properties
+`--*` and `var()` values included; at-rules rejected). Injected rules
+join the cascade at the same priority as template CSS (later Add wins
+on equal specificity) and match globally — the pack-time component
+content wall does not constrain runtime injection. Takes effect next
+frame. `Clear` withdraws runtime injections only (package CSS is
+untouched).
 
 `!important` is rejected at package build time.
 

@@ -19,6 +19,7 @@ fn main() {
         .input_extern_file("src/animation.rs")
         .input_extern_file("src/list.rs")
         .input_extern_file("src/resources.rs")
+        .input_extern_file("src/style_sheet.rs")
         .csharp_dll_name("ikat_ffi_c")
         .csharp_namespace("Ikat.Bindings")
         .csharp_class_name("Native")

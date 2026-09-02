@@ -38,6 +38,11 @@ pub enum DiagnosticCode {
     /// border-width 已声明但 border-style 缺省（CSS initial=none）。
     /// 浏览器按 CSS 规范不画边框，而 Ikat 历史实现会画 → 预览 ≠ 运行时。
     FenceBorderWithoutStyle,
+    /// CSS 自定义属性引用环（`--a: var(--b); --b: var(--a)`，#11）。打包期同块静态
+    /// 可见的环发 warning（非阻断——不同选择器命中的声明可能落在不同节点、运行时
+    /// 不成环）；运行时该环上属性全 invalid（消费声明回退），作者侧症状是
+    /// 「声明了却不生效」，必须响亮提示。
+    FenceCustomPropCycle,
     /// background-image 已声明但 background-size 缺省。
     /// CSS 默认 `auto`（原始尺寸），Ikat 默认 `stretch`（拉伸填满）→ 预览 ≠ 运行时。
     FenceBgImageWithoutSize,

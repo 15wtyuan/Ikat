@@ -270,6 +270,15 @@ pub struct ScopedRuleTable {
     pub entries: Vec<ScopedRule>,
 }
 
+/// 一批运行时注入的规则（`UIContext.StyleSheet.Add` 通道，#11）。id = 撤销句柄
+/// （C# Dispose 按它 remove）。规则按全局语义参与 rematch（scope_root=INVALID，
+/// 跨作用域命中——见 `Scene::runtime_rule_sets` 字段注释的墙语义说明）。
+#[derive(Debug, Clone)]
+pub struct RuntimeRuleSet {
+    pub id: u64,
+    pub rules: Vec<DynamicRule>,
+}
+
 use crate::scene::node::{ControlState, NodeKind};
 
 /// 运行时版 compound 匹配（消费 Node 而非 ElementData，运行时无 ElementTree）。
@@ -681,9 +690,20 @@ fn compute_scope_map(scene: &Scene, node_ids: &[NodeId]) -> HashMap<NodeId, Node
 /// 首次 cascade（cascaded_once=false）即时生效不产请求，并置 cascaded_once=true。
 /// `root_size`/`safe_insets` 是延迟长度（视口单位/env()）的解析分母/取值源，由
 /// Stage 每帧传入（viewport 概念归 Stage，不从 scene 来——见 propagate_inherited）。
+///
+/// **运行时规则注入（#11）**：`Scene::runtime_rule_sets`（StyleSheet.Add 通道）作为
+/// 全局规则（scope_root=INVALID，跨作用域命中）追加在 pkg 规则之后收集——同
+/// specificity 稳定排序下后注入赢。注入即下帧生效（本函数每帧全量）。
+///
+/// **var 层（#11）**：场景里存在任一 var/custom prop 源（规则声明 `--*`、值含
+/// `var()`、节点带行内 deferred_inline、运行时 SetVar 条目）时走两阶段：先匹配
+/// 收集（Stage 1，customs 与延迟节点登记），后 tree-order 环境 pass（Stage 2，
+/// `vars::merge_env_layer` 逐节点合并环境 + 延迟声明替换重放 + finish）。无 var
+/// 源的场景走单阶段原路径，零额外开销。
 pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_insets: [f32; 4]) {
     // 预提取 specificity 元组 + owned rule 副本 + scope_root（避免借 scene.dynamic_rules 跨 get_mut）。
-    let rules_with_spec: Vec<(u32, u32, u32, DynamicRule, NodeId)> = scene
+    // pkg scoped 规则在前；运行时注入集在后（全局语义 + 同 specificity 后注入赢）。
+    let mut rules_with_spec: Vec<(u32, u32, u32, DynamicRule, NodeId)> = scene
         .dynamic_rules
         .entries
         .iter()
@@ -697,6 +717,30 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
             )
         })
         .collect();
+    rules_with_spec.extend(scene.runtime_rule_sets.iter().flat_map(|rs| {
+        rs.rules.iter().map(|r| {
+            (
+                r.selector.specificity.0,
+                r.selector.specificity.1,
+                r.selector.specificity.2,
+                r.clone(),
+                NodeId::INVALID,
+            )
+        })
+    }));
+    // var 层开关：任一规则声明 --* / 任一规则值含 var( / 有 SetVar 条目 / 有节点带
+    // 行内 deferred_inline。节点扫描 O(n) early-exit（Vec is_empty 判定廉价），与每帧
+    // 全量 rematch 的成本模型同阶。
+    let var_layer_on = !scene.node_vars.is_empty()
+        || rules_with_spec.iter().any(|(_, _, _, r, _)| {
+            r.declarations
+                .iter()
+                .any(|d| d.prop.starts_with("--") || crate::style::vars::value_has_var(&d.value))
+        })
+        || scene
+            .nodes
+            .values()
+            .any(|n| !n.base_style.deferred_inline.is_empty());
     // 收集所有 NodeId（slotmap 分配，不能手造 NodeId(i)）。
     let node_ids: Vec<NodeId> = scene.nodes.values().map(|n| n.id).collect();
     // 每节点的所属作用域根（沿父链最近的 SCOPE_ROOT，含自身）。全局规则（scope_root=INVALID）
@@ -704,17 +748,11 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
     let scope_map = compute_scope_map(scene, &node_ids);
     // set-ness：每节点显式声明了哪些可继承属性。cascade 期收集，继承 pass 消费。
     let mut set_map: HashMap<NodeId, InheritedSet> = HashMap::new();
+    // var 层中间态：命中的 --* 声明（环境 pass 用）+ 延迟重放节点（匹配到 var() 值
+    // 或自身带行内 var 消费声明——整段应用推迟到环境解析后，保持节点内声明序）。
+    let mut customs_map: HashMap<NodeId, Vec<(String, String)>> = HashMap::new();
+    let mut deferred_map: HashMap<NodeId, Vec<Declaration>> = HashMap::new();
     for node_id in node_ids {
-        // 捕获旧级联值 + cascaded_once（写新 style 前留快照）。
-        // transition 声明在下方级联完成后从 new_style 读（覆盖 base/inline +
-        // 动态 class 规则两源），此处只留 old_style 供通道变化比较。
-        let (old_style, cascaded_once) = {
-            let n = scene.get_live(node_id, "dynamic/rematch:old_style");
-            (
-                n.style.clone(),
-                n.interaction.flags.contains(NodeFlags::CASCALED),
-            )
-        };
         let mut new_style = scene
             .get_live(node_id, "dynamic/rematch:base_style")
             .base_style
@@ -732,6 +770,45 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
         }
         // specificity 升序（高 specificity 后 apply 胜出）；同级保持原序（stable sort）
         matched.sort_by_key(|r| (r.0, r.1, r.2));
+        // customs 收集 + 延迟判定（var 层开时单遍扫描匹配件）。
+        let mut customs: Vec<(String, String)> = Vec::new();
+        let mut has_var_decl = false;
+        if var_layer_on {
+            for (_, _, _, r) in &matched {
+                for decl in &r.declarations {
+                    if decl.prop.starts_with("--") {
+                        customs.push((decl.prop.clone(), decl.value.clone()));
+                    } else if crate::style::vars::value_has_var(&decl.value) {
+                        has_var_decl = true;
+                    }
+                }
+            }
+        }
+        // 行内 var 消费声明（base_style.deferred_inline 的非 --* 条目）也要求延迟——
+        // 它们的值要等环境解析（无论规则是否命中）。
+        let has_inline_var = var_layer_on
+            && scene
+                .get_live(node_id, "dynamic/rematch:deferred_inline")
+                .base_style
+                .deferred_inline
+                .iter()
+                .any(|d| !d.prop.starts_with("--"));
+        if !customs.is_empty() {
+            customs_map.insert(node_id, customs);
+        }
+        if var_layer_on && (has_var_decl || has_inline_var) {
+            // 延迟节点：typed 规则声明（--* 除外）按匹配序登记，环境 pass 统一重放。
+            // old_style/cascaded_once 不登记者——finish 时从节点读（frame 内 style 只在
+            // finish 写，届时仍是旧值）。
+            let decls: Vec<Declaration> = matched
+                .iter()
+                .flat_map(|(_, _, _, r)| r.declarations.iter())
+                .filter(|d| !d.prop.starts_with("--"))
+                .cloned()
+                .collect();
+            deferred_map.insert(node_id, decls);
+            continue;
+        }
         // apply 声明并收集 set-ness：apply_decl 返回 true = 该 prop 成功写入
         // → 若是可继承属性，记对应 bit，供继承 pass 判"子是否显式声明"。
         // Seed from base_style.inherited_set (package-time baked declarations),
@@ -747,6 +824,10 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
         let mut display_decl_seen = false;
         for (_, _, _, r) in &matched {
             for decl in &r.declarations {
+                // --* 声明不是 typed 声明（var 层已收集；var 层关时规则里不可能有——gate 拒）
+                if var_layer_on && decl.prop.starts_with("--") {
+                    continue;
+                }
                 // CSS inline > class：base_style.inline_declared 标记的属性由打包期 inline
                 // style 声明，class 规则不覆盖（如 dialog-overlay 的 inline display:none 不被
                 // .dialog-overlay{display:flex} 覆盖）。inline_bit 返 None 的属性（transition 等）
@@ -766,56 +847,280 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
                 }
             }
         }
-        // inline_override 应用（最高优先级，动态规则之后）。
-        // 按 inline_set 把 inline_override 字段拷进 new_style；继承子集 OR 进 set_map，
-        // 使 propagate 把含 inline 的父值传给未自设的子、且本节点自身不被父覆盖。
-        // inline_set 默认空 → 对没设 inline 的节点 no-op。
-        {
-            let n_ref = scene.get_live(node_id, "dynamic/rematch:inline_set");
-            let inline_set = n_ref.inline_set;
-            if inline_set.0 != 0 {
-                // 直传 &n_ref.inline_override（不可变借，new_style 是 local 不冲突；
-                // block 结束 n_ref 借释放，后续 set_map.insert/get_mut 不受影响）。
-                // 省 ResolvedStyle clone（含 Vec<TransitionSpec>/text_effects，每帧每 inline 节点）。
-                apply_inline_override(&mut new_style, &n_ref.inline_override, inline_set);
-                // 只把继承子集并进 set_map；非继承 bit 不影响 propagate。
-                // InheritedSet/InlineSet 同为 u64，直接掩码无需截位。
-                inh.0 |= inline_set.0 & INH_ALL_MASK;
-            }
-        }
-        set_map.insert(node_id, inh);
-        // transition 声明读自级联结果（new_style）：base/inline 烘焙经
-        // base_style.clone 进入，动态 class 规则经 apply_decl 写入——两源统一。
-        let transition_decl = new_style.transition.clone();
-        for ts in &transition_decl {
-            if cascaded_once && ts.duration > 0.0 {
-                emit_transition_requests(scene, node_id, *ts, &old_style, &new_style);
-            }
-        }
-        let node = scene.get_live_mut(node_id, "dynamic/rematch:write");
-        // 值比较短路：稳态帧 style 逐字节不变——不写不 bump（bump 会打死 render build
-        // 缓存）。变化才写 + render_input_version +1（A2 增量指纹的失效信号）。
-        if node.style != new_style {
-            node.style = new_style;
-            node.render_input_version += 1;
-        }
-        // pointer-events（style.touchable）级联终态回写 interaction——hit_test 判据在
-        // interaction（建节点时从 base_style 拷贝一次），类规则驱动的 pointer-events
-        // 只落 style 层的话永远到不了命中（mini-hud 根 pointer-events:none 不吞命中的
-        // 实锤）。运行时 set_node_touchable 写的是 base_style（重起源），此处随级联
-        // 同步不与其冲突。inline 声明路径不经过此分叉（打包期 bake 进 base_style）。
-        if node.interaction.touchable != node.style.touchable {
-            node.interaction.touchable = node.style.touchable;
-        }
-        if display_decl_seen && node.style.display_mode == DisplayMode::Flex && node.rich_text_block
-        {
-            node.rich_text_block = false;
-        }
-        node.interaction.flags.insert(NodeFlags::CASCALED);
+        finish_rematch_node(
+            scene,
+            node_id,
+            new_style,
+            inh,
+            display_decl_seen,
+            &mut set_map,
+        );
+    }
+    // var 环境 pass（#11）：tree-order 逐节点合并环境 + 延迟声明替换重放 + finish。
+    if var_layer_on {
+        var_env_pass(scene, &customs_map, &deferred_map, &mut set_map);
     }
     // 通用可继承属性传播：每节点从 base_style 独立 cascade（不读父），故继承须 rematch 后
     // 按 tree order 补一次：子未显式声明（set_map 无该 bit）→ 取父 effective 值。
     propagate_inherited(scene, &set_map, root_size, safe_insets);
+}
+
+/// rematch 每节点的收尾（立即路径与环境 pass 延迟路径共用）：C# inline_override 应用
+/// （最高优先级）→ set_map 登记 → transition 请求发射 → style 写回（值比较短路）→
+/// touchable 同步 → rich_text_block 翻转 → CASCALED 置位。
+///
+/// old_style/cascaded_once 此处从节点现读（本帧 style 只在本函数写，读到的一定是
+/// 旧值）——两条路径统一，免显式快照传递。
+fn finish_rematch_node(
+    scene: &mut Scene,
+    node_id: NodeId,
+    mut new_style: ResolvedStyle,
+    mut inh: InheritedSet,
+    display_decl_seen: bool,
+    set_map: &mut HashMap<NodeId, InheritedSet>,
+) {
+    let (old_style, cascaded_once) = {
+        let n = scene.get_live(node_id, "dynamic/rematch:old_style");
+        (
+            n.style.clone(),
+            n.interaction.flags.contains(NodeFlags::CASCALED),
+        )
+    };
+    // inline_override 应用（最高优先级，动态规则之后）。
+    // 按 inline_set 把 inline_override 字段拷进 new_style；继承子集 OR 进 set_map，
+    // 使 propagate 把含 inline 的父值传给未自设的子、且本节点自身不被父覆盖。
+    // inline_set 默认空 → 对没设 inline 的节点 no-op。
+    {
+        let n_ref = scene.get_live(node_id, "dynamic/rematch:inline_set");
+        let inline_set = n_ref.inline_set;
+        if inline_set.0 != 0 {
+            // 直传 &n_ref.inline_override（不可变借，new_style 是 local 不冲突；
+            // block 结束 n_ref 借释放，后续 set_map.insert/get_mut 不受影响）。
+            // 省 ResolvedStyle clone（含 Vec<TransitionSpec>/text_effects，每帧每 inline 节点）。
+            apply_inline_override(&mut new_style, &n_ref.inline_override, inline_set);
+            // 只把继承子集并进 set_map；非继承 bit 不影响 propagate。
+            // InheritedSet/InlineSet 同为 u64，直接掩码无需截位。
+            inh.0 |= inline_set.0 & INH_ALL_MASK;
+        }
+    }
+    set_map.insert(node_id, inh);
+    // transition 声明读自级联结果（new_style）：base/inline 烘焙经
+    // base_style.clone 进入，动态 class 规则经 apply_decl 写入——两源统一。
+    let transition_decl = new_style.transition.clone();
+    for ts in &transition_decl {
+        if cascaded_once && ts.duration > 0.0 {
+            emit_transition_requests(scene, node_id, *ts, &old_style, &new_style);
+        }
+    }
+    let node = scene.get_live_mut(node_id, "dynamic/rematch:write");
+    // 值比较短路：稳态帧 style 逐字节不变——不写不 bump（bump 会打死 render build
+    // 缓存）。变化才写 + render_input_version +1（A2 增量指纹的失效信号）。
+    if node.style != new_style {
+        node.style = new_style;
+        node.render_input_version += 1;
+    }
+    // pointer-events（style.touchable）级联终态回写 interaction——hit_test 判据在
+    // interaction（建节点时从 base_style 拷贝一次），类规则驱动的 pointer-events
+    // 只落 style 层的话永远到不了命中（mini-hud 根 pointer-events:none 不吞命中的
+    // 实锤）。运行时 set_node_touchable 写的是 base_style（重起源），此处随级联
+    // 同步不与其冲突。inline 声明路径不经过此分叉（打包期 bake 进 base_style）。
+    if node.interaction.touchable != node.style.touchable {
+        node.interaction.touchable = node.style.touchable;
+    }
+    if display_decl_seen && node.style.display_mode == DisplayMode::Flex && node.rich_text_block {
+        node.rich_text_block = false;
+    }
+    node.interaction.flags.insert(NodeFlags::CASCALED);
+}
+
+/// var 环境 pass（#11）：tree-order DFS。每节点环境 = 父环境 + 本层声明覆盖
+/// （优先级：规则命中的 --* < 行内 deferred_inline 的 --* < 运行时 SetVar——
+/// `vars::merge_env_layer` 内同层后者胜 + 胜出集递归解析）。环境就绪后重放该节点
+/// 的延迟声明（规则源按匹配序替换应用 → 行内 var 消费声明按 inline 优先级应用）
+/// 并 finish。customs-only 节点（无 typed 延迟）不重放只贡献环境。
+fn var_env_pass(
+    scene: &mut Scene,
+    customs_map: &HashMap<NodeId, Vec<(String, String)>>,
+    deferred_map: &HashMap<NodeId, Vec<Declaration>>,
+    set_map: &mut HashMap<NodeId, InheritedSet>,
+) {
+    use std::collections::HashSet;
+
+    /// 环境解析失败（环/链断）的 warn-once（scene.warnings + warned_keys 去重，
+    /// 与 list.rs 运行时警告同一机制）。
+    fn warn_var_once(scene: &mut Scene, msg: &str) {
+        if scene.warned_keys.insert(format!("var:{msg}")) {
+            scene.warnings.push(msg.to_string());
+        }
+    }
+
+    fn var_env_rec(
+        scene: &mut Scene,
+        id: NodeId,
+        parent_env: &crate::style::vars::VarEnv,
+        customs_map: &HashMap<NodeId, Vec<(String, String)>>,
+        deferred_map: &HashMap<NodeId, Vec<Declaration>>,
+        set_map: &mut HashMap<NodeId, InheritedSet>,
+        finished: &mut HashSet<NodeId>,
+    ) {
+        // 本层声明（优先级序喂入：规则 → 行内 --* → SetVar，同层后者胜）。
+        let mut layer: Vec<(String, String)> = Vec::new();
+        if let Some(c) = customs_map.get(&id) {
+            layer.extend(c.iter().cloned());
+        }
+        {
+            let n = scene.get_live(id, "dynamic/var_env_pass:layer");
+            for d in &n.base_style.deferred_inline {
+                if d.prop.starts_with("--") {
+                    layer.push((d.prop.clone(), d.value.clone()));
+                }
+            }
+        }
+        if let Some(vars) = scene.node_vars.get(&id) {
+            layer.extend(vars.iter().cloned());
+        }
+        // 环境合并（层空 → 复用父引用，零分配）。合并期 on_invalid 走 warn-once。
+        let merged;
+        let env: &crate::style::vars::VarEnv = if layer.is_empty() {
+            parent_env
+        } else {
+            let mut sink: Vec<String> = Vec::new();
+            merged = crate::style::vars::merge_env_layer(parent_env, &layer, &mut |m| {
+                sink.push(m.to_string())
+            });
+            for m in sink {
+                warn_var_once(scene, &m);
+            }
+            &merged
+        };
+        // 延迟节点重放 + finish（old/cascaded 由 finish 现读）。
+        if deferred_map.contains_key(&id) {
+            replay_deferred_node(scene, id, env, deferred_map, set_map);
+            finished.insert(id);
+        }
+        let children = scene
+            .get_live(id, "dynamic/var_env_pass:children")
+            .children
+            .clone();
+        for c in children {
+            var_env_rec(scene, c, env, customs_map, deferred_map, set_map, finished);
+        }
+    }
+
+    let roots = scene.roots.clone();
+    let mut finished: HashSet<NodeId> = HashSet::new();
+    let empty = crate::style::vars::VarEnv::new();
+    for root in roots {
+        var_env_rec(
+            scene,
+            root,
+            &empty,
+            customs_map,
+            deferred_map,
+            set_map,
+            &mut finished,
+        );
+    }
+    // 防御：不在任何 root 树上的延迟节点（游离克隆等手术中间态）——空父环境收尾，
+    // 不留未 CASCADED 节点（customs 只来自本层，环境仍可用）。
+    let strays: Vec<NodeId> = deferred_map
+        .keys()
+        .copied()
+        .filter(|id| !finished.contains(id))
+        .collect();
+    for id in strays {
+        replay_deferred_node(scene, id, &empty, deferred_map, set_map);
+    }
+}
+
+/// 延迟节点的声明重放（var 环境 pass 内，#11）：new_style 从 base 重起 →
+/// 规则源延迟声明按匹配序替换应用（inline_declared skip 重查、替换失败 warn-once
+/// 跳过）→ 行内 var 消费声明（deferred_inline 非 --*）按 inline 优先级应用 →
+/// finish_rematch_node 收尾。
+fn replay_deferred_node(
+    scene: &mut Scene,
+    id: NodeId,
+    env: &crate::style::vars::VarEnv,
+    deferred_map: &HashMap<NodeId, Vec<Declaration>>,
+    set_map: &mut HashMap<NodeId, InheritedSet>,
+) {
+    use crate::style::vars::substitute_value;
+    let mut new_style = scene
+        .get_live(id, "dynamic/replay_deferred:base")
+        .base_style
+        .clone();
+    let mut inh: InheritedSet = new_style.inherited_set;
+    let mut display_decl_seen = false;
+    if let Some(decls) = deferred_map.get(&id) {
+        for decl in decls {
+            // CSS inline > class（与立即路径同一 skip 语义）。
+            if let Some(bit) = inline_bit(&decl.prop) {
+                if new_style.inline_declared & bit != 0 {
+                    continue;
+                }
+            }
+            // 替换（失败 = 缺失/环且无 fallback → 声明 invalid 跳过，warn-once）。
+            let value = match substitute_value(&decl.value, env) {
+                Some(v) => v,
+                None => {
+                    let msg = format!(
+                        "declaration \"{}: {}\" skipped — var() did not resolve (missing \
+                         custom property or cycle without fallback)",
+                        decl.prop, decl.value
+                    );
+                    if scene.warned_keys.insert(format!("var:{msg}")) {
+                        scene.warnings.push(msg);
+                    }
+                    continue;
+                }
+            };
+            if decl.prop == "display" {
+                display_decl_seen = true;
+            }
+            if apply_decl(&mut new_style, &decl.prop, &value) {
+                if let Some(bit) = inherited_bit(&decl.prop) {
+                    inh.0 |= bit;
+                }
+            }
+        }
+    }
+    // 行内 var 消费声明（deferred_inline 的非 --* 条目）：inline 优先级——不查
+    // inline_declared skip（它们就是 inline 源本身），在规则声明之后应用。
+    {
+        let decls = scene
+            .get_live(id, "dynamic/replay_deferred:inline")
+            .base_style
+            .deferred_inline
+            .clone();
+        for decl in &decls {
+            if decl.prop.starts_with("--") {
+                continue;
+            }
+            let value = match substitute_value(&decl.value, env) {
+                Some(v) => v,
+                None => {
+                    let msg = format!(
+                        "declaration \"{}: {}\" skipped — var() did not resolve (missing \
+                         custom property or cycle without fallback)",
+                        decl.prop, decl.value
+                    );
+                    if scene.warned_keys.insert(format!("var:{msg}")) {
+                        scene.warnings.push(msg);
+                    }
+                    continue;
+                }
+            };
+            if decl.prop == "display" {
+                display_decl_seen = true;
+            }
+            if apply_decl(&mut new_style, &decl.prop, &value) {
+                if let Some(bit) = inherited_bit(&decl.prop) {
+                    inh.0 |= bit;
+                }
+            }
+        }
+    }
+    finish_rematch_node(scene, id, new_style, inh, display_decl_seen, set_map);
 }
 
 /// 按 set 位图把 `inline_override` 字段拷进 style（最高优先级覆盖）。覆盖全部 11 个继承
@@ -3375,5 +3680,306 @@ mod tests {
         );
         assert_eq!(pair.end.len(), 1);
         assert!((pair.end[0].oy - 8.0).abs() < 1e-5);
+    }
+
+    // ===== #11 运行时 CSS 注入 + custom props/var() =====
+
+    /// 多声明规则构造（rule() 只收单声明）。
+    fn rule_decls(sel: &str, decls: &[(&str, &str)]) -> DynamicRule {
+        DynamicRule {
+            selector: hand_selector(sel),
+            declarations: decls
+                .iter()
+                .map(|(p, v)| Declaration {
+                    prop: p.to_string(),
+                    value: v.to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+    const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+    const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
+
+    #[test]
+    fn runtime_rule_add_applies_immediately_next_rematch() {
+        // Add 注入 → 下一次 rematch 即生效（每帧全量，无 dirty 机制）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        let set_id =
+            crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "color", "#ff0000")]);
+        assert!(set_id > 0);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED);
+    }
+
+    #[test]
+    fn runtime_rule_same_specificity_later_add_wins() {
+        // 「与模板 CSS 同 cascade 优先级」+ 追加序 = 文档序：同 specificity 后 Add 赢。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule(".btn", "color", "#ff0000"));
+        crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "color", "#0000ff")]);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, BLUE, "后 Add 赢");
+    }
+
+    #[test]
+    fn runtime_rule_remove_restores_and_clear_empties() {
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        let set1 =
+            crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "color", "#ff0000")]);
+        let set2 =
+            crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "color", "#0000ff")]);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, BLUE);
+        // Dispose set2（后注入的胜出者）→ 回落 set1 红。
+        assert!(crate::scene::dynamic::style_sheet_remove(&mut s, set2));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED);
+        // 重复 Dispose → false；Clear 清空运行时集。
+        assert!(!crate::scene::dynamic::style_sheet_remove(&mut s, set2));
+        crate::scene::dynamic::style_sheet_clear(&mut s);
+        assert!(s.runtime_rule_sets.is_empty());
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_ne!(s.get(bid).unwrap().style.color, RED);
+        let _ = set1;
+    }
+
+    #[test]
+    fn runtime_rule_hits_inside_scoped_subtree() {
+        // 穿墙语义：全局注入规则可及 scoped（组件展开域）内部节点——打包期内容墙
+        // 不约束运行时注入（public-api §10.2）。root 打 SCOPE_ROOT，运行时全局规则
+        // 仍命中其子。
+        let mut s = btn_scene();
+        let root_id = s.roots[0];
+        let bid = btn_id(&s);
+        s.get_mut(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::SCOPE_ROOT);
+        crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "color", "#0000ff")]);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(
+            s.get(bid).unwrap().style.color,
+            BLUE,
+            "全局注入规则跨作用域命中"
+        );
+    }
+
+    #[test]
+    fn var_consumes_rule_declared_custom_prop() {
+        // .btn 同规则集里声明 --accent + color: var(--accent) → 消费生效。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(
+            &mut s,
+            rule_decls(
+                ".btn",
+                &[("--accent", "#ff0000"), ("color", "var(--accent)")],
+            ),
+        );
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED);
+    }
+
+    #[test]
+    fn var_inherits_down_tree_from_ancestor_rule() {
+        // root 规则声明 --accent；子消费 var(--accent) 继承解析（main-design：--* 跨边界传递）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule("div", "--accent", "#ff0000"));
+        push_global(&mut s, rule(".btn", "color", "var(--accent)"));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(
+            s.get(bid).unwrap().style.color,
+            RED,
+            "子从父继承 custom prop"
+        );
+        // SetVar 在子节点覆盖继承值
+        crate::scene::dynamic::node_set_var(&mut s, bid, "--accent", "#0000ff").unwrap();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, BLUE, "SetVar 最高优先级");
+        // RemoveVar 回落继承值
+        crate::scene::dynamic::node_remove_var(&mut s, bid, "--accent").unwrap();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED, "RemoveVar 回落");
+    }
+
+    #[test]
+    fn nested_chain_resolves_through_declaration_site() {
+        // --a: var(--b) 与 --b 同在 root 声明 → --a 解析为 --b 值；子消费继承解析结果。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(
+            &mut s,
+            rule_decls("div", &[("--b", "#ff0000"), ("--a", "var(--b)")]),
+        );
+        push_global(&mut s, rule(".btn", "color", "var(--a)"));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED, "嵌套链解析");
+    }
+
+    #[test]
+    fn var_missing_without_fallback_skips_declaration_with_warning() {
+        // 缺失且无 fallback：声明跳过（color 保持 base 默认）+ warn-once 进 warnings。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule(".btn", "color", "var(--missing)"));
+        s.warnings.clear();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_ne!(s.get(bid).unwrap().style.color, RED, "声明被跳过");
+        assert!(
+            s.warnings.iter().any(|w| w.contains("--missing")),
+            "warn-once 落 warnings: {:?}",
+            s.warnings
+        );
+    }
+
+    #[test]
+    fn var_fallback_literal_applies() {
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule(".btn", "color", "var(--missing, #0000ff)"));
+        s.warnings.clear();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, BLUE, "fallback 字面量生效");
+        assert!(
+            s.warnings.iter().all(|w| !w.contains("--missing")),
+            "有 fallback 不告警: {:?}",
+            s.warnings
+        );
+    }
+
+    #[test]
+    fn var_cycle_makes_declaration_invalid_but_fallback_works() {
+        // --a ↔ --b 互指：环上属性 invalid → color: var(--a) 跳过、无 fallback 的背景也跳过；
+        // 带 fallback 的消费走 fallback。环进 warnings（运行时分层 fail-loud：不抛异常、留诊断）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(
+            &mut s,
+            rule_decls("div", &[("--a", "var(--b)"), ("--b", "var(--a)")]),
+        );
+        push_global(&mut s, rule(".btn", "color", "var(--a)"));
+        push_global(
+            &mut s,
+            rule(".btn", "background-color", "var(--a, #0000ff)"),
+        );
+        s.warnings.clear();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        let st = &s.get(bid).unwrap().style;
+        assert_ne!(st.color, RED, "环 → color 声明跳过");
+        assert_eq!(
+            st.background_color,
+            Some(BLUE),
+            "环 + fallback → fallback 生效"
+        );
+        assert!(
+            s.warnings.iter().any(|w| w.contains("cycle")),
+            "环 warn-once: {:?}",
+            s.warnings
+        );
+    }
+
+    #[test]
+    fn var_layer_off_path_unchanged_for_plain_rules() {
+        // 无任何 var/custom 源 → 单阶段原路径（行为回归锚：普通规则照旧生效）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule(".btn", "color", "#ff0000"));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED);
+        assert!(s.node_vars.is_empty() && s.runtime_rule_sets.is_empty());
+    }
+
+    #[test]
+    fn deferred_inline_var_consumption_at_inline_priority() {
+        // 行内 var 消费（base_style.deferred_inline 携带 color: var(--accent)）：
+        // ① 值来自规则声明的 --accent；② inline 优先级——同 prop 的 class 规则不覆盖
+        //（css_resolve 打包期已烙 inline_declared 位，此处手工模拟完整烘焙面）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule("div", "--accent", "#ff0000"));
+        push_global(&mut s, rule(".btn", "color", "#00ff00"));
+        {
+            let n = s.get_mut(bid).unwrap();
+            n.base_style.deferred_inline.push(Declaration {
+                prop: "color".to_string(),
+                value: "var(--accent)".to_string(),
+            });
+            n.base_style.inline_declared |= crate::style::dynamic::INH_COLOR;
+        }
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(
+            s.get(bid).unwrap().style.color,
+            RED,
+            "行内 var 消费赢过 class 规则字面值"
+        );
+    }
+
+    #[test]
+    fn inline_custom_overrides_rule_custom_and_setvar_beats_both() {
+        // 优先级链：规则 --x < 行内 --x（deferred_inline）< SetVar。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(&mut s, rule(".btn", "--x", "#ff0000"));
+        push_global(&mut s, rule(".btn", "color", "var(--x)"));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED, "规则声明基线");
+        // 行内 --x 覆盖
+        s.get_mut(bid)
+            .unwrap()
+            .base_style
+            .deferred_inline
+            .push(Declaration {
+                prop: "--x".to_string(),
+                value: "#00ff00".to_string(),
+            });
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, GREEN, "行内覆盖规则");
+        // SetVar 最高
+        crate::scene::dynamic::node_set_var(&mut s, bid, "--x", "#0000ff").unwrap();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, BLUE, "SetVar 最高");
+        // RemoveVar 回落行内值（不是规则值——SetVar 只撤自己）
+        crate::scene::dynamic::node_remove_var(&mut s, bid, "--x").unwrap();
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, GREEN, "回落行内");
+    }
+
+    #[test]
+    fn runtime_injected_rule_can_declare_custom_props() {
+        // Add 通道注入 --x 声明 + 消费规则（主题热切换的最小闭环）。
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        let set_a = crate::scene::dynamic::style_sheet_add(
+            &mut s,
+            vec![rule_decls("div", &[("--accent", "#ff0000")])],
+        );
+        crate::scene::dynamic::style_sheet_add(
+            &mut s,
+            vec![rule(".btn", "color", "var(--accent)")],
+        );
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(s.get(bid).unwrap().style.color, RED);
+        // Dispose 声明集 → --accent 消失 → 消费声明跳过（颜色回默认）
+        crate::scene::dynamic::style_sheet_remove(&mut s, set_a);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_ne!(s.get(bid).unwrap().style.color, RED);
+    }
+
+    #[test]
+    fn setvar_rejects_non_custom_name_and_dead_node() {
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        assert!(crate::scene::dynamic::node_set_var(&mut s, bid, "accent", "#fff").is_err());
+        assert!(crate::scene::dynamic::node_set_var(&mut s, bid, "--", "#fff").is_err());
+        let dead = NodeId(999_999);
+        assert!(crate::scene::dynamic::node_set_var(&mut s, dead, "--x", "1").is_err());
+        assert!(crate::scene::dynamic::node_remove_var(&mut s, dead, "--x").is_err());
     }
 }

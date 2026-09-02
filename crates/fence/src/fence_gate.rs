@@ -200,6 +200,11 @@ fn validate_inline_style(
         if prop.is_empty() {
             continue;
         }
+        // `--*` 自定义属性（#11）：值近乎自由（css_resolve 做 var() 形状校验并存
+        // deferred_inline），本门只放行名字。
+        if crate::var_check::is_custom_prop(prop) {
+            continue;
+        }
         if find_css_prop(prop).is_none() && find_shorthand(prop).is_none() {
             let hint = unsupported_hint(prop)
                 .unwrap_or("not supported by fence — remove or replace with a supported property.");

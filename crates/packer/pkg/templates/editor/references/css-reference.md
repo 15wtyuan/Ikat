@@ -164,6 +164,39 @@ Properties that do NOT exist in the fence (using any of these is a
 - `clip-path`
 <!-- fence-sync:css-not-supported-end -->
 
+## Custom properties and `var()`
+
+Declare theme tokens as CSS custom properties and consume them with
+`var()` in any property's value:
+
+```css
+.theme { --accent: #2a5a75; --line-strong: var(--accent); }
+.card  { color: var(--accent); border-color: var(--line-strong, #888); }
+```
+
+- **Sources (web semantics, three)**: `<style>` rule declarations,
+  inline `style="--accent: #f00"`, and the runtime C# API
+  `Style.SetVar` (highest priority; `RemoveVar` falls back to the CSS
+  value). The HTML attribute `--*` is passthrough data only (matchable
+  by `[attr]` selectors) — it is NOT a var() source.
+- `var(--x, fallback)` fallback is supported and may nest `var()`.
+  Values containing `var()` skip literal validation at build time (the
+  final value is only known at runtime); malformed shapes (unbalanced
+  parens, non-`--` names) are build errors.
+- Custom properties inherit down the tree and cross component
+  boundaries; resolution happens at the declaring element (a `--a:
+  var(--b)` resolves `--b` in the declaring element's environment).
+- **Cycles and missing targets**: a reference cycle (`--a ↔ --b`) or a
+  broken chain makes that property invalid — declarations using it are
+  skipped (fallback still applies) with a runtime warn-once log, never
+  an exception. The build warns for cycles statically visible within
+  one `<style>` block or one `style` attribute
+  (`FenceCustomPropCycle`). A missing target without fallback is legal
+  (runtime `SetVar` may inject it later).
+- Runtime injection (`UIContext.StyleSheet.Add`) accepts the same
+  selector+declaration subset INCLUDING `--*` / `var()`; at-rules are
+  rejected (parse failure throws `UIStyleException` with line/column).
+
 ## Animations
 
 Define with `@keyframes <name> { from {...} to {...} 50% {...} }` inside

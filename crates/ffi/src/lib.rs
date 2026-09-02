@@ -31,6 +31,7 @@ mod node_setters;
 mod resources;
 mod scroll;
 mod stage;
+mod style_sheet;
 mod text;
 
 // 路径稳定：crate 内测试（use crate::*）与外部消费者经根路径取全部导出面。
@@ -45,6 +46,7 @@ pub use node_setters::*;
 pub use resources::*;
 pub use scroll::*;
 pub use stage::*;
+pub use style_sheet::*;
 pub use text::*;
 
 use ikat_core::stage::Stage;
@@ -97,6 +99,11 @@ pub struct StageHandle {
     dump_blob: CString,     // dump_scene 缓存（Rust 拥有）
     tree_blob: CString,     // dump_tree 缓存（Rust 拥有）
     warnings_blob: CString, // take_warnings 缓存（Rust 拥有）
+    /// StyleSheet.Add 最近一次解析失败的消息缓存（#11；Rust 拥有，last_error 返回其指针）。
+    style_err_blob: CString,
+    /// 同上：失败定位（1-based 行列，diag.location 拷贝；无失败 = 0/0）。
+    style_err_line: u32,
+    style_err_col: u32,
 }
 
 #[cfg(test)]

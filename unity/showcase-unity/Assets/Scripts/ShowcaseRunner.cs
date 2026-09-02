@@ -31,6 +31,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-anim", "m2-animation"),
         ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
+        ("nav-rtcss", "runtime-css"),
         ("nav-tree", "tree"),
         ("nav-fx", "effects"),
         ("nav-world", "world"),
@@ -53,6 +54,9 @@ public class ShowcaseRunner : MonoBehaviour
     IkatStageDriver _driver;
     Container _current;
     string _shown;
+
+    // runtime-css 页（#11）当前 Add 句柄集——离页全 Dispose（注入规则不跨页泄漏）。
+    readonly List<IDisposable> _rtRegs = new();
 
     // ── character 页 3D 展位（NativeHost 同屏渲染验证） ──
     Container _nativeSlot;         // 绑定目标（native-slot div；Unbind 需同节点）
@@ -178,6 +182,7 @@ public class ShowcaseRunner : MonoBehaviour
         TeardownEffectsStage();     // 上一页若是 effects：解绑全部粒子槽 + 销毁实例
         TeardownWorldStage();       // 上一页若是 world：清锚点登记 + 销毁 3D 舞台/小窗
         TeardownStressPage();       // 上一页若是 stress：清 500 锚点登记
+        TeardownRuntimeCssPage();   // 上一页若是 runtime-css：Dispose 注入句柄
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -1101,6 +1106,102 @@ public class ShowcaseRunner : MonoBehaviour
         _stressHidden = false;
     }
 
+    /// 离开 runtime-css 页：Dispose 全部 Add 句柄（注入规则不跨页泄漏；主题 SetVar
+    /// 随页面节点销毁自然失效——node_vars 挂节点）。
+    void TeardownRuntimeCssPage()
+    {
+        foreach (var r in _rtRegs) r?.Dispose();
+        _rtRegs.Clear();
+    }
+
+    /// runtime-css 页（#11）：StyleSheet.Add/Dispose/Clear + SetVar/RemoveVar + var() 消费面。
+    /// 判据（肉眼强信号）：目标块变色/复原、同优先后 Add 赢、非法 CSS 异常读数带行列、
+    /// chips 组整组翻色/回落、嵌套链 swatch 变色、行内源 chip 恒橙（打包期通路回归）。
+    /// 环 warning 判据不在 PlayMode（走 ikat check 输出，agent 自测）。
+    void WireRuntimeCssPage(Container page)
+    {
+        var ui = _driver.Context;
+        var ss = ui.StyleSheet;
+        if (!page.TryGet<TextElement>("rt-status", out var status)) return;
+        void Say(string s) { status.TextContent = s; Debug.Log($"[Showcase] rt-css: {s}"); }
+        void DropRegs()
+        {
+            foreach (var r in _rtRegs) r?.Dispose();
+            _rtRegs.Clear();
+        }
+
+        // ① Add 生效 + Dispose 复原：注入 .rt-target 红规则。
+        if (page.TryGet<Button>("rt-add", out var addBtn))
+            addBtn.Clicked += () =>
+            {
+                DropRegs();
+                _rtRegs.Add(ss.Add(".rt-target { background-color: #c0392b; border-color: #c0392b; }"));
+                Say("已注入红");
+            };
+        if (page.TryGet<Button>("rt-dispose", out var disBtn))
+            disBtn.Clicked += () =>
+            {
+                DropRegs();
+                Say("已撤销");
+            };
+        // ② 同 specificity 后 Add 赢：连注绿→橙两条，橙（后者）胜出；撤销后回灰。
+        if (page.TryGet<Button>("rt-later", out var laterBtn))
+            laterBtn.Clicked += () =>
+            {
+                DropRegs();
+                _rtRegs.Add(ss.Add(".rt-target { background-color: #2ecc71; border-color: #2ecc71; }"));
+                _rtRegs.Add(ss.Add(".rt-target { background-color: #f39c12; border-color: #f39c12; }"));
+                Say("后Add赢·橙");
+            };
+        // ⑥ Clear 全清（pkg 规则不动——chips 边框色是 pkg 规则的 var 消费，Clear 后仍在）。
+        if (page.TryGet<Button>("rt-clear", out var clearBtn))
+            clearBtn.Clicked += () =>
+            {
+                DropRegs();
+                ss.Clear();
+                Say("已Clear");
+            };
+        // ③ 非法 CSS：at-rule 在注入通道全拒 → UIStyleException 带行列读数。
+        if (page.TryGet<Button>("rt-bad", out var badBtn))
+            badBtn.Clicked += () =>
+            {
+                try
+                {
+                    ss.Add("@keyframes fade { from { opacity: 0 } }");
+                    Say("未抛异常?");
+                }
+                catch (UIStyleException ex)
+                {
+                    Say($"UIStyleException L{ex.Line}C{ex.Column}");
+                }
+            };
+        // ④ SetVar 主题 + RemoveVar 回落：--rt-accent 在 .rt-page 规则声明（深蓝），
+        //    SetVar 同节点覆盖 → 整组 chips 翻亮青；RemoveVar 回落。
+        if (page.TryGet<Container>("rt-page", out var rtPage))
+        {
+            if (page.TryGet<Button>("rt-theme", out var themeBtn))
+                themeBtn.Clicked += () =>
+                {
+                    rtPage.Style.SetVar("--rt-accent", new IkatColor(0.37f, 0.71f, 0.83f, 1f));
+                    Say("主题·亮青");
+                };
+            if (page.TryGet<Button>("rt-untheme", out var unthemeBtn))
+                unthemeBtn.Clicked += () =>
+                {
+                    rtPage.Style.RemoveVar("--rt-accent");
+                    Say("已回落");
+                };
+            // ⑤ 嵌套链：--rt-chain-a 吃 --rt-chain-b（页面 CSS 声明）；SetVar --chain-b
+            //    在声明节点覆盖 → 链解析传播，swatch 变红。
+            if (page.TryGet<Button>("rt-chain", out var chainBtn))
+                chainBtn.Clicked += () =>
+                {
+                    rtPage.Style.SetVar("--rt-chain-b", new IkatColor(0.75f, 0.22f, 0.17f, 1f));
+                    Say("链·红");
+                };
+        }
+    }
+
     /// 克隆源 controller 的 Idle 态 clip、剥掉根 path（""）的 position/rotation 曲线，
     /// 内存重建单态 controller。剥离的曲线只影响根 transform 摆位（由归一化逻辑接管），
     /// 骨骼动画曲线原样保留。
@@ -1372,6 +1473,10 @@ public class ShowcaseRunner : MonoBehaviour
                 selRead.TextContent = tree.SelectedItem != null ? OwnTreeLabel(tree.SelectedItem) : "（空）";
                 expRead.TextContent = countExpanded().ToString();
             }
+        }
+        if (pageName == "runtime-css")
+        {
+            WireRuntimeCssPage(page);
         }
         if (pageName == "lab")
         {

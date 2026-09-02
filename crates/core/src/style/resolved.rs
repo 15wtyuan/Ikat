@@ -738,6 +738,16 @@ pub struct ResolvedStyle {
     /// overwrite the inline value (priority inverted). rematch skips class declarations
     /// whose `inline_bit` is set here, restoring inline > class.
     pub inline_declared: u64,
+
+    /// 行内声明的**延迟解析面**（#11 custom props）：`--x: val` 自定义属性声明 +
+    /// 含 `var()` 的行内值声明。打包期不烘焙进 typed 字段（终值运行时在 var 环境
+    /// 才能定），原样字符串存此、随 base_style 进 pkg（v55）。运行时 rematch 的
+    /// var 层消费：`--*` 进 var 环境（行内优先级，高于样式表规则声明的同名属性、
+    /// 低于 C# SetVar）；var 值声明在环境解析后按 inline 优先级重放（class 规则
+    /// 不覆盖——对应 `inline_declared` 位已在打包期标记）。空 Vec = 无（绝大多数
+    /// 节点），克隆成本为零分配。
+    #[serde(default)]
+    pub deferred_inline: Vec<crate::style::dynamic::Declaration>,
 }
 
 /// box-shadow 每类层数硬限。render 合成节点把层类型+层内 idx 编码进 node_id high byte
@@ -849,6 +859,7 @@ impl Default for ResolvedStyle {
             text_effects: Vec::new(),
             inherited_set: InheritedSet::default(),
             inline_declared: 0,
+            deferred_inline: Vec::new(),
         }
     }
 }

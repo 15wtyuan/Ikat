@@ -61,6 +61,9 @@ pub extern "C" fn ikat_stage_new_bound(h: *mut HostHandle, w: f32, hgt: f32) -> 
             dump_blob: std::ffi::CString::new("").unwrap(),
             tree_blob: std::ffi::CString::new("").unwrap(),
             warnings_blob: std::ffi::CString::new("").unwrap(),
+            style_err_blob: std::ffi::CString::new("").unwrap(),
+            style_err_line: 0,
+            style_err_col: 0,
         }))
     })
 }

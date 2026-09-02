@@ -29,6 +29,7 @@ pub fn sync_bindings() -> Result<(), Box<dyn std::error::Error>> {
         "animation.rs",
         "list.rs",
         "resources.rs",
+        "style_sheet.rs",
     ];
     for m in &ffi_modules {
         let p = ffi_src.join(m);

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **运行时 CSS 与 custom props（#11）**：`UIContext.StyleSheet.Add/Clear` 接通——
+  运行时注入 CSS 规则（围栏选择器+声明子集，含 `--*` 自定义属性与 `var()` 值；
+  at-rule 一律拒），解析失败抛 `UIStyleException` 带 `Line`/`Column`。注入规则
+  与模板 CSS 同 cascade 优先级（同 specificity 后 Add 赢）、全局跨作用域命中
+  （打包期组件内容墙不约束运行时注入），下一帧生效；`Add` 返回 `IDisposable`
+  句柄、Dispose 撤销。`Style.SetVar` ×4（`Length`/`IkatColor`/`float`/`string`）
+  / `RemoveVar` 接通——CSS 自定义属性最高优先级层，`RemoveVar` 回落 CSS 声明值。
+  CSS 侧（打包期）同步开 `--x: val` 声明（样式表 + 行内 style）与 `var(--x[, fallback])`
+  消费（任意属性值位、嵌套引用、继承跨组件边界）；引用环打包期 warning
+  （`FenceCustomPropCycle`）、运行时 invalid 回退 + warn-once（不抛异常）。
 - **ListView 多模板（#12）**：`TemplateSelector` 从纯 C# 缓存升级为真正参与克隆——
   list 下可声明多个 `<template id>` 蓝图，`GetTemplate` 取出塞进 selector lambda
   按 index 逐项分派。严格派语义：selector 设了即全权（返 null / 裸包组件模板抛

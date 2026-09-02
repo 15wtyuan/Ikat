@@ -740,6 +740,20 @@ pub struct Scene {
     /// 运行时伪类重匹配规则表（带作用域，Shadow DOM 风格）。默认空；instantiate 时填
     /// （模板规则绑定实例根 scope_root），inline 路径空。不进 pkg（pkg 用无 scope 的 DynamicRuleTable）。
     pub dynamic_rules: crate::style::dynamic::ScopedRuleTable,
+    /// 运行时注入规则集（UIContext.StyleSheet 逃生舱，#11）。每集带单调 id（C# Dispose
+    /// 撤销句柄按 id 定位）。全局规则语义：scope_root = INVALID 跨作用域命中——运行时
+    /// 注入是程序员工具非 AI 编辑面，**打包期组件内容墙不约束运行时注入**（字面匹配
+    /// 可及组件展开内部节点，public-api §10.2 明示）。收集时追加在 pkg 规则之后参与
+    /// specificity 稳定排序 → 同 specificity 后 Add 赢（「与模板 CSS 同 cascade 优先级、
+    /// 按文档序」契约）。运行时态，不进 pkg。
+    pub runtime_rule_sets: Vec<crate::style::dynamic::RuntimeRuleSet>,
+    /// 下一个注入集 id（单调递增，从 1 起；0 保留 = 无句柄）。
+    pub next_rule_set_id: u64,
+    /// 运行时 SetVar 层（#11）：NodeId → (name, value) 序列（同名后者胜）。custom prop
+    /// 最高优先级来源（高于行内 style 与样式表规则声明）；RemoveVar 撤销本层条目、
+    /// 回落 CSS 声明值。值是 CSS 值字符串（C# typed 重载在投影层格式化）。随
+    /// free_node_slot 联动清理。运行时态，不进 pkg。
+    pub node_vars: std::collections::HashMap<NodeId, Vec<(String, String)>>,
     /// 当前焦点节点（单一全局，照 fgui Stage.focus）。None=无焦点。
     pub focused_node: Option<NodeId>,
     /// 每节点累计世界矩阵（compute_world_transforms 填）。index = NodeId.index()。运行时态，不进 pkg。
@@ -908,6 +922,7 @@ impl Scene {
         self.image_srcs.remove(&id);
         self.link_hrefs.remove(&id);
         self.mounts.remove(&id);
+        self.node_vars.remove(&id);
     }
 
     /// 从扁平 entries（DFS 先序）建 Node 树。`parent_idx` 指向 entries 下标，`None` = 根。

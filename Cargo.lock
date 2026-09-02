@@ -1691,6 +1691,7 @@ version = "0.1.0"
 dependencies = [
  "csbindgen",
  "ikat_core",
+ "ikat_fence",
  "taffy",
 ]
 

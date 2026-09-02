@@ -1046,6 +1046,57 @@ impl Stage {
             .and_then(|s| crate::scene::dynamic::has_class(s, node, name))
     }
 
+    /// 注入一批运行时全局规则（StyleSheet.Add，#11）。规则结构由 FFI 层解析（fence），
+    /// core 只收 `DynamicRule`。返回撤销句柄 id。scene 不存在则先建空骨架
+    ///（ensure_scene——同 create_root 先例：Add 允许先于 instantiate 调用）。
+    pub fn style_sheet_add_rules(
+        &mut self,
+        rules: Vec<crate::style::dynamic::DynamicRule>,
+    ) -> Result<u64, String> {
+        self.ensure_scene();
+        Ok(crate::scene::dynamic::style_sheet_add(
+            self.scene.as_mut().expect("ensure_scene 后必有 scene"),
+            rules,
+        ))
+    }
+
+    /// 撤销一批注入规则（Add 句柄的 Dispose）。句柄不存在 / 无 scene → Err。
+    pub fn style_sheet_remove(&mut self, set_id: u64) -> Result<(), String> {
+        let removed = crate::scene::dynamic::style_sheet_remove(
+            self.scene.as_mut().ok_or("no scene")?,
+            set_id,
+        );
+        if removed {
+            Ok(())
+        } else {
+            Err(format!("rule set {set_id} not found (already disposed?)"))
+        }
+    }
+
+    /// 清空全部运行时注入规则（StyleSheet.Clear；pkg 规则不动）。无 scene = 无可清，
+    /// no-op Ok（Clear 允许任意时序调用）。移除单句柄见 [`Self::style_sheet_remove`]。
+    pub fn style_sheet_clear(&mut self) -> Result<(), String> {
+        if let Some(scene) = self.scene.as_mut() {
+            crate::scene::dynamic::style_sheet_clear(scene);
+        }
+        Ok(())
+    }
+
+    /// 运行时 SetVar（#11，custom prop 最高优先级层）。name 须 `--` 前缀。
+    pub fn node_set_var(&mut self, node: NodeId, name: &str, value: &str) -> Result<(), String> {
+        crate::scene::dynamic::node_set_var(
+            self.scene.as_mut().ok_or("no scene")?,
+            node,
+            name,
+            value,
+        )
+    }
+
+    /// 运行时 RemoveVar（#11，撤销 SetVar 条目回落 CSS 声明值）。
+    pub fn node_remove_var(&mut self, node: NodeId, name: &str) -> Result<(), String> {
+        crate::scene::dynamic::node_remove_var(self.scene.as_mut().ok_or("no scene")?, node, name)
+    }
+
     /// 设渲染复用键（虚拟列表 slot）。node 无效 → no-op。
     pub fn set_reuse_key(&mut self, node: NodeId, key: u32) {
         if let Some(scene) = self.scene.as_mut() {

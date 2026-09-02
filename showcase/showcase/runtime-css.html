@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat 靶子冻结 Showcase · 运行时 CSS</title>
+  <style>
+  /* runtime-css 页（#11）：StyleSheet.Add/Clear + SetVar/RemoveVar + var() 消费面。
+     页面自身 CSS 即消费面样本：--rt-accent（规则源声明，SetVar 覆盖/RemoveVar 回落）、
+     --rt-chain-b → --rt-chain-a（嵌套链）、行内 --rt-inline（style 属性双路径：
+     行内声明 + 行内 var 消费）。判据 = 肉眼强信号（色块翻转 + 读数翻转）。 */
+  .root {display:flex; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; flex-direction:row; }
+  .sidebar {display:flex;flex-direction:column; width:280px; background-color:rgba(21,36,51,0.72); padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-style:solid; border-color:#2a5a75; }
+  .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
+  .side-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:8px; }
+  .side-desc { color:#6c7080; font-size:12px; margin-bottom:20px; }
+  .readout-label { color:#6c7080; font-size:12px; margin-top:14px; }
+  .readout { color:#8ec5d8; font-size:15px; }
+  .api-row {display:flex; flex-direction:row; gap:10px; margin-top:18px; }
+  .api-btn { color:#e0e6ec; font-size:13px; padding:8px 14px; border-radius:8px; background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; }
+  .api-btn:hover { border-color:#5fb4d4; color:#5fb4d4; }
+  /* ── 消费面 ── */
+  .rt-page {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:16px; }
+  .main-title { color:#e0e6ec; font-size:36px; font-weight:700; }
+  .section-label { color:#6c7080; font-size:13px; margin-top:16px; }
+  /* 规则源 custom props：主题色（SetVar 覆盖它）+ 嵌套链（--chain-a 吃 --chain-b）。 */
+  .rt-page { --rt-accent: #2a5a75; --rt-chain-b: #8ec5d8; --rt-chain-a: var(--rt-chain-b); }
+  /* Add 的目标块：默认灰；运行时注入 .rt-target 规则换色。 */
+  .rt-target {display:flex; width:200px; height:80px; background-color:#7f8c8d; border-radius:10px; border-width:0 0 0 3px; border-style:solid; border-color:#1a2f45; }
+  .rt-target-label { color:#e0e6ec; font-size:14px; align-self:center; margin:0 0 0 16px; }
+  /* var 消费者组：边框 + 文字色吃 --rt-accent，SetVar 后整组翻色。 */
+  .rt-chip-row {display:flex; flex-direction:row; gap:12px; }
+  .rt-chip {display:flex; width:120px; height:48px; align-items:center; justify-content:center; background-color:rgba(21,36,51,0.72); border-width:0 0 0 3px; border-style:solid; border-color:var(--rt-accent); border-radius:8px; }
+  .rt-chip-text { color:var(--rt-accent); font-size:13px; font-weight:700; }
+  /* 嵌套链 swatch：background 吃 --rt-chain-a（var(--rt-chain-b) 的解析结果）。 */
+  .rt-chain-swatch {display:flex; width:120px; height:48px; background-color:var(--rt-chain-a); border-radius:8px; }
+  /* 行内源 chip：--rt-inline 行内声明 + 行内 var 消费（deferred_inline 双路径）。 */
+  .rt-inline-chip {display:flex; width:120px; height:48px; align-items:center; justify-content:center; background-color:rgba(21,36,51,0.72); border-radius:8px; font-size:13px; font-weight:700; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="sidebar">
+      <button class="side-back" id="back-home">← 返回首页</button>
+      <div class="side-title">运行时 CSS</div>
+      <div class="side-desc">StyleSheet.Add/Clear · SetVar · var()</div>
+      <div class="readout-label">操作读数</div>
+      <div class="readout" id="rt-status">待命</div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-add">注入规则</button>
+        <button class="api-btn" id="rt-dispose">撤销注入</button>
+      </div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-later">同优先后赢</button>
+        <button class="api-btn" id="rt-clear">Clear 全清</button>
+      </div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-bad">非法 CSS</button>
+      </div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-theme">SetVar 主题</button>
+        <button class="api-btn" id="rt-untheme">RemoveVar</button>
+      </div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-chain">嵌套链注入</button>
+      </div>
+    </div>
+    <div class="rt-page" id="rt-page">
+      <div class="main-title">运行时 CSS 与 custom props</div>
+      <div class="section-label">Add 目标块（注入变红 / 后 Add 赢变橙 / 撤销回落灰）</div>
+      <div class="rt-target"><span class="rt-target-label">目标块</span></div>
+      <div class="section-label">var(--rt-accent) 消费者（SetVar 后整组翻亮青）</div>
+      <div class="rt-chip-row">
+        <div class="rt-chip"><span class="rt-chip-text">边框+文字</span></div>
+        <div class="rt-chip"><span class="rt-chip-text">同步变色</span></div>
+        <div class="rt-chip"><span class="rt-chip-text">三个一组</span></div>
+      </div>
+      <div class="section-label">嵌套链 swatch（--chain-a 吃 --chain-b，链注入变红）</div>
+      <div class="rt-chain-swatch"></div>
+      <div class="section-label">行内源 chip（style 属性声明 + 消费，恒橙色）</div>
+      <div class="rt-inline-chip" style="--rt-inline: #e67e22; color: var(--rt-inline);">行内源</div>
+    </div>
+  </div>
+</body>
+</html>
