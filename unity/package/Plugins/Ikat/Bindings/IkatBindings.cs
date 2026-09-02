@@ -1458,11 +1458,22 @@ namespace Ikat.Bindings
         internal static extern int ikat_list_set_item_count(StageHandle* h, ulong node, int count);
 
         /// <summary>
-        ///  设 ListView 的模板根（覆盖 enter_data_driven 备份的备用 li）。业务通过
-        ///  ListView.ItemTemplate 设——指向场景内克隆出的模板子树根。无 ListState 条目 → -1。
+        ///  设 ListView 的默认模板（覆盖 enter 备份的备用 li / 多模板 default_bp）。业务通过
+        ///  ListView.ItemTemplate 设——指向场景内子树根（GetTemplate 的模板 li / Instantiate 的
+        ///  游离克隆）。enter 前调用会被缓冲（Scene::pending_lists），enter 时消费——修复旧路径
+        ///  「enter 前设被静默丢弃」。源节点死且从未收养 → -1。
         /// </summary>
         [DllImport(__DllName, EntryPoint = "ikat_list_set_template", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int ikat_list_set_template(StageHandle* h, ulong node, ulong template_node);
+
+        /// <summary>
+        ///  推 per-item 模板映射（TemplateSelector 求值结果批量送达）。`src_ids[i]` = item
+        ///  (start+i) 的模板源节点 id（GetTemplate 的模板 li / Instantiate 的游离克隆根）。
+        ///  enter 前缓冲、enter 后即时解析：模板变了的 item 清已测高度 + park 旧蓝图 active slot，
+        ///  下帧以正确蓝图重新物化。源死且未注册 → -1；null 句柄/指针 → -1；成功 → 0。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_list_set_item_templates", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_list_set_item_templates(StageHandle* h, ulong node, int start, ulong* src_ids, int len);
 
         /// <summary>
         ///  拉取本帧待绑定 slot 列表（SOA）。C# tick 前调：遍历所有 ListView 的 pending_binds，

@@ -13,25 +13,41 @@ pub fn execute_visible(scene: &mut Scene, ops: Vec<PendingOps>) {
 }
 
 fn execute_one(scene: &mut Scene, op: PendingOps) {
-    let (template_root, list_ordinal, tail_spacer) = {
+    let (list_ordinal, tail_spacer) = {
         let ls = match scene.lists.get(op.list_ul) {
             Some(ls) => ls,
             None => return,
         };
-        (ls.template_root, ls.list_ordinal, ls.tail_spacer)
-    };
-    let tpl = match template_root {
-        Some(t) => t,
-        None => return,
+        (ls.list_ordinal, ls.tail_spacer)
     };
     for item_index in &op.to_bind {
-        // 优先复用 parked slot（留挂 ul，只翻 display + 换绑，零克隆零重建）；
-        // 同 item 的 parked slot 最优（内容本就对得上），否则任取一个。
+        // 本 item 的蓝图（多模板分派；单模板列表恒 default_bp）。
+        let bp_idx = scene
+            .lists
+            .get(op.list_ul)
+            .map(|ls| ls.bp_of(*item_index))
+            .unwrap_or(0);
+        let bp_master = {
+            let ls = scene.lists.get(op.list_ul).unwrap();
+            match ls.blueprints.get(bp_idx as usize) {
+                Some(b) => b.root,
+                None => return, // 无蓝图（异常态）：跳过本 item，不 panic。
+            }
+        };
+        // 优先复用 parked slot（留挂 ul，只翻 display + 换绑，零克隆零重建）。
+        // 池按蓝图分组：先同蓝图 + 同 item（内容本就对得上），再同蓝图任取——跨蓝图
+        // 复用会把 A 模板的子树拿来显示 B 模板的内容，形状对不上。
         let parked_pos = scene.lists.get(op.list_ul).and_then(|ls| {
             ls.slots
                 .iter()
-                .position(|s| s.parked && s.item_index == *item_index)
-                .or_else(|| ls.slots.iter().position(|s| s.parked))
+                .position(|s| {
+                    s.parked && s.template_idx as u32 == bp_idx && s.item_index == *item_index
+                })
+                .or_else(|| {
+                    ls.slots
+                        .iter()
+                        .position(|s| s.parked && s.template_idx as u32 == bp_idx)
+                })
         });
         let node = match parked_pos {
             Some(pos) => {
@@ -46,9 +62,9 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
                 let _ = crate::scene::dynamic::unset_inline_override(scene, node, "display");
                 node
             }
-            // 无 parked 可用 → 克隆扩容（高水位只增）。
+            // 同蓝图池空 → 从该蓝图克隆扩容（高水位只增）。
             None => {
-                let node = crate::scene::dynamic::clone_node_recursive(scene, tpl);
+                let node = crate::scene::dynamic::clone_node_recursive(scene, bp_master);
                 // clone_node_recursive 不复制 inline_override / inline_set——grown slot 从模板
                 // 的"干净态"开始，无 display:none 泄漏风险（对比 unpark 路径复用 parked slot 时
                 // 显式 unset_inline_override 清 display 便签）。
@@ -74,6 +90,7 @@ fn execute_one(scene: &mut Scene, op: PendingOps) {
                         node,
                         item_index: *item_index,
                         parked: false,
+                        template_idx: bp_idx as u16,
                     });
                 }
                 node

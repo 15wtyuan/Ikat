@@ -314,13 +314,21 @@ expressed in HTML).
 - Touching none of them keeps static mode: listitems are real content
   under the normal Container API.
 
-Item template priority: (1) runtime `ItemTemplate` or
-`TemplateSelector` (fetch design-time templates with
-`view.GetTemplate("name")` and return them from the selector lambda);
-(2) a single `<template id>` under the list — used automatically;
-multiple `<template id>` without a selector throws
+Item template priority: (1) runtime `TemplateSelector` (per-item
+explicit; fetch design-time templates with `view.GetTemplate("name")`
+and return them from the selector lambda) over (1b) `ItemTemplate`
+(the default blueprint); (2) a single `<template id>` under the list —
+used automatically; multiple `<template id>` without a selector throws
 `UIContractException`; (3) the first design-time listitem structure as
 fallback template.
+
+`TemplateSelector` is strict: once set it answers EVERY index —
+returning null throws `UIContractException` (return the default
+`UITemplate` explicitly if you want a fallback). Sources must be
+in-scene subtrees (`GetTemplate` results or `Instantiate()` clones);
+raw package-component templates need `Instantiate()` first. Changing
+the selector (or `Notify*` re-evaluation) re-materializes affected
+items on the new blueprint.
 
 `ItemExitClass`: when set, `NotifyRemoved` items get the class and are
 recycled after `AnimationEnd`.

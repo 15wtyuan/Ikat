@@ -1,9 +1,19 @@
 use super::pool::encode_reuse_key;
-use super::state::{HeightCache, ListState, Slot, INITIAL_SLOTS};
+use super::state::{Blueprint, ListState, INITIAL_SLOTS};
+use super::templates::check_multi_template_selection;
 use super::viewport::ancestor_pane;
 use crate::scene::node::{NodeFlags, NodeId, NodeKind, Scene};
 
-/// 进入数据驱动模式：备份模板（兜底=第一个设计期 li）+ 建 spacer + 清空设计期 li + 建 ListState。
+/// 进入数据驱动模式：备份全部模板蓝图（`<template>` 子逐个收养 + 兜底=第一个设计期 li）
+/// + 建 spacer + 清空设计期子 + 建 ListState。
+///
+/// 多模板（多个 `<template>` 子）合法——须已给出选择（ItemTemplate override 或
+/// TemplateSelector 的 per-item 映射，均经 `Scene::pending_lists` 缓冲到此消费）；
+/// 多模板无选择 → Err（FFI 的 enter 前预检 `check_multi_template_selection` 同判，
+/// 双保险——core 直调方（测试）也拦得住）。
+///
+/// 失败路径不留半态：pending 解析在清场**之前**完成，任一步 Err 时清理已克隆的游离
+/// master 后返回，ul 子树原样。
 ///
 /// ul 高度必须 auto（否则虚拟化无法撑出可滚内容）；非 auto → Err。祖先 flex 纵向拉伸
 /// 同样钉死高度（warning 不 Err——短列表拉伸无害，见 [`ul_flex_stretch_warning`]）。
@@ -12,44 +22,46 @@ pub fn enter_data_driven(
     ul: NodeId,
     list_ordinal: u32,
 ) -> Result<(), String> {
-    // 短期不可变借：校验 kind + height + 解析模板来源（<template> 子优先，
+    // 短期不可变借：校验 kind + height + 解析模板源（全部 <template> 子的首个 ListItem，
     // 兜底设计期 li）。不能跨 clone_subtree 持有 scene 借（clone_subtree 也要 &mut stage）。
-    let (blueprint, all_children, stretch_warn): (Option<NodeId>, Vec<NodeId>, Option<String>) = {
+    let (bp_sources, all_children, stretch_warn): (Vec<NodeId>, Vec<NodeId>, Option<String>) = {
         let scene = stage.scene.as_ref().ok_or("no scene")?;
         if scene.get(ul).map(|n| n.kind) != Some(NodeKind::ListView) {
             return Err("enter_data_driven: node is not a ListView".into());
         }
         check_ul_height_auto(scene, ul)?;
+        check_multi_template_selection(scene, ul)?;
         let stretch_warn = ul_flex_stretch_warning(scene, ul);
         let ul_node = scene.get(ul).unwrap();
-        // <template> 子（NodeKind::Template）：要求恰好一个，多个是契约违反。
-        let templates: Vec<NodeId> = ul_node
-            .children
-            .iter()
-            .copied()
-            .filter(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::Template))
-            .collect();
-        if templates.len() > 1 {
-            return Err("ListView 下有多个 <template>：自动采用要求恰好一个（spec §6.3）".into());
+        // 每个 <template> 子（NodeKind::Template）贡献一个蓝图：其内首个 ListItem
+        //（packer 保留 template 子树，缩进空白 TextNode 被 find-by-kind 自然跳过）。
+        let mut bp_sources: Vec<NodeId> = Vec::new();
+        for &c in &ul_node.children {
+            if scene.get(c).map(|cn| cn.kind) != Some(NodeKind::Template) {
+                continue;
+            }
+            let Some(tn) = scene.get(c) else { continue };
+            if let Some(li) = tn
+                .children
+                .iter()
+                .copied()
+                .find(|&gc| scene.get(gc).map(|gcn| gcn.kind) == Some(NodeKind::ListItem))
+            {
+                bp_sources.push(li);
+            }
         }
-        // 蓝图 = <template> 内的首个 ListItem（packer 保留 template 子树，fence 已校验恰一个）。
-        let blueprint = templates.first().and_then(|&tpl| {
-            scene.get(tpl).and_then(|tn| {
-                tn.children
-                    .iter()
-                    .copied()
-                    .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
-            })
-        });
-        // 兜底：ul 直接 ListItem 子（设计期 li 写法）。
-        let blueprint = blueprint.or_else(|| {
-            ul_node
+        // 兜底：ul 直接 ListItem 子（设计期 li 写法）。有 <template> 时模板优先，设计期 li 不收养。
+        if bp_sources.is_empty() {
+            if let Some(li) = ul_node
                 .children
                 .iter()
                 .copied()
                 .find(|&c| scene.get(c).map(|cn| cn.kind) == Some(NodeKind::ListItem))
-        });
-        (blueprint, ul_node.children.clone(), stretch_warn)
+            {
+                bp_sources.push(li);
+            }
+        }
+        (bp_sources, ul_node.children.clone(), stretch_warn)
     };
     // 拉伸警告（一次性，enter 每列表只跑一次）推运行时警告通道。
     if let Some(msg) = stretch_warn {
@@ -57,12 +69,87 @@ pub fn enter_data_driven(
             scene.warnings.push(msg);
         }
     }
-    // 先 clone 蓝图到游离态（需 &mut stage，此时无 scene 借），再清空 ul 全部设计期子
-    // （adopted <template> 子树 + 设计期 li + 标签间空白 TextNode），使 ul 仅剩 spacer+slot。
-    let Some(bp) = blueprint else {
+    if bp_sources.is_empty() {
         return Err("ListView 无模板来源：无 <template>、无设计期 li、未设 ItemTemplate".into());
+    }
+    // 蓝图收养：逐源 clone 到游离 master。src_key = 源 li id——与 C# GetTemplate 返回的
+    // UITemplate._srcNodeId 同一节点，pending 映射按它命中（源死后的重推也按它查表：
+    // NodeId 带 generation，不会误撞）。
+    let mut blueprints: Vec<Blueprint> = Vec::with_capacity(bp_sources.len());
+    let mut bp_by_src: std::collections::HashMap<NodeId, u32> = std::collections::HashMap::new();
+    let mut default_bp = 0u32;
+    // pending 消费（ItemTemplate override + per-item 映射）在清场前解析：映射源要么已
+    // 注册（HTML 模板 li），要么是场景内活节点（Instantiate 得到的游离子树）。失败 →
+    // 清理全部已克隆 master 返回 Err，ul 原样。
+    let pending = stage
+        .scene
+        .as_mut()
+        .ok_or("no scene")?
+        .pending_lists
+        .remove(&ul);
+    let resolve = |stage: &mut crate::stage::Stage,
+                   blueprints: &mut Vec<Blueprint>,
+                   bp_by_src: &mut std::collections::HashMap<NodeId, u32>,
+                   src: NodeId|
+     -> Result<u32, String> {
+        if let Some(&idx) = bp_by_src.get(&src) {
+            return Ok(idx);
+        }
+        if stage
+            .scene
+            .as_ref()
+            .map(|s| s.get(src).is_none())
+            .unwrap_or(true)
+        {
+            return Err(format!(
+                "template source node {} is not alive and was never adopted (stale UITemplate?)",
+                src.0
+            ));
+        }
+        let master = stage.clone_subtree(src)?;
+        let idx = blueprints.len() as u32;
+        bp_by_src.insert(src, idx);
+        blueprints.push(Blueprint {
+            root: master,
+            src_key: src,
+            estimate: 0.0,
+        });
+        Ok(idx)
     };
-    let template_root = stage.clone_subtree(bp)?;
+    let resolve_result: Result<(u32, Vec<u16>), String> = (|| {
+        let mut template_ids: Vec<u16> = Vec::new();
+        if let Some(pending) = &pending {
+            if let Some(src) = pending.override_src {
+                default_bp = resolve(stage, &mut blueprints, &mut bp_by_src, src)?;
+            }
+            if pending.has_map && !pending.item_templates.is_empty() {
+                template_ids = vec![default_bp as u16; pending.item_templates.len()];
+                for (i, src) in pending.item_templates.iter().enumerate() {
+                    if let Some(src) = src {
+                        template_ids[i] =
+                            resolve(stage, &mut blueprints, &mut bp_by_src, *src)? as u16;
+                    }
+                }
+            }
+        }
+        Ok((default_bp, template_ids))
+    })();
+    let (default_bp, template_ids) = match resolve_result {
+        Ok(v) => v,
+        Err(e) => {
+            for bp in &blueprints {
+                stage.remove_node(bp.root);
+            }
+            return Err(e);
+        }
+    };
+    // 全源收养（HTML 模板 li 在 pending 解析后统一收养——顺序保证 override/map 的已注册
+    // 源命中，未涉及的模板 li 各占一蓝图，doc 序决定下标）。
+    for src in bp_sources {
+        resolve(stage, &mut blueprints, &mut bp_by_src, src)?;
+    }
+    // 清空 ul 全部设计期子（adopted <template> 子树 + 设计期 li + 标签间空白 TextNode），
+    // 使 ul 仅剩 spacer+slot。
     for child in &all_children {
         stage.remove_node(*child);
     }
@@ -72,12 +159,13 @@ pub fn enter_data_driven(
     configure_spacer(stage, tail);
     stage.append_child(ul, head)?;
     stage.append_child(ul, tail)?;
+    let default_master = blueprints[default_bp as usize].root;
     // 预分配初始 batch：INITIAL_SLOTS 个 slot 现在就克隆好、挂在 head/tail spacer 之间，
     // 全部 parked（display:none）。slot 从此永驻 ul 子树，只翻 display + 换绑，永不 detach
     // ——后端 GO 随稳定 reuse_key 永驻，滞后一帧的重建闪烁随之消失。
     let mut slots = Vec::with_capacity(INITIAL_SLOTS);
     for ordinal in 0..INITIAL_SLOTS {
-        let node = stage.clone_subtree(template_root)?;
+        let node = stage.clone_subtree(default_master)?;
         stage.insert_before(ul, node, tail)?;
         let scene = stage.scene.as_mut().ok_or("no scene")?;
         // LOOKUP_SCOPE（不打 SCOPE_ROOT：slot 根 CSS 规则仍按页面根 scope 匹配）。
@@ -87,16 +175,20 @@ pub fn enter_data_driven(
         // reuse_key 出生即定（ordinal = slots 下标，slots 只增不减 → key 永不旋转）。
         crate::scene::dynamic::set_reuse_key(scene, node, encode_reuse_key(list_ordinal, ordinal));
         crate::scene::dynamic::set_inline_override(scene, node, "display:none")?;
-        slots.push(Slot {
+        slots.push(super::state::Slot {
             node,
             item_index: 0,
             parked: true,
+            template_idx: default_bp as u16,
         });
     }
     let ls = ListState {
         item_count: 0,
-        template_root: Some(template_root),
-        heights: HeightCache::new(0, 0.0),
+        blueprints,
+        bp_by_src,
+        default_bp,
+        template_ids,
+        heights: super::state::HeightCache::new(0),
         slots,
         visible: 0..0,
         head_spacer: head,

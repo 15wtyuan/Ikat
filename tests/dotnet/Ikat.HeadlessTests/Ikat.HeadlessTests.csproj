@@ -83,6 +83,11 @@
          node.Play L3 suite (Play/Pause/Resume/Stop/Time + OnStart/OnEnd/OnKey/OnHook +
          On<AnimationEndEvent>). Built from fixtures/animation.workspace via ikat-pkg. -->
     <None Include="fixtures\animation.pkg.bin" Link="fixtures\animation.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
+    <!-- M3 #12 multi-template fixture: multitpl.pkg.bin (pane > list with two <template id>
+         blueprints of distinct baked heights) — used by MultiTemplateTests for TemplateSelector
+         per-item dispatch / strict null / no-selection throw / pre-enter ItemTemplate buffering.
+         Built from fixtures/multitpl.workspace via ikat-pkg. -->
+    <None Include="fixtures\multitpl.pkg.bin" Link="fixtures\multitpl.pkg.bin" CopyToOutputDirectory="PreserveNewest" />
     <!-- E2 fixture font for text layout (tick panics without a default font) -->
     <None Include="fixtures\fonts\DejaVuSans.ttf" Link="fixtures\fonts\DejaVuSans.ttf" CopyToOutputDirectory="PreserveNewest" />
     <!-- Component system fixture: component.pkg.bin (page with 2 expanded game-item-card hosts +

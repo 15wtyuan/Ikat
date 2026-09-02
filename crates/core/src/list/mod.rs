@@ -13,6 +13,7 @@ mod plan;
 mod pool;
 mod scroll;
 mod state;
+mod templates;
 mod viewport;
 
 // 路径稳定：crate 内引用点与外部消费者（FFI/examples）经 `crate::list::X` 取全部导出面
@@ -25,3 +26,4 @@ pub use notify::*;
 pub use plan::*;
 pub use scroll::*;
 pub use state::*;
+pub use templates::{check_multi_template_selection, set_item_templates, set_list_template};

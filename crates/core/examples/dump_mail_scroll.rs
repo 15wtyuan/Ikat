@@ -104,7 +104,7 @@ fn main() {
         // 详细：scroll 最大时 dump 高度缓存（estimate vs known）
         if scroll_y >= 5000.0 {
             let ls = s.scene.as_ref().unwrap().lists.0.get(&mail_list).unwrap();
-            let est = ls.heights.estimate;
+            let est = ls.heights.mean_known().unwrap_or(0.0);
             let (mut known, mut unknown, mut sum_known): (usize, usize, f32) = (0, 0, 0.0);
             for i in 0..ls.visible.start {
                 match ls.heights.known.get(i).copied().flatten() {

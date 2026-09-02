@@ -3233,7 +3233,9 @@ namespace Ikat
         // 再 DrainPendingBinds 绑定（同帧 bind，避免首帧模板原样）。后续 set 靠
         // tick-drain 自然推进，无需重复 drain（hot-path 避免 FFI 开销）。
         bool _firstItemCountSet;
-        // BindItem 委托 + ItemTemplate/TemplateSelector（core 不存这二者，纯 C# 业务回调）。
+        // BindItem 委托（core 不感知，纯 C# 业务回调）。
+        // ItemTemplate/TemplateSelector：模板选择结果经 FFI 批量推送进 core（selector
+        // 在本类求值——core 零回调；见 EvaluateAndPushTemplates）。委托本体仍只存 C# 侧。
         // internal：UIContext.DrainPendingBinds 同程序集直读调本委托。
         internal Action<ListItem, int> _bindItem;
         UITemplate _itemTemplate;
@@ -3253,8 +3255,15 @@ namespace Ikat
                 ThrowIfDisposed();
                 if (value < 0)
                     throw new ArgumentOutOfRangeException(nameof(value), "ItemCount must be non-negative");
+                // selector 先求值推送（enter 前 = core 侧 pending 缓冲，enter 收养蓝图后
+                // 解析；已 enter 则即时重映射）。null/包组件模板在此抛（严格派）。
+                EvaluateAndPushTemplates(0, value);
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 int rc = Native.ikat_list_set_item_count(h, _id, value);
+                if (rc == -2)
+                    throw new UIContractException(
+                        $"list (node {_id}) has multiple <template> children but neither " +
+                        "ItemTemplate nor TemplateSelector was set (multiple templates need a choice)");
                 if (rc != 0)
                     throw new InvalidOperationException(
                         $"list_set_item_count failed (node {_id}): not a ListView / no template source");
@@ -3272,9 +3281,12 @@ namespace Ikat
         }
 
         /// <summary>
-        /// 项模板。SceneSubtree 变体：调 ikat_list_set_template 覆盖 enter_data_driven 备份的
-        /// 备用 li，指向场景内克隆出的模板子树根。PackageComponent 变体需先 Instantiate 再传
+        /// 项模板（默认蓝图）。SceneSubtree 变体：ikat_list_set_template 收养源子树为新蓝图
+        /// 并设为 default——enter 前调用会被 core 缓冲到 enter 时消费（不丢）；enter 后调用
+        /// 换 default，未显式指定模板的项跟随。PackageComponent 变体需先 Instantiate 再传
         /// （本 setter 只接 SceneSubtree，包组件路径走业务侧 Instantiate + 转传）。
+        /// 与 TemplateSelector 同设时 selector 赢（per-item 显式映射优先于默认蓝图）。
+        /// 源子树已死（节点被删）→ UIContractException。
         /// </summary>
         public UITemplate ItemTemplate
         {
@@ -3286,19 +3298,74 @@ namespace Ikat
                 if (value != null && value.IsSceneSubtree)
                 {
                     StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
-                    Native.ikat_list_set_template(h, _id, value._srcNodeId);
+                    int rc = Native.ikat_list_set_template(h, _id, value._srcNodeId);
+                    if (rc != 0)
+                        throw new UIContractException(
+                            $"ItemTemplate rejected (node {_id}): source subtree is stale " +
+                            "(the source node was removed — GetTemplate taken before an enter that cleared it?)");
                 }
             }
         }
 
         /// <summary>
-        /// 多模板选择器（按 item index 选模板）。纯 C# 业务回调，core 不存。
-        /// setter 只缓存委托；实际选模板在 BindItem 回调里由业务据 index 调本选择器（若需要）。
+        /// 多模板选择器（按 item index 选模板，参与克隆）。严格派语义：设了即全权——
+        /// 每个 index 必须返回 UITemplate（返 null 抛 UIContractException；包组件变体需先
+        /// Instantiate）。求值在本侧完成后批量推给 core（core 侧零回调），enter 前推送会被
+        /// 缓冲。与 ItemTemplate 同设时 selector 赢。已数据驱动时换 selector 立即重推：
+        /// 模板变了的项由 core park 旧蓝图 slot、下帧以正确蓝图重新物化。
         /// </summary>
         public Func<int, UITemplate> TemplateSelector
         {
             get { ThrowIfDisposed(); return _templateSelector; }
-            set { ThrowIfDisposed(); _templateSelector = value; }
+            set
+            {
+                ThrowIfDisposed();
+                _templateSelector = value;
+                if (_firstItemCountSet && _itemCount > 0)
+                    EvaluateAndPushTemplates(0, _itemCount);
+            }
+        }
+
+        /// <summary>
+        /// 求值 TemplateSelector 并把 [start, start+count) 的模板源批量推给 core
+        /// （ikat_list_set_item_templates）。selector 未设时 no-op。count=0 仍过 FFI
+        /// 标记「选择已给出」（防多模板预检误判 -2）。模板源须为场景内子树
+        /// （GetTemplate 模板 li / Instantiate 游离克隆）。
+        /// </summary>
+        void EvaluateAndPushTemplates(int start, int count)
+        {
+            var sel = _templateSelector;
+            if (sel == null)
+                return;
+            StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+            if (count <= 0)
+            {
+                // 空推送：只标记选择意图（多模板 + ItemCount=0 的首 set）。
+                Native.ikat_list_set_item_templates(h, _id, start, null, 0);
+                return;
+            }
+            ulong[] ids = new ulong[count];
+            for (int k = 0; k < count; k++)
+            {
+                UITemplate t = sel(start + k);
+                if (t == null)
+                    throw new UIContractException(
+                        $"TemplateSelector returned null at index {start + k} (node {_id}): " +
+                        "a set selector must answer every index (return the default UITemplate explicitly if intended)");
+                if (!t.IsSceneSubtree)
+                    throw new UIContractException(
+                        $"TemplateSelector returned a package-component UITemplate at index {start + k} " +
+                        $"(node {_id}): call Instantiate() first — cloning needs an in-scene subtree");
+                ids[k] = t._srcNodeId;
+            }
+            fixed (ulong* p = ids)
+            {
+                int rc = Native.ikat_list_set_item_templates(h, _id, start, p, count);
+                if (rc != 0)
+                    throw new UIContractException(
+                        $"TemplateSelector push failed (node {_id}, range [{start}, {start + count})): " +
+                        "stale template source (node was removed)");
+            }
         }
 
         /// <summary>
@@ -3404,6 +3471,8 @@ namespace Ikat
                 throw new UIContractException(
                     $"NotifyInserted failed (node {_id}): not a data-driven ListView");
             _itemCount += c;
+            // selector 按 index 选模板：插入移位后受影响区间重求值重推。
+            EvaluateAndPushTemplates(i, _itemCount - i);
         }
 
         /// <summary>
@@ -3422,6 +3491,8 @@ namespace Ikat
                 throw new UIContractException(
                     $"NotifyRemoved failed (node {_id}): not a data-driven ListView");
             _itemCount -= c;
+            // 删除移位后受影响区间重求值重推。
+            EvaluateAndPushTemplates(i, _itemCount - i);
         }
 
         /// <summary>
@@ -3439,6 +3510,10 @@ namespace Ikat
             if (rc != 0)
                 throw new UIContractException(
                     $"NotifyMoved failed (node {_id}): not a data-driven ListView");
+            // 移动重排 [min(f,t), max(f,t)] 区间的 index→模板配对，从区间头重推后缀
+            // （selector 任意函数，保守多推无损）。
+            int lo = f < t ? f : t;
+            EvaluateAndPushTemplates(lo, _itemCount - lo);
         }
 
         public string ItemExitClass { get { throw NE(); } set { throw NE(); } }

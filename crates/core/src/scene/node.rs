@@ -755,6 +755,9 @@ pub struct Scene {
     /// 每节点 ListView 虚拟化状态（enter_data_driven 填，update_visible 更新）。运行时态，不进 pkg。
     /// side table 模式（同 scroll/anim），不塞进 Node。
     pub lists: crate::list::ListTable,
+    /// enter 前 ListView 模板配置缓冲（ItemTemplate/TemplateSelector 先于 ItemCount 到达时）。
+    /// enter_data_driven 消费；remove_node(ul) 联动清。运行时态，不进 pkg。
+    pub pending_lists: std::collections::HashMap<NodeId, crate::list::PendingListCfg>,
     /// 每节点控件状态（instantiate 从 `ControlInit` 填、交互改）。运行时态，不进 pkg。
     pub controls: ControlTable,
     /// 每节点控件初值缓存（instantiate 从 pkg `ControlInit` 填）。运行时态，不进 pkg。

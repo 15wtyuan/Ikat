@@ -87,31 +87,51 @@ fn stage_with_pane_ul_li() -> (crate::stage::Stage, NodeId, NodeId, NodeId) {
 }
 
 #[test]
-fn height_cache_sum_with_mixed_known_estimate() {
-    let mut hc = HeightCache::new(3, 20.0);
+fn height_cache_sum_with_mixed_known_fallback() {
+    let mut hc = HeightCache::new(3);
     hc.set(0, 10.0);
     hc.set(2, 30.0);
-    approx_eq(hc.sum(0..3), 60.0);
+    // 未测项用 fallback（估高由调用方按蓝图给）。
+    approx_eq(hc.sum(0..3, |_| 20.0), 60.0);
 }
 
 #[test]
-fn height_cache_estimate_updates_to_known_mean() {
-    let mut hc = HeightCache::new(5, 40.0);
+fn height_cache_mean_known() {
+    let mut hc = HeightCache::new(5);
+    assert!(!hc.any_known());
+    assert_eq!(hc.mean_known(), None);
     hc.set(0, 10.0);
     hc.set(1, 30.0);
-    approx_eq(hc.estimate, 20.0);
-    approx_eq(hc.sum(0..5), 100.0);
+    assert!(hc.any_known());
+    approx_eq(hc.mean_known().unwrap(), 20.0);
+}
+
+#[test]
+fn height_cache_clear_drops_known() {
+    let mut hc = HeightCache::new(2);
+    hc.set(0, 10.0);
+    hc.clear(0);
+    assert!(!hc.any_known());
+    approx_eq(hc.sum(0..2, |_| 5.0), 10.0);
 }
 
 #[test]
 fn height_cache_sum_empty_range_zero() {
-    let hc = HeightCache::new(10, 50.0);
-    approx_eq(hc.sum(5..5), 0.0);
+    let hc = HeightCache::new(10);
+    approx_eq(hc.sum(5..5, |_| 50.0), 0.0);
 }
 
 #[test]
 fn visible_range_basic() {
-    let r = compute_visible_range(100, 0.0, 0.0, 100.0, &uniform_heights(100, 10.0), 0.0);
+    let r = compute_visible_range(
+        100,
+        0.0,
+        0.0,
+        100.0,
+        &uniform_heights(100, 10.0),
+        &|_| 10.0,
+        0.0,
+    );
     assert_eq!(r, 0..12);
 }
 
@@ -123,7 +143,7 @@ fn visible_range_counts_flex_gap_in_item_positions() {
     let h = uniform_heights(100, 75.0);
     let gap = 12.0_f32;
     let top = 50.0 * 75.0 + 50.0 * gap; // item 50 顶边
-    let r = compute_visible_range(100, top, 0.0, 965.0, &h, gap);
+    let r = compute_visible_range(100, top, 0.0, 965.0, &h, &|_| 75.0, gap);
     // item 50 顶边 == top，其底边(4425) > top → 部分可见 → first=50 → start=48(BUFFER)。
     // 漏 gap 时 first 会到 58（start 56）——这就是 live mail 顶部空白的根因。
     assert!(
@@ -135,26 +155,50 @@ fn visible_range_counts_flex_gap_in_item_positions() {
 
 #[test]
 fn visible_range_scrolled_mid() {
-    let r = compute_visible_range(100, 50.0, 0.0, 100.0, &uniform_heights(100, 10.0), 0.0);
+    let r = compute_visible_range(
+        100,
+        50.0,
+        0.0,
+        100.0,
+        &uniform_heights(100, 10.0),
+        &|_| 10.0,
+        0.0,
+    );
     assert_eq!(r, 3..17);
 }
 
 #[test]
 fn visible_range_clamps_to_count() {
-    let r = compute_visible_range(5, 50.0, 0.0, 100.0, &uniform_heights(5, 10.0), 0.0);
+    let r = compute_visible_range(
+        5,
+        50.0,
+        0.0,
+        100.0,
+        &uniform_heights(5, 10.0),
+        &|_| 10.0,
+        0.0,
+    );
     assert_eq!(r.start, 0);
     assert_eq!(r.end, 5);
 }
 
 #[test]
 fn visible_range_empty_count() {
-    let r = compute_visible_range(0, 0.0, 0.0, 100.0, &HeightCache::new(0, 10.0), 0.0);
+    let r = compute_visible_range(0, 0.0, 0.0, 100.0, &HeightCache::new(0), &|_| 10.0, 0.0);
     assert_eq!(r, 0..0);
 }
 
 #[test]
 fn visible_range_cold_start_viewport_zero() {
-    let r = compute_visible_range(1000, 0.0, 0.0, 0.0, &uniform_heights(1000, 10.0), 0.0);
+    let r = compute_visible_range(
+        1000,
+        0.0,
+        0.0,
+        0.0,
+        &uniform_heights(1000, 10.0),
+        &|_| 10.0,
+        0.0,
+    );
     assert_eq!(r, 0..INITIAL_SLOTS);
 }
 
@@ -196,11 +240,259 @@ fn grid_visible_cold_start_returns_buffer_rows() {
 }
 
 fn uniform_heights(n: usize, h: f32) -> HeightCache {
-    let mut hc = HeightCache::new(n, h);
+    let mut hc = HeightCache::new(n);
     for i in 0..n {
         hc.set(i, h);
     }
     hc
+}
+
+/// 多模板测试台：ul + 两个 <template>（各含一个 li）。返 (stage, ul, [li1, li2])。
+#[cfg(test)]
+fn stage_with_ul_two_templates() -> (crate::stage::Stage, NodeId, Vec<NodeId>) {
+    use crate::scene::node::{Node, NodeKind};
+    let ul = Node {
+        kind: NodeKind::ListView,
+        ..Node::default()
+    };
+    let tpl1 = Node {
+        kind: NodeKind::Template,
+        ..Node::default()
+    };
+    let li1 = Node {
+        kind: NodeKind::ListItem,
+        ..Node::default()
+    };
+    let tpl2 = Node {
+        kind: NodeKind::Template,
+        ..Node::default()
+    };
+    let li2 = Node {
+        kind: NodeKind::ListItem,
+        ..Node::default()
+    };
+    let scene = crate::scene::node::Scene::from_nodes(
+        vec![ul, tpl1, li1, tpl2, li2],
+        vec![(0, 1), (1, 2), (0, 3), (3, 4)],
+    );
+    let ul = scene.roots[0];
+    let lis: Vec<NodeId> = {
+        let sc = &scene;
+        let uln = sc.get(ul).unwrap();
+        let mut li_ids = Vec::new();
+        for &c in &uln.children {
+            if sc.get(c).map(|n| n.kind) == Some(NodeKind::Template) {
+                for &gc in &sc.get(c).unwrap().children {
+                    if sc.get(gc).map(|n| n.kind) == Some(NodeKind::ListItem) {
+                        li_ids.push(gc);
+                    }
+                }
+            }
+        }
+        li_ids
+    };
+    let mut s = crate::stage::Stage::new_for_test();
+    s.scene = Some(scene);
+    (s, ul, lis)
+}
+
+/// 池按蓝图分组：A 蓝图的 parked slot 不能复用去绑 B 蓝图的 item；池空才克隆对应蓝图。
+#[cfg(test)]
+fn multi_template_enter_with_map(
+    s: &mut crate::stage::Stage,
+    ul: NodeId,
+    lis: &[NodeId],
+    map: &[usize],
+) {
+    let ids: Vec<NodeId> = map.iter().map(|&i| lis[i]).collect();
+    let sc = s.scene.as_mut().unwrap();
+    crate::list::set_item_templates(sc, ul, 0, &ids).unwrap();
+    crate::list::enter_data_driven(s, ul, 0).unwrap();
+}
+
+#[test]
+fn multi_template_pool_separation_on_scroll() {
+    let (mut s, ul, lis) = stage_with_ul_two_templates();
+    // 4 项：0/2 → bp0，1/3 → bp1（交替）。
+    multi_template_enter_with_map(&mut s, ul, &lis, &[0, 1, 0, 1]);
+    crate::list::set_item_count(&mut s, ul, 4);
+    let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+    crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+    {
+        let scene = s.scene.as_ref().unwrap();
+        let ls = scene.lists.get(ul).unwrap();
+        let mut active: Vec<(usize, u16)> = ls
+            .slots
+            .iter()
+            .filter(|sl| !sl.parked)
+            .map(|sl| (sl.item_index, sl.template_idx))
+            .collect();
+        active.sort_unstable();
+        // 无 pane 全量路径：4 项全物化，模板各归各池（slots vec 序 = 克隆序，非 item 序）。
+        assert_eq!(
+            active,
+            vec![(0, 0), (1, 1), (2, 0), (3, 1)],
+            "per-item blueprint dispatch"
+        );
+        // 初始 batch 全 bp0：item0/2 复用之，item1/3 各克隆一个 bp1 → 5+2=7。
+        assert_eq!(
+            ls.slots.len(),
+            INITIAL_SLOTS + 2,
+            "INITIAL batch (bp0) + grown bp1 slots"
+        );
+    }
+    // 重推映射：item1 改用 bp0 → 旧 bp1 active slot 就地 park，下帧以 bp0 重新物化。
+    let sc = s.scene.as_mut().unwrap();
+    crate::list::set_item_templates(sc, ul, 1, &[lis[0]]).unwrap();
+    let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+    crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+    let scene = s.scene.as_ref().unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    let item1_slots: Vec<&super::Slot> = ls.slots.iter().filter(|sl| sl.item_index == 1).collect();
+    assert_eq!(
+        item1_slots.len(),
+        2,
+        "old bp1 slot parked + new bp0 slot grown"
+    );
+    let active1: Vec<u16> = item1_slots
+        .iter()
+        .filter(|sl| !sl.parked)
+        .map(|sl| sl.template_idx)
+        .collect();
+    assert_eq!(active1, vec![0], "item1 now shown by a bp0 slot");
+    assert!(
+        item1_slots
+            .iter()
+            .any(|sl| sl.parked && sl.template_idx == 1),
+        "old bp1 slot parked (never detached)"
+    );
+    // 换蓝图项的已测高度被清（旧高度属旧蓝图）。
+    assert_eq!(ls.heights.known[1], None);
+}
+
+#[test]
+fn multi_template_notify_shifts_map() {
+    let (mut s, ul, lis) = stage_with_ul_two_templates();
+    multi_template_enter_with_map(&mut s, ul, &lis, &[0, 1]);
+    crate::list::set_item_count(&mut s, ul, 2);
+    let scene = s.scene.as_mut().unwrap();
+    crate::list::notify_inserted(scene, ul, 1, 2).unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    // 插入项临时填 default_bp（C# selector 随后重推覆盖）；既有项随 index 移位。
+    assert_eq!(ls.template_ids, vec![0, 0, 0, 1]);
+    crate::list::notify_removed(scene, ul, 0, 1).unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    assert_eq!(ls.template_ids, vec![0, 0, 1]);
+    crate::list::notify_moved(scene, ul, 2, 0).unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    assert_eq!(ls.template_ids, vec![1, 0, 0]);
+    // C# 重推语义：移动后按新 index 重推（此处推同值，验证推送通道）。
+    crate::list::set_item_templates(scene, ul, 0, &[lis[1], lis[0], lis[0]]).unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    assert_eq!(ls.template_ids, vec![1, 0, 0]);
+}
+
+#[test]
+fn per_blueprint_estimates_after_collect() {
+    // 两模板交替 4 项（无 pane 也行：collect 只按 slot 布局高回填）。
+    let (mut s, ul, lis) = stage_with_ul_two_templates();
+    multi_template_enter_with_map(&mut s, ul, &lis, &[0, 1, 0, 1]);
+    crate::list::set_item_count(&mut s, ul, 4);
+    let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
+    crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
+    // 模拟 solve：bp0 项高 10、bp1 项高 30 → 各蓝图估高分化。
+    {
+        let scene = s.scene.as_mut().unwrap();
+        let targets: Vec<(NodeId, f32)> = scene
+            .lists
+            .get(ul)
+            .unwrap()
+            .slots
+            .iter()
+            .map(|sl| (sl.node, if sl.template_idx == 0 { 10.0 } else { 30.0 }))
+            .collect();
+        for (node, h) in targets {
+            scene.get_mut(node).unwrap().layout_rect.h = h;
+        }
+    }
+    crate::list::collect_heights(s.scene.as_mut().unwrap());
+    let scene = s.scene.as_ref().unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    approx_eq(ls.blueprints[0].estimate, 10.0);
+    approx_eq(ls.blueprints[1].estimate, 30.0);
+}
+
+/// enter 前 set_template 缓冲（修复旧路径静默丢弃）：enter 后 default_bp 指向 override。
+#[test]
+fn pre_enter_item_template_override_buffered() {
+    let (mut s, ul, lis) = stage_with_ul_two_templates();
+    // enter 前设 ItemTemplate = 第二个模板（override）→ 多模板 + override = 合法。
+    {
+        let sc = s.scene.as_mut().unwrap();
+        crate::list::set_list_template(sc, ul, lis[1]).unwrap();
+    }
+    crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let ls = scene.lists.get(ul).unwrap();
+    // override 源 = 第二个模板的 li：enter 先解析 override（占 bp0），HTML 模板收养时
+    // 同源去重 → 2 个蓝图，default_bp=0 指向 override。
+    assert_eq!(
+        ls.blueprints.len(),
+        2,
+        "override deduped against HTML template"
+    );
+    assert_eq!(ls.default_bp, 0, "override is default");
+    assert_eq!(ls.bp_by_src[&lis[1]], 0, "override source keyed to default");
+    // INITIAL batch 从 override 蓝图克隆。
+    assert!(ls.slots.iter().all(|sl| sl.template_idx == 0));
+    // 后续 items 未推 map → 全走 default（override）。
+    crate::list::set_item_count(&mut s, ul, 3);
+    let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
+    assert_eq!(ls.template_ids, vec![0, 0, 0]);
+}
+
+/// enter 后 set_template 换 default：隐式项跟随、显式 map 项不动。
+#[test]
+fn post_enter_set_template_rewrites_implicit_only() {
+    let (mut s, ul, lis) = stage_with_ul_two_templates();
+    // map：item0 显式 bp1（非 default），item1 = default(0)（显式推的值恰等于 default，
+    // 与隐式项不可区分——重写规则按值判，跟随新 default）。
+    multi_template_enter_with_map(&mut s, ul, &lis, &[1, 0]);
+    crate::list::set_item_count(&mut s, ul, 2);
+    // override 源用新建游离节点（区别于两个 HTML 模板 → 独立新蓝图）。
+    let fresh = s.create_node("div", "").unwrap();
+    let sc = s.scene.as_mut().unwrap();
+    crate::list::set_list_template(sc, ul, fresh).unwrap();
+    let ls = sc.lists.get(ul).unwrap();
+    assert_eq!(ls.default_bp, 2, "fresh subtree adopted as new default");
+    // enter 解析序：item0→lis[1] 占 bp0（=default），item1→lis[0] 占 bp1。
+    // 重写按值判：item0（值=旧 default 0）跟随新 default → 2；item1（bp1 ≠ 旧 default）不动。
+    assert_eq!(ls.template_ids, vec![2, 1]);
+    // 加一个隐式项（set_item_count 扩容填新 default）。
+    crate::list::set_item_count(&mut s, ul, 3);
+    let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
+    assert_eq!(ls.template_ids, vec![2, 1, 2]);
+}
+
+/// 陈旧模板源（死节点且未注册）→ enter 时 pending 解析失败，ul 子树原样。
+#[test]
+fn set_item_templates_rejects_stale_source() {
+    let (mut s, ul, _lis) = stage_with_ul_two_templates();
+    let dead = NodeId(0xDEAD_BEEF);
+    let sc = s.scene.as_mut().unwrap();
+    assert!(
+        crate::list::set_item_templates(sc, ul, 0, &[dead]).is_ok(),
+        "pre-enter buffers without validation"
+    );
+    // enter：pending 解析发现死源 → 整体失败，ul 子树原样（children 未清）。
+    assert!(crate::list::enter_data_driven(&mut s, ul, 0).is_err());
+    let scene = s.scene.as_ref().unwrap();
+    assert_eq!(
+        scene.get(ul).unwrap().children.len(),
+        2,
+        "ul children untouched on failed enter"
+    );
+    assert!(scene.lists.get(ul).is_none(), "no ListState left behind");
 }
 
 fn approx_eq(a: f32, b: f32) {
@@ -265,8 +557,8 @@ fn enter_data_driven_creates_spacers_and_backups_li() {
     );
     let ls = scene.lists.get(ul).expect("list state created");
     assert!(
-        ls.template_root.is_some(),
-        "design-time li backed up as template"
+        !ls.blueprints.is_empty(),
+        "design-time li backed up as blueprint"
     );
 }
 
@@ -370,7 +662,7 @@ fn enter_data_driven_adopts_template_child() {
     );
     let ls = scene.lists.get(ul).expect("list state created");
     assert!(
-        ls.template_root.is_some(),
+        !ls.blueprints.is_empty(),
         "template blueprint (ListItem inside <template>) adopted as template source"
     );
 }
@@ -407,8 +699,67 @@ fn enter_data_driven_rejects_multiple_templates() {
     let mut s = crate::stage::Stage::new_for_test();
     s.scene = Some(scene);
     let err = crate::list::enter_data_driven(&mut s, ul, 0)
-        .expect_err("multiple <template> should be rejected");
-    assert!(err.contains("多个 <template>"), "got: {err}");
+        .expect_err("multiple <template> without selection should be rejected");
+    assert!(err.contains("multiple <template>"), "got: {err}");
+}
+
+/// 多模板 + 已给出选择（pending per-item 映射）→ enter 成功且蓝图全收养、映射解析。
+#[test]
+fn enter_data_driven_multiple_templates_with_map_ok() {
+    use crate::scene::node::{Node, NodeKind};
+    let ul = Node {
+        kind: NodeKind::ListView,
+        ..Node::default()
+    };
+    let tpl1 = Node {
+        kind: NodeKind::Template,
+        ..Node::default()
+    };
+    let li1 = Node {
+        kind: NodeKind::ListItem,
+        ..Node::default()
+    };
+    let tpl2 = Node {
+        kind: NodeKind::Template,
+        ..Node::default()
+    };
+    let li2 = Node {
+        kind: NodeKind::ListItem,
+        ..Node::default()
+    };
+    let scene = crate::scene::node::Scene::from_nodes(
+        vec![ul, tpl1, li1, tpl2, li2],
+        vec![(0, 1), (1, 2), (0, 3), (3, 4)],
+    );
+    let ul = scene.roots[0];
+    let mut s = crate::stage::Stage::new_for_test();
+    s.scene = Some(scene);
+    // enter 前推 per-item 映射（模拟 C# selector 求值推送）：0→li1（default），1→li2。
+    {
+        let ids: Vec<crate::scene::node::NodeId> = {
+            let sc = s.scene.as_ref().unwrap();
+            let uln = sc.get(ul).unwrap();
+            let mut li_ids = Vec::new();
+            for &c in &uln.children {
+                if sc.get(c).map(|n| n.kind) == Some(NodeKind::Template) {
+                    for &gc in &sc.get(c).unwrap().children {
+                        if sc.get(gc).map(|n| n.kind) == Some(NodeKind::ListItem) {
+                            li_ids.push(gc);
+                        }
+                    }
+                }
+            }
+            li_ids
+        };
+        assert_eq!(ids.len(), 2);
+        let sc = s.scene.as_mut().unwrap();
+        crate::list::set_item_templates(sc, ul, 0, &ids).unwrap();
+    }
+    crate::list::enter_data_driven(&mut s, ul, 0).unwrap();
+    let scene = s.scene.as_ref().unwrap();
+    let ls = scene.lists.get(ul).expect("entered with map");
+    assert_eq!(ls.blueprints.len(), 2, "both templates adopted");
+    assert_eq!(ls.template_ids, vec![0u16, 1], "per-item map resolved");
 }
 
 #[test]
@@ -640,7 +991,7 @@ fn remove_node_frees_template_root_subtree() {
     let (template_root, slot_nodes) = {
         let ls = s.scene.as_ref().unwrap().lists.get(ul).unwrap();
         (
-            ls.template_root.expect("template backed up"),
+            ls.blueprints[0].root,
             ls.slots.iter().map(|s| s.node).collect::<Vec<_>>(),
         )
     };
@@ -735,9 +1086,9 @@ fn collect_heights_writes_slot_layout_height() {
     crate::list::collect_heights(s.scene.as_mut().unwrap());
     let scene = s.scene.as_ref().unwrap();
     let ls = scene.lists.get(ul).unwrap();
-    assert_eq!(ls.heights.height_of(0), 5.0);
-    assert_eq!(ls.heights.height_of(1), 15.0);
-    assert_eq!(ls.heights.height_of(2), 25.0);
+    assert_eq!(ls.heights.height_of(0, 0.0), 5.0);
+    assert_eq!(ls.heights.height_of(1, 0.0), 15.0);
+    assert_eq!(ls.heights.height_of(2, 0.0), 25.0);
 }
 
 /// margin box 回填：li 带 margin-bottom:8px 时，height_of 应 = border-box h + margin。
@@ -771,7 +1122,7 @@ fn collect_heights_uses_margin_box_not_border_box() {
     crate::list::collect_heights(s.scene.as_mut().unwrap());
     let scene = s.scene.as_ref().unwrap();
     let ls = scene.lists.get(ul).unwrap();
-    approx_eq(ls.heights.height_of(0), 31.0);
+    approx_eq(ls.heights.height_of(0, 0.0), 31.0);
     // 占位引用 pane（构造 helper 返回它；后续 anchoring 测也用）。
     let _ = pane;
 }
@@ -811,19 +1162,19 @@ fn collect_heights_skips_parked_slots() {
     let scene = s.scene.as_ref().unwrap();
     let ls = scene.lists.get(ul).unwrap();
     assert!(
-        ls.heights.height_of(2) > 0.0,
+        ls.heights.height_of(2, 0.0) > 0.0,
         "parked slot should not overwrite height cache with zero"
     );
     assert_eq!(
-        ls.heights.height_of(2),
+        ls.heights.height_of(2, 0.0),
         30.0,
         "parked slot should leave existing known height unchanged"
     );
     // 其余 active slot 真高度不变。
-    assert_eq!(ls.heights.height_of(0), 10.0);
-    assert_eq!(ls.heights.height_of(1), 20.0);
-    assert_eq!(ls.heights.height_of(3), 40.0);
-    assert_eq!(ls.heights.height_of(4), 50.0);
+    assert_eq!(ls.heights.height_of(0, 0.0), 10.0);
+    assert_eq!(ls.heights.height_of(1, 0.0), 20.0);
+    assert_eq!(ls.heights.height_of(3, 0.0), 40.0);
+    assert_eq!(ls.heights.height_of(4, 0.0), 50.0);
 }
 
 /// anchoring 补偿：本帧回填修正了 estimate → head 区间（仍用 estimate 的未测项）
@@ -839,8 +1190,12 @@ fn anchoring_compensates_head_height_delta() {
     {
         let scene = s.scene.as_mut().unwrap();
         let ls = scene.lists.get_mut(ul).unwrap();
-        ls.heights.estimate = 20.0; // 全未测，head 区用此 estimate
-                                    // 视口高 100 → 滚到 scroll_y=200（~10 项）→ visible.start≈10。
+        // 预置 3 个已测项（@20）：any_known → 走精准路径；head 区其余未测项的估高经
+        // bp_estimate_of 回落全体均值 20（蓝图自身 estimate 尚 0——collect 后才有）。
+        // 视口高 100 → 滚到 scroll_y=200（~10 项）→ visible.start≈10。
+        for i in 0..3 {
+            ls.heights.set(i, 20.0);
+        }
         let st = scene.scroll.ensure(pane);
         st.viewport_size = (1000.0, 100.0);
         st.scroll_pos = (0.0, 200.0);
@@ -865,8 +1220,7 @@ fn anchoring_compensates_head_height_delta() {
         .lists
         .get(ul)
         .unwrap()
-        .heights
-        .sum(0..visible_start);
+        .sum_heights(0..visible_start);
     // 模拟 solve：物化的 slot（visible 区）实测高度=30（≠ estimate 20）。
     // collect_heights 会回填这些 → recompute_estimate 把 estimate 从 20 拉到 30
     // → head 区（仍全未测，用 estimate）总和从 20*vs 变 30*vs → delta=10*vs。
@@ -897,7 +1251,7 @@ fn anchoring_compensates_head_height_delta() {
     crate::list::collect_heights(s.scene.as_mut().unwrap());
     let scene = s.scene.as_ref().unwrap();
     let ls = scene.lists.get(ul).unwrap();
-    let head_after = ls.heights.sum(0..visible_start);
+    let head_after = ls.sum_heights(0..visible_start);
     let scroll_y_after = scene.scroll.get(pane).unwrap().scroll_pos.1;
     let delta = head_after - head_before;
     assert!(

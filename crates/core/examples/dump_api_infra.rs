@@ -209,9 +209,9 @@ fn main() {
         let ls = sc.lists.0.get(&list_id).unwrap();
         let known_cnt = ls.heights.known.iter().filter(|h| h.is_some()).count();
         println!(
-            "  [heights] item_count={} estimate={:.1} known={}/{} visible={:?}",
+            "  [heights] item_count={} mean_known={:.1} known={}/{} visible={:?}",
             ls.item_count,
-            ls.heights.estimate,
+            ls.heights.mean_known().unwrap_or(0.0),
             known_cnt,
             ls.heights.known.len(),
             ls.visible

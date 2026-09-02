@@ -29,7 +29,7 @@ pub fn collect_heights(scene: &mut Scene) {
                 .filter(|s| !s.parked)
                 .map(|s| (s.node, s.item_index))
                 .collect();
-            let old_head_sum = ls.heights.sum(0..ls.visible.start);
+            let old_head_sum = ls.sum_heights(0..ls.visible.start);
             let pane = ancestor_pane(scene, *ul);
             (*ul, slots, old_head_sum, pane)
         })
@@ -57,9 +57,29 @@ pub fn collect_heights(scene: &mut Scene) {
                 ls.heights.set(idx, h);
             }
         }
+        // 按蓝图重算估高（本蓝图已测项均值；无已测项的蓝图保持 0——bp_estimate_of
+        // 回落全体均值，保证测过任一模板后未测项估高为正）。O(item_count) 一趟，
+        // 与回填同级（原 set() 内嵌 recompute 同量级，合并成一趟反而省）。
+        if let Some(ls) = scene.lists.get_mut(ul) {
+            let n_bp = ls.blueprints.len();
+            let mut sums = vec![0.0f32; n_bp];
+            let mut cnts = vec![0usize; n_bp];
+            for (i, k) in ls.heights.known.iter().enumerate() {
+                if let Some(h) = k {
+                    let bp = (ls.bp_of(i) as usize).min(n_bp.saturating_sub(1));
+                    sums[bp] += h;
+                    cnts[bp] += 1;
+                }
+            }
+            for (b, (s, c)) in ls.blueprints.iter_mut().zip(sums.iter().zip(cnts.iter())) {
+                if *c > 0 {
+                    b.estimate = s / *c as f32;
+                }
+            }
+        }
         // anchoring：回填后 head 区间总高变化 → 补偿祖先 pane scroll_pos.y。
         let (new_head_sum, visible_start) = match scene.lists.get(ul) {
-            Some(ls) => (ls.heights.sum(0..ls.visible.start), ls.visible.start),
+            Some(ls) => (ls.sum_heights(0..ls.visible.start), ls.visible.start),
             None => continue,
         };
         let delta = new_head_sum - old_head_sum;

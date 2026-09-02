@@ -20,6 +20,8 @@ pub fn notify_inserted(
     }
     for _ in 0..count {
         ls.heights.known.insert(at, None);
+        // 新项模板未知（C# 若设 selector 会在 Notify 后立刻重推 [at, count) 覆盖）。
+        ls.template_ids.insert(at, ls.default_bp as u16);
     }
     ls.item_count += count;
     // 移位 + 重排队：item_index >= at 的 slot 移位后语义指向新 item，需重新 bind。
@@ -81,6 +83,7 @@ pub fn notify_removed(
         let ls = scene.lists.get_mut(ul).unwrap();
         let end = end.min(ls.heights.known.len());
         ls.heights.known.drain(at..end);
+        ls.template_ids.drain(at..end.min(ls.template_ids.len()));
         ls.item_count -= count;
         let mut recycle = std::collections::HashSet::new();
         let mut shift = std::collections::HashMap::new();
@@ -145,6 +148,11 @@ pub fn notify_moved(scene: &mut Scene, ul: NodeId, from: usize, to: usize) -> Re
         let ls = scene.lists.get_mut(ul).unwrap();
         let v = ls.heights.known.remove(from);
         ls.heights.known.insert(to, v);
+        // per-item 模板映射同搬（保持与 heights.known 的下标对齐）。
+        if from < ls.template_ids.len() {
+            let t = ls.template_ids.remove(from);
+            ls.template_ids.insert(to.min(ls.template_ids.len()), t);
+        }
         // slot.item_index 重映射：原 from → to；
         //   from<to：原 (from,to] 的项前移 1（item_index-1）；
         //   from>to：原 [to,from) 的项后移 1（item_index+1）。

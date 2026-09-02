@@ -185,6 +185,7 @@ fn blob_emits_parked_keepalive_entries() {
             node,
             item_index: i,
             parked,
+            template_idx: 0,
         });
     }
     let mut want: Vec<u64> = slots
@@ -264,6 +265,7 @@ fn blob_emits_parked_keepalive_for_slot_subtree() {
                 node: slot,
                 item_index: 0,
                 parked: true,
+                template_idx: 0,
             }],
             ..Default::default()
         },
@@ -309,6 +311,7 @@ fn blob_no_keepalive_when_all_slots_active() {
                 node,
                 item_index: 0,
                 parked: false,
+                template_idx: 0,
             }],
             ..Default::default()
         },

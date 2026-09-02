@@ -5,6 +5,8 @@ use crate::scene::node::{NodeId, Scene};
 /// 计算可见项区间 [start, end)（含 BUFFER）。viewport.h==0 → 冷启动返 INITIAL_SLOTS。
 /// top = scroll_pos.y - listview_offset（ul 相对 pane 的偏移）。
 ///
+/// `fallback_of(i)`：item i 未测时的估高（多模板下按蓝图均值——见 `ListState::bp_estimate_of`）。
+///
 /// `gap`：flex 列表项间 gap（px）。**必须计入**累积位——实际布局（spacer + taffy flex+gap）
 /// 把 item i 放在 sum(h[0..i]) + i*gap，若此处漏算 gap 会低估值位置 → start 偏晚 →
 /// 视口顶部空白（mail gap:12 实例：scroll 5000 时差 ~458px）。block ul gap=0 no-op。
@@ -14,6 +16,7 @@ pub fn compute_visible_range(
     listview_offset: f32,
     viewport_h: f32,
     heights: &HeightCache,
+    fallback_of: &dyn Fn(usize) -> f32,
     gap: f32,
 ) -> std::ops::Range<usize> {
     if item_count == 0 {
@@ -22,9 +25,9 @@ pub fn compute_visible_range(
     if viewport_h <= 0.0 {
         return 0..INITIAL_SLOTS.min(item_count);
     }
-    // 无已测高度（estimate<=0）：无法估算可见项数（每项高度 0 → 累积和永不达阈值 → 误判整列可见）。
+    // 全无已测高度：无法估算可见项数（每项高度 0 → 累积和永不达阈值 → 误判整列可见）。
     // 退化为冷启动定数，等首帧 solve + collect_heights 回填真实高度后下帧才走精准路径。
-    if heights.estimate <= 0.0 {
+    if !heights.any_known() {
         return 0..INITIAL_SLOTS.min(item_count);
     }
     let top = scroll_pos_y - listview_offset;
@@ -34,7 +37,7 @@ pub fn compute_visible_range(
     let mut acc = 0.0;
     let mut first = 0usize;
     for i in 0..item_count {
-        acc += heights.height_of(i);
+        acc += heights.height_of(i, fallback_of(i));
         if acc + (i as f32) * gap > top {
             first = i;
             break;
@@ -44,7 +47,7 @@ pub fn compute_visible_range(
     let mut acc2 = 0.0;
     let mut last = item_count;
     for j in 0..item_count {
-        acc2 += heights.height_of(j);
+        acc2 += heights.height_of(j, fallback_of(j));
         if acc2 + (j as f32) * gap >= target {
             last = j + 1;
             break;
@@ -207,8 +210,15 @@ fn compute_visible_spacers(
     } else {
         0.0
     };
-    let visible =
-        compute_visible_range(ls.item_count, scroll_y, ul_y, viewport_h, &ls.heights, gap);
+    let visible = compute_visible_range(
+        ls.item_count,
+        scroll_y,
+        ul_y,
+        viewport_h,
+        &ls.heights,
+        &|i| ls.bp_estimate_of(i),
+        gap,
+    );
     // Gap accounting for flex+gap uls: [head_spacer, slot.., tail_spacer]，可见 slot 在 head spacer
     // 后一个 gap。为对齐非虚拟基准（item[k].top = sum(0..k) + k*gap），head spacer 须保留
     // sum(0..start) + (start-1)*gap：slot.top = spacer.h + gap = sum + count*gap。tail 对称。
@@ -216,8 +226,8 @@ fn compute_visible_spacers(
     let head_count = visible.start;
     let tail_count = ls.item_count.saturating_sub(visible.end);
     let spacer_head_h =
-        (ls.heights.sum(0..visible.start) + (head_count.saturating_sub(1) as f32) * gap).max(0.0);
-    let spacer_tail_h = (ls.heights.sum(visible.end..ls.item_count)
+        (ls.sum_heights(0..visible.start) + (head_count.saturating_sub(1) as f32) * gap).max(0.0);
+    let spacer_tail_h = (ls.sum_heights(visible.end..ls.item_count)
         + (tail_count.saturating_sub(1) as f32) * gap)
         .max(0.0);
     (visible, spacer_head_h, spacer_tail_h)

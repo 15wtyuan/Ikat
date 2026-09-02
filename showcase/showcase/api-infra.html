@@ -50,7 +50,9 @@
   .mt-row {display:flex;flex-direction:row;align-items:center;gap:12px; border-radius:8px; padding:10px 14px;}
   .mt-idx { color:#6c7080; font-size:12px; font-family:JetBrainsMono, monospace; }
   .mt-title { color:#c8d4e0; font-size:14px; }
-  .mt-row-accent { background-color:#2a2233; box-shadow:inset 3px 0 0 0 #d4a44e; }
+  /* 强调行视觉烙进 row-tpl-accent 蓝图（高度也分化：64 vs 44——多模板估高按蓝图走）。 */
+  .mt-row-accent { background-color:#2a2233; box-shadow:inset 3px 0 0 0 #d4a44e; height:64px; }
+  .mt-row { height:44px; }
 
   /* #7 unload 演示舞台。 */
   .ul-stage {display:flex;flex-direction:row;gap:14px;align-items:center;flex-wrap:wrap; min-height:80px; width:760px; border-radius:8px; background-color:#101c28; padding:14px;}
@@ -141,15 +143,18 @@
       </div>
 
       <div class="section">
-        <div class="section-title">6 · GetTemplate 具名模板（ListView 蓝图经 API 取用）</div>
-        <div class="section-desc">driver 用 GetTemplate("row-tpl") 具名取出设计期蓝图喂给 ItemTemplate（不从 ul 子里自动采纳），BindItem 按行数据切换样式 class——两种行视觉交替。按 index 自动选多模板（TemplateSelector 逐项切换）是契约已定、机制待后续交付的件，本节不演示。</div>
+        <div class="section-title">6 · 多模板 ListView（GetTemplate + TemplateSelector 逐项分派）</div>
+        <div class="section-desc">list 下两个具名 &lt;template&gt; 蓝图（普通行 44px / 强调行 64px 金左条）。driver 经 GetTemplate("row-tpl")/("row-tpl-accent") 取出，塞进 TemplateSelector lambda 按 index 分派（第 3/6/9… 行走强调蓝图）；BindItem 只填数据不切 class——强调视觉烙在蓝图里。框架不自动收集 list 下模板：取哪个、怎么选都是显式 API 调用。</div>
         <div class="stage">
-          <div role="list" id="infra-mt-list" class="mt-list" data-fill="6">
+          <div role="list" id="infra-mt-list" class="mt-list" data-fill-mt="12">
             <template id="row-tpl">
               <div role="listitem" class="mt-row"><span class="mt-idx">#00</span><span class="mt-title">普通行</span></div>
             </template>
+            <template id="row-tpl-accent">
+              <div role="listitem" class="mt-row mt-row-accent"><span class="mt-idx">#00</span><span class="mt-title">强调行</span></div>
+            </template>
           </div>
-          <span class="note">30 项 · 第 3/6/9… 行强调样式（BindItem class 切换）· 列表内滚轮滚动（虚拟化）</span>
+          <span class="note">30 项 · 第 3/6/9… 行走强调蓝图（44/64px 混排，spacer 估高按蓝图）· 列表内滚轮滚动（虚拟化 + 按模板分池复用）</span>
         </div>
       </div>
 

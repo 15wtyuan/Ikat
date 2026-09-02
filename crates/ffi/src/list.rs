@@ -27,6 +27,14 @@ pub extern "C" fn ikat_list_set_item_count(h: *mut StageHandle, node: u64, count
             .map(|s| s.lists.get(ul).is_none())
             .unwrap_or(true);
         if needs_enter {
+            // enter 前预检：多 <template> 且未给出选择（ItemTemplate/TemplateSelector 均未
+            // 经 FFI 到达）→ 专用错误码 -2（区别于一般 -1；C# 映射 UIContractException——
+            // 契约：有多个模板却没说怎么选）。enter 内部同判双保险。
+            if let Some(scene) = sh.stage.scene.as_ref() {
+                if ikat_core::list::check_multi_template_selection(scene, ul).is_err() {
+                    return -2;
+                }
+            }
             let ordinal = sh.stage.next_list_ordinal;
             sh.stage.next_list_ordinal = sh.stage.next_list_ordinal.wrapping_add(1);
             if ikat_core::list::enter_data_driven(&mut sh.stage, ul, ordinal).is_err() {
@@ -38,8 +46,10 @@ pub extern "C" fn ikat_list_set_item_count(h: *mut StageHandle, node: u64, count
     })
 }
 
-/// 设 ListView 的模板根（覆盖 enter_data_driven 备份的备用 li）。业务通过
-/// ListView.ItemTemplate 设——指向场景内克隆出的模板子树根。无 ListState 条目 → -1。
+/// 设 ListView 的默认模板（覆盖 enter 备份的备用 li / 多模板 default_bp）。业务通过
+/// ListView.ItemTemplate 设——指向场景内子树根（GetTemplate 的模板 li / Instantiate 的
+/// 游离克隆）。enter 前调用会被缓冲（Scene::pending_lists），enter 时消费——修复旧路径
+/// 「enter 前设被静默丢弃」。源节点死且从未收养 → -1。
 #[no_mangle]
 pub extern "C" fn ikat_list_set_template(
     h: *mut StageHandle,
@@ -54,12 +64,53 @@ pub extern "C" fn ikat_list_set_template(
         let Some(scene) = sh.stage.scene.as_mut() else {
             return -1;
         };
-        match scene.lists.get_mut(NodeId(node)) {
-            Some(ls) => {
-                ls.template_root = Some(NodeId(template_node));
-                0
+        match ikat_core::list::set_list_template(scene, NodeId(node), NodeId(template_node)) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        }
+    })
+}
+
+/// 推 per-item 模板映射（TemplateSelector 求值结果批量送达）。`src_ids[i]` = item
+/// (start+i) 的模板源节点 id（GetTemplate 的模板 li / Instantiate 的游离克隆根）。
+/// enter 前缓冲、enter 后即时解析：模板变了的 item 清已测高度 + park 旧蓝图 active slot，
+/// 下帧以正确蓝图重新物化。源死且未注册 → -1；null 句柄/指针 → -1；成功 → 0。
+#[no_mangle]
+pub extern "C" fn ikat_list_set_item_templates(
+    h: *mut StageHandle,
+    node: u64,
+    start: i32,
+    src_ids: *const u64,
+    len: i32,
+) -> i32 {
+    ffi_guard(-1, || {
+        if h.is_null() || start < 0 || len < 0 {
+            return -1;
+        }
+        let sh = unsafe { &mut *h };
+        let Some(scene) = sh.stage.scene.as_mut() else {
+            return -1;
+        };
+        let len = len as usize;
+        if len == 0 {
+            // 空推送仍标记「选择已给出」——ItemCount=0 的首次 set + 已设 selector：
+            // 不标记会被多模板预检误判 -2。
+            if scene.lists.get(NodeId(node)).is_none() {
+                scene.pending_lists.entry(NodeId(node)).or_default().has_map = true;
             }
-            None => -1,
+            return 0;
+        }
+        if src_ids.is_null() {
+            return -1;
+        }
+        let ids: Vec<NodeId> = unsafe { std::slice::from_raw_parts(src_ids, len) }
+            .iter()
+            .copied()
+            .map(NodeId)
+            .collect();
+        match ikat_core::list::set_item_templates(scene, NodeId(node), start as usize, &ids) {
+            Ok(()) => 0,
+            Err(_) => -1,
         }
     })
 }

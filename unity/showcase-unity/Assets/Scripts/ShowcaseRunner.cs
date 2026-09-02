@@ -463,22 +463,22 @@ public class ShowcaseRunner : MonoBehaviour
             tabs.SelectionChanged += _ => RefreshTabs();
         }
 
-        // ── #6 GetTemplate 具名模板：经 API 取蓝图喂 ItemTemplate + BindItem 行样式切换。
-        //    按 index 自动选多模板（TemplateSelector 逐项切换）机制未交付（core
-        //    enter_data_driven 要求恰好一个 template），本节不演示。
+        // ── #6 多模板 ListView：GetTemplate 取两个蓝图 + TemplateSelector 按 index 分派。
+        //    强调行视觉（金左条 + 64px）烙在 row-tpl-accent 蓝图里——BindItem 只填数据，
+        //    不再切 class。core 侧按模板分池克隆，spacer 估高按蓝图均值。
         if (page.TryGet<ListView>("infra-mt-list", out var mt))
         {
-            mt.ItemTemplate = mt.GetTemplate("row-tpl");
+            UITemplate rowNormal = mt.GetTemplate("row-tpl");
+            UITemplate rowAccent = mt.GetTemplate("row-tpl-accent");
+            mt.TemplateSelector = i => (i % 3 == 2) ? rowAccent : rowNormal;
             mt.BindItem = (item, i) =>
             {
                 var spans = item.Query<TextElement>();
                 if (spans.Count >= 2)
                 {
                     spans[0].TextContent = string.Format("#{0:00}", i);
-                    spans[1].TextContent = (i % 3 == 2) ? "强调行（class 切换）" : "普通行";
+                    spans[1].TextContent = (i % 3 == 2) ? "强调行（蓝图切换）" : "普通行";
                 }
-                if (i % 3 == 2) item.Classes.Add("mt-row-accent");
-                else item.Classes.Remove("mt-row-accent");
             };
             mt.ItemCount = 30;
         }

@@ -379,6 +379,8 @@ public class ListView : Container {
 
 **自动/报错规则**：未设 `ItemTemplate`/`TemplateSelector` 时——list 下有**单个** `<template id>` → 自动用它；有**多个** `<template id>` → 抛 `UIContractException`（有多个模板却没说怎么选）。`<template>` 与运行时 virtual 开关不冲突：virtual 管是否虚拟化，`<template>` 管 item 模板长什么样。
 
+**多模板语义（#12）**：`TemplateSelector` 与 `ItemTemplate` 同设时 **selector 赢**（per-item 显式映射优先于默认蓝图）。selector 是严格派：设了即全权，每个 index 必须返回 UITemplate——返 null 抛 `UIContractException`（要回落默认就显式返回默认 UITemplate）；返回的须为场景内子树（`GetTemplate` 产物或 `Instantiate()` 克隆，裸包组件模板先 Instantiate）。selector 求值在 C# 侧完成后批量推给 core（core 零回调）；enter 前的 `ItemTemplate`/selector 推送会被缓冲到 enter 时消费（不丢）。换 selector（或 `Notify*` 后重推）时模板变了的 item 清已测高度、park 旧蓝图 slot、下帧以正确蓝图重新物化；spacer 估高按蓝图均值分化。
+
 **退场动画**：`ItemExitClass` 设定后，`NotifyRemoved` 的 item 先加 class 等 `AnimationEnd` 再回收。
 
 ---

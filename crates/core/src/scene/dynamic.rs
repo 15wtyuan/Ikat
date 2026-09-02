@@ -681,10 +681,16 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     // 3. per-node side table 联动清（单一入口 free_node_slot：Vec 索引表清初值 +
     //    anim/scroll/controls/control_inits/roles/lists/text_contents/image_srcs remove。
     //    新增 per-node 表只改 free_node_slot 一处，不在此逐表列）。
-    //    ListView 模板是游离子树（parent=None、不在 roots、不在任何父的 children），
-    //    remove_node 的递归删子够不到它。删 ul 前先取 template_root，随 ul 一并递归释放，
-    //    否则 ListState 条目被清后该游离子树成孤儿、slotmap 槽永久泄漏。
-    let list_template_root = scene.lists.get(id).and_then(|ls| ls.template_root);
+    //    ListView 蓝图 master 是游离子树（parent=None、不在 roots、不在任何父的 children），
+    //    remove_node 的递归删子够不到它们。删 ul 前取全部蓝图根，随 ul 一并递归释放，
+    //    否则 ListState 条目被清后这些游离子树成孤儿、slotmap 槽永久泄漏。
+    //    enter 前的 pending 模板配置一并清（缓冲的源引用随节点死亡失效）。
+    let list_blueprint_roots: Vec<NodeId> = scene
+        .lists
+        .get(id)
+        .map(|ls| ls.blueprints.iter().map(|b| b.root).collect())
+        .unwrap_or_default();
+    scene.pending_lists.remove(&id);
     scene.free_node_slot(id);
     tweens.kill_node(id);
     // pending_transitions 不清：每帧首由 Stage drain/clear（stage.rs），瞬态，非持久泄漏；
@@ -706,9 +712,9 @@ pub fn remove_node(scene: &mut Scene, tweens: &mut TweenManager, id: NodeId) {
     was_css_scope.then(|| {
         scene.dynamic_rules.entries.retain(|sr| sr.scope_root != id);
     });
-    // 6. ListView 模板游离子树随 ul 一并释放（见上方 list_template_root 注释）。
-    //    template_root != id 且与 id 无父子关系（游离），递归删它不会重入 id。
-    if let Some(tpl) = list_template_root {
+    // 6. ListView 全部蓝图 master 游离子树随 ul 一并释放（见上方 list_blueprint_roots 注释）。
+    //    蓝图根 != id 且与 id 无父子关系（游离），递归删它不会重入 id。
+    for tpl in list_blueprint_roots {
         remove_node(scene, tweens, tpl);
     }
 }

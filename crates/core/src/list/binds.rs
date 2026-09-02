@@ -5,9 +5,11 @@ pub fn set_item_count(stage: &mut crate::stage::Stage, ul: NodeId, count: usize)
     if let Some(scene) = stage.scene.as_mut() {
         if let Some(ls) = scene.lists.get_mut(ul) {
             ls.item_count = count;
-            // 保留已测高度：resize 只扩缩 known vec，estimate 不变。
-            // initial_estimate 取当前 estimate（无已测时 0.0，首帧 solve 后补真实模板高）。
-            ls.heights.resize(count, ls.heights.estimate);
+            // 保留已测高度：resize 只扩缩 known vec。新项估高按蓝图（bp_estimate_of）。
+            ls.heights.resize(count);
+            // per-item 模板映射同步扩缩：新项填 default_bp（C# 若设了 TemplateSelector
+            // 会在本次 FFI 前后重推覆盖；未设则恒 default 正确）。
+            ls.template_ids.resize(count, ls.default_bp as u16);
             ls.dirty = true;
         }
     }

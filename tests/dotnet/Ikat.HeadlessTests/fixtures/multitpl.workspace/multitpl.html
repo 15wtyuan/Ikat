@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ListView multi-template fixture</title>
+<style>
+  /* Fixture for multi-template ListView (#12): two <template id> blueprints under one
+     role="list". The two blueprints carry DIFFERENT baked heights (40 vs 80) so a slot's
+     layout height alone identifies which blueprint cloned it — the headless test asserts
+     per-item template dispatch by reading slot rect heights. Templates are fetched at
+     runtime via GetTemplate("rowA"/"rowB") and fed to TemplateSelector (the framework
+     does NOT auto-collect templates under a list). */
+  .root { width: 400px; height: 300px; background-color: #111; }
+  .pane {
+    width: 400px;
+    height: 200px;
+    overflow: scroll;
+    background-color: #222;
+  }
+  [role="list"] { display: block; }
+  .row-a {
+    width: 380px;
+    height: 40px;
+    background-color: #4a90d9;
+    color: #fff;
+    font-size: 14px;
+  }
+  .row-b {
+    width: 380px;
+    height: 80px;
+    background-color: #d97a4a;
+    color: #fff;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <div class="root">
+    <div class="pane" id="pane">
+      <!-- ListView（role="list"）：两个 <template id> 蓝图。运行时 GetTemplate 取出、
+           TemplateSelector 按 index 分派（多模板必须给选择——否则 UIContractException）。 -->
+      <div role="list" id="list">
+        <template id="rowA"><div role="listitem" class="row-a"><span class="kind">A</span></div></template>
+        <template id="rowB"><div role="listitem" class="row-b"><span class="kind">B</span></div></template>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

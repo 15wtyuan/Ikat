@@ -62,7 +62,7 @@ pub fn scroll_to_item(
         .ok_or("no scene")?
         .lists
         .get(ul)
-        .map(|ls| ls.heights.sum(0..index))
+        .map(|ls| ls.sum_heights(0..index))
         .unwrap_or(0.0);
     // 设祖先 ScrollPane scroll_pos（保留 x，设 y）。animated=behavior==1（Smooth）。
     if let Some(pane) = pane {
@@ -95,7 +95,7 @@ pub fn recompute_smooth_scroll_targets(scene: &mut Scene) {
         .collect();
     for (pane, ul, index) in anchored {
         // 回填后按最新高度重算目标（lists 槽消失 → 清锚防悬空 NodeId 残留）。
-        let Some(target) = scene.lists.get(ul).map(|ls| ls.heights.sum(0..index)) else {
+        let Some(target) = scene.lists.get(ul).map(|ls| ls.sum_heights(0..index)) else {
             if let Some(st) = scene.scroll.get_mut(pane) {
                 st.smooth_scroll_to = None;
             }

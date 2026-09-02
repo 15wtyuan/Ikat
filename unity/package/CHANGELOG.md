@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **ListView 多模板（#12）**：`TemplateSelector` 从纯 C# 缓存升级为真正参与克隆——
+  list 下可声明多个 `<template id>` 蓝图，`GetTemplate` 取出塞进 selector lambda
+  按 index 逐项分派。严格派语义：selector 设了即全权（返 null / 裸包组件模板抛
+  `UIContractException`）；与 `ItemTemplate` 同设 selector 赢（默认蓝图语义保留）。
+  core 侧按模板分池克隆复用（slot 永驻不变量保持），spacer 估高按蓝图均值分化，
+  `Notify*` 后 C# 侧重推受影响区间。多模板未给选择（无 ItemTemplate/selector）时
+  首次 `ItemCount` 抛 `UIContractException`。
+### Fixed
+- **enter 前设 `ItemTemplate` 被静默丢弃**：旧路径 `ikat_list_set_template` 在
+  未进数据驱动模式时返 -1 且 C# 不查 rc——先设 `ItemTemplate` 再设 `ItemCount`
+  的常规顺序会丢模板（列表默默用 HTML 备用蓝图）。现 enter 前的模板设定缓冲到
+  enter 时消费；enter 后设 ItemTemplate 遇陈旧源（节点已删）抛
+  `UIContractException`（旧路径静默无效果）。
 - **Tree 复合控件（#8）**：`<div role="tree">` / `<div role="treeitem">`
   WAI-ARIA 标准树。条目直接嵌套（treeitem 内嵌 treeitem，无 group 包装层），
   任意深度；branch（有直接 treeitem 子）可展开/折叠（`aria-expanded="true"`

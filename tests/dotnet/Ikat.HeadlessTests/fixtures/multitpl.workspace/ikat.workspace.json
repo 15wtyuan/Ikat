@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "output_dir": "../multitpl-ws-out",
+  "packages": [
+    {
+      "name": "multitpl",
+      "dirs": ["."],
+      "html": ["multitpl.html"]
+    }
+  ],
+  "atlases": [],
+  "fonts": []
+}

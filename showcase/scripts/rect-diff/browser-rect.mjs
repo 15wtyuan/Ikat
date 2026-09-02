@@ -132,9 +132,10 @@ try {
 
   const rects = await page.evaluate((roleTags) => {
     document.body.style.zoom = '';
-    // Undo demo fill: remove cloned (non-template) children of data-fill
-    // lists so the browser shows the same empty list core laid out.
-    document.querySelectorAll('[role="list"][data-fill]').forEach((list) => {
+    // Undo demo fill: remove cloned (non-template) children of data-fill /
+    // data-fill-mt lists so the browser shows the same empty list core laid out
+    // (data-fill-mt = multi-template demo fill, same undo semantics).
+    document.querySelectorAll('[role="list"][data-fill],[role="list"][data-fill-mt]').forEach((list) => {
       Array.from(list.children).forEach((ch) => {
         if (ch.tagName !== 'TEMPLATE') ch.remove();
       });
