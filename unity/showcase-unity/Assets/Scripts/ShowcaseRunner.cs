@@ -1200,6 +1200,42 @@ public class ShowcaseRunner : MonoBehaviour
                     Say("链·红");
                 };
         }
+        // ⑧⑨⑩ typed 重载三连（#11）：长度（border-width 变粗）/ 透明度（淡化）/
+        // 字符串（fallback 消费可见化——默认紫 = var 缺席 fallback，SetVar 后红）。
+        // 均 toggle：未设 → SetVar；已设 → RemoveVar 回落（CSS 声明/继承值）。
+        if (page.TryGet<Container>("rt-w-block", out var wBlock)
+            && page.TryGet<Button>("rt-w", out var wBtn))
+        {
+            bool thick = false;
+            wBtn.Clicked += () =>
+            {
+                if (thick) { wBlock.Style.RemoveVar("--rt-border-w"); Say("边框·回落3px"); }
+                else { wBlock.Style.SetVar("--rt-border-w", Length.Px(10)); Say("边框·10px"); }
+                thick = !thick;
+            };
+        }
+        if (page.TryGet<Container>("rt-fade-block", out var fadeBlock)
+            && page.TryGet<Button>("rt-fade", out var fadeBtn))
+        {
+            bool faded = false;
+            fadeBtn.Clicked += () =>
+            {
+                if (faded) { fadeBlock.Style.RemoveVar("--rt-alpha"); Say("透明·回落1"); }
+                else { fadeBlock.Style.SetVar("--rt-alpha", 0.25f); Say("透明·0.25"); }
+                faded = !faded;
+            };
+        }
+        if (page.TryGet<Container>("rt-fb-swatch", out var fbSwatch)
+            && page.TryGet<Button>("rt-fb", out var fbBtn))
+        {
+            bool injected = false;
+            fbBtn.Clicked += () =>
+            {
+                if (injected) { fbSwatch.Style.RemoveVar("--rt-fb"); Say("字符串·回落fallback紫"); }
+                else { fbSwatch.Style.SetVar("--rt-fb", "#c0392b"); Say("字符串·红"); }
+                injected = !injected;
+            };
+        }
     }
 
     /// 克隆源 controller 的 Idle 态 clip、剥掉根 path（""）的 position/rotation 曲线，

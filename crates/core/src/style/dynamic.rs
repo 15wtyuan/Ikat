@@ -3749,6 +3749,29 @@ mod tests {
     }
 
     #[test]
+    fn custom_props_cross_scope_boundary_inheritance() {
+        // main-design §279 契约锁：--* 跨组件（作用域）边界继承——scope 根规则声明的
+        // --accent 对边界内后代可见（var 环境沿父链走查不因 SCOPE_ROOT 停步——与
+        // 后代选择器的墙语义不同，custom props 的墙是透的）。
+        let mut s = btn_scene();
+        let root_id = s.roots[0];
+        let bid = btn_id(&s);
+        s.get_mut(root_id)
+            .unwrap()
+            .interaction
+            .flags
+            .insert(NodeFlags::SCOPE_ROOT);
+        push_global(&mut s, rule("div", "--accent", "#ff0000"));
+        push_global(&mut s, rule(".btn", "color", "var(--accent)"));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(
+            s.get(bid).unwrap().style.color,
+            RED,
+            "custom prop 跨作用域边界继承给边界内后代"
+        );
+    }
+
+    #[test]
     fn runtime_rule_hits_inside_scoped_subtree() {
         // 穿墙语义：全局注入规则可及 scoped（组件展开域）内部节点——打包期内容墙
         // 不约束运行时注入（public-api §10.2）。root 打 SCOPE_ROOT，运行时全局规则

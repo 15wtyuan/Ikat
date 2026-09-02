@@ -22,8 +22,9 @@
   .rt-page {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:16px; }
   .main-title { color:#e0e6ec; font-size:36px; font-weight:700; }
   .section-label { color:#6c7080; font-size:13px; margin-top:16px; }
-  /* 规则源 custom props：主题色（SetVar 覆盖它）+ 嵌套链（--chain-a 吃 --chain-b）。 */
-  .rt-page { --rt-accent: #2a5a75; --rt-chain-b: #8ec5d8; --rt-chain-a: var(--rt-chain-b); }
+  /* 规则源 custom props：主题色（SetVar 覆盖它）+ 嵌套链（--chain-a 吃 --chain-b）
+     + 三个 typed 重载消费面（长度/透明度/字符串 fallback）。 */
+  .rt-page { --rt-accent: #2a5a75; --rt-chain-b: #8ec5d8; --rt-chain-a: var(--rt-chain-b); --rt-border-w: 3px; --rt-alpha: 1; }
   /* Add 的目标块：默认灰；运行时注入 .rt-target 规则换色。 */
   .rt-target {display:flex; width:200px; height:80px; background-color:#7f8c8d; border-radius:10px; border-width:0 0 0 3px; border-style:solid; border-color:#1a2f45; }
   .rt-target-label { color:#e0e6ec; font-size:14px; align-self:center; margin:0 0 0 16px; }
@@ -33,6 +34,14 @@
   .rt-chip-text { color:var(--rt-accent); font-size:13px; font-weight:700; }
   /* 嵌套链 swatch：background 吃 --rt-chain-a（var(--rt-chain-b) 的解析结果）。 */
   .rt-chain-swatch {display:flex; width:120px; height:48px; background-color:var(--rt-chain-a); border-radius:8px; }
+  /* typed 重载消费面：长度（border-width 吃 --rt-border-w，SetVar(Length) 变粗）、
+     透明度（opacity 吃 --rt-alpha，SetVar(float) 变淡）、字符串+fallback（背景吃
+     --rt-fb——未设时走 fallback 紫，SetVar(string) 后变红：fallback 消费可见化）。 */
+  .rt-w-block {display:flex; width:160px; height:48px; align-items:center; justify-content:center; background-color:rgba(21,36,51,0.72); border-style:solid; border-width:var(--rt-border-w); border-color:#2a5a75; border-radius:8px; }
+  .rt-w-label { color:#9aa0b4; font-size:12px; }
+  .rt-fade-block {display:flex; width:120px; height:48px; align-items:center; justify-content:center; background-color:#2a5a75; border-radius:8px; opacity:var(--rt-alpha); }
+  .rt-fade-label { color:#e0e6ec; font-size:12px; }
+  .rt-fb-swatch {display:flex; width:120px; height:48px; background-color:var(--rt-fb, #8e44ad); border-radius:8px; }
   /* 行内源 chip：--rt-inline 行内声明 + 行内 var 消费（deferred_inline 双路径）。 */
   .rt-inline-chip {display:flex; width:120px; height:48px; align-items:center; justify-content:center; background-color:rgba(21,36,51,0.72); border-radius:8px; font-size:13px; font-weight:700; }
   </style>
@@ -63,6 +72,13 @@
       <div class="api-row">
         <button class="api-btn" id="rt-chain">嵌套链注入</button>
       </div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-w">SetVar·长度</button>
+        <button class="api-btn" id="rt-fade">SetVar·透明度</button>
+      </div>
+      <div class="api-row">
+        <button class="api-btn" id="rt-fb">SetVar·字符串</button>
+      </div>
     </div>
     <div class="rt-page" id="rt-page">
       <div class="main-title">运行时 CSS 与 custom props</div>
@@ -78,6 +94,12 @@
       <div class="rt-chain-swatch"></div>
       <div class="section-label">行内源 chip（style 属性声明 + 消费，恒橙色）</div>
       <div class="rt-inline-chip" style="--rt-inline: #e67e22; color: var(--rt-inline);">行内源</div>
+      <div class="section-label">typed 重载：边框吃 var(--rt-border-w)（按钮变粗 10px）</div>
+      <div class="rt-w-block" id="rt-w-block"><span class="rt-w-label">边框宽度</span></div>
+      <div class="section-label">typed 重载：透明度吃 var(--rt-alpha)（按钮变淡 0.25）</div>
+      <div class="rt-fade-block" id="rt-fade-block"><span class="rt-fade-label">透明度</span></div>
+      <div class="section-label">typed 重载 + fallback：背景吃 var(--rt-fb, 紫)（默认紫=fallback，按钮变红）</div>
+      <div class="rt-fb-swatch" id="rt-fb-swatch"></div>
     </div>
   </div>
 </body>
