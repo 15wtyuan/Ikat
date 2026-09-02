@@ -146,6 +146,12 @@
         <div class="section-title">6 · 多模板 ListView（GetTemplate + TemplateSelector 逐项分派）</div>
         <div class="section-desc">list 下两个具名 &lt;template&gt; 蓝图（普通行 44px / 强调行 64px 金左条）。driver 经 GetTemplate("row-tpl")/("row-tpl-accent") 取出，塞进 TemplateSelector lambda 按 index 分派（第 3/6/9… 行走强调蓝图）；BindItem 只填数据不切 class——强调视觉烙在蓝图里。框架不自动收集 list 下模板：取哪个、怎么选都是显式 API 调用。</div>
         <div class="stage">
+          <div style="display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+            <button id="btn-mt-insert" class="hbtn">头部插 3 项</button>
+            <button id="btn-mt-remove" class="hbtn">头部删 3 项</button>
+            <button id="btn-mt-allaccent" class="hbtn">切换全强调蓝图</button>
+            <button id="btn-mt-nullsel" class="hbtn">null selector 试验</button>
+          </div>
           <div role="list" id="infra-mt-list" class="mt-list" data-fill-mt="12">
             <template id="row-tpl">
               <div role="listitem" class="mt-row"><span class="mt-idx">#00</span><span class="mt-title">普通行</span></div>
@@ -154,7 +160,7 @@
               <div role="listitem" class="mt-row mt-row-accent"><span class="mt-idx">#00</span><span class="mt-title">强调行</span></div>
             </template>
           </div>
-          <span class="note">30 项 · 第 3/6/9… 行走强调蓝图（44/64px 混排，spacer 估高按蓝图）· 列表内滚轮滚动（虚拟化 + 按模板分池复用）</span>
+          <span class="note" id="infra-mt-status">30 项 · 交替分派中（第 3/6/9… 行强调，44/64px 混排）</span>
         </div>
       </div>
 

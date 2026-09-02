@@ -464,13 +464,19 @@ public class ShowcaseRunner : MonoBehaviour
         }
 
         // ── #6 多模板 ListView：GetTemplate 取两个蓝图 + TemplateSelector 按 index 分派。
-        //    强调行视觉（金左条 + 64px）烙在 row-tpl-accent 蓝图里——BindItem 只填数据，
-        //    不再切 class。core 侧按模板分池克隆，spacer 估高按蓝图均值。
-        if (page.TryGet<ListView>("infra-mt-list", out var mt))
+        //    强调行视觉（金左条 + 64px）烙在 row-tpl-accent 蓝图里——BindItem 只填数据。
+        //    动态面四按钮（读数翻转即证据，照 #7 同款）：
+        //    插/删走 Notify*（C# 侧按新 index 重推受影响区间，模板随数据重排）；
+        //    「切换全强调」换 selector（core park 旧蓝图 slot、下帧以新蓝图重新物化——整列翻面）；
+        //    「null selector 试验」验证严格派异常（求值抛在前、core 映射未动，捕获后恢复原状）。
+        if (page.TryGet<ListView>("infra-mt-list", out var mt) &&
+            page.TryGet<TextElement>("infra-mt-status", out var mtStatus))
         {
             UITemplate rowNormal = mt.GetTemplate("row-tpl");
             UITemplate rowAccent = mt.GetTemplate("row-tpl-accent");
-            mt.TemplateSelector = i => (i % 3 == 2) ? rowAccent : rowNormal;
+            System.Func<int, UITemplate> alternating = i => (i % 3 == 2) ? rowAccent : rowNormal;
+            bool allAccent = false;
+            mt.TemplateSelector = alternating;
             mt.BindItem = (item, i) =>
             {
                 var spans = item.Query<TextElement>();
@@ -481,6 +487,44 @@ public class ShowcaseRunner : MonoBehaviour
                 }
             };
             mt.ItemCount = 30;
+            if (page.TryGet<Button>("btn-mt-insert", out var mtInsert))
+                mtInsert.Clicked += () =>
+                {
+                    mt.NotifyInserted(0, 3);
+                    mtStatus.TextContent = "已插 3 @0 · 共 " + mt.ItemCount + " 项 · 模板按新 index 重排";
+                };
+            if (page.TryGet<Button>("btn-mt-remove", out var mtRemove))
+                mtRemove.Clicked += () =>
+                {
+                    if (mt.ItemCount < 6) { mtStatus.TextContent = "项数不足，先插几批再删"; return; }
+                    mt.NotifyRemoved(0, 3);
+                    mtStatus.TextContent = "已删 [0,3) · 共 " + mt.ItemCount + " 项";
+                };
+            if (page.TryGet<Button>("btn-mt-allaccent", out var mtAll))
+                mtAll.Clicked += () =>
+                {
+                    allAccent = !allAccent;
+                    mt.TemplateSelector = allAccent ? (System.Func<int, UITemplate>)(_ => rowAccent) : alternating;
+                    mtStatus.TextContent = (allAccent ? "全强调蓝图 ✓（换 selector 重物化）" : "恢复交替分派 ✓") + " · 共 " + mt.ItemCount + " 项";
+                };
+            if (page.TryGet<Button>("btn-mt-nullsel", out var mtNull))
+                mtNull.Clicked += () =>
+                {
+                    try
+                    {
+                        // 求值抛在推送之前——core 的 per-item 映射未被动过，列表原样。
+                        mt.TemplateSelector = i => (i == 5) ? null : rowNormal;
+                        mtStatus.TextContent = "未抛（✗ 严格派失效）";
+                    }
+                    catch (UIContractException)
+                    {
+                        mtStatus.TextContent = "null @5 抛 UIContractException ✓ · 已恢复交替 · " + mt.ItemCount + " 项不变";
+                    }
+                    finally
+                    {
+                        mt.TemplateSelector = alternating;
+                    }
+                };
         }
 
         // ── #7 UnloadPackage：别名重载 showcase 字节 → 实例化本页微缩窗 → 卸载见存活。
