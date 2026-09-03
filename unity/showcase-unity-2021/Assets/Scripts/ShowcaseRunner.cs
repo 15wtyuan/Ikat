@@ -1112,7 +1112,10 @@ public class ShowcaseRunner : MonoBehaviour
     void TeardownComponentLabPage()
     {
         LifecycleWidget.OnLifecycleChanged -= RefreshComponentLabReadouts;
+        _clPartReg?.Dispose();     // 运行时 ::part 注入句柄（不跨页泄漏）
+        _clPartReg = null;
     }
+    IDisposable _clPartReg;
 
     void RefreshComponentLabReadouts()
     {
@@ -1131,6 +1134,12 @@ public class ShowcaseRunner : MonoBehaviour
     {
         LifecycleWidget.OnLifecycleChanged += RefreshComponentLabReadouts;
         RefreshComponentLabReadouts();   // 进页 connect 已发生（instantiate 早于 wire）
+        TextElement status = page.TryGet<TextElement>("cl-status", out var st) ? st : null;
+        void Say(string s)
+        {
+            if (status != null) status.TextContent = s;
+            Debug.Log($"[Showcase] comp: {s}");
+        }
 
         if (page.TryGet<Container>("cl-stage", out var stage))
         {
@@ -1145,6 +1154,53 @@ public class ShowcaseRunner : MonoBehaviour
                     stage.AddChild(holder);
                     Debug.Log($"[Showcase] comp: +1 (conn={LifecycleWidget.Connected} disc={LifecycleWidget.Disconnected})");
                 };
+            // 重复注册 fail-loud（#20）：同 tag 二次注册必须抛 UIContractException。
+            if (page.TryGet<Button>("cl-dup", out var dupBtn))
+                dupBtn.Clicked += () =>
+                {
+                    try
+                    {
+                        _driver.Context.RegisterComponent("lifecycle-widget",
+                            (c, id) => new LifecycleWidget(c, id));
+                        Say("重复注册未拒?");
+                    }
+                    catch (UIContractException)
+                    {
+                        Say("重复注册→拒绝 ✓");
+                    }
+                };
+            // 运行时 ::part 注入（#57 × #11）：StyleSheet.Add 的 ::part 通道——注入后
+            // 舞台区两组件的 title 整组变红（同 specificity 后 Add 赢，覆盖 .lw-hot 金）。
+            if (page.TryGet<Button>("cl-rt", out var rtBtn))
+                rtBtn.Clicked += () =>
+                {
+                    _clPartReg?.Dispose();
+                    _clPartReg = _driver.Context.StyleSheet.Add(
+                        ".cl-stage::part(title) { color: #e74c3c; }");
+                    Say("已注入 ::part 红");
+                };
+            // 列表换绑淘汰（#20 pump 路径）：ItemCount 减员 → core 杀克隆 → 下帧
+            // PumpRemovedNodes 对已物化 wrapper fire OnDisconnected（disc 跳增）。
+            if (page.TryGet<ListView>("cl-list", out var lv))
+            {
+                lv.ItemTemplate = lv.GetTemplate("cl-row");
+                // BindItem 触达子树（Query 物化 widget wrapper → OnConnected）；
+                // 不触达则克隆永不物化、死亡无 wrapper 可通知。
+                lv.BindItem = (item, i) =>
+                {
+                    // 触达即物化：Query 构造 widget wrapper（→ OnConnected）；
+                    // 不触达则克隆永不物化、死亡无 wrapper 可通知。
+                    var _ = item.Query<CustomElement>();
+                };
+                lv.ItemCount = 8;
+                if (page.TryGet<Button>("cl-shrink", out var shrinkBtn))
+                    shrinkBtn.Clicked += () =>
+                    {
+                        int n = lv.ItemCount > 2 ? 2 : 8;   // 8→2 杀 6 槽 ↔ 2→8 复原
+                        lv.ItemCount = n;
+                        Say($"ItemCount→{n}（看 disc/conn 跳变）");
+                    };
+            }
             if (page.TryGet<Button>("cl-pop", out var popBtn))
                 popBtn.Clicked += () =>
                 {
