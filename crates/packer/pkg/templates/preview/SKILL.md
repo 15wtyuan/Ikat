@@ -22,7 +22,7 @@ there. The preview server closes that gap in **two layers** (#92):
   (`/ikat-preview/comp-style/<name>.css`, single truth in Rust) that matches
   core's style-wall semantics, including root-class rules on the template
   root. It also wires control semantics (slider/combobox/switch/spinbutton/
-  tabs/dialogs/progressbar/textbox) and injects the structural base polyfill
+  tabs/trees/dialogs/progressbar/textbox) and injects the structural base polyfill
   (`box-sizing`, button reset, placeholder line). Its content is embedded
   in the running `ikat` binary — always version-matched to the CLI. You
   never copy or reimplement any of this; a workspace copy would rot into a

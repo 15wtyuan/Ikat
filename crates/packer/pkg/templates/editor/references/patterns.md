@@ -44,6 +44,22 @@ state-selector transform:
 [role="switch"][aria-checked="true"] .knob { transform: translateX(20px); }
 ```
 
+`tree` has no framework slot either — state lives in CSS via the
+synthesized `aria-selected` / `aria-expanded` / `aria-level` attributes
+(top item = 1; use it for indentation). Put every label (branch and
+leaf) in a child `.row` element: a branch hosts its nested items as
+block children, so a bare text label trips `FenceMixedInlineBlock`, and
+a bare label misses the hover/selected/indent hooks anyway. Hiding
+collapsed children is the runtime's job, never author `display:none`:
+
+```css
+[role="treeitem"] { display: flex; flex-direction: column; }
+[role="treeitem"] .row { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 8px 12px; }
+[role="treeitem"][aria-selected="true"] .row { background: #2e2e42; color: #7c5cfc; }
+[role="treeitem"][aria-expanded="true"] .chev { transform: rotate(90deg); }
+[role="treeitem"][aria-level="2"] .row { padding-left: 32px; }
+```
+
 ## Decorated frames (background image behind foreground content)
 
 Rings, campfire circles, portrait frames — the most common trigger of the
