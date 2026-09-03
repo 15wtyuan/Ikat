@@ -4,8 +4,9 @@
   <meta charset="utf-8">
   <title>Ikat 靶子冻结 Showcase · shape mask</title>
   <style>
-  /* shape-mask 页（#52）：clip-path circle()/polygon() + 多 entry clip 链 + 命中穿透 +
-     transform 局部系 + 运行时注入。判据 = 肉眼强信号（角被裁/轮廓/穿透读数翻/旋转可见）。 */
+  /* shape-mask 页（#52）：clip-path circle()/polygon() + 多 entry clip 链 + 命中穿透（shape/圆角）+
+     transform 局部系 + 运行时注入（Add 类规则 / var() 换形）+ circle 对角线语义/at/交集。
+     判据 = 肉眼强信号（角被裁/轮廓/穿透读数翻/旋转可见/胶囊形/平边弧/换形）。 */
   .root {display:flex; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; flex-direction:row; }
   .sidebar {display:flex;flex-direction:column; width:280px; background-color:rgba(21,36,51,0.72); padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-style:solid; border-color:#2a5a75; }
   .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
@@ -42,7 +43,9 @@
   .sm-hit-circle:hover { background-color:rgba(95,180,212,0.9); }
   .hit-readout-row {display:flex; flex-direction:row; gap:16px; }
   /* D 嵌套链：矩形滚动视口 × 圆头像行。判据：滚动时头像被视口边裁（rect∩circle 链）。 */
-  .sm-scroll {display:flex;flex-direction:column; width:280px; height:132px; overflow:auto; background-color:rgba(21,36,51,0.72); padding:10px; gap:10px; }
+  /* border-radius + overflow:auto = 圆角 viewport 裁剪链（祖先圆角传播，#52）：
+     滚到角时头像被圆角边裁——对齐浏览器行为。 */
+  .sm-scroll {display:flex;flex-direction:column; width:280px; height:132px; overflow:auto; background-color:rgba(21,36,51,0.72); padding:10px; gap:10px; border-radius:18px; }
   .sm-scroll-row {display:flex; flex-direction:row; gap:12px; }
   .sm-avatar-s { width:64px; height:64px; clip-path:circle(50%); }
   .sm-slot-s {display:flex; align-items:center; justify-content:center; width:64px; height:64px; background-color:#2a5a75; clip-path:polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
@@ -54,6 +57,22 @@
   .sm-rot-shape-text { color:#e0e6ec; font-size:13px; }
   /* F 运行时注入目标：方图（默认无遮罩），注入 .sm-round 变圆。 */
   .sm-rt-img { width:96px; height:96px; }
+  /* F2 var() 换形：遮罩值走 var（fallback none = 方图），SetVar 在圆/六边形间切。 */
+  .sm-var-img { width:96px; height:96px; clip-path:var(--sm-mask, none); }
+  /* G 圆角命中穿透：overflow:hidden + border-radius 的圆角裁剪器盖住角按钮。
+     判据：点四角 = 穿透（角读数翻）；点中部 = 命中（圆角读数翻）。 */
+  .sm-rhit-stage {display:flex; position:relative; width:140px; height:140px; }
+  .sm-rhit-under { position:absolute; left:0; top:0; width:44px; height:44px; color:#0e1620; font-size:13px; font-weight:700; background-color:#f39c12; border-width:0; border-radius:6px; }
+  .sm-rhit-round { position:absolute; left:0; top:0; width:140px; height:140px; overflow:hidden; border-radius:30px; color:#e0e6ec; font-size:14px; font-weight:700; background-color:rgba(142,68,173,0.92); border-width:0; }
+  .sm-rhit-round:hover { background-color:rgba(176,104,212,0.92); }
+  /* H 对角线语义：200×80 条形 circle(50%) —— 半径按对角线（≈76px）而非半高（40px），
+     呈胶囊形（对照「直觉半高圆」预期差异）。at 偏心：圆心偏左 25%。
+     交集：overflow:hidden + 出框圆（圆心 at 115%）——右弧被矩形裁平 = 双测试交集。 */
+  .sm-wide {display:flex; width:200px; height:80px; align-items:center; justify-content:center; background-color:#2a5a75; clip-path:circle(50%); }
+  .sm-wide-text { color:#e0e6ec; font-size:12px; }
+  .sm-offset {display:flex; width:160px; height:80px; align-items:center; justify-content:center; background-color:#2a5a75; clip-path:circle(40% at 20% 50%); }
+  .sm-inter {display:flex; width:160px; height:80px; overflow:hidden; align-items:center; justify-content:center; background-color:#8e44ad; clip-path:circle(30% at 115% 50%); }
+  .sm-inter-text { color:#e0e6ec; font-size:12px; }
   </style>
 </head>
 <body>
@@ -67,11 +86,19 @@
         <span class="readout" id="sm-hit-c">0</span>
         <span class="readout" id="sm-hit-x">0</span>
       </div>
+      <div class="readout-label">圆角命中读数（中 / 角）</div>
+      <div class="hit-readout-row">
+        <span class="readout" id="sm-rhit-c">0</span>
+        <span class="readout" id="sm-rhit-x">0</span>
+      </div>
       <div class="readout-label">运行时注入读数</div>
       <span class="readout" id="sm-status">待命</span>
       <div class="api-row">
         <button class="api-btn" id="sm-rt">注入圆遮罩</button>
         <button class="api-btn" id="sm-rt-off">撤销</button>
+      </div>
+      <div class="api-row">
+        <button class="api-btn" id="sm-var">var 换形</button>
       </div>
     </div>
     <div class="sm-page">
@@ -98,7 +125,7 @@
         </div>
       </div>
 
-      <div class="section-label">D · 嵌套链：滚动此列表（滚轮/拖拽），头像在矩形视口边被裁 = rect∩circle 多 entry 链</div>
+      <div class="section-label">D · 嵌套链 + 祖先圆角：滚动列表（viewport 带圆角）——头像在视口直边被裁（rect∩circle 链）、滚到角被圆角边裁（祖先圆角传播）</div>
       <div class="sm-scroll">
         <div class="sm-scroll-row">
           <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
@@ -126,9 +153,25 @@
         <div class="sm-rot-shape"><span class="sm-rot-shape-text">polygon</span></div>
       </div>
 
-      <div class="section-label">F · 运行时注入：方图 → 侧栏「注入圆遮罩」变圆（StyleSheet.Add 类规则）</div>
+      <div class="section-label">F · 运行时注入：方图 → 侧栏「注入圆遮罩」变圆（StyleSheet.Add 类规则）；var 换形：遮罩值走 var()，SetVar 在圆/六边形间切</div>
       <div class="sm-row">
         <img class="sm-rt-img" id="sm-rt-img" src="../res/icons/glove.png" alt="">
+        <img class="sm-var-img" id="sm-var-img" src="../res/icons/boots.png" alt="">
+      </div>
+
+      <div class="sm-c-section">
+        <div class="section-label sm-c-label">G · 圆角命中：紫色卡是 overflow:hidden + border-radius 圆角裁剪器——点橙色角 = 穿透（角读数翻）；点卡中部 = 命中（中读数翻）</div>
+        <div class="sm-rhit-stage">
+          <button class="sm-rhit-under" id="sm-r-corner">角</button>
+          <button class="sm-rhit-round" id="sm-r-center">圆角</button>
+        </div>
+      </div>
+
+      <div class="section-label">H · circle 语义三则：左 = 200×80 条形 circle(50%)（半径按对角线 ≈76px → 胶囊形，非「半高圆」）；中 = circle(40% at 20% 50%)（圆心偏左）；右 = overflow:hidden + 出框圆（圆心 at 115% → 右弧被矩形裁平 = 双测试交集）</div>
+      <div class="sm-row">
+        <div class="sm-wide"><span class="sm-wide-text">circle(50%)</span></div>
+        <div class="sm-offset"><span class="sm-wide-text">at 20%</span></div>
+        <div class="sm-inter"><span class="sm-inter-text">at 115%</span></div>
       </div>
     </div>
   </div>

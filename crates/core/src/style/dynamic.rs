@@ -3819,6 +3819,62 @@ mod tests {
         );
     }
 
+    /// var() 代换 clip-path（#52 涌现能力实锤）：规则声明 --sm-mask + 值消费
+    /// `clip-path: var(--sm-mask)`，SetVar 换值后 rematch 重放 → shape 翻转。
+    #[test]
+    fn var_substitution_drives_clip_path() {
+        use crate::style::resolved::{ClipPathDecl, ClipShape};
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(
+            &mut s,
+            rule_decls(
+                ".btn",
+                &[
+                    ("--sm-mask", "circle(50%)"),
+                    ("clip-path", "var(--sm-mask)"),
+                ],
+            ),
+        );
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert!(
+            matches!(
+                s.get(bid).unwrap().style.clip_path,
+                Some(ClipPathDecl::Circle { .. })
+            ),
+            "var() 代换 circle 生效"
+        );
+        // SetVar 换 polygon → rematch 后 shape 翻转（运行时换遮罩通道）。
+        crate::scene::dynamic::node_set_var(
+            &mut s,
+            bid,
+            "--sm-mask",
+            "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
+        )
+        .expect("set_var");
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert!(
+            matches!(
+                s.get(bid).unwrap().style.clip_path,
+                Some(ClipPathDecl::Polygon { .. })
+            ),
+            "SetVar 换形后 polygon 生效"
+        );
+        // 惰性派生链路完整：多边形几何按 100×100 解析。
+        let shape = s
+            .get(bid)
+            .unwrap()
+            .style
+            .clip_path
+            .as_ref()
+            .unwrap()
+            .resolve(100.0, 100.0);
+        match shape {
+            ClipShape::Polygon { points } => assert_eq!(points.len(), 4),
+            _ => panic!("polygon 形错"),
+        }
+    }
+
     #[test]
     fn var_consumes_rule_declared_custom_prop() {
         // .btn 同规则集里声明 --accent + color: var(--accent) → 消费生效。

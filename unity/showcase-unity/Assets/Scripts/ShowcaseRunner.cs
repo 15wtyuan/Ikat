@@ -1159,8 +1159,32 @@ public class ShowcaseRunner : MonoBehaviour
                 foreach (var r in _rtRegs) r?.Dispose();
                 _rtRegs.Clear();
                 if (status != null) status.TextContent = "已撤销";
-            }
-        ;
+            };
+        // G 圆角命中读数：圆角裁剪器（overflow+radius）角外点击穿透（Q6 存量偏差修复）。
+        if (page.TryGet<TextElement>("sm-rhit-c", out var rHitC)
+            && page.TryGet<TextElement>("sm-rhit-x", out var rHitX))
+        {
+            int rc = 0, rx = 0;
+            if (page.TryGet<Button>("sm-r-center", out var rCenterBtn))
+                rCenterBtn.Clicked += () => { rc++; rHitC.TextContent = rc.ToString(); };
+            if (page.TryGet<Button>("sm-r-corner", out var rCornerBtn))
+                rCornerBtn.Clicked += () => { rx++; rHitX.TextContent = rx.ToString(); };
+        }
+        // F2 var() 换形：遮罩值走 var(--sm-mask)，SetVar(string) 在圆/六边形间切
+        // （var 代换 clip-path 的端到端肉眼判据——core 已有契约测试）。
+        if (page.TryGet<Image>("sm-var-img", out var varImg))
+        {
+            bool round = false;
+            if (page.TryGet<Button>("sm-var", out var varBtn))
+                varBtn.Clicked += () =>
+                {
+                    round = !round;
+                    varImg.Style.SetVar(
+                        "--sm-mask",
+                        round ? "circle(50%)" : "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)");
+                    if (status != null) status.TextContent = round ? "var·圆" : "var·六边";
+                };
+        }
     }
 
     /// runtime-css 页（#11）：StyleSheet.Add/Dispose/Clear + SetVar/RemoveVar + var() 消费面。

@@ -787,6 +787,35 @@ public class ShowcaseRunner : MonoBehaviour
                 _rtRegs.Clear();
                 if (status != null) status.TextContent = "已撤销";
             };
+        // G 圆角命中读数：圆角裁剪器（overflow+radius）角外点击穿透（Q6 存量偏差修复）。
+        TextElement rHitC = null, rHitX = null;
+        page.TryGet<TextElement>("sm-rhit-c", out rHitC);
+        page.TryGet<TextElement>("sm-rhit-x", out rHitX);
+        if (rHitC != null && rHitX != null)
+        {
+            int rc = 0, rx = 0;
+            Button rCenterBtn = null, rCornerBtn = null;
+            if (page.TryGet<Button>("sm-r-center", out rCenterBtn))
+                rCenterBtn.Clicked += () => { rc++; rHitC.TextContent = rc.ToString(); };
+            if (page.TryGet<Button>("sm-r-corner", out rCornerBtn))
+                rCornerBtn.Clicked += () => { rx++; rHitX.TextContent = rx.ToString(); };
+        }
+        // F2 var() 换形：遮罩值走 var(--sm-mask)，SetVar(string) 在圆/六边形间切。
+        Image varImg = null;
+        page.TryGet<Image>("sm-var-img", out varImg);
+        Button varBtn = null;
+        if (varImg != null && page.TryGet<Button>("sm-var", out varBtn))
+        {
+            bool round = false;
+            varBtn.Clicked += () =>
+            {
+                round = !round;
+                varImg.Style.SetVar(
+                    "--sm-mask",
+                    round ? "circle(50%)" : "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)");
+                if (status != null) status.TextContent = round ? "var·圆" : "var·六边";
+            };
+        }
     }
 
     void WireRuntimeCssPage(Container page)
