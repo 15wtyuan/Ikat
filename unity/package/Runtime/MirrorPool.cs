@@ -487,14 +487,14 @@ namespace Ikat
                 var p = ro.Go.transform.localPosition;
                 int sort = ro.Mr != null ? ro.Mr.sortingOrder : 0;
                 var b = ro.Mesh != null ? ro.Mesh.bounds : new Bounds();
-                // 材质 clip 诊断：是否启 CLIPPED keyword + _ClipBox 值（验证 clip 是否真挂上）。
+                // 材质 clip 诊断：是否启 CLIPPED keyword + clip 链 entry 数（多 entry 布局，#52）。
                 string matInfo = "";
                 if (ro.Mr != null && ro.Mr.sharedMaterial != null)
                 {
                     var m = ro.Mr.sharedMaterial;
-                    bool clipped = m.IsKeywordEnabled("CLIPPED") || m.IsKeywordEnabled("CLIPPED_ROUNDED");
-                    var cb = m.GetVector("_ClipBox");
-                    matInfo = $" clip={clipped} cb=({cb.x:F2},{cb.y:F2},{cb.z:F3},{cb.w:F3})";
+                    bool clipped = m.IsKeywordEnabled("CLIPPED");
+                    float clipCount = m.GetFloat("_ClipCount");
+                    matInfo = $" clip={clipped} entries={clipCount:F0}";
                 }
                 sb.AppendLine($"  [{tag}{kv.Key}] nid={ro.LastNodeId} sort={sort} pos=({p.x:F0},{p.y:F0}) mb=(({b.center.x:F0},{b.center.y:F0}),({b.size.x:F0},{b.size.y:F0})) active={ro.Go.activeSelf}{matInfo}");
             }
