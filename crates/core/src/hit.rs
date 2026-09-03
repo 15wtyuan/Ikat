@@ -119,9 +119,10 @@ fn hit_subtree(scene: &Scene, id: NodeId, point: (f32, f32)) -> Option<NodeId> {
 
 /// clip 门控：节点未被任何 clipper 祖先（含自身 `clip_rect`）挡住。
 ///
-/// gate(A) = 点在 A 的页面坐标里落进 A.clip_rect。页面点 = 逆世界变换（已含
-/// 滚动逆变换）回 A 本地 + A.layout_rect 偏移——与 clip 同空间（页面绝对坐标、
-/// 不含滚动；拿屏幕点直接比会在祖先滚动下失配，嵌套滚动整树穿透）。递归时代的
+/// gate(A) = 点映回 A 的 box-local 后落进 A 的有效裁剪形。映射 = 逆世界变换
+/// （已含滚动逆变换）——与 render 侧 clip entry 的 inv_frame 同构（多 entry 链
+/// 逐裁剪器判定的 hit 面；clipper 自身 transform 旋转时裁剪形随之旋转 = web
+/// 语义，与浏览器 hit test 尊重 clip-path/border-radius 一致）。递归时代的
 /// 语义是「A 的 gate 失败 → A 整棵子树跳过」；扁平序下等价于「后代逐个沿祖先
 /// 链问 gate」，结果一致但顺序无关。
 fn clip_gate_passed(
@@ -138,14 +139,31 @@ fn clip_gate_passed(
         return passed;
     }
     let mut passed = true;
-    if let Some(clip) = node.clip_rect {
+    // clipper 判定与 render 侧 dfs_mask 同源：overflow 裁剪（clip_rect）或
+    // clip-path 声明（声明即 clipper）。几何测试 = box-local 的圆角矩形 +
+    // 形状判定（与 shader 同语义基准，见 resolved::point_in_rounded_rect /
+    // ClipShape::contains）。
+    let has_clip_path = node.style.clip_path.is_some();
+    if node.clip_rect.is_some() || has_clip_path {
         // world_transforms 缺席 → bounds guard 语义：本 gate 挡下（paint_order 的
         // include 已按子树剪过，这里到不了；防御分支）。
         if let Some(wm) = scene.world_transforms.get(id.index()) {
             let inv = crate::transform::inverse(wm);
             let (lx, ly) = crate::transform::apply_point(&inv, point.0, point.1);
             let lr = node.layout_rect;
-            passed = point_in_rect((lx + lr.x, ly + lr.y), clip);
+            if node.clip_rect.is_some() {
+                let radii = crate::style::resolved::clamp_corner_radii(
+                    lr.w,
+                    lr.h,
+                    &node.style.border_radius.as_corners(lr.w, lr.h),
+                );
+                passed = crate::style::resolved::point_in_rounded_rect(lx, ly, lr.w, lr.h, &radii);
+            }
+            if passed {
+                if let Some(d) = &node.style.clip_path {
+                    passed = d.resolve(lr.w, lr.h).contains(lx, ly);
+                }
+            }
         }
     }
     // 自身 gate 过了还要过祖先的（祖先 gate 挡 = 整子树不可命中）。
@@ -517,17 +535,116 @@ mod tests {
         let mut s = overlap_scene();
         compute_world_transforms(&mut s);
         let (root, _a, b) = overlap_ids(&s);
-        // root 加 clip_rect (0,0,80,80)——点 (90,90) 在 root AABB 但 clip 外
-        s.get_mut(root).unwrap().clip_rect = Some(Rect {
-            x: 0.0,
-            y: 0.0,
-            w: 80.0,
-            h: 80.0,
-        });
+        // root 裁剪成 (0,0,80,80)——solve 后 clip_rect ≡ layout border 框（新模型
+        // entry 几何按 layout 盒派生，伪造更小的 clip_rect 在真实管线不成立），两处
+        // 同步改。点 (90,90) 在 root AABB 但 clip 外。
+        {
+            let r = s.get_mut(root).unwrap();
+            r.layout_rect = Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            };
+            r.clip_rect = Some(Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 80.0,
+                h: 80.0,
+            });
+        }
         // 点 (90,90) 在 b 的 AABB (50,50,100,100) 但在 root clip 外 → 子树不命中
         assert_eq!(hit_test(&s, (90.0, 90.0)), None);
         // 点 (70,70) 在 clip 内 + 在 b 内 → 命中 b
         assert_eq!(hit_test(&s, (70.0, 70.0)), Some(b));
+    }
+
+    /// clip-path 声明即 clipper（hit 面，#52）：圆形遮罩的子树，四角点击穿透
+    /// （web 行为：clip-path 裁命中）、圆心命中。
+    #[test]
+    fn hit_test_clip_path_circle_gates_corners() {
+        use crate::style::resolved::ClipPathDecl;
+        use taffy::style::LengthPercentage;
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        root.style.clip_path = Some(ClipPathDecl::Circle {
+            radius: LengthPercentage::percent(0.5),
+            cx: LengthPercentage::percent(0.5),
+            cy: LengthPercentage::percent(0.5),
+        });
+        let mut child = Node::default();
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        child.interaction.touchable = true;
+        let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+        compute_world_transforms(&mut s);
+        let root_id = s.roots[0];
+        let child_id = s.get(root_id).unwrap().children[0];
+        // 圆心命中。
+        assert_eq!(hit_test(&s, (50.0, 50.0)), Some(child_id), "圆心命中子节点");
+        // 四角（box-local (2,2) 距圆心 67.9 > r=50）穿透：无命中。
+        assert_eq!(
+            hit_test(&s, (2.0, 2.0)),
+            None,
+            "TL 角穿透（web：clip-path 裁命中）"
+        );
+        assert_eq!(hit_test(&s, (98.0, 98.0)), None, "BR 角穿透");
+        // 边中（(50,1) 距圆心 49 < 50）在圆内 → 命中。
+        assert_eq!(hit_test(&s, (50.0, 1.0)), Some(child_id), "顶边中在圆内");
+    }
+
+    /// border-radius hit 感知（#52 顺带修的存量偏差）：overflow:hidden + 圆角的
+    /// 角外点击穿透、边中命中。
+    #[test]
+    fn hit_test_border_radius_gates_corners() {
+        use crate::style::resolved::{BorderRadius, CornerRadius};
+        use taffy::style::LengthPercentage;
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        root.clip_rect = Some(Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        root.style.border_radius = BorderRadius {
+            corners: [CornerRadius {
+                h: LengthPercentage::length(30.0),
+                v: LengthPercentage::length(30.0),
+            }; 4],
+        };
+        let mut child = Node::default();
+        child.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        child.interaction.touchable = true;
+        let mut s = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+        compute_world_transforms(&mut s);
+        let root_id = s.roots[0];
+        let child_id = s.get(root_id).unwrap().children[0];
+        // 角带外（(2,2) 距 (30,30) 为 39.8 > 30）穿透。
+        assert_eq!(hit_test(&s, (2.0, 2.0)), None, "圆角外穿透");
+        // 边中命中。
+        assert_eq!(hit_test(&s, (50.0, 1.0)), Some(child_id), "顶边中命中");
+        // 角圆心 (30,30) 命中。
+        assert_eq!(hit_test(&s, (30.0, 30.0)), Some(child_id));
     }
 
     #[test]

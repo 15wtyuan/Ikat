@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Ikat 靶子冻结 Showcase · shape mask</title>
+  <style>
+  /* shape-mask 页（#52）：clip-path circle()/polygon() + 多 entry clip 链 + 命中穿透 +
+     transform 局部系 + 运行时注入。判据 = 肉眼强信号（角被裁/轮廓/穿透读数翻/旋转可见）。 */
+  .root {display:flex; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; flex-direction:row; }
+  .sidebar {display:flex;flex-direction:column; width:280px; background-color:rgba(21,36,51,0.72); padding:32px 20px; gap:6px; border-width:0 1px 0 0; border-style:solid; border-color:#2a5a75; }
+  .side-back { color:#8ec5d8; font-size:14px; margin-bottom:20px; }
+  .side-title { color:#e0e6ec; font-size:22px; font-weight:700; margin-bottom:8px; }
+  .side-desc { color:#6c7080; font-size:12px; margin-bottom:20px; }
+  .readout-label { color:#6c7080; font-size:12px; margin-top:14px; }
+  .readout { color:#8ec5d8; font-size:15px; }
+  .api-row {display:flex; flex-direction:row; gap:10px; margin-top:18px; }
+  .api-btn { color:#e0e6ec; font-size:13px; padding:8px 14px; border-radius:8px; background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; }
+  .api-btn:hover { border-color:#5fb4d4; color:#5fb4d4; }
+  /* ── 消费面 ── */
+  .sm-page {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:14px; overflow:auto; }
+  .main-title { color:#e0e6ec; font-size:36px; font-weight:700; }
+  .section-label { color:#6c7080; font-size:13px; margin-top:12px; }
+  .sm-row {display:flex; flex-direction:row; gap:18px; align-items:center; }
+  /* A 圆形头像：clip-path circle(50%) vs 未裁对照。判据：左圆右方、四角图被裁。 */
+  .sm-avatar { width:96px; height:96px; clip-path:circle(50%); }
+  .sm-avatar-plain { width:96px; height:96px; }
+  /* B 槽位：菱形/六边形/八边形 polygon。判据：多边形轮廓、角外内容不露。 */
+  .sm-slot {display:flex; align-items:center; justify-content:center; width:110px; height:110px; background-color:#2a5a75; }
+  .sm-slot-diamond { clip-path:polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+  .sm-slot-hex { clip-path:polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+  .sm-slot-oct { clip-path:polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%); }
+  .sm-slot-icon { width:52px; height:52px; }
+  /* C 命中穿透：大圆按钮（clip-path circle）盖住角按钮（下层）。判据：点四角=
+     穿透到角按钮（角读数翻），点圆心=命中圆按钮（圆读数翻）。 */
+  /* C 区包一层：hit-stage（positioned）与页面静态子隔离——画序意图显式化
+     （label 与 stage 无重叠，声明 relative+z 记录「不参与叠加竞争」）。 */
+  .sm-c-section {display:flex; flex-direction:column; gap:6px; }
+  .sm-c-label { position:relative; z-index:0; }
+  .sm-hit-stage {display:flex; position:relative; width:160px; height:160px; }
+  .sm-hit-under { position:absolute; left:0; top:0; width:54px; height:54px; color:#0e1620; font-size:14px; font-weight:700; background-color:#f39c12; border-width:0; border-radius:6px; }
+  .sm-hit-circle { position:absolute; left:0; top:0; width:160px; height:160px; color:#e0e6ec; font-size:16px; font-weight:700; background-color:rgba(42,90,117,0.9); border-width:0; clip-path:circle(50%); }
+  .sm-hit-circle:hover { background-color:rgba(95,180,212,0.9); }
+  .hit-readout-row {display:flex; flex-direction:row; gap:16px; }
+  /* D 嵌套链：矩形滚动视口 × 圆头像行。判据：滚动时头像被视口边裁（rect∩circle 链）。 */
+  .sm-scroll {display:flex;flex-direction:column; width:280px; height:132px; overflow:auto; background-color:rgba(21,36,51,0.72); padding:10px; gap:10px; }
+  .sm-scroll-row {display:flex; flex-direction:row; gap:12px; }
+  .sm-avatar-s { width:64px; height:64px; clip-path:circle(50%); }
+  .sm-slot-s {display:flex; align-items:center; justify-content:center; width:64px; height:64px; background-color:#2a5a75; clip-path:polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+  /* E transform 局部系：旋转的圆角裁剪卡 + 旋转的 polygon 卡。判据：裁剪形随卡旋转。 */
+  .sm-rot-row {display:flex; flex-direction:row; gap:18px; align-items:center; }
+  .sm-rot-clip {display:flex; width:150px; height:100px; overflow:hidden; border-radius:16px; background-color:#2a5a75; transform:rotate(12deg); align-items:center; justify-content:center; }
+  .sm-rot-clip-text { color:#e0e6ec; font-size:13px; }
+  .sm-rot-shape {display:flex; width:150px; height:100px; background-color:#8e44ad; clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%); transform:rotate(-10deg); align-items:center; justify-content:center; }
+  .sm-rot-shape-text { color:#e0e6ec; font-size:13px; }
+  /* F 运行时注入目标：方图（默认无遮罩），注入 .sm-round 变圆。 */
+  .sm-rt-img { width:96px; height:96px; }
+  </style>
+</head>
+<body>
+  <div class="root">
+    <div class="sidebar">
+      <button class="side-back" id="back-home">← 返回首页</button>
+      <div class="side-title">shape mask</div>
+      <div class="side-desc">clip-path circle/polygon · 多 entry 链 · 命中穿透</div>
+      <div class="readout-label">命中读数（圆 / 角）</div>
+      <div class="hit-readout-row">
+        <span class="readout" id="sm-hit-c">0</span>
+        <span class="readout" id="sm-hit-x">0</span>
+      </div>
+      <div class="readout-label">运行时注入读数</div>
+      <span class="readout" id="sm-status">待命</span>
+      <div class="api-row">
+        <button class="api-btn" id="sm-rt">注入圆遮罩</button>
+        <button class="api-btn" id="sm-rt-off">撤销</button>
+      </div>
+    </div>
+    <div class="sm-page">
+      <div class="main-title">shape mask</div>
+
+      <div class="section-label">A · 圆形头像：左 = clip-path circle(50%)，右 = 未裁对照（四角图被裁 vs 方图）</div>
+      <div class="sm-row">
+        <img class="sm-avatar" src="../res/icons/character.png" alt="">
+        <img class="sm-avatar-plain" src="../res/icons/character.png" alt="">
+      </div>
+
+      <div class="section-label">B · 多边形槽位：菱形 / 六边形 / 八边形（角外内容不露）</div>
+      <div class="sm-row">
+        <div class="sm-slot sm-slot-diamond"><img class="sm-slot-icon" src="../res/icons/item-gem.png" alt=""></div>
+        <div class="sm-slot sm-slot-hex"><img class="sm-slot-icon" src="../res/icons/item-chest.png" alt=""></div>
+        <div class="sm-slot sm-slot-oct"><img class="sm-slot-icon" src="../res/icons/item-staff.png" alt=""></div>
+      </div>
+
+      <div class="sm-c-section">
+        <div class="section-label sm-c-label">C · 命中穿透：点橙色角 = 穿透（角读数翻）；点圆心 = 命中圆按钮（圆读数翻）</div>
+        <div class="sm-hit-stage">
+          <button class="sm-hit-under" id="sm-corner">角</button>
+          <button class="sm-hit-circle" id="sm-center">圆</button>
+        </div>
+      </div>
+
+      <div class="section-label">D · 嵌套链：滚动此列表（滚轮/拖拽），头像在矩形视口边被裁 = rect∩circle 多 entry 链</div>
+      <div class="sm-scroll">
+        <div class="sm-scroll-row">
+          <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
+          <div class="sm-slot-s"></div>
+          <img class="sm-avatar-s" src="../res/icons/helm.png" alt="">
+          <div class="sm-slot-s"></div>
+        </div>
+        <div class="sm-scroll-row">
+          <img class="sm-avatar-s" src="../res/icons/helm.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
+          <div class="sm-slot-s"></div>
+          <img class="sm-avatar-s" src="../res/icons/boots.png" alt="">
+        </div>
+        <div class="sm-scroll-row">
+          <div class="sm-slot-s"></div>
+          <img class="sm-avatar-s" src="../res/icons/boots.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/helm.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
+        </div>
+      </div>
+
+      <div class="section-label">E · transform 局部系：两张卡都旋转——裁剪形随卡旋转（不留在屏幕轴向）</div>
+      <div class="sm-rot-row">
+        <div class="sm-rot-clip"><span class="sm-rot-clip-text">overflow+radius</span></div>
+        <div class="sm-rot-shape"><span class="sm-rot-shape-text">polygon</span></div>
+      </div>
+
+      <div class="section-label">F · 运行时注入：方图 → 侧栏「注入圆遮罩」变圆（StyleSheet.Add 类规则）</div>
+      <div class="sm-row">
+        <img class="sm-rt-img" id="sm-rt-img" src="../res/icons/glove.png" alt="">
+      </div>
+    </div>
+  </div>
+</body>
+</html>

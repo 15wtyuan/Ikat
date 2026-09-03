@@ -4,8 +4,8 @@ using UnityEngine;
 
 namespace Ikat
 {
-    /// 圆角 clip 端到端：blob clip 表带 radii → MirrorPool 应建 CLIPPED_ROUNDED 材质
-    /// 并写归一化 _CornerRadius（stat-bar fill 圆角链路的 Unity 半场守卫）。
+    /// 圆角 clip 端到端（#52 多 entry 布局）：blob clip 表带 radii entry → MirrorPool
+    /// 应建 CLIPPED 材质并写 clip 链数组（rectKind=2 圆角，stat-bar 链路的 Unity 半场守卫）。
     public class MirrorPoolRoundedClipTests
     {
         /// 单节点 blob + clip 表一条 entry（ctx=7, rect, radii）。镜像 blob.rs v13 布局
@@ -47,7 +47,7 @@ namespace Ikat
             b.AddRange(System.BitConverter.GetBytes(meshArenaOff));
             b.AddRange(System.BitConverter.GetBytes(arenaLen));
             int clipOff = meshArenaOff + arenaLen;
-            uint clipLen = 4u + 52u;
+            uint clipLen = 4u + 92u;   // clip_count + 1×92B entry（多 entry 布局，无 poly）
             b.AddRange(System.BitConverter.GetBytes(clipOff));
             b.AddRange(System.BitConverter.GetBytes(clipLen));
             int pathOff = clipOff + (int)clipLen;
@@ -82,15 +82,25 @@ namespace Ikat
             b.AddRange(arena);
             b.AddRange(System.BitConverter.GetBytes(1u)); // clip_count
             b.AddRange(System.BitConverter.GetBytes(7u));  // ctx
-            b.AddRange(System.BitConverter.GetBytes(cx));
-            b.AddRange(System.BitConverter.GetBytes(cy));
-            b.AddRange(System.BitConverter.GetBytes(cw));
-            b.AddRange(System.BitConverter.GetBytes(ch));
+            b.AddRange(System.BitConverter.GetBytes(0b011u)); // flags: has_rect | has_radii
+            b.AddRange(System.BitConverter.GetBytes(1f));  // inv_frame a
+            b.AddRange(System.BitConverter.GetBytes(0f));  // b
+            b.AddRange(System.BitConverter.GetBytes(0f));  // c
+            b.AddRange(System.BitConverter.GetBytes(1f));  // d
+            b.AddRange(System.BitConverter.GetBytes(-cx));  // tx（design 平移逆）
+            b.AddRange(System.BitConverter.GetBytes(-cy));  // ty
+            b.AddRange(System.BitConverter.GetBytes(cw));   // rect w（box-local）
+            b.AddRange(System.BitConverter.GetBytes(ch));   // rect h
             for (int k = 0; k < 4; k++)
             {
                 b.AddRange(System.BitConverter.GetBytes(radius));
                 b.AddRange(System.BitConverter.GetBytes(radius));
             }
+            b.AddRange(System.BitConverter.GetBytes(0f));  // circle cx
+            b.AddRange(System.BitConverter.GetBytes(0f));  // circle cy
+            b.AddRange(System.BitConverter.GetBytes(0f));  // circle r
+            b.AddRange(System.BitConverter.GetBytes(0u));  // poly_count
+            b.AddRange(System.BitConverter.GetBytes(0u));  // poly_off
             b.AddRange(System.BitConverter.GetBytes(0u)); // path_count
             return b.ToArray();
 
@@ -122,22 +132,26 @@ namespace Ikat
                     System.BitConverter.ToUInt32(raw, System.BitConverter.ToInt32(raw, 112)),
                     "clipOff 处应写有 clip_count=1（自洽检查）");
                 Assert.AreEqual(1, blob.ClipCount, "clip 表 count=1（ClipTableOff/ClipTableLen 解码）");
-                Assert.IsTrue(blob.ClipRect(7, out _, out _, out float dw, out float dh, out float cr),
-                    "ClipRect 应命中 ctx=7");
-                Assert.AreEqual(3f, cr, 0.001f, "radii 解码应得 3");
-                Assert.AreEqual(546f, dw, 0.01f);
+                var entries = blob.ReadClipEntries(7);
+                Assert.AreEqual(1, entries.Count, "ctx=7 应有 1 条 entry");
+                var en = entries[0];
+                Assert.IsTrue(en.HasRect && en.HasRadii, "rect + radii flags 解码");
+                Assert.AreEqual(3f, en.RadiiTlTr.x, 0.001f, "TL rx 解码应得 3");
+                Assert.AreEqual(546f, en.W, 0.01f);
+                Assert.AreEqual(16f, en.H, 0.01f);
 
                 pool.Sync(blob, root.transform, mm, null, fallback);
 
                 var mr = root.transform.GetChild(0).GetComponent<MeshRenderer>();
                 var mat = mr.sharedMaterial;
                 Assert.IsNotNull(mat, "节点应持有材质");
-                Assert.IsTrue(mat.IsKeywordEnabled("CLIPPED_ROUNDED"),
-                    "radii>0 clip → CLIPPED_ROUNDED 变体");
-                float normR = mat.GetFloat("_CornerRadius");
-                Assert.Greater(normR, 0f, "_CornerRadius 应为归一化正值");
-                // 归一化 = 3 / min(546,16)/2 = 0.375
-                Assert.AreEqual(0.375f, normR, 0.01f, "归一化半径 3/(16/2)");
+                Assert.IsTrue(mat.IsKeywordEnabled("CLIPPED"),
+                    "ctx>0 clip → CLIPPED 变体（多 entry 数组分派）");
+                Assert.AreEqual(1f, mat.GetFloat("_ClipCount"), "链 entry 数=1");
+                var f1 = mat.GetVectorArray("_ClipFrame1");
+                Assert.AreEqual(2f, f1[0].w, "rectKind=2（圆角）");
+                var r0 = mat.GetVectorArray("_ClipRadii0");
+                Assert.AreEqual(3f, r0[0].x, 0.001f, "TL 半径透传（像素空间，不再归一化）");
             }
             finally
             {

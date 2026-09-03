@@ -117,8 +117,22 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
     }
 }
 
-/// 给所有 RenderNode 填 sort_key + mask_context，并产 clip 表（context_id → 祖先
-/// clip 链交集的绝对 design rect）。
+/// 裁剪链项（dfs 内部形）：context 无关的 entry 数据，开新 context 时按链序
+/// 逐条展开进 clip 表（多 entry 语义见 [`ClipEntry`]）。
+#[derive(Debug, Clone)]
+struct ClipChainItem {
+    inv_frame: crate::transform::Affine2,
+    rect: Option<crate::render::ClipRectSpec>,
+    shape: crate::style::resolved::ClipShape,
+}
+
+/// 超深 clip 链 warn-once（运行时 CSS 通道越 [`crate::render::MAX_CLIP_CHAIN`] 时；
+/// authored 情形 fence 打包期已拒）。
+static CLIP_CHAIN_OVERFLOW_WARNED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 给所有 RenderNode 填 sort_key + mask_context，并产 clip 表（多 entry：每个
+/// context = 该层级活跃的**整条**祖先 clip 链，不坍缩）。
 ///
 /// 两 pass：①结构 pass（DOM DFS）算 mask_context + clip 表——树结构性质，与画序
 /// 无关（被上提的节点仍按其**树祖先链**取 clip：CSS 里 overflow 裁剪不因画序分层
@@ -128,17 +142,19 @@ fn reorder_unit(scene: &Scene, nodes: &[RenderNode], unit: &mut Vec<usize>) {
 /// 画序 pass 的 include 即 `id_to_pos` 含有性，剪掉整棵子树。返回的
 /// `Vec<ClipEntry>` 含且仅含 mask_context>0 的层级（context==0 = 无 clip，不入表）。
 ///
-/// 交集语义：进入 overflow:hidden 节点（`clip_rect.is_some()`）时，把本节点 clip 与
-/// 祖先 clip 链的累乘交 (`accumulated`) 求交，得 `intersected`；新 context 记
-/// `(ctx, intersected)` 入表；子树 `accumulated = intersected`。非 clipper 节点继承
-/// 父 `accumulated` 不变（其 mask_context 继承父层级）。
+/// clipper 判定 = `clip_rect.is_some()`（overflow 派生）**或** `style.clip_path`
+/// 非空（声明即 clipper，web 原义）。开 context 时把链上全部 entry 以新
+/// context_id 重复入表（后代引用一个 context 即得整条链，交集语义）。entry 几何
+/// 存 clipper box-local + 世界矩阵逆——滚动/共享祖先变换在逆映射中自动消解，
+/// 旧的 scroll_offset 补偿与交集坍缩逻辑已退役（详见 [`ClipEntry`] 文档）。
 pub fn assign_sort_keys(
     scene: &Scene,
     nodes: &mut [RenderNode],
     id_to_pos: &std::collections::HashMap<NodeId, usize>,
     sort_keys: &mut [u32],
-) -> Vec<ClipEntry> {
+) -> (Vec<ClipEntry>, Vec<String>) {
     let mut clips: Vec<ClipEntry> = Vec::new();
+    let mut warns: Vec<String> = Vec::new();
     let mut ctx_counter: u32 = 0;
     fn dfs_mask(
         scene: &Scene,
@@ -147,77 +163,84 @@ pub fn assign_sort_keys(
         id: NodeId,
         ctx_counter: &mut u32,
         clips: &mut Vec<ClipEntry>,
+        warns: &mut Vec<String>,
         parent_mask: MaskContext,
-        accumulated: Option<Rect>,
-        scroll_offset: (f32, f32),
+        chain: Vec<ClipChainItem>,
     ) {
         // pruned（display:none 子树）节点不在 id_to_pos → 不赋 mask，不递归子树。
         if !id_to_pos.contains_key(&id) {
             return;
         }
         let node = scene.get_live(id, "render/assign_sort_keys");
-        // mask_context + clip 交集：本节点 clip_rect 非空 → 开新层级（计数器+1），
-        // 算 own ∩ accumulated；否则继承父层级与 accumulated。
-        //
-        // clip rect 减祖先 scroll_offset：transform.rs 给子节点 world_matrix 注入
-        // T(-祖先.scroll_pos)，故节点 world 在 (layout - scroll_offset) 空间。clip rect
-        // 须同空间——否则 shader clipPos（world 含 scroll）与 _ClipBox（design 不含 scroll）
-        // 错位，scroll 时 CLIPPED 节点 clipPos 超界全裁。
-        let (mask, intersected_for_kids) = if let Some(own) = node.clip_rect {
-            let own_scrolled = Rect {
-                x: own.x - scroll_offset.0,
-                y: own.y - scroll_offset.1,
-                w: own.w,
-                h: own.h,
-            };
-            let intersected = match accumulated {
-                None => own_scrolled,
-                Some(a) => rect_intersect(a, own_scrolled),
-            };
-            let ctx = *ctx_counter + 1;
-            *ctx_counter = ctx;
-            // 圆角裁剪：clipper 节点自身 border_radius 非全零时，把四角半径随 clip entry
-            // 透传到后端（shader CLIPPED_ROUNDED 变体走 SDF）。半径按 clipper 自身 box
-            // 尺寸解析（own.w/own.h，不受 scroll/ancestor 交集影响）——交集后 rect 可能更小，
-            // SDF 用交集 rect 的 half-size 归一化，半径按 design px 传，在 shader 端归一化。
-            // 全零半径 → None（直角 AABB clip，走 CLIPPED 变体，零开销）。
-            let radii = {
-                let r = node.style.border_radius.as_corners(own.w, own.h);
-                let all_zero = r.iter().all(|&(rx, ry)| rx <= 0.0 && ry <= 0.0);
-                if all_zero {
-                    None
-                } else {
-                    Some(r)
+        // nodes 0 基位置：用 id_to_pos 映射（slotmap 删节点后有空洞，idx-1 ≠ 位置）。
+        // remove_node 后 slotmap idx 不连续，须用 build_render_nodes 算的 id_to_pos。
+        let pos = *id_to_pos.get(&id).expect("live node 在 id_to_pos 中");
+        // clip-path 惰性解析成 box-local 几何（元素尺寸相关——消费点解析 = 增量
+        // solve 下无陈旧风险，Node 不落存储字段）。
+        let shape = node
+            .style
+            .clip_path
+            .as_ref()
+            .map(|d| d.resolve(node.layout_rect.w, node.layout_rect.h))
+            .unwrap_or(crate::style::resolved::ClipShape::None);
+        let is_clipping =
+            node.clip_rect.is_some() || !matches!(shape, crate::style::resolved::ClipShape::None);
+        let (mask, child_chain) = if is_clipping {
+            // 链深上限：fence 拒 authored 超深；运行时 CSS 越界 warn-once 丢本
+            // clipper（选「少裁」不「全裁」——全裁是黑屏级故障，少裁是渐进退化）。
+            if chain.len() >= crate::render::MAX_CLIP_CHAIN {
+                // 会话级 warn-once（core 无日志依赖，走 FrameData.warnings →
+                // Scene::warnings → 宿主日志的既有通道）。
+                if !CLIP_CHAIN_OVERFLOW_WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    warns.push(format!(
+                        "clip chain deeper than {} — innermost clipper dropped (authored cases are rejected at package time)",
+                        crate::render::MAX_CLIP_CHAIN
+                    ));
                 }
-            };
-            clips.push(ClipEntry {
-                context_id: ctx,
-                rect: intersected,
-                radii,
-            });
-            (MaskContext(ctx), Some(intersected))
+                (parent_mask, chain)
+            } else {
+                // rect 测试仅在 overflow 裁剪时挂（纯 clip-path 不裁到 border box，
+                // shape 可出框）；圆角随 rect 透传（border-radius 裁后代以 overflow
+                // 为前提，CSS 语义），并随 entry 传播到后代 context（web 行为）。
+                let rect = node.clip_rect.is_some().then(|| {
+                    let (w, h) = (node.layout_rect.w, node.layout_rect.h);
+                    let r = crate::style::resolved::clamp_corner_radii(
+                        w,
+                        h,
+                        &node.style.border_radius.as_corners(w, h),
+                    );
+                    let all_zero = r.iter().all(|&(rx, ry)| rx <= 0.0 && ry <= 0.0);
+                    crate::render::ClipRectSpec {
+                        w,
+                        h,
+                        radii: if all_zero { None } else { Some(r) },
+                    }
+                });
+                let item = ClipChainItem {
+                    inv_frame: crate::transform::inverse(&nodes[pos].world_matrix),
+                    rect,
+                    shape,
+                };
+                let ctx = *ctx_counter + 1;
+                *ctx_counter = ctx;
+                let mut child_chain = chain.clone();
+                child_chain.push(item);
+                // 链上全部 entry 以新 context 入表——祖先 entry 重复出现 = 多 entry
+                // 交集语义的数据面（不坍缩，见 ClipEntry 文档）。
+                for it in &child_chain {
+                    clips.push(ClipEntry {
+                        context_id: ctx,
+                        inv_frame: it.inv_frame,
+                        rect: it.rect,
+                        shape: it.shape.clone(),
+                    });
+                }
+                (MaskContext(ctx), child_chain)
+            }
         } else {
-            (parent_mask, accumulated)
+            (parent_mask, chain)
         };
-        {
-            // nodes 0 基位置：用 id_to_pos 映射（slotmap 删节点后有空洞，idx-1 ≠ 位置）。
-            // remove_node 后 slotmap idx 不连续，须用 build_render_nodes 算的 id_to_pos。
-            let pos = *id_to_pos.get(&id).expect("live node 在 id_to_pos 中");
-            nodes[pos].mask_context = mask;
-        }
-        // 子树 scroll_offset：本节点是 scroll 容器时子吃其 scroll_pos（transform.rs 同约定）。
-        // accumulated 不减 scroll——祖先 clip（如 scroll 容器 viewport）在 world 固定（容器自身
-        // world 不含自己 scroll_pos），own 在 dfs 入口减 scroll_offset 转 world 空间后与之求交，
-        // 即得 world 可见区。传子保持 intersected（已是 world 空间可见区）。
-        let child_scroll_offset = if let Some(st) = scene.scroll.get(id) {
-            (
-                scroll_offset.0 + st.scroll_pos.0,
-                scroll_offset.1 + st.scroll_pos.1,
-            )
-        } else {
-            scroll_offset
-        };
-        let child_accumulated = intersected_for_kids;
+        nodes[pos].mask_context = mask;
         for c in node.children.clone() {
             dfs_mask(
                 scene,
@@ -226,9 +249,9 @@ pub fn assign_sort_keys(
                 c,
                 ctx_counter,
                 clips,
+                warns,
                 mask,
-                child_accumulated,
-                child_scroll_offset,
+                child_chain.clone(),
             );
         }
     }
@@ -240,9 +263,9 @@ pub fn assign_sort_keys(
             *root,
             &mut ctx_counter,
             &mut clips,
+            &mut warns,
             MaskContext(0),
-            None,
-            (0.0, 0.0),
+            Vec::new(),
         );
     }
     // 画序 pass：stacking context 全局分层序 → sort_key（#100：嵌套在 static 子树
@@ -260,7 +283,7 @@ pub fn assign_sort_keys(
             key += 1;
         }
     }
-    clips
+    (clips, warns)
 }
 
 /// AABB 保序重排：按 BatchingRoot（mask_context）分段，段内对 program=0
@@ -423,11 +446,17 @@ mod tests {
         assert_eq!(rns[1].mask_context, MaskContext(1), "child 继承父层级");
     }
 
-    /// clipper 节点 border_radius 全零 → ClipEntry.radii=None（直角 AABB clip）。
+    /// clipper 节点 border_radius 全零 → rect spec 的 radii=None（直角 AABB clip）。
     #[test]
     fn clip_node_zero_radius_yields_none_radii() {
         use crate::style::resolved::BorderRadius;
         let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         root.clip_rect = Some(Rect {
             x: 0.0,
             y: 0.0,
@@ -438,18 +467,31 @@ mod tests {
         let scene = Scene::from_nodes(vec![root], vec![]);
         let mut rns: Vec<RenderNode> = (0..1).map(placeholder_rn).collect();
         let mut sort_keys = sort_keys_buf(&scene);
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         assert_eq!(clips.len(), 1);
-        assert!(clips[0].radii.is_none(), "全零 border_radius → radii=None");
+        assert!(
+            clips[0].rect.as_ref().unwrap().radii.is_none(),
+            "全零 border_radius → radii=None"
+        );
+        // rect spec = clipper 自身 box（box-local，(0,0) 起）。
+        let r = clips[0].rect.unwrap();
+        assert_eq!((r.w, r.h), (100.0, 100.0));
     }
 
-    /// clipper 节点 border_radius 非零 → ClipEntry.radii=Some，四角值按 clipper box
+    /// clipper 节点 border_radius 非零 → rect spec 带 radii，四角值按 clipper box
     /// 尺寸解析（as_corners(w,h)）。验 TL/TR/BR/BL 序 + 像素值保真。
     #[test]
     fn clip_node_nonzero_radius_carries_radii() {
         use crate::style::resolved::{BorderRadius, CornerRadius};
         use taffy::style::LengthPercentage;
         let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+        };
         root.clip_rect = Some(Rect {
             x: 0.0,
             y: 0.0,
@@ -480,9 +522,15 @@ mod tests {
         let scene = Scene::from_nodes(vec![root], vec![]);
         let mut rns: Vec<RenderNode> = (0..1).map(placeholder_rn).collect();
         let mut sort_keys = sort_keys_buf(&scene);
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         assert_eq!(clips.len(), 1);
-        let r = clips[0].radii.expect("非零 border_radius → radii=Some");
+        let r = clips[0]
+            .rect
+            .as_ref()
+            .unwrap()
+            .radii
+            .expect("非零 border_radius → radii=Some");
         let expected = [(10.0, 15.0), (20.0, 25.0), (30.0, 35.0), (40.0, 45.0)];
         for i in 0..4 {
             assert!(
@@ -494,6 +542,16 @@ mod tests {
                 r[i].0,
                 r[i].1
             );
+        }
+    }
+
+    /// 测试辅助：entry 对世界点的包含判定——inv_frame 映回 clipper box-local 后
+    /// 测 rect（多 entry 交集语义的最小实现，与 shader/hit 同构）。
+    fn entry_contains(e: &ClipEntry, wx: f32, wy: f32) -> bool {
+        let (lx, ly) = crate::transform::apply_point(&e.inv_frame, wx, wy);
+        match &e.rect {
+            None => true,
+            Some(spec) => lx >= 0.0 && ly >= 0.0 && lx <= spec.w && ly <= spec.h,
         }
     }
 
@@ -509,7 +567,8 @@ mod tests {
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
         let mut sort_keys = sort_keys_buf(&scene);
-        let _clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        let (_clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
         // root: counter=0 → mask(1)
         // mid:  counter=1 → mask(2)
         // leaf: counter=2 → 继承 mid mask(2)
@@ -518,12 +577,11 @@ mod tests {
         assert_eq!(rns[2].mask_context, MaskContext(2));
     }
 
+    /// 滚动语义在新模型下的形态：entry 存 box-local 几何 + clipper 世界逆矩阵，
+    /// 滚动偏移由 frame 映射消解（不再有 scroll_adjusted 折叠 rect）。世界点判定
+    /// 走「链上全部 entry 都过」：滚出 viewport 顶部的区域被**祖先** entry 挡下。
     #[test]
-    fn clip_rect_in_scroll_container_is_scroll_adjusted() {
-        // scroll 容器（scroll_pos 非零）+ 子 overflow:hidden。
-        // 子的 clip rect 必须减祖先 scroll offset（= layout - scroll_pos），与子节点 world_matrix
-        // （transform.rs 注入 T(-scroll_pos)）同空间——否则 shader clipPos（world 含 scroll）与
-        // _ClipBox（design 不含 scroll）错位 → scroll 时 CLIPPED 节点 clipPos 超界全裁。
+    fn clip_entries_in_scroll_container_gate_via_ancestor_chain() {
         let mut root = Node::default();
         root.layout_rect = Rect {
             x: 0.0,
@@ -555,46 +613,53 @@ mod tests {
         scene.scroll.ensure(root_id).scroll_pos = (0.0, 30.0);
 
         let mut rns: Vec<RenderNode> = (0..2).map(placeholder_rn).collect();
+        // child 的 world = layout(10,10) − scroll(0,30)（transform.rs 注入 T(-scroll)）。
+        rns[1].world_matrix = [1.0, 0.0, 0.0, 1.0, 10.0, -20.0];
         let mut sort_keys = sort_keys_buf(&scene);
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
 
-        // root ctx(1)：容器自身 world 不含自己 scroll_pos（transform.rs 约定）→ clip rect 不减。
-        let root_ctx = clips
-            .iter()
-            .find(|c| c.context_id == 1)
-            .expect("root clip ctx");
+        // root ctx(1)：一条 entry（自身）。
+        let root_entries: Vec<&ClipEntry> = clips.iter().filter(|c| c.context_id == 1).collect();
+        assert_eq!(root_entries.len(), 1, "root context 1 条 entry");
+        // child ctx(2)：两条 entry（root + child——多 entry 交集语义）。
+        let child_entries: Vec<&ClipEntry> = clips.iter().filter(|c| c.context_id == 2).collect();
+        assert_eq!(child_entries.len(), 2, "child context = 祖先链 2 条 entry");
+
+        // 世界点判定（链上全过才算可见）：
+        // (10,10) 在可视区 → 两条 entry 都过。
         assert!(
-            (root_ctx.rect.y - 0.0).abs() < 1e-3,
-            "root clip rect 不减自己 scroll_pos"
+            child_entries.iter().all(|e| entry_contains(e, 10.0, 10.0)),
+            "可视点过整条链"
         );
-        // child ctx(2)：child world rect = (10,10-30,80,80) = (10,-20,80,80)（滚出 root viewport
-        // 顶部）。可见区 = root viewport(0,0,200,200) ∩ child world(10,-20,80,80) = (10,0,80,60)。
-        // clip rect 存 world 可见区（accumulated=viewport 不减 scroll；own 减 scroll_offset 转 world）。
-        let child_ctx = clips
+        // (10,-5) 在 child box-local 内（(0,15)）但滚出 root viewport 顶 → 被 root
+        // entry 挡下（frame 消解 scroll，祖先 gate 生效）。
+        let passing: Vec<bool> = child_entries
             .iter()
-            .find(|c| c.context_id == 2)
-            .expect("child clip ctx");
-        assert!((child_ctx.rect.x - 10.0).abs() < 1e-3, "child clip x=10");
+            .map(|e| entry_contains(e, 10.0, -5.0))
+            .collect();
         assert!(
-            (child_ctx.rect.y - 0.0).abs() < 1e-3,
-            "child clip y=0（world 可见区顶，被 root viewport 裁），得 {}",
-            child_ctx.rect.y
-        );
-        assert!(
-            (child_ctx.rect.h - 60.0).abs() < 1e-3,
-            "child clip h=60（80−滚出的 20），得 {}",
-            child_ctx.rect.h
+            passing.iter().any(|&p| !p),
+            "滚出 viewport 顶的点必须被链上某条 entry 挡下，得 {:?}",
+            passing
         );
     }
 
-    // DFS 算祖先 clip 链交集，clip 表存 intersected rect（否则 leaf 的 clip rect
-    // 只等于最内层 clipper 的 box，外层 disjoint clip 泄漏）。
+    // 多 entry 交集语义（不坍缩）：链上全部 entry 都过才算可见。disjoint / overlap
+    // 不再折零面积 rect——交集由链判定隐式表达。
 
     /// nested disjoint: outer [0,0,100,100] > inner [200,200,50,50]（不相交）> leaf。
-    /// inner 的 context 对应 clip rect 必须是零面积（交集空），不是 [200,200,50,50]。
+    /// inner context 的 2 条 entry 无公共可见点：inner 盒内点过 inner 但挡在 outer，
+    /// outer 盒内点反之——「有效裁剪 = 链交集」。
     #[test]
-    fn nested_disjoint_clip_intersection_is_zero_area() {
+    fn nested_disjoint_clip_chain_has_no_common_point() {
         let mut outer = Node::default();
+        outer.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         outer.clip_rect = Some(Rect {
             x: 0.0,
             y: 0.0,
@@ -602,6 +667,12 @@ mod tests {
             h: 100.0,
         });
         let mut inner = Node::default();
+        inner.layout_rect = Rect {
+            x: 200.0,
+            y: 200.0,
+            w: 50.0,
+            h: 50.0,
+        };
         inner.clip_rect = Some(Rect {
             x: 200.0,
             y: 200.0,
@@ -612,46 +683,50 @@ mod tests {
         let scene = Scene::from_nodes(vec![outer, inner, leaf], vec![(0, 1), (1, 2)]);
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
+        rns[1].world_matrix = [1.0, 0.0, 0.0, 1.0, 200.0, 200.0];
         let mut sort_keys = sort_keys_buf(&scene);
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
 
         // mask_context: outer=1, inner=2, leaf 继承 inner=2。
         assert_eq!(rns[0].mask_context, MaskContext(1));
         assert_eq!(rns[1].mask_context, MaskContext(2));
         assert_eq!(rns[2].mask_context, MaskContext(2));
 
-        // outer context(1) 的 clip rect == outer box 本身（无祖先 clip）。
-        let ctx1 = clips
-            .iter()
-            .find(|c| c.context_id == 1)
-            .expect("ctx 1 in table");
-        assert_eq!(
-            (ctx1.rect.x, ctx1.rect.y, ctx1.rect.w, ctx1.rect.h),
-            (0.0, 0.0, 100.0, 100.0)
-        );
+        let ctx2: Vec<&ClipEntry> = clips.iter().filter(|c| c.context_id == 2).collect();
+        assert_eq!(ctx2.len(), 2, "inner context = 链 2 条 entry");
 
-        // inner context(2) 的 clip rect == outer ∩ inner = 零面积（不相交）。
-        let ctx2 = clips
+        // inner 盒心 (225,225)：过 inner entry、挡在 outer entry。
+        let at_inner_center: Vec<bool> = ctx2
             .iter()
-            .find(|c| c.context_id == 2)
-            .expect("ctx 2 in table");
-        assert_eq!(ctx2.rect.w, 0.0, "disjoint 交集 w=0");
-        assert_eq!(ctx2.rect.h, 0.0, "disjoint 交集 h=0");
-        // 关键断言：不是 [200,200,50,50]（只裁最内层会泄漏外层 disjoint clip）。
+            .map(|e| entry_contains(e, 225.0, 225.0))
+            .collect();
         assert!(
-            !(ctx2.rect.x == 200.0
-                && ctx2.rect.y == 200.0
-                && ctx2.rect.w == 50.0
-                && ctx2.rect.h == 50.0),
-            "inner context rect 不应等于 inner box（只裁最内层会泄漏）"
+            at_inner_center.iter().any(|&p| !p),
+            "inner 盒心必须被 outer entry 挡下（disjoint 交集空），得 {:?}",
+            at_inner_center
+        );
+        // outer 盒心 (50,50)：过 outer entry、挡在 inner entry。
+        let at_outer_center: Vec<bool> =
+            ctx2.iter().map(|e| entry_contains(e, 50.0, 50.0)).collect();
+        assert!(
+            at_outer_center.iter().any(|&p| !p),
+            "outer 盒心必须被 inner entry 挡下，得 {:?}",
+            at_outer_center
         );
     }
 
-    /// nested overlapping: outer [0,0,100,100] > inner [50,50,100,100]（重叠）> leaf。
-    /// inner context rect == 交集 [50,50,50,50]。
+    /// nested overlapping: outer [0,0,100,100] > inner [50,50,100,100] > leaf。
+    /// 交集区 [50,50]–[100,100] 内的点过整条链；任一盒外点被对应 entry 挡下。
     #[test]
-    fn nested_overlapping_clip_intersection_is_overlap_rect() {
+    fn nested_overlapping_clip_chain_gates_by_intersection() {
         let mut outer = Node::default();
+        outer.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
         outer.clip_rect = Some(Rect {
             x: 0.0,
             y: 0.0,
@@ -659,6 +734,12 @@ mod tests {
             h: 100.0,
         });
         let mut inner = Node::default();
+        inner.layout_rect = Rect {
+            x: 50.0,
+            y: 50.0,
+            w: 100.0,
+            h: 100.0,
+        };
         inner.clip_rect = Some(Rect {
             x: 50.0,
             y: 50.0,
@@ -669,20 +750,141 @@ mod tests {
         let scene = Scene::from_nodes(vec![outer, inner, leaf], vec![(0, 1), (1, 2)]);
 
         let mut rns: Vec<RenderNode> = (0..3).map(placeholder_rn).collect();
+        rns[1].world_matrix = [1.0, 0.0, 0.0, 1.0, 50.0, 50.0];
         let mut sort_keys = sort_keys_buf(&scene);
-        let clips = assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
 
-        let ctx2 = clips
-            .iter()
-            .find(|c| c.context_id == 2)
-            .expect("ctx 2 in table");
-        // outer ∩ inner = [max(0,50), max(0,50)] .. [min(100,150), min(100,150)]
-        //                = [50,50,50,50]
-        assert_eq!(
-            (ctx2.rect.x, ctx2.rect.y, ctx2.rect.w, ctx2.rect.h),
-            (50.0, 50.0, 50.0, 50.0),
-            "overlapping 交集 = [50,50,50,50]"
+        let ctx2: Vec<&ClipEntry> = clips.iter().filter(|c| c.context_id == 2).collect();
+        assert_eq!(ctx2.len(), 2);
+        // 交集区心 (75,75) 过整条链。
+        assert!(
+            ctx2.iter().all(|e| entry_contains(e, 75.0, 75.0)),
+            "交集区心过整条链"
         );
+        // (25,25) 只在 outer 盒内 → 挡在 inner entry。
+        assert!(
+            ctx2.iter().any(|e| !entry_contains(e, 25.0, 25.0)),
+            "outer-only 点被 inner entry 挡下"
+        );
+        // (125,125) 只在 inner 盒内 → 挡在 outer entry。
+        assert!(
+            ctx2.iter().any(|e| !entry_contains(e, 125.0, 125.0)),
+            "inner-only 点被 outer entry 挡下"
+        );
+    }
+
+    /// clip-path 声明即 clipper（无 overflow）：开新 context，entry 带 shape、
+    /// 无 rect 测试（纯 clip-path 不裁到 border box，shape 可出框）。
+    #[test]
+    fn clip_path_declares_clipper_without_rect() {
+        use crate::style::resolved::{ClipPathDecl, ClipShape};
+        use taffy::style::LengthPercentage;
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        root.style.clip_path = Some(ClipPathDecl::Circle {
+            radius: LengthPercentage::percent(0.5),
+            cx: LengthPercentage::percent(0.5),
+            cy: LengthPercentage::percent(0.5),
+        });
+        let child = Node::default();
+        let scene = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+
+        let mut rns: Vec<RenderNode> = (0..2).map(placeholder_rn).collect();
+        let mut sort_keys = sort_keys_buf(&scene);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        assert_eq!(
+            rns[0].mask_context,
+            MaskContext(1),
+            "clip-path 声明即 clipper"
+        );
+        assert_eq!(rns[1].mask_context, MaskContext(1), "子继承 ctx");
+        assert_eq!(clips.len(), 1);
+        assert!(clips[0].rect.is_none(), "纯 clip-path entry 无 rect 测试");
+        match &clips[0].shape {
+            ClipShape::Circle { cx, cy, r } => {
+                assert!((*cx - 50.0).abs() < 1e-4 && (*cy - 50.0).abs() < 1e-4);
+                assert!((*r - 50.0).abs() < 1e-4, "100×100 circle(50%) 内切");
+            }
+            other => panic!("entry shape 形错：{other:?}"),
+        }
+    }
+
+    /// overflow:hidden + clip-path 同元素：单 entry 双测试并存（rect Some + shape），
+    /// entry 链语义 = 两条都过（web 交集原义）。
+    #[test]
+    fn overflow_plus_clip_path_single_entry_dual_test() {
+        use crate::style::resolved::{ClipPathDecl, ClipShape};
+        use taffy::style::LengthPercentage;
+        let mut root = Node::default();
+        root.layout_rect = Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        root.clip_rect = Some(Rect {
+            x: 10.0,
+            y: 10.0,
+            w: 100.0,
+            h: 100.0,
+        });
+        root.style.clip_path = Some(ClipPathDecl::Polygon {
+            points: vec![
+                (
+                    LengthPercentage::percent(0.5),
+                    LengthPercentage::percent(0.0),
+                ),
+                (
+                    LengthPercentage::percent(1.0),
+                    LengthPercentage::percent(0.5),
+                ),
+                (
+                    LengthPercentage::percent(0.5),
+                    LengthPercentage::percent(1.0),
+                ),
+                (
+                    LengthPercentage::percent(0.0),
+                    LengthPercentage::percent(0.5),
+                ),
+            ],
+        });
+        let child = Node::default();
+        let scene = Scene::from_nodes(vec![root, child], vec![(0, 1)]);
+
+        let mut rns: Vec<RenderNode> = (0..2).map(placeholder_rn).collect();
+        let mut sort_keys = sort_keys_buf(&scene);
+        let (clips, _warns) =
+            assign_sort_keys(&scene, &mut rns, &id_to_pos_map(&scene), &mut sort_keys);
+        assert_eq!(clips.len(), 1, "同元素双声明 = 单 entry");
+        let e = &clips[0];
+        let rect = e.rect.as_ref().expect("overflow 挂 rect 测试");
+        assert_eq!((rect.w, rect.h), (100.0, 100.0));
+        assert!(matches!(e.shape, ClipShape::Polygon { .. }), "shape 并存");
+
+        // 语义：菱形心（design (60,60)）过双测试；rect 角（design (15,15)）在
+        // rect 内但菱形外 → 挡在 shape。
+        let mut rns2: Vec<RenderNode> = (0..2).map(placeholder_rn).collect();
+        rns2[0].world_matrix = [1.0, 0.0, 0.0, 1.0, 10.0, 10.0];
+        let mut sort_keys2 = sort_keys_buf(&scene);
+        let (clips2, _) =
+            assign_sort_keys(&scene, &mut rns2, &id_to_pos_map(&scene), &mut sort_keys2);
+        let e2 = &clips2[0];
+        // 映 design (60,60) → box-local (50,50)：rect 过 + 菱形心过。
+        let (lx, ly) = crate::transform::apply_point(&e2.inv_frame, 60.0, 60.0);
+        let in_rect = lx >= 0.0 && ly >= 0.0 && lx <= 100.0 && ly <= 100.0;
+        assert!(in_rect);
+        assert!(e2.shape.contains(lx, ly), "菱形心过 shape");
+        // design (15,15) → box-local (5,5)：rect 过、菱形外。
+        let (lx, ly) = crate::transform::apply_point(&e2.inv_frame, 15.0, 15.0);
+        assert!(lx >= 0.0 && ly >= 0.0, "rect 内");
+        assert!(!e2.shape.contains(lx, ly), "菱形外挡下");
     }
 
     /// 构造 program=0 Mesh RenderNode（给 reorder_unit 直接喂 unit 索引对应的 nodes）。

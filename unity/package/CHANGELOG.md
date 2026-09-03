@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **shape mask（#52）**：`clip-path` 非矩形几何遮罩——fence 子集
+  `circle(<length|%> [at <pos>])` / `polygon(<x> <y>, ...)`（3..=16 点，硬边）。
+  声明即 clipper（裁自身 + 子树，与 overflow 独立），命中测试同形（被裁区域
+  点击穿透，浏览器行为）；circle 百分比半径按 CSS 对角线归一语义（正方形
+  `circle(50%)` = 内切圆）。运行时 CSS 通道接通（`StyleSheet.Add` 类规则 /
+  `var()` 代换）。构建期硬拒组合：`overflow:scroll/auto` + `clip-path`、
+  裁剪链深 > 4。
+### Changed
+- **裁剪管线泛化为多 entry clip 栈（#52，web 语义对齐）**：嵌套裁剪不再坍缩成
+  单矩形，每 context 携带整条祖先链（rect/圆角/circle/polygon 逐条交集）——
+  圆形头像放进滚动列表等组合正确。**祖先圆角现在裁后代角**（此前不传播，已对齐
+  浏览器）。**裁剪形随裁剪器自身 transform 旋转**（此前不旋转的预览分歧已移除）。
+  命中测试感知圆角与形状（此前纯矩形判定）。渲染 blob clip 表换 92B 多 entry
+  布局（pkg v56）。
 - **运行时 CSS 与 custom props（#11）**：`UIContext.StyleSheet.Add/Clear` 接通——
   运行时注入 CSS 规则（围栏选择器+声明子集，含 `--*` 自定义属性与 `var()` 值；
   at-rule 一律拒），解析失败抛 `UIStyleException` 带 `Line`/`Column`。注入规则

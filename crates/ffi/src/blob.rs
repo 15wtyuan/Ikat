@@ -155,27 +155,74 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
     let mesh_arena_off = off as u32;
     let mesh_arena_len = mesh_arena.len() as u32;
     let clip_table_off = mesh_arena_off + mesh_arena_len;
-    // clip 表 = clip_count:u32 + entries[count × {context_id:u32, x,y,w,h:f32, radii: 4×(rx,ry):f32}]。
-    // radii 段恒写 32B（8×f32）：有圆角时为四角 (rx,ry) 对，无圆角时全零（C# 侧据全零判 CLIPPED vs CLIPPED_ROUNDED）。
-    // 只含 mask_context>0 的层级（context==0 = 无 clip，永不入表）。
-    const CLIP_ENTRY_SIZE: u32 = 52; // 20B(ctx+rect) + 32B(4×(rx,ry))
+    // clip 表（多 entry，#52）= clip_count:u32 + entries[count × 92B] + poly_arena。
+    // entry 布局（定长 92B，小端）：
+    //   context_id u32 | flags u32 | inv_frame 6×f32 | rect w,h 2×f32 |
+    //   radii 8×f32（4 角 (rx,ry)，无圆角全零）| circle cx,cy,r 3×f32 |
+    //   poly_count u32 | poly_off u32（poly_arena 内字节偏移，0 = 无）
+    // flags：bit0 = rect 测试生效（overflow 裁剪）；bit1 = radii 非零；bit2 =
+    // shape 生效，shape kind 在 bits 8..=15（0 = circle，1 = polygon）。
+    // 同一 context 的全部链 entry 同 context_id（多 entry 交集语义，见
+    // core render::ClipEntry 文档）；poly_arena 紧随 entries，段内偏移由 entry
+    // 指向。只含 mask_context>0 的层级（context==0 = 无 clip，永不入表）。
+    const CLIP_ENTRY_SIZE: u32 = 92;
     let clip_count: u32 = clips.len() as u32;
-    let clip_table_len = 4 + clip_count * CLIP_ENTRY_SIZE;
-    let mut clip_table_buf: Vec<u8> = Vec::with_capacity(clip_table_len as usize);
+    let mut clip_table_buf: Vec<u8> = Vec::new();
     clip_table_buf.extend_from_slice(&clip_count.to_le_bytes());
+    let mut poly_arena: Vec<u8> = Vec::new();
     for c in clips {
+        let mut flags: u32 = 0;
+        let (rect_w, rect_h, radii) = match &c.rect {
+            Some(spec) => {
+                flags |= 0b001;
+                let r = spec.radii.unwrap_or([(0.0, 0.0); 4]);
+                if spec.radii.is_some() {
+                    flags |= 0b010;
+                }
+                (spec.w, spec.h, r)
+            }
+            None => (0.0, 0.0, [(0.0, 0.0); 4]),
+        };
+        let (kind, cx, cy, r, poly_count, poly_off) = match &c.shape {
+            ikat_core::style::resolved::ClipShape::None => (0u32, 0.0, 0.0, 0.0, 0u32, 0u32),
+            ikat_core::style::resolved::ClipShape::Circle { cx, cy, r } => {
+                flags |= 0b100;
+                (0u32, *cx, *cy, *r, 0u32, 0u32)
+            }
+            ikat_core::style::resolved::ClipShape::Polygon { points } => {
+                flags |= 0b100;
+                let off = poly_arena.len() as u32;
+                for &(x, y) in points {
+                    poly_arena.extend_from_slice(&x.to_le_bytes());
+                    poly_arena.extend_from_slice(&y.to_le_bytes());
+                }
+                (1u32, 0.0, 0.0, 0.0, points.len() as u32, off)
+            }
+        };
+        flags |= kind << 8;
         clip_table_buf.extend_from_slice(&c.context_id.to_le_bytes());
-        clip_table_buf.extend_from_slice(&c.rect.x.to_le_bytes());
-        clip_table_buf.extend_from_slice(&c.rect.y.to_le_bytes());
-        clip_table_buf.extend_from_slice(&c.rect.w.to_le_bytes());
-        clip_table_buf.extend_from_slice(&c.rect.h.to_le_bytes());
-        // 四角半径 [TL, TR, BR, BL] 各 (rx, ry)。None → 全零（C# 判 CLIPPED）。
-        let r = c.radii.unwrap_or([(0.0, 0.0); 4]);
-        for &(rx, ry) in r.iter() {
+        clip_table_buf.extend_from_slice(&flags.to_le_bytes());
+        for v in c.inv_frame {
+            clip_table_buf.extend_from_slice(&v.to_le_bytes());
+        }
+        clip_table_buf.extend_from_slice(&rect_w.to_le_bytes());
+        clip_table_buf.extend_from_slice(&rect_h.to_le_bytes());
+        for &(rx, ry) in radii.iter() {
             clip_table_buf.extend_from_slice(&rx.to_le_bytes());
             clip_table_buf.extend_from_slice(&ry.to_le_bytes());
         }
+        clip_table_buf.extend_from_slice(&cx.to_le_bytes());
+        clip_table_buf.extend_from_slice(&cy.to_le_bytes());
+        clip_table_buf.extend_from_slice(&r.to_le_bytes());
+        clip_table_buf.extend_from_slice(&poly_count.to_le_bytes());
+        clip_table_buf.extend_from_slice(&poly_off.to_le_bytes());
     }
+    clip_table_buf.extend_from_slice(&poly_arena);
+    debug_assert_eq!(
+        clip_table_buf.len(),
+        4 + clip_count as usize * CLIP_ENTRY_SIZE as usize + poly_arena.len()
+    );
+    let clip_table_len = clip_table_buf.len() as u32;
 
     let path_count = path_index.len() as u32;
     path_table_buf[0..4].copy_from_slice(&path_count.to_le_bytes());

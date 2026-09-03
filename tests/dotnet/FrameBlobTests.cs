@@ -315,51 +315,75 @@ namespace Ikat.Tests.Core
         }
 
         [Fact]
-        public void ClipRect_Found_ReturnsCorrectRect()
+        public void ReadClipEntries_Found_ReturnsEntries()
         {
+            // 多 entry 布局（#52）：92B entry = ctx | flags | inv_frame×6 | w,h |
+            // radii×8 | circle×3 | poly_count | poly_off；poly_arena 紧随 entries。
             var clipTable = new List<byte>();
             clipTable.AddRange(U32(2));  // clip_count = 2
-            // 每条目 52B：ctx(4) + rect x/y/w/h(16) + 8 角半径 tl/tr/br/bl 各 xy(32)。
-            clipTable.AddRange(U32(5));  // ctx=5
-            clipTable.AddRange(F32(10f)); clipTable.AddRange(F32(20f));
-            clipTable.AddRange(F32(100f)); clipTable.AddRange(F32(200f));
+            // entry 0：ctx=5，rect + radii，identity frame。
+            clipTable.AddRange(U32(5));            // ctx
+            clipTable.AddRange(U32(0b011));        // flags: has_rect | has_radii
+            clipTable.AddRange(F32(1f)); clipTable.AddRange(F32(0f));  // a b
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(1f));  // c d
+            clipTable.AddRange(F32(-10f)); clipTable.AddRange(F32(-20f));  // tx ty
+            clipTable.AddRange(F32(100f)); clipTable.AddRange(F32(200f));  // w h
             clipTable.AddRange(F32(8f)); clipTable.AddRange(F32(8f));   // tl
             clipTable.AddRange(F32(4f)); clipTable.AddRange(F32(4f));   // tr
             clipTable.AddRange(F32(6f)); clipTable.AddRange(F32(6f));   // br
             clipTable.AddRange(F32(2f)); clipTable.AddRange(F32(2f));   // bl
-            clipTable.AddRange(U32(8));  // ctx=8
-            clipTable.AddRange(F32(1f)); clipTable.AddRange(F32(2f));
-            clipTable.AddRange(F32(3f)); clipTable.AddRange(F32(4f));
-            for (int i = 0; i < 8; i++) clipTable.AddRange(F32(0f));    // 全 0 半径
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));  // circle
+            clipTable.AddRange(U32(0)); clipTable.AddRange(U32(0));     // poly
+            // entry 1：ctx=8，shape=polygon（4 点，落 arena 偏移 0）。
+            clipTable.AddRange(U32(8));            // ctx
+            clipTable.AddRange(U32(0b100 | (1 << 8)));  // flags: has_shape + kind=1(polygon)
+            clipTable.AddRange(F32(1f)); clipTable.AddRange(F32(0f));
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(1f));
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));   // identity frame
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));   // w h（无 rect）
+            for (int i = 0; i < 8; i++) clipTable.AddRange(F32(0f));    // radii 全零
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));
+            clipTable.AddRange(U32(4));            // poly_count = 4
+            clipTable.AddRange(U32(0));            // poly_off = 0
+            // poly_arena：菱形 4 点。
+            clipTable.AddRange(F32(50f)); clipTable.AddRange(F32(0f));
+            clipTable.AddRange(F32(100f)); clipTable.AddRange(F32(50f));
+            clipTable.AddRange(F32(50f)); clipTable.AddRange(F32(100f));
+            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(50f));
 
             var blob = new FrameBlob(BuildBlob(0, new byte[21][], clipTable: clipTable.ToArray()));
             Assert.Equal(2, blob.ClipCount);
 
-            Assert.True(blob.ClipRect(5, out float x, out float y, out float w, out float h, out float r));
-            Assert.Equal(10f, x);
-            Assert.Equal(20f, y);
-            Assert.Equal(100f, w);
-            Assert.Equal(200f, h);
-            // 统一半径 = min(各角 rx/ry) = min(8,4,6,2) = 2。
-            Assert.Equal(2f, r);
+            var e5 = blob.ReadClipEntries(5);
+            Assert.Single(e5);
+            Assert.True(e5[0].HasRect && e5[0].HasRadii && !e5[0].HasShape);
+            Assert.Equal(-10f, e5[0].Tx);
+            Assert.Equal(100f, e5[0].W);
+            Assert.Equal(200f, e5[0].H);
+            Assert.Equal(8f, e5[0].RadiiTlTr.x);
+            Assert.Equal(2f, e5[0].RadiiBrBl.z);  // bl rx
 
-            Assert.True(blob.ClipRect(8, out x, out y, out w, out h, out r));
-            Assert.Equal(1f, x);
-            Assert.Equal(2f, y);
-            Assert.Equal(3f, w);
-            Assert.Equal(4f, h);
+            var e8 = blob.ReadClipEntries(8);
+            Assert.Single(e8);
+            Assert.True(e8[0].HasShape && !e8[0].HasRect);
+            Assert.Equal(1, e8[0].ShapeKind);
+            Assert.Equal(4, e8[0].Poly.Length);
+            Assert.Equal(50f, e8[0].Poly[0].x);
+            Assert.Equal(50f, e8[0].Poly[3].y);
         }
 
         [Fact]
-        public void ClipRect_NotFound_ReturnsFalse()
+        public void ReadClipEntries_NotFound_ReturnsEmpty()
         {
             var clipTable = new List<byte>();
             clipTable.AddRange(U32(1));
-            clipTable.AddRange(U32(5)); clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));
-            clipTable.AddRange(F32(0f)); clipTable.AddRange(F32(0f));
+            clipTable.AddRange(U32(5)); clipTable.AddRange(U32(0b001));
+            for (int i = 0; i < 22; i++) clipTable.AddRange(F32(0f));
+            clipTable.AddRange(U32(0)); clipTable.AddRange(U32(0));
 
             var blob = new FrameBlob(BuildBlob(0, new byte[21][], clipTable: clipTable.ToArray()));
-            Assert.False(blob.ClipRect(99, out _, out _, out _, out _, out _));
+            Assert.Empty(blob.ReadClipEntries(99));
+            Assert.Single(blob.ReadClipEntries(5));
         }
 
         [Fact]

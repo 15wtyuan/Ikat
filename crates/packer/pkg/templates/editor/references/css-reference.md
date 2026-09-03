@@ -43,6 +43,17 @@ error):
 - `animation` and longhands: `animation-name` / `animation-duration` / `animation-timing-function` / `animation-delay` / `animation-iteration-count` / `animation-direction` / `animation-fill-mode` / `animation-play-state`
 - `transition`
 - `overflow-x` / `overflow-y` — visible / hidden / scroll / auto
+- `clip-path` — geometric shape mask (fence subset): `none` |
+  `circle(<length|%> [at <length|%> <length|%>])` |
+  `polygon(<x> <y>, ...)` with 3..=16 points. Circle `%` radius resolves
+  against `sqrt(w^2+h^2)/sqrt(2)` (exact CSS semantics — `circle(50%)` inscribes
+  a square box); polygon `%` resolves against width/height per axis. Declaring
+  it makes the element a clipper for its own paint AND its subtree (web
+  semantics), independent of `overflow`; hit testing respects the shape
+  (clipped-away areas click through). Hard-rejected combos:
+  `overflow:scroll/auto` + `clip-path`, clip chains deeper than 4 nested
+  clippers. `ellipse()` / `inset()` / `closest-side` / `farthest-side` /
+  `fill-rule` prefixes / geometry-box keywords are outside the fence.
 - `resize` — accepted as a no-op (never consumed)
 
 Shorthands (expand to the properties above):
@@ -161,7 +172,6 @@ Properties that do NOT exist in the fence (using any of these is a
 - `object-fit`
 - `text-overflow`
 - `list-style`
-- `clip-path`
 <!-- fence-sync:css-not-supported-end -->
 
 ## Custom properties and `var()`

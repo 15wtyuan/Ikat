@@ -790,8 +790,8 @@ fn pkg_v27_rejects_v26() {
 #[test]
 fn pkg_v29_roundtrip_with_aria_controls() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 55,
-        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem)"
+        PKG_FORMAT_VERSION, 56,
+        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem; v56 ResolvedStyle.clip_path #52 shape mask)"
     );
     let mut node = tn(NodeKind::Container);
     node.role = Some("tab".into());
@@ -862,8 +862,8 @@ fn pkg_v29_rejects_v28() {
 #[test]
 fn pkg_v30_keyframes_and_animation_roundtrip_via_pkg() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 55,
-        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem)"
+        PKG_FORMAT_VERSION, 56,
+        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem; v56 ResolvedStyle.clip_path #52 shape mask)"
     );
     use crate::scene::animation::{
         AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, TransformAnim,
@@ -1010,8 +1010,8 @@ fn pkg_v32_rejects_v31() {
 #[test]
 fn pkg_v46_roundtrip_preserves_link_href() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 55,
-        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem)"
+        PKG_FORMAT_VERSION, 56,
+        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem; v56 ResolvedStyle.clip_path #52 shape mask)"
     );
     let mut root = tn(NodeKind::Container);
     root.rich_text_block = true;
@@ -1098,8 +1098,8 @@ fn pkg_v33_rejects_v32() {
 #[test]
 fn pkg_v34_roundtrip_preserves_gradient() {
     assert_eq!(
-        PKG_FORMAT_VERSION, 55,
-        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem)"
+        PKG_FORMAT_VERSION, 56,
+        "pkg format version must be 55 after v55 ResolvedStyle.deferred_inline (#11 custom props; v54 ControlInit Tree/TreeItem; v56 ResolvedStyle.clip_path #52 shape mask)"
     );
     use crate::style::resolved::{GradCoord, Gradient, GradientStop, RadialExtent};
     let mut root = tn(NodeKind::Container);

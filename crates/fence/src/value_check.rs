@@ -70,6 +70,17 @@ pub fn value_error(prop: &str, value: &str) -> Option<String> {
                 "value \"{value}\" is not valid for CSS property \"animation-timing-function\"                  (see fence.md 缓动函数全集: CSS keyword + cubic-bezier(x1,y1,x2,y2)                  + ikat superset ease-in/out/in-out-back/elastic/bounce)"
             ));
         }
+        "clip-path" => {
+            // 委托 core parse_clip_path（与运行时 apply_decl 同一真相源）：域外形态
+            // （ellipse()/inset()/closest-side/fill-rule 前缀/geometry-box 关键字/
+            // 裸 circle()/点数 3..=16 外）统一拒。`none` 合法（清除声明）。
+            if value == "none" || ikat_core::style::mapping::parse_clip_path(value).is_some() {
+                return None;
+            }
+            return Some(format!(
+                "value \"{value}\" is not valid for CSS property \"clip-path\"                  (fence subset: none | circle(<length|%> [at <length|%> <length|%>]) |                  polygon(<x> <y>, ...) with 3..=16 points; ellipse()/inset()/                  closest-side/farthest-side/fill-rule are outside the fence)"
+            ));
+        }
         _ => {}
     }
     match parser {

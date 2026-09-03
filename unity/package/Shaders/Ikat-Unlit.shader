@@ -5,7 +5,6 @@ Shader "Ikat/Unlit"
         _MainTex ("Texture", 2D) = "white" {}
         _SrcFactor ("SrcFactor", Float) = 5   // SrcAlpha
         _DstFactor ("DstFactor", Float) = 10  // OneMinusSrcAlpha
-        _ClipBox ("ClipBox", Vector) = (0,0,1,1)
         // _ObjectMatrix 拆 4 个 Vector 进 Properties（ShaderLab 无 Matrix property 类型）。
         // _ObjectMatrix 声明在 CBUFFER(UnityPerMaterial) 但**无 Properties 对应** → MPB.SetMatrix
         // 不覆盖非 material property 的 CBUFFER 字段 → 非 pure 节点（transform:scale/rotate）
@@ -24,7 +23,6 @@ Shader "Ikat/Unlit"
         _CF3 ("CF3", Vector) = (0,0,0,1)
         _CFOff ("CFOff", Vector) = (0,0,0,0)
         _Alpha ("Alpha", Float) = 1
-        _CornerRadius ("CornerRadius", Float) = 0
         // Box-shadow blur（program=5 / SHADOW_BLUR）：像素空间圆角矩形 SDF + 高斯边 alpha。
         // _ShadowHalfSize.xy=像素半宽高（zw 空），_ShadowRadius=像素圆角半径，_ShadowSigma=高斯 σ（core 算），
         // _ShadowInset=0/1（inset 翻 SDF 符号做内阴影）。per-renderer MPB 覆盖。
@@ -84,13 +82,11 @@ Shader "Ikat/Unlit"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            // CLIPPED（#52 多 entry clip 链）：rect / 圆角 SDF / circle / polygon 按 entry
+            // kind 分派（_ClipFrame0[e].w），链上全部 entry 逐条测试全过才保留（web clip 栈
+            // 交集语义）。与 SHADOW_BLUR 独立两行 multi_compile（同时启用正确叠加——两块
+            // 各自 col.a *= …；shadow 自身圆角走 SDF，但仍经 mask_context 受祖先裁剪约束）。
             #pragma multi_compile _ CLIPPED
-            // CLIPPED_ROUNDED（祖先 overflow clip 圆角遮罩）与 SHADOW_BLUR（box-shadow 自身 SDF 圆角 + 高斯边）
-            // 拆独立 multi_compile 行：同 Material 可同时启用（blur shadow 落在 rounded-overflow 容器内），
-            // 同行时 Unity 只选首个声明变体（CLIPPED_ROUNDED 赢）→ SHADOW_BLUR 块不执行 → 阴影塌成硬裁剪块。
-            // 两块独立（各自 col.a *= …），同时启用正确叠加。shadow 自身圆角走 SDF，但仍经 mask_context
-            // 受祖先 overflow clip 约束（非“无需 clip”）。
-            #pragma multi_compile _ CLIPPED_ROUNDED
             #pragma multi_compile _ SHADOW_BLUR
             #pragma multi_compile _ OBJECT_MATRIX
             #pragma multi_compile _ ALPHA_MASK
@@ -103,11 +99,24 @@ Shader "Ikat/Unlit"
 
             struct Attr { float4 pos : POSITION; float4 color : COLOR; float2 uv : TEXCOORD0; };
             struct Vary { float4 pos : SV_POSITION; float4 color : COLOR; float2 uv : TEXCOORD0;
-                          float2 clipPos : TEXCOORD1; };
+                          float2 designPos : TEXCOORD1; };
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _MainTex_ST;
-                float4 _ClipBox;
+                // clip 链（#52，CLIPPED 变体；MaterialManager.SetClipEntries 经
+                // SetVectorArray 写入——数组不可作 ShaderLab Properties，只能在 CBUFFER
+                // 声明由 material API 覆盖）。4 entry 定长 = core MAX_CLIP_CHAIN。
+                // frame0 = (A, C, Tx, kind)，frame1 = (B, D, Ty, hasRect)：
+                // lp = (A,C)·designPos + Tx 等六元组逆矩阵映 clipper box-local。
+                // kind：0=rect 1=rounded 2=circle 3=polygon。
+                float4 _ClipFrame0[4];
+                float4 _ClipFrame1[4];
+                float4 _ClipRect[4];     // (w, h, poly_count, _)
+                float4 _ClipRadii0[4];   // (tl_rx, tl_ry, tr_rx, tr_ry)
+                float4 _ClipRadii1[4];   // (br_rx, br_ry, bl_rx, bl_ry)
+                float4 _ClipCircle[4];   // (cx, cy, r, _)
+                float4 _ClipPoly[32];    // 每 entry 8 个 float4 × 2 点（16 点上限）
+                float _ClipCount;
                 // _ObjectMatrix 拆 4 Vector（Properties 对应，MPB 覆盖）。列主序：重组 float4x4(_ObjM0..3)。
                 float4 _ObjM0;
                 float4 _ObjM1;
@@ -119,7 +128,6 @@ Shader "Ikat/Unlit"
                 float4 _CF3;
                 float4 _CFOff;
                 float _Alpha;
-                float _CornerRadius;   // 归一化圆角半径（design_radius / min_half_size），CLIPPED_ROUNDED 用
                 // Box-shadow blur uniforms（Properties 对应，SRP batcher 须入 CBUFFER；per-renderer MPB 覆盖）。
                 float4 _ShadowHalfSize;
                 float _ShadowRadius;
@@ -169,7 +177,15 @@ Shader "Ikat/Unlit"
                 float3 worldPos = TransformObjectToWorld(v.pos.xyz);
 #endif
                 o.pos = TransformWorldToHClip(worldPos);
-                float2 clipWorldXY = worldPos.xy;
+                // clip 链测试空间 = design 坐标（core world_matrix 同空间；root
+                // transform 的缩放/y-flip 不介入——inv_frame 直接吃 design 坐标）。
+                // OBJECT_MATRIX 时 designWorld 是 objM 后 design 坐标；否则顶点即
+                // design 坐标。
+                #if defined(OBJECT_MATRIX)
+                o.designPos = designWorld.xy;
+                #else
+                o.designPos = v.pos.xy;
+                #endif
                 o.color = v.color;
                 // SHADOW_BLUR / GRADIENT：core 把几何编码进 uv（SHADOW_BLUR = 顶点 − 形状中心；
                 // GRADIENT = box 局部像素坐标，左上原点），须直通 raw uv；TRANSFORM_TEX 会叠
@@ -179,9 +195,6 @@ Shader "Ikat/Unlit"
             #else
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
             #endif
-#if defined(CLIPPED) || defined(CLIPPED_ROUNDED)
-                o.clipPos = clipWorldXY * _ClipBox.zw + _ClipBox.xy;
-#endif
                 return o;
             }
             // erfc 近似（Abramowitz-Stegun 7.1.26，精度 ~1.5e-7）。box-shadow blur 用真高斯模糊
@@ -337,29 +350,84 @@ Shader "Ikat/Unlit"
                 #endif
                 // 节点 opacity（从顶点色剥离，per-renderer MPB）。alpha 剥离后 colors.a 不含节点 alpha。
                 col.a *= _Alpha;
-                #ifdef CLIPPED_ROUNDED
-                // 圆角矩形 SDF 裁剪（像素空间）：clipPos 是 _ClipBox 归一化坐标（|x|,|y|<=1 在
-                // 直角矩形内），但归一化空间 x/y 像素当量不同（宽条 x 半宽数百 px、y 半宽数 px）——
-                // 直接在归一化空间做 SDF 会让 smoothstep 边带横跨整个半宽（3px 圆角被糊没）
-                // 且各向异性把圆角变椭圆。换算回像素：halfPx=1/_ClipBox.zw，rPx=归一半径×min半边。
-                // sdf<0 内，>0 外；smoothstep(0,1,sdf) = 1 design px 抗锯齿带。
-                // SafeBlank（零面积 clip，_ClipBox.zw=(0,0)）显式置 0：像素空间的 1/zw 会产生
-                // inf→inf−inf=NaN，smoothstep(0,1,NaN) 在常见驱动返 0 → alpha×1 = 完全不裁剪
-                // （SafeBlank「clipPos 恒 (-2,-2) → step 全 discard」契约只对 CLIPPED 的 step
-                // 路径成立，像素空间 SDF 须自带守卫——否则滚出视口的圆角 clip 子树整条漏出）。
-                if (_ClipBox.z * _ClipBox.w <= 0.0) {
-                    col.a = 0.0;
-                } else {
-                float2 halfPx = 1.0 / _ClipBox.zw;
-                float rPx = _CornerRadius * min(halfPx.x, halfPx.y);
-                float2 pPx = i.clipPos * halfPx;
-                float2 q = abs(pPx) - halfPx + rPx;
-                float sdf = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - rPx;
-                col.a *= 1.0 - smoothstep(0.0, 1.0, sdf);
+                #ifdef CLIPPED
+                // 多 entry clip 链（#52）：designPos 经 entry 逆矩阵映 clipper box-local
+                // （(0,0) = 裁剪器 border box 左上，y-down design 系），按双独立 kind
+                // 测试——rectKind（frame1.w：1 直角 AABB / 2 圆角各向异性 SDF）与
+                // shapeKind（frame0.w：1 circle SDF / 2 polygon crossing）。同 entry 双
+                // kind 并存 = 同元素 overflow:hidden + clip-path（web 交集原义）；链上
+                // 全部 entry 都过才保留（web clip 栈交集语义，不坍缩）。
+                // rounded/circle 走 SDF 给 1 design px 抗锯齿带；polygon 是硬判定。
+                // 与 core hit gate 同一几何语义（resolved::point_in_rounded_rect /
+                // ClipShape::contains 的 HLSL 镜像——两侧改须同步）。
+                for (int e = 0; e < 4; e++)
+                {
+                    if (e >= (int)_ClipCount) break;
+                    float2 lp = float2(dot(_ClipFrame0[e].xy, i.designPos) + _ClipFrame0[e].z,
+                                       dot(_ClipFrame1[e].xy, i.designPos) + _ClipFrame1[e].z);
+                    float shapeKind = _ClipFrame0[e].w;
+                    float rectKind = _ClipFrame1[e].w;
+                    float keep = 1.0;
+                    if (rectKind > 1.5)
+                    {
+                        // 圆角矩形 SDF（像素空间，各角 (rx,ry) 独立）。归一化到半径空间
+                        // 做椭圆角 SDF，× min(rx,ry) 回像素量纲（1 design px AA 带）。
+                        float2 wh = _ClipRect[e].xy;
+                        float2 half2 = wh * 0.5;
+                        float2 rel = lp - half2;
+                        // y-down：rel.y<0 = 顶行（TL/TR），>=0 底行（BL/BR）。
+                        float4 rTop = _ClipRadii0[e];   // (tl_rx, tl_ry, tr_rx, tr_ry)
+                        float4 rBot = _ClipRadii1[e];   // (br_rx, br_ry, bl_rx, bl_ry)
+                        float2 r = (rel.y < 0.0)
+                            ? ((rel.x < 0.0) ? rTop.xy : rTop.zw)
+                            : ((rel.x < 0.0) ? rBot.zw : rBot.xy);
+                        r = max(r, 1e-4);
+                        float2 q = abs(rel) - (half2 - r);
+                        float2 qn = q / r;
+                        float sdist = length(max(qn, 0.0)) + min(max(qn.x, qn.y), 0.0) - 1.0;
+                        float sdf = sdist * min(r.x, r.y);
+                        keep = 1.0 - smoothstep(0.0, 1.0, sdf);
+                    }
+                    else if (rectKind > 0.5)
+                    {
+                        // 直角 AABB（box-local 0..wh）。
+                        float2 wh = _ClipRect[e].xy;
+                        keep = step(0.0, lp.x) * step(0.0, lp.y) * step(lp.x, wh.x) * step(lp.y, wh.y);
+                    }
+                    if (keep > 0.0)
+                    {
+                        if (shapeKind > 1.5)
+                        {
+                            // polygon crossing number 奇偶（简单多边形与 web nonzero 一致）。
+                            // 点存 _ClipPoly[e×8 + k/2] 两点一 float4，k 奇数取 .zw。
+                            int n = (int)_ClipRect[e].z;
+                            int pbase = e * 8;
+                            int inside = 0;
+                            int j = n - 1;
+                            for (int k = 0; k < 16; k++)
+                            {
+                                if (k >= n) break;
+                                float4 segA = _ClipPoly[pbase + k / 2];
+                                float2 a = ((k & 1) == 0) ? segA.xy : segA.zw;
+                                float4 segB = _ClipPoly[pbase + j / 2];
+                                float2 b = ((j & 1) == 0) ? segB.xy : segB.zw;
+                                if ((a.y > lp.y) != (b.y > lp.y))
+                                {
+                                    float t = (lp.y - a.y) / (b.y - a.y);
+                                    if (lp.x < a.x + t * (b.x - a.x)) inside ^= 1;
+                                }
+                                j = k;
+                            }
+                            keep = (float)inside;
+                        }
+                        else if (shapeKind > 0.5)
+                        {
+                            float2 d = lp - _ClipCircle[e].xy;
+                            keep = 1.0 - smoothstep(0.0, 1.0, length(d) - _ClipCircle[e].z);
+                        }
+                    }
+                    col.a *= keep;
                 }
-                #elif defined(CLIPPED)
-                float2 f = abs(i.clipPos);
-                col.a *= step(max(f.x, f.y), 1.0);
                 #endif
                 #ifdef SHADOW_BLUR
                 // Box-shadow（program=5）：像素空间圆角矩形 SDF + smoothstep 双侧软边。

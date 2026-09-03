@@ -21,7 +21,7 @@ const HTML: &str = include_str!("fixtures/schema-lock.html");
 /// v52 ControlInit::TabList 加 manual（#13 手动激活模型）；v50 taffy 0.14（#82：taffy Style
 /// serde 格式变，min/max_size 分型 LPA 等）；v49 progress min（#97 ARIA 填充域）；
 /// #101 后夹具 #root 补 position:relative（E1 门下 static+z 非法），内容变更非布局变更，哈希随之更新。
-const LOCKED_HASH: u64 = 0x3b55_2d58_bf0f_0ece;
+const LOCKED_HASH: u64 = 0x323f7a585d6d60e0; // v56（#52 ResolvedStyle.clip_path）
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

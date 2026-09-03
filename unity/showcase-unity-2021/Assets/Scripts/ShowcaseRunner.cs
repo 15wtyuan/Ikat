@@ -31,6 +31,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-anim", "m2-animation"),
         ("nav-infra", "api-infra"),
         ("nav-rtcss", "runtime-css"),
+        ("nav-shape", "shape-mask"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -747,6 +748,47 @@ public class ShowcaseRunner : MonoBehaviour
     /// 判据（肉眼强信号）：目标块变色/复原、同优先后 Add 赢、非法 CSS 异常读数带行列、
     /// chips 组整组翻色/回落、嵌套链 swatch 变色、行内源 chip 恒橙（打包期通路回归）。
     /// 环 warning 判据不在 PlayMode（走 ikat check 输出，agent 自测）。
+    /// shape-mask 页（#52）：命中穿透读数（圆/角计数）+ 运行时注入圆遮罩。
+    /// 判据（肉眼强信号）：点橙角=角读数翻（clip-path 裁命中——穿透到下层按钮）、
+    /// 点圆心=圆读数翻、注入后方图变圆/撤销复原。静态区无接线（CSS 声明面）。
+    /// 注入句柄复用 _rtRegs（离页切换统一 Dispose，同 runtime-css 生命周期）。
+    void WireShapeMaskPage(Container page)
+    {
+        var ui = _driver.Context;
+        var ss = ui.StyleSheet;
+        TextElement status = null;
+        page.TryGet<TextElement>("sm-status", out status);
+        if (status != null) status.TextContent = "待命";
+        TextElement hitC = null, hitX = null;
+        page.TryGet<TextElement>("sm-hit-c", out hitC);
+        page.TryGet<TextElement>("sm-hit-x", out hitX);
+        if (hitC != null && hitX != null)
+        {
+            int c = 0, x = 0;
+            Button centerBtn = null, cornerBtn = null;
+            if (page.TryGet<Button>("sm-center", out centerBtn))
+                centerBtn.Clicked += () => { c++; hitC.TextContent = c.ToString(); };
+            if (page.TryGet<Button>("sm-corner", out cornerBtn))
+                cornerBtn.Clicked += () => { x++; hitX.TextContent = x.ToString(); };
+        }
+        Button rtBtn = null, offBtn = null;
+        if (page.TryGet<Button>("sm-rt", out rtBtn))
+            rtBtn.Clicked += () =>
+            {
+                foreach (var r in _rtRegs) r?.Dispose();
+                _rtRegs.Clear();
+                _rtRegs.Add(ss.Add(".sm-rt-img { clip-path: circle(50%); }"));
+                if (status != null) status.TextContent = "已注入圆";
+            };
+        if (page.TryGet<Button>("sm-rt-off", out offBtn))
+            offBtn.Clicked += () =>
+            {
+                foreach (var r in _rtRegs) r?.Dispose();
+                _rtRegs.Clear();
+                if (status != null) status.TextContent = "已撤销";
+            };
+    }
+
     void WireRuntimeCssPage(Container page)
     {
         var ui = _driver.Context;
@@ -869,6 +911,10 @@ public class ShowcaseRunner : MonoBehaviour
         if (pageName == "runtime-css")
         {
             WireRuntimeCssPage(page);
+        }
+        if (pageName == "shape-mask")
+        {
+            WireShapeMaskPage(page);
         }
         if (pageName == "lab")
         {

@@ -283,11 +283,13 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **视觉**
 
-`opacity`, `box-shadow`, `pointer-events`, `transform`, `transform-origin`, `filter`
+`opacity`, `box-shadow`, `pointer-events`, `transform`, `transform-origin`, `filter`, `clip-path`
 
 > **transform 原点**：`transform-origin` 在围栏——`<length|%>` × 2 + 位置关键字（`left`/`center`/`right`/`top`/`bottom`；单值时 y 缺省 `center`）。缺省 `50% 50%`（= 元素几何中心）。百分比相对自身布局尺寸，**延迟解析**（存描述符、世界矩阵累计期按当帧尺寸解析）。绕非中心点旋转（连线、指针）直接声明 origin，不再需要「中点定位 + 换算」绕路。
 
 > **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。层数硬限：inset 最多 8 层、outer 最多 4 层（渲染层合成 id 的编码容量，超限层会撞相邻编码区错渲染）——超限整条声明打包期 `FenceBadCssValue`（inline 走 `apply_decl` 返 false、`<style>` 规则走共享值域门，单一真相源 = core 解析器）。
+
+- `clip-path`（**不继承**，#52 shape mask，fence 子集 = basic shapes 两形）：`none` / `circle(<length|%> [at <length|%> <length|%>])` / `polygon(<x> <y>, ...)`（3..=16 点，`%`/px）。circle 半径 `%` 按 `sqrt(w²+h²)/√2` 解析（CSS 精确语义——`circle(50%)` 在正方形盒恰内切）；polygon 点 `%` 各按宽/高。`at` 位置缺省 `50% 50%`（居心）。域外形态（`ellipse()` / `inset()` / `closest-side` / `farthest-side` / fill-rule 前缀 / geometry-box 关键字 / 裸 `circle()` / 负半径）→ `FenceBadCssValue`（单一真相源 = core `parse_clip_path`）。声明即 clipper：裁自身绘制 + 子树（与 overflow 独立，web 原义），命中测试同形（被裁区域点击穿透）。同元素 `overflow:hidden` + `clip-path` = 交集；`overflow:scroll/auto` + `clip-path` → `FenceClipPathScrollCombo` 硬错；裁剪链（overflow + clip-path 沿祖先链）深度 > 4 → `FenceClipChainTooDeep` 硬错（后端 clip 槽定长）。fill-rule 不收——实现走 crossing number，对简单（非自交）多边形与 web nonzero 一致。硬边语义（SDF/crossing，无羽化——soft clip 是 #113 deferred）。
 
 - `cursor`（**不继承**，#93）：值集 `auto` / `default` / `none` / `pointer`。桌面端指针 affordance 入口——`auto`（缺省）= UA 默认行为：hover 到 pressable 控件（button/tab/toggle/radio/slider/dropdown/option 与 `<a>` 链接）运行时出手型**意图**（0/1/2 数值经 `CursorIntentChanged` 交后端渲染；Unity driver 缺省渲染系统光标，手型贴图由消费侧 `SetCursorTexture` 注册——见 projection-layer.md §3.3），其余系统箭头（纯 runtime 决策，不经样式通道、无需作者声明）；命中细化到控件内文字/内联子后沿祖先链上溯宿主控件判定（悬停按钮文字同样手型），disabled/不可命中控件不给手型并截断。显式声明恒压 UA 行为——`pointer` 手型（标非控件可点区）、`default` 箭头（把可点控件压回箭头）、`none` 元素级隐藏指针（配合游戏自绘光标）。文本输入类（TextField 等）的 I-beam 暂不在 UA 默认内。预览侧浏览器原生支持 `cursor`，无单侧缺口。
 
@@ -571,6 +573,8 @@ CSS 自定义属性 `--x` 与 `var()` 引用按 web 语义收窄进围栏。**�
 | `FenceUnknownCssProp` | CSS 属性名不在围栏中 |
 | `FenceBadCssValue` | CSS 值解析失败或不在允许的关键字域内 |
 | `FenceBadAttrValue` | 结构属性值不在允许的枚举域内 |
+| `FenceClipPathScrollCombo` | `overflow:scroll/auto` 与 `clip-path` 同元素（#52）——shape 裁滚动视口无清晰语义，硬拒 |
+| `FenceClipChainTooDeep` | 裁剪链（overflow + clip-path 沿祖先链）深度 > 4（#52）——后端 clip uniform 槽 4 组定长 |
 | `DuplicateId` | 同一模板作用域内 ID 重复 |
 | `UnclosedTag` | 标签未闭合 |
 | `InvalidContentModel` | 子元素不满足父元素的 ContentModel |

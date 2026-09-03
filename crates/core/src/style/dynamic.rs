@@ -3714,6 +3714,32 @@ mod tests {
         assert_eq!(s.get(bid).unwrap().style.color, RED);
     }
 
+    /// 运行时 CSS 通道收下 clip-path（#52）：Add 类规则 → 下一次 rematch 生效
+    /// （apply_decl 同一 arm；消费点惰性派生，无需 solve 存储字段）。
+    #[test]
+    fn runtime_rule_clip_path_applies_on_rematch() {
+        use crate::style::resolved::{ClipPathDecl, ClipShape};
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        crate::scene::dynamic::style_sheet_add(
+            &mut s,
+            vec![rule(".btn", "clip-path", "circle(50%)")],
+        );
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        let style = &s.get(bid).unwrap().style;
+        assert!(matches!(style.clip_path, Some(ClipPathDecl::Circle { .. })));
+        // 惰性派生：按 layout 100×100 解析成内切圆（消费点同款调用）。
+        let shape = style.clip_path.as_ref().unwrap().resolve(100.0, 100.0);
+        match shape {
+            ClipShape::Circle { r, .. } => assert!((r - 50.0).abs() < 1e-4),
+            _ => panic!(),
+        }
+        // none 清除（toggle 场景）。
+        crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "clip-path", "none")]);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert!(s.get(bid).unwrap().style.clip_path.is_none(), "none 清除");
+    }
+
     #[test]
     fn runtime_rule_same_specificity_later_add_wins() {
         // 「与模板 CSS 同 cascade 优先级」+ 追加序 = 文档序：同 specificity 后 Add 赢。

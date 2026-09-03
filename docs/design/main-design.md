@@ -600,13 +600,17 @@ anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不
 
 ### 12.4 批合（FairyBatching）
 
-两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇 `clip_rect` 的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。mesh 合并锚：合并产物的 `node_id` 取 batch 内最小原始 id（后端 GO 复用防抖动）。排除项：控件节点（后端要建交互实体——控件排除点是「加新控件类型」的 dispatch 位置之一）、文本节点、非纯平移 transform、box-shadow 合成层，均不参与重排合并。
+两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇裁剪器（overflow 裁剪或 clip-path 声明，§12.5）的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。mesh 合并锚：合并产物的 `node_id` 取 batch 内最小原始 id（后端 GO 复用防抖动）。排除项：控件节点（后端要建交互实体——控件排除点是「加新控件类型」的 dispatch 位置之一）、文本节点、非纯平移 transform、box-shadow 合成层，均不参与重排合并。
 
 合并批的增量语义（#109 起）：**批不跨渲染显隐、不跨 world-space 挂载**（合批键含这两维——merged 行的 GO 归属/显隐是整批属性，混批会互相绑架）。合并批**携带 anchor 的世界平移矩阵**且定级按**整批合并 payload 的哈希**：纯平移（滚动/Transform 位移）在 payload 顶点里不可见（位置编码在矩阵，顶点是局部系），批必须靠矩阵轴捕捉——同质批纯平移 → Header 级（只挪 GO 不重传 mesh），成员几何/批成员集变化 → Full 重传；稳态帧仍全批 Skip。
 
 ### 12.5 裁剪/遮罩
 
-**rect mask**：核心给 clip_box；后端自选实现。`mask_context` 是批合边界。嵌套 `overflow:hidden`：clip 区域取祖先 clip 链的交集。裁剪框是轴对齐的：clipper 自身 `border-radius` 非全零时裁剪框带四角半径（圆角裁子内容），但**祖先链圆角不传播**；transform 旋转不旋转裁剪框（作者可见限制）。soft clip/shape mask 未做（deferred）。
+**多 entry clip 栈**（#52，web clip 栈模型）：核心产 clip 表——每个 `mask_context` 对应**整条**祖先裁剪链（每条 entry = 一个裁剪器的测试），后代的有效裁剪 = 链上全部 entry 逐条应用取交集，**不坍缩**。`mask_context` 仍是批合边界（裁剪器开新 context）。链深上限 4（后端 clip uniform 槽定长）：authored 超深 fence 打包期拒（`FenceClipChainTooDeep`），运行时 CSS 越界 core warn-once 丢最内层（少裁不黑屏）。核心给「意图」（box-local 几何 + 裁剪器世界矩阵逆）；后端自选实现（Unity 走片元 discard：design 坐标映回裁剪器局部系后按 entry kind 测 rect/圆角 SDF/circle SDF/polygon crossing）。
+
+**entry 几何 = clipper box-local + 局部系逆矩阵**：几何存裁剪器 border box 局部坐标（(0,0) = 左上），`inv_frame` = 裁剪器世界（design 系）矩阵逆。消费端把点映回裁剪器局部系再测形状——共享祖先的 transform/滚动在映射中自动消解；**裁剪器自身 transform 旋转时裁剪形随之旋转**（web 语义：clip 定义在裁剪器局部系——预览一致性的硬要求）。子代的 transform 不动祖先裁剪形（各 entry 独立测试，天然正确）。
+
+**裁剪器判定与测试项**：`overflow` 非 Visible（rect 测试 + 自身 `border-radius` 圆角）**或** `clip-path` 声明（shape 测试，声明即 clipper——裁自身绘制 + 子树，web 原义）。同元素 `overflow:hidden` + `clip-path` = 单 entry 双测试并存（交集）。**祖先链圆角随 entry 传播**（祖先 rounded rect entry 作用于后代角——web 行为）。命中测试同语义（`clip_gate_passed` 逐裁剪器判定，与渲染共用几何函数——画出来裁的点即命不中的点；border-radius 感知命中 = 浏览器行为）。`overflow:scroll/auto` + `clip-path` fence 硬拒（shape 裁滚动视口无语义）。soft clip（羽化逐像素 alpha）未做（#113 deferred）。
 
 **浮层机制**（通用模式，open dropdown 的 `role=listbox` 子树与 scrollbar thumb 共用）：跳出正常 DFS，render 末尾追加独立 DFS、sort_key 续 post-merge 最大值、mask 重赋脱离祖先裁剪链；命中层对应前置。画序单源 `scene::stacking::paint_order`（stacking context 全局分层，CSS Appendix E 语义：static 子树里的 opacity<1/transform/filter/定位+声明 z 后代会上提到所属 SC 的对应层，#96/#100）——主 DFS、浮层追加、hit 逆序三消费点共用同一份序，绘制与命中一致性由构造保证，无「多处手抄同步」面。
 

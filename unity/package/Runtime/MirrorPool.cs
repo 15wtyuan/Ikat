@@ -55,11 +55,9 @@ namespace Ikat
         // blob mount_id 列非 0 的行 SetParent 到对应容器（顶点已 re-base 到挂载根局部系，
         // 容器层随业务 → 场景相机渲染 + ZTest LEqual 吃 3D 深度遮挡）。
         readonly Dictionary<ulong, Transform> _mountContainers = new();
-        // 每 ctx 每帧首次算一次 _ClipBox 并 SetClipBox。
+        // 每 ctx 每帧首次读 clip 链并 SetClipEntries。
         // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
         readonly HashSet<uint> _clipsAppliedThisFrame = new();
-        // 本帧启 CLIPPED_ROUNDED 的 ctx 集合（同 ctx 后续节点复用 rounded 标志保 material key 一致）。
-        readonly HashSet<uint> _roundedCtxsThisFrame = new();
 
         /// <summary>
         /// 行归属解析：挂载行（mount_id ≠ 0 且容器登记存活）→ 容器；其余（含容器已销毁的
@@ -121,9 +119,8 @@ namespace Ikat
             // ① 全标 stale（两个 dict）
             foreach (var kv in _poolByNodeId) kv.Value.Stale = true;
             foreach (var kv in _poolByReuse) kv.Value.Stale = true;
-            // 本帧 clip 应用集清空（per-ctx-per-frame 一次性算 _ClipBox）。
+            // 本帧 clip 应用集清空（per-ctx-per-frame 一次性设 clip 链数组）。
             _clipsAppliedThisFrame.Clear();
-            _roundedCtxsThisFrame.Clear();
 
             // ② v15 skip 段先走：Skip 行 = 「对象还在，清 stale」；parked keepalive =
             //    保留 GO 并隐藏。这行不进 SOA（16B/条）——后端不读 header/mesh。
@@ -241,37 +238,18 @@ namespace Ikat
 
             uint maskCtx = blob.MaskContext(i);
 
-            // mc>0 节点本帧首次见 → 读 clip 表 design rect + 圆角半径，转 world，算 _ClipBox，
-            // SetClipBox + SetCornerRadius 到该 ctx 的 per-context Material。
-            // 必须在 mm.Get 之前调，使新建 Material 时即带 box + radius；同 ctx 后续节点跳过（HashSet 去重）。
-            bool rounded = false;
+            // mc>0 节点本帧首次见 → 读该 ctx 的整条 clip 链（多 entry，#52）设到 per-ctx
+            // Material 的 uniform 数组。必须在 mm.Get 之前调，使新建 Material 时即带链数据；
+            // 同 ctx 后续节点跳过（HashSet 去重）。
             if (maskCtx > 0u && _clipsAppliedThisFrame.Add(maskCtx))
             {
-                if (blob.ClipRect(maskCtx, out float dx, out float dy, out float dw, out float dh,
-                                  out float cornerRadius))
-                {
-                    Vector4 clipBox = ClipMath.ComputeClipBox(root, dx, dy, dw, dh);
-                    mm.SetClipBox(maskCtx, clipBox);
-                    if (cornerRadius > 0f)
-                    {
-                        // 归一化半径（design px → shader clipPos 空间）+ 启 CLIPPED_ROUNDED 变体。
-                        float normR = ClipMath.NormalizeCornerRadius(dw, dh, cornerRadius);
-                        mm.SetCornerRadius(maskCtx, normR);
-                        rounded = true;
-                        _roundedCtxsThisFrame.Add(maskCtx);
-                    }
-                }
-                // ClipRect miss（表里无该 ctx）→ 不 SetClipBox；material 仍按 mc 建（CLIPPED variant
-                // + 默认 _ClipBox=0,0,1,1 → 全保留，clip 无效但不崩；正常 flow 表必含所有 mc>0 ctx）。
-            }
-            else if (maskCtx > 0u)
-            {
-                // 同 ctx 已在本帧应用过——从 dict 读回 rounded 标志，保证 Get 的 material key 一致。
-                rounded = _roundedCtxsThisFrame.Contains(maskCtx);
+                mm.SetClipEntries(maskCtx, blob.ReadClipEntries(maskCtx));
+                // 空链（表里无该 ctx）→ 不设数组；material 仍按 mc 建（CLIPPED 变体 +
+                // _ClipCount=0 → 循环不进 → 全保留，clip 无效但不崩；正常 flow 表必含所有 mc>0 ctx）。
             }
 
             // 材质：按 program+texture 选（包括 text 节点，program=1，tex 由 SyncFontAtlas 注入 font atlas）。
-            Material mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure, rounded);
+            Material mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
             if (mat != null) ro.Mr.sharedMaterial = mat;
 
             // 合并 per-renderer uniform（MPB 一次 SetPropertyBlock，避免 _ObjM/_CF/_Alpha 互相覆盖）。
