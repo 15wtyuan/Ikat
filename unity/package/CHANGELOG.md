@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **组件文件按 stem 可实例化**：`components/` 目录文件直收进 pkg 组件映射，
+  运行时 `Instantiate("my-widget")` / `GetTemplate` 按 stem 克隆（fgui 组件一等公民
+  同构；api-reference 既有承诺的兑现）。独立实例化走组件语义——`<slot>` 无 light 子
+  可投影、全走 fallback 原位渲染，文件内嵌套 hyphen 标签照常经注册表展开。
+  页面与组件撞名打包期 fail loud。`ikat list/show` 的页面计数不含组件条目。
 - **`::part()` 跨组件精确样式通道（#57）**：页面规则穿组件内容墙命中组件内部节点——
   `prefix::part(name)` 中 compound 前缀匹配组件 host、`::part(name)` 匹配展开子树内带
   `part="name"` 属性的目标节点（`part` 全局属性入围栏 + attrs β 仓持久化）。一层不递归
