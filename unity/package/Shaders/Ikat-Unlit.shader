@@ -23,6 +23,10 @@ Shader "Ikat/Unlit"
         _CF3 ("CF3", Vector) = (0,0,0,1)
         _CFOff ("CFOff", Vector) = (0,0,0,0)
         _Alpha ("Alpha", Float) = 1
+        // 节点 design 平移（Mtx,Mty，per-renderer MPB 覆盖）：clip 链测试空间是 design
+        // 坐标，而 blob 顶点已 re-base 到节点本地（纯平移行）/盒本地（OBJECT_MATRIX 行），
+        // 须补回平移（合并行 Mtx=Mty=0，顶点已是绝对 design——同式自洽）。
+        _ObjT ("ObjT", Vector) = (0,0,0,0)
         // Box-shadow blur（program=5 / SHADOW_BLUR）：像素空间圆角矩形 SDF + 高斯边 alpha。
         // _ShadowHalfSize.xy=像素半宽高（zw 空），_ShadowRadius=像素圆角半径，_ShadowSigma=高斯 σ（core 算），
         // _ShadowInset=0/1（inset 翻 SDF 符号做内阴影）。per-renderer MPB 覆盖。
@@ -128,6 +132,7 @@ Shader "Ikat/Unlit"
                 float4 _CF3;
                 float4 _CFOff;
                 float _Alpha;
+                float4 _ObjT;
                 // Box-shadow blur uniforms（Properties 对应，SRP batcher 须入 CBUFFER；per-renderer MPB 覆盖）。
                 float4 _ShadowHalfSize;
                 float _ShadowRadius;
@@ -182,9 +187,9 @@ Shader "Ikat/Unlit"
                 // OBJECT_MATRIX 时 designWorld 是 objM 后 design 坐标；否则顶点即
                 // design 坐标。
                 #if defined(OBJECT_MATRIX)
-                o.designPos = designWorld.xy;
+                o.designPos = designWorld.xy + _ObjT.xy;
                 #else
-                o.designPos = v.pos.xy;
+                o.designPos = v.pos.xy + _ObjT.xy;
                 #endif
                 o.color = v.color;
                 // SHADOW_BLUR / GRADIENT：core 把几何编码进 uv（SHADOW_BLUR = 顶点 − 形状中心；

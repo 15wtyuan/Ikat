@@ -342,6 +342,9 @@ namespace Ikat
                 }
             }
             ro.Mpb.SetFloat("_Alpha", alpha);
+            // _ObjT：节点 design 平移（Mtx,Mty）——clip 链测试空间是 design 坐标，
+            // blob 顶点已 re-base 到本地（见 _ObjT 注释），shader 侧补回。
+            ro.Mpb.SetVector("_ObjT", new Vector4(blob.Mtx(i), blob.Mty(i), 0f, 0f));
             ro.Mr.SetPropertyBlock(ro.Mpb);
         }
 
