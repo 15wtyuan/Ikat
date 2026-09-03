@@ -58,11 +58,14 @@ pub fn list_pkgs(root: &Path) -> Result<Vec<PkgSummary>, BuildFailure> {
     let ws = load_workspace(root)?;
     let mut out = Vec::new();
     for pkg in &ws.packages {
-        let pages = resolve_html_list(root, pkg)?;
+        let entries = resolve_html_list(root, pkg)?;
+        let components = count_component_files(root, pkg)?;
+        // entries 现含 components/ 直收条目（按 stem 可实例化模板）；「页面」列
+        // 剔除它们——list 摘要语义保持「页面数 + 组件数」两列不变。
         out.push(PkgSummary {
             name: pkg.name.clone(),
-            pages: pages.len(),
-            components: count_component_files(root, pkg)?,
+            pages: entries.len().saturating_sub(components),
+            components,
         });
     }
     Ok(out)
@@ -109,7 +112,12 @@ pub fn show_pkg(root: &Path, name: &str) -> Result<PkgDetail, BuildFailure> {
         .iter()
         .find(|p| p.name == name)
         .ok_or_else(|| BuildFailure::config(format!("package `{name}` not found")))?;
-    let pages = resolve_html_list(root, pkg)?;
+    // entries 现含 components/ 直收条目（可实例化模板）；pages 列剔除——组件在
+    // components 列单列，show 语义保持两列不变。
+    let pages: Vec<String> = resolve_html_list(root, pkg)?
+        .into_iter()
+        .filter(|rel| !rel.contains("/components/"))
+        .collect();
     Ok(PkgDetail {
         name: pkg.name.clone(),
         dirs: pkg.dirs.clone(),

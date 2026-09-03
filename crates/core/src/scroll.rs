@@ -508,12 +508,30 @@ pub fn effective(ovf: OverflowMode, content: f32, viewport: f32) -> bool {
 
 /// 垂直 thumb design-rect（容器 viewport 右边缘 track；thumb 大小/位置）。
 /// 返 None 若 overlap_y <= 0（无溢出、无需 thumb）。
+/// 祖先滚动累计偏移（不含自身）：滚动容器嵌在另一个滚动容器里时，后代节点的
+/// world_matrix 注入了 T(-祖先.scroll_pos)（transform.rs），而合成 thumb 是根级
+/// 追加行（design 绝对坐标、不裁剪）——不补这个偏移，thumb 会钉死在 design 静态
+/// 位置，外层滚动时纹丝不动（嵌套滚动首次现身于 #52 shape-mask 页 D 区）。
+fn ancestor_scroll_offset(scene: &Scene, id: NodeId) -> (f32, f32) {
+    let mut off = (0.0f32, 0.0f32);
+    let mut cur = scene.get(id).and_then(|n| n.parent);
+    while let Some(pid) = cur {
+        if let Some(st) = scene.scroll.get(pid) {
+            off.0 += st.scroll_pos.0;
+            off.1 += st.scroll_pos.1;
+        }
+        cur = scene.get(pid).and_then(|n| n.parent);
+    }
+    off
+}
+
 pub fn v_thumb_rect(scene: &Scene, id: NodeId) -> Option<Rect> {
     let s = scene.scroll.get(id)?;
     if s.overlap.1 <= 0.0 {
         return None;
     }
     let lr = scene.get_live(id, "scroll/v_thumb_rect").layout_rect;
+    let anc = ancestor_scroll_offset(scene, id);
     let track_w = SCROLLBAR_TRACK_THICKNESS;
     let track_h = lr.h;
     let thumb_h = (s.viewport_size.1 * (s.viewport_size.1 / s.content_size.1))
@@ -524,9 +542,9 @@ pub fn v_thumb_rect(scene: &Scene, id: NodeId) -> Option<Rect> {
     } else {
         0.0
     };
-    let thumb_y = lr.y + (track_h - thumb_h) * perc;
+    let thumb_y = lr.y + (track_h - thumb_h) * perc - anc.1;
     Some(Rect {
-        x: lr.x + lr.w - track_w,
+        x: lr.x + lr.w - track_w - anc.0,
         y: thumb_y,
         w: track_w,
         h: thumb_h,
@@ -540,6 +558,7 @@ pub fn h_thumb_rect(scene: &Scene, id: NodeId) -> Option<Rect> {
         return None;
     }
     let lr = scene.get_live(id, "scroll/h_thumb_rect").layout_rect;
+    let anc = ancestor_scroll_offset(scene, id);
     let track_h = SCROLLBAR_TRACK_THICKNESS;
     let track_w = lr.w;
     let thumb_w = (s.viewport_size.0 * (s.viewport_size.0 / s.content_size.0))
@@ -550,10 +569,10 @@ pub fn h_thumb_rect(scene: &Scene, id: NodeId) -> Option<Rect> {
     } else {
         0.0
     };
-    let thumb_x = lr.x + (track_w - thumb_w) * perc;
+    let thumb_x = lr.x + (track_w - thumb_w) * perc - anc.0;
     Some(Rect {
         x: thumb_x,
-        y: lr.y + lr.h - track_h,
+        y: lr.y + lr.h - track_h - anc.1,
         w: thumb_w,
         h: track_h,
     })

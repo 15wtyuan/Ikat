@@ -18,7 +18,11 @@
   .api-btn { color:#e0e6ec; font-size:13px; padding:8px 14px; border-radius:8px; background-color:rgba(26,47,69,0.85); border-width:0 0 0 2px; border-style:solid; border-color:#2a5a75; }
   .api-btn:hover { border-color:#5fb4d4; color:#5fb4d4; }
   /* ── 消费面 ── */
+  /* 直接子 flex-shrink:0：页面列是 flex column，Chrome 对 overflow:auto 项的
+     min-height 解析为 0 → 内容超高时定高元素（滚动面板等）被压扁（preview 塌陷、
+     taffy 不塌的分歧源）。全部定高子显式不收缩，两端一致。 */
   .sm-page {display:flex;flex-direction:column; flex-grow:1; padding:48px; gap:14px; overflow:auto; }
+  .main-title, .section-label, .sm-row, .sm-scroll, .sm-c-section, .sm-rot-row { flex-shrink:0; }
   .main-title { color:#e0e6ec; font-size:36px; font-weight:700; }
   .section-label { color:#6c7080; font-size:13px; margin-top:12px; }
   .sm-row {display:flex; flex-direction:row; gap:18px; align-items:center; }
@@ -106,8 +110,8 @@
 
       <div class="section-label">A · 圆形头像：左 = clip-path circle(50%)，右 = 未裁对照（四角图被裁 vs 方图）</div>
       <div class="sm-row">
-        <img class="sm-avatar" src="../res/icons/character.png" alt="">
-        <img class="sm-avatar-plain" src="../res/icons/character.png" alt="">
+        <img class="sm-avatar" src="../res/icons/mask-avatar.png" alt="">
+        <img class="sm-avatar-plain" src="../res/icons/mask-avatar.png" alt="">
       </div>
 
       <div class="section-label">B · 多边形槽位：菱形 / 六边形 / 八边形（角外内容不露）</div>
@@ -128,22 +132,22 @@
       <div class="section-label">D · 嵌套链 + 祖先圆角：滚动列表（viewport 带圆角）——头像在视口直边被裁（rect∩circle 链）、滚到角被圆角边裁（祖先圆角传播）</div>
       <div class="sm-scroll">
         <div class="sm-scroll-row">
-          <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
           <div class="sm-slot-s"></div>
-          <img class="sm-avatar-s" src="../res/icons/helm.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
           <div class="sm-slot-s"></div>
         </div>
         <div class="sm-scroll-row">
-          <img class="sm-avatar-s" src="../res/icons/helm.png" alt="">
-          <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
           <div class="sm-slot-s"></div>
-          <img class="sm-avatar-s" src="../res/icons/boots.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
         </div>
         <div class="sm-scroll-row">
           <div class="sm-slot-s"></div>
-          <img class="sm-avatar-s" src="../res/icons/boots.png" alt="">
-          <img class="sm-avatar-s" src="../res/icons/helm.png" alt="">
-          <img class="sm-avatar-s" src="../res/icons/character.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
+          <img class="sm-avatar-s" src="../res/icons/mask-avatar.png" alt="">
         </div>
       </div>
 
@@ -155,8 +159,8 @@
 
       <div class="section-label">F · 运行时注入：方图 → 侧栏「注入圆遮罩」变圆（StyleSheet.Add 类规则）；var 换形：遮罩值走 var()，SetVar 在圆/六边形间切</div>
       <div class="sm-row">
-        <img class="sm-rt-img" id="sm-rt-img" src="../res/icons/glove.png" alt="">
-        <img class="sm-var-img" id="sm-var-img" src="../res/icons/boots.png" alt="">
+        <img class="sm-rt-img" id="sm-rt-img" src="../res/icons/mask-avatar.png" alt="">
+        <img class="sm-var-img" id="sm-var-img" src="../res/icons/mask-avatar.png" alt="">
       </div>
 
       <div class="sm-c-section">

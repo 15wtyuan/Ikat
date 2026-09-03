@@ -59,6 +59,13 @@ impl ComponentRegistry {
         self.defs.iter()
     }
 
+    /// 该 html_rel 是否注册表组件文件本体。components/ 直收条目（build 侧
+    /// resolve_html_list）据此走组件语义 walk——slot 走 fallback、嵌套组件照常
+    /// 展开；否则按页面语义（light 上下文，slot 非法）。
+    pub fn is_component_file(&self, html_rel: &str) -> bool {
+        self.defs.values().any(|d| d.html_rel == html_rel)
+    }
+
     /// 从 (名, HTML 源, html_rel) 构建注册表。单测/字符串入口。
     ///
     /// collect-all：单个组件的注册错误（fence Error / 命名 / 单根 / 子树校验）收集成
@@ -296,7 +303,13 @@ pub fn bridge_with_components(
         nodes: Vec::new(),
         bg_refs: Vec::new(),
     };
-    w.walk_page(parsed, html_rel)?;
+    if registry.is_component_file(html_rel) {
+        // 独立组件文件条目（components/ 直收，运行时 Instantiate 按 Stem 克隆）：
+        // 组件语义但无 host/light 子——空分配表 = slot 全走 fallback。
+        w.walk_component_file(parsed, html_rel)?;
+    } else {
+        w.walk_page(parsed, html_rel)?;
+    }
     if w.nodes.is_empty() {
         return Err("组件无可实例化节点，产物为空".into());
     }
@@ -313,6 +326,28 @@ impl<'a> Walker<'a> {
     fn walk_page(&mut self, parsed: &ParsedTemplate, html_rel: &str) -> Result<(), String> {
         let root = parsed.tree.roots[0];
         self.walk_node(parsed, html_rel, root, None, false)
+    }
+
+    /// 走独立组件文件条目（components/ 直收为可实例化模板，fgui 组件一等公民）：
+    /// 组件语义但无 host——空 slot 分配（无 light 子可投影，fallback 原位渲染）、
+    /// 嵌套组件经 expand_host 照常展开。根节点归实例化根作用域（同页面根）。
+    fn walk_component_file(
+        &mut self,
+        parsed: &ParsedTemplate,
+        html_rel: &str,
+    ) -> Result<(), String> {
+        let root = parsed.tree.roots[0];
+        let mut assignment = SlotAssignment::default();
+        self.walk_component_node(
+            parsed,
+            html_rel,
+            parsed,
+            html_rel,
+            root,
+            None,
+            &mut assignment,
+            false,
+        )
     }
 
     /// 走一个节点（页面文件或被投影的 light 子）。`in_projection` = 当前处于展开域内

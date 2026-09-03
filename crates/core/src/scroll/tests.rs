@@ -1379,3 +1379,64 @@ fn wheel_on_dead_scroll_container_warns_once() {
         "滚轮实际生效（set_pos 补间）"
     );
 }
+
+/// 嵌套滚动的 thumb 祖先偏移（#52 shape-mask D 区验收实锤）：内层 thumb 的
+/// design rect 须减外层 scroll_pos——否则外层滚动时合成 thumb 钉死在静态位置。
+#[test]
+fn nested_scroll_thumb_follows_ancestor_scroll() {
+    // 结构：outer(scroll) > inner(scroll)，各自有 overlap（content > viewport）。
+    let mut outer_style = ResolvedStyle::default();
+    outer_style.overflow_y = OverflowMode::Scroll;
+    let inner_style = outer_style.clone();
+    let mut outer = Node::default();
+    outer.style = outer_style;
+    outer.layout_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 100.0,
+        h: 100.0,
+    };
+    let mut inner = Node::default();
+    inner.style = inner_style;
+    inner.layout_rect = Rect {
+        x: 10.0,
+        y: 10.0,
+        w: 80.0,
+        h: 80.0,
+    };
+    let mut scene = Scene::from_nodes(vec![outer, inner], vec![(0, 1)]);
+    let outer_id = scene.roots[0];
+    let inner_id = scene.get(outer_id).unwrap().children[0];
+    // 双层滚动态：外层滚 50、内层滚 10（各自 overlap 足够）。
+    let so = scene.scroll.ensure(outer_id);
+    so.viewport_size = (100.0, 100.0);
+    so.content_size = (100.0, 300.0);
+    so.overlap = (0.0, 200.0);
+    so.scroll_pos = (0.0, 50.0);
+    let si = scene.scroll.ensure(inner_id);
+    si.viewport_size = (80.0, 80.0);
+    si.content_size = (80.0, 200.0);
+    si.overlap = (0.0, 120.0);
+    si.scroll_pos = (0.0, 10.0);
+
+    let r = super::v_thumb_rect(&scene, inner_id).expect("inner thumb");
+    // 静态 thumb（未修前）：track 顶 = inner layout y = 10；修后须随外层滚 50 上移。
+    // thumb_h = 80×(80/200) = 32；perc = 10/120；thumb_y_static = 10 + (80-32)*perc。
+    let perc = 10.0f32 / 120.0;
+    let expect_y = 10.0 + (80.0 - 32.0) * perc - 50.0;
+    assert!(
+        (r.y - expect_y).abs() < 1e-3,
+        "thumb y 应含祖先滚动 -50，期望 {expect_y} 得 {}",
+        r.y
+    );
+    assert!((r.x - (10.0 + 80.0 - super::SCROLLBAR_TRACK_THICKNESS)).abs() < 1e-3);
+    // 外层滚回 0 → 回到静态位。
+    scene.scroll.ensure(outer_id).scroll_pos = (0.0, 0.0);
+    let r0 = super::v_thumb_rect(&scene, inner_id).expect("inner thumb");
+    let expect0 = 10.0 + (80.0 - 32.0) * perc;
+    assert!(
+        (r0.y - expect0).abs() < 1e-3,
+        "滚回 0 复位，期望 {expect0} 得 {}",
+        r0.y
+    );
+}

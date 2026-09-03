@@ -198,7 +198,7 @@
         128
       ]
     },
-    "res/icons/ring.png": {
+    "res/icons/mask-avatar.png": {
       "page": 0,
       "uv": [
         0.13671875,
@@ -211,7 +211,7 @@
         128
       ]
     },
-    "res/icons/settings.png": {
+    "res/icons/ring.png": {
       "page": 0,
       "uv": [
         0.26953125,
@@ -224,7 +224,7 @@
         128
       ]
     },
-    "res/icons/shield.png": {
+    "res/icons/settings.png": {
       "page": 0,
       "uv": [
         0.40234375,
@@ -237,7 +237,7 @@
         128
       ]
     },
-    "res/icons/shop.png": {
+    "res/icons/shield.png": {
       "page": 0,
       "uv": [
         0.53515625,
@@ -250,7 +250,7 @@
         128
       ]
     },
-    "res/icons/skill-eye.png": {
+    "res/icons/shop.png": {
       "page": 0,
       "uv": [
         0.66796875,
@@ -263,7 +263,7 @@
         128
       ]
     },
-    "res/icons/skill-spin.png": {
+    "res/icons/skill-eye.png": {
       "page": 0,
       "uv": [
         0.80078125,
@@ -276,7 +276,7 @@
         128
       ]
     },
-    "res/icons/skill-step.png": {
+    "res/icons/skill-spin.png": {
       "page": 0,
       "uv": [
         0.00390625,
@@ -289,12 +289,25 @@
         128
       ]
     },
-    "res/icons/weapon.png": {
+    "res/icons/skill-step.png": {
       "page": 0,
       "uv": [
         0.13671875,
         0.47265625,
         0.26171875,
+        0.59765625
+      ],
+      "orig": [
+        128,
+        128
+      ]
+    },
+    "res/icons/weapon.png": {
+      "page": 0,
+      "uv": [
+        0.26953125,
+        0.47265625,
+        0.39453125,
         0.59765625
       ],
       "orig": [

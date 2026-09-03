@@ -359,6 +359,29 @@ pub fn resolve_html_list(workspace_root: &Path, pkg: &PackageCfg) -> Result<Vec<
             .collect();
         entries.sort();
         out.extend(entries);
+        // components/ 子目录同收：组件文件按 stem 进 pkg 组件映射，运行时
+        // `Instantiate("my-widget")` / `GetTemplate` 可克隆（fgui 组件一等公民同构；
+        // 消费侧 api-reference「the registered stem, no components/ prefix」既有承诺
+        // 的兑现）。文件内自定义标签照常经注册表展开（嵌套组件克隆路径）。页面与
+        // 组件撞名 → 打包期 duplicate component name 错误（fail loud）。
+        let comp_dir = format!("{dir}/components");
+        let comp_full = workspace_root.join(&comp_dir);
+        if comp_full.is_dir() {
+            let mut comp_entries: Vec<String> = std::fs::read_dir(&comp_full)
+                .map_err(|e| format!("read dir {}: {e}", comp_full.display()))?
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().and_then(|x| x.to_str()) == Some("html") {
+                        p.file_name()?.to_str().map(|n| format!("{comp_dir}/{n}"))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            comp_entries.sort();
+            out.extend(comp_entries);
+        }
     }
     Ok(out)
 }
@@ -814,6 +837,85 @@ mod package_tests {
 
     /// 回归：某页投影悬空 slot 名 → analyze 必须失败且错误可见。
     /// 修前：bridge 错误只带 message，被 analyze 丢弃 → 包静默消失、build 报 OK。
+    /// components/ 子目录直收为可实例化条目（运行时 `Instantiate("my-card")` 按
+    /// stem 克隆——api-reference 既有承诺的兑现）。嵌套 hyphen 标签在条目内照常
+    /// 经注册表展开（holder 条目含展开后的 host 子树）。
+    #[test]
+    fn components_dir_entries_instantiable_by_stem() {
+        let tmp = std::env::temp_dir().join(format!("ikat-comp-entry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("ui/components")).unwrap();
+        std::fs::write(
+            tmp.join("ui/main.html"),
+            "<div><span id=\"a\">page</span></div>",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("ui/components/my-card.html"),
+            "<div class=\"card\"><slot name=\"icon\"><img src=\"../a.png\" style=\"width:8px;height:8px\"></slot></div>",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("ui/components/card-holder.html"),
+            "<div><my-card></my-card></div>",
+        )
+        .unwrap();
+        let ws = crate::workspace::Workspace {
+            version: 1,
+            output_dir: String::new(),
+            design: None,
+            match_mode: None,
+            packages: vec![crate::workspace::PackageCfg {
+                name: "ui".into(),
+                dirs: vec!["ui".into()],
+                html: vec![],
+            }],
+            atlases: vec![],
+            fonts: vec![],
+        };
+        let (registry, _) = crate::expand::scan_component_registry(&tmp, &ws.packages).unwrap();
+        let htmls = resolve_html_list(&tmp, &ws.packages[0]).unwrap();
+        let stems: Vec<String> = htmls.iter().map(|r| stem(r)).collect();
+        let stems: Vec<&str> = stems.iter().map(|s| s.as_str()).collect();
+        // 直收：页面 + 两个组件文件都进条目
+        assert!(stems.contains(&"main"), "stems = {stems:?}");
+        assert!(
+            stems.contains(&"my-card"),
+            "components/ 直收，stems = {stems:?}"
+        );
+        assert!(stems.contains(&"card-holder"), "stems = {stems:?}");
+
+        // 打包 → 读回 pkg 组件映射：三 stem 都可实例化；holder 含展开的 host 子树。
+        let comps: Vec<Component> = htmls
+            .iter()
+            .map(|rel| {
+                let src_html = std::fs::read_to_string(tmp.join(rel)).unwrap();
+                Component {
+                    name: stem(rel),
+                    src: src_html,
+                    html_rel: rel.clone(),
+                }
+            })
+            .collect();
+        let pr = pack_components_with_css(&comps, &registry, &|_| None).unwrap();
+        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        assert!(pkg.components.contains_key("main"));
+        assert!(
+            pkg.components.contains_key("my-card"),
+            "slot fallback 走组件语义"
+        );
+        assert!(pkg.components.contains_key("card-holder"));
+        let holder = &pkg.components["card-holder"];
+        assert!(
+            holder
+                .nodes
+                .iter()
+                .any(|n| n.kind == ikat_core::scene::NodeKind::CustomElement),
+            "holder 条目内 <my-card> 经注册表展开为 host 节点"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn analyze_fails_loudly_on_dangling_slot_projection() {
         let tmp = write_temp_ws(
