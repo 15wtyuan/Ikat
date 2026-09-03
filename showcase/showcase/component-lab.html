@@ -28,6 +28,7 @@
   .cl-pane { width:640px; height:560px; overflow:scroll; padding:10px; background-color:#101c28; border-radius:8px; }
   .cl-list { display:block; width:620px; }
   .cl-row { margin-bottom:8px; }
+  .cl-plain { color:#9aa0b4; font-size:13px; }
   /* ::part() 穿墙（#57）：页面规则穿组件内容墙命中组件内部 part 标记节点。
      .lw-hot 实例的 title/note 被 ::part 换色（金/亮青），无 .lw-hot 的实例保持
      组件默认（灰蓝）——同屏并排对照，无需记忆比对。 */
@@ -54,17 +55,18 @@
         <button class="api-btn" id="cl-rt">注入::part红</button>
       </div>
       <div class="api-row">
-        <button class="api-btn" id="cl-shrink">列表减员</button>
+        <button class="api-btn" id="cl-swap">换蓝图重物化</button>
       </div>
       <div class="readout-label">操作读数</div>
       <span class="readout" id="cl-status">待命</span>
     </div>
     <div class="cl-page">
       <div class="main-title">组件类绑定与生命周期</div>
-      <div class="section-label">列表换绑淘汰（ItemCount 减员 → Rust 侧克隆死亡 → 帧泵 OnDisconnected，disc 读数跳增）</div>
+      <div class="section-label">换蓝图重物化（旧蓝图克隆 Rust 侧死亡 → 帧泵 OnDisconnected，disc 跳增 + 整列翻面）</div>
       <div class="cl-pane">
         <div role="list" id="cl-list" class="cl-list">
           <template id="cl-row"><div role="listitem" class="cl-row"><lifecycle-widget></lifecycle-widget></div></template>
+          <template id="cl-row-plain"><div role="listitem" class="cl-row"><span class="cl-plain">普通行（旧蓝图克隆已死）</span></div></template>
         </div>
       </div>
       <div class="section-label">组件实例（进页静态 ×2 · 按钮动态加挂/销毁 · 离页整页销毁）</div>

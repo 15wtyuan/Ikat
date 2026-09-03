@@ -835,11 +835,155 @@ mod package_tests {
     const WS_JSON: &str =
         r#"{"version":1,"output_dir":"../out","packages":[{"name":"game","dirs":["ui"]}]}"#;
 
-    /// 回归：某页投影悬空 slot 名 → analyze 必须失败且错误可见。
-    /// 修前：bridge 错误只带 message，被 analyze 丢弃 → 包静默消失、build 报 OK。
-    /// components/ 子目录直收为可实例化条目（运行时 `Instantiate("my-card")` 按
-    /// stem 克隆——api-reference 既有承诺的兑现）。嵌套 hyphen 标签在条目内照常
-    /// 经注册表展开（holder 条目含展开后的 host 子树）。
+    /// showcase ::part 摆台契约锁：读真 showcase.pkg.bin（组件/页面标记的集成面），
+    /// instantiate component-lab 后 .lw-hot 实例 title 金、默认实例保持组件默认色。
+    /// 防摆台回归（行内 style 压过 ::part 一类：part 目标节点禁行内 color 声明）。
+    #[test]
+    fn showcase_bundle_part_demo_contract() {
+        let bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin"
+        ))
+        .unwrap();
+        let mut stage = ikat_core::stage::Stage::new((1080.0, 1920.0)).unwrap();
+        stage.create_root("div", "").unwrap();
+        stage.load_package("showcase", &bytes).unwrap();
+        let _ = stage.instantiate("showcase", "component-lab").unwrap();
+        ikat_core::style::dynamic::rematch_pseudo_classes(
+            stage.scene.as_mut().unwrap(),
+            (1080.0, 1920.0),
+            [0.0; 4],
+        );
+        let scene = stage.scene.as_ref().unwrap();
+        fn dfs(
+            scene: &ikat_core::scene::Scene,
+            id: ikat_core::scene::NodeId,
+        ) -> Option<ikat_core::scene::NodeId> {
+            if scene.roles.get(id).and_then(|i| i.attr("part")) == Some("title") {
+                return Some(id);
+            }
+            for &c in &scene.get(id).unwrap().children {
+                if let Some(f) = dfs(scene, c) {
+                    return Some(f);
+                }
+            }
+            None
+        }
+        let hot_host = scene
+            .nodes
+            .values()
+            .find(|n| {
+                n.kind == ikat_core::scene::NodeKind::CustomElement
+                    && n.classes.iter().any(|c| c == "lw-hot")
+            })
+            .map(|n| n.id)
+            .unwrap();
+        let hot = dfs(scene, hot_host).unwrap();
+        let plain_host = scene
+            .nodes
+            .values()
+            .find(|n| n.kind == ikat_core::scene::NodeKind::CustomElement && n.classes.is_empty())
+            .map(|n| n.id)
+            .unwrap();
+        let plain = dfs(scene, plain_host).unwrap();
+        let gold: [f32; 4] = [0.9529412, 0.6117647, 0.07058824, 1.0];
+        let dflt: [f32; 4] = [0.8784314, 0.9019608, 0.9254902, 1.0];
+        assert_eq!(
+            scene.get(hot).unwrap().style.color,
+            gold,
+            "lw-hot 的 title 应金"
+        );
+        assert_eq!(
+            scene.get(plain).unwrap().style.color,
+            dflt,
+            "默认实例保持组件默认色"
+        );
+    }
+
+    #[test]
+    fn part_rule_matches_through_real_pack_instantiate_pipeline() {
+        let tmp = std::env::temp_dir().join(format!("ikat-part-e2e-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("ui/components")).unwrap();
+        std::fs::write(
+            tmp.join("ui/main.html"),
+            "<style>.hot::part(title) { color:#f39c12; }</style>
+<div><my-part-card class=\"hot\"></my-part-card></div>",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("ui/components/my-part-card.html"),
+            "<div class=\"c-root\"><span class=\"c-title\" part=\"title\">T</span></div>",
+        )
+        .unwrap();
+        let ws = crate::workspace::Workspace {
+            version: 1,
+            output_dir: String::new(),
+            design: None,
+            match_mode: None,
+            packages: vec![crate::workspace::PackageCfg {
+                name: "ui".into(),
+                dirs: vec!["ui".into()],
+                html: vec![],
+            }],
+            atlases: vec![],
+            fonts: vec![],
+        };
+        let (registry, _) = crate::expand::scan_component_registry(&tmp, &ws.packages).unwrap();
+        let htmls = resolve_html_list(&tmp, &ws.packages[0]).unwrap();
+        let comps: Vec<Component> = htmls
+            .iter()
+            .map(|rel| {
+                let src_html = std::fs::read_to_string(tmp.join(rel)).unwrap();
+                Component {
+                    name: stem(rel),
+                    src: src_html,
+                    html_rel: rel.clone(),
+                }
+            })
+            .collect();
+        let pr = pack_components_with_css(&comps, &registry, &|_| None).unwrap();
+
+        // core 真管线：load → instantiate → rematch。
+        let mut stage = ikat_core::stage::Stage::new((200.0, 200.0)).unwrap();
+        stage.create_root("div", "").unwrap();
+        stage.load_package("ui", &pr.bytes).unwrap();
+        let _root = stage.instantiate("ui", "main").unwrap();
+        ikat_core::style::dynamic::rematch_pseudo_classes(
+            stage.scene.as_mut().unwrap(),
+            (1080.0, 1920.0),
+            [0.0; 4],
+        );
+        let scene = stage.scene.as_ref().unwrap();
+        // 目标：组件内部带 part="title" 的 span；host 带 class hot。
+        let mut host_found = false;
+        let mut target: Option<ikat_core::scene::NodeId> = None;
+        for n in scene.nodes.values() {
+            if n.kind == ikat_core::scene::NodeKind::CustomElement
+                && n.classes.iter().any(|c| c == "hot")
+            {
+                host_found = true;
+            }
+            if scene
+                .roles
+                .get(n.id)
+                .and_then(|i| i.attr("part"))
+                .is_some_and(|v| v == "title")
+            {
+                target = Some(n.id);
+            }
+        }
+        assert!(host_found, "host（class=hot 的 CustomElement）在树中");
+        let target = target.expect("part=title 目标节点在树中（attrs 进 RoleInfo）");
+        let got = scene.get(target).unwrap().style.color;
+        assert_eq!(
+            got,
+            [0.9529412, 0.6117647, 0.07058824, 1.0],
+            "::part(title) 规则命中（#f39c12）——真管线穿墙"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn components_dir_entries_instantiable_by_stem() {
         let tmp = std::env::temp_dir().join(format!("ikat-comp-entry-{}", std::process::id()));

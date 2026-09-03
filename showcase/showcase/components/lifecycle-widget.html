@@ -7,6 +7,7 @@
   .lw-note { color:#9aa0b4; font-size:12px; align-self:center; }
 </style>
 <div class="lw-root" style="display:flex;flex-direction:column;gap:6px;width:200px;background-color:#1a2f45;border-radius:10px;padding:14px">
-  <span class="lw-title" part="title" style="color:#e0e6ec;font-size:15px;font-weight:700;align-self:center">生命周期组件</span>
-  <span class="lw-note" part="note" style="color:#9aa0b4;font-size:12px;align-self:center">typed 子类接线</span>
+  <!-- part 目标节点禁用行内 color 类声明（行内压过 ::part——CSS 语义）；视觉全走 <style> 类。 -->
+  <span class="lw-title" part="title">生命周期组件</span>
+  <span class="lw-note" part="note">typed 子类接线</span>
 </div>

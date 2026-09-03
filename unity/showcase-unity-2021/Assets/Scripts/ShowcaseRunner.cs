@@ -1251,7 +1251,7 @@ public class ShowcaseRunner : MonoBehaviour
                 {
                     _clPartReg?.Dispose();
                     _clPartReg = _driver.Context.StyleSheet.Add(
-                        ".cl-stage::part(title) { color: #e74c3c; }");
+                        "::part(title) { color: #e74c3c; }");
                     Say("已注入 ::part 红");
                 };
             // 列表换绑淘汰（#20 pump 路径）：ItemCount 减员 → core 杀克隆 → 下帧
@@ -1268,13 +1268,22 @@ public class ShowcaseRunner : MonoBehaviour
                     var _ = item.Query<CustomElement>();
                 };
                 lv.ItemCount = 8;
-                if (page.TryGet<Button>("cl-shrink", out var shrinkBtn))
-                    shrinkBtn.Clicked += () =>
+                if (page.TryGet<Button>("cl-swap", out var swapBtn))
+                {
+                    UITemplate rowWidget = lv.GetTemplate("cl-row");
+                    UITemplate rowPlain = lv.GetTemplate("cl-row-plain");
+                    bool plain = false;
+                    swapBtn.Clicked += () =>
                     {
-                        int n = lv.ItemCount > 2 ? 2 : 8;   // 8→2 杀 6 槽 ↔ 2→8 复原
-                        lv.ItemCount = n;
-                        Say($"ItemCount→{n}（看 disc/conn 跳变）");
+                        plain = !plain;
+                        // 换蓝图重物化：模板变了的 item 旧蓝图克隆被 core 释放（Rust 侧死亡，
+                        // 非 C# Dispose）→ 下帧 PumpRemovedNodes 对已物化 wrapper fire
+                        // OnDisconnected。减员不触发（槽位池化 parked 不释放）。
+                        UITemplate t = plain ? rowPlain : rowWidget;
+                        lv.TemplateSelector = _ => t;
+                        Say(plain ? "换普通行蓝图（disc 跳增）" : "换组件蓝图（conn 跳增）");
                     };
+                }
             }
             if (page.TryGet<Button>("cl-pop", out var popBtn))
                 popBtn.Clicked += () =>
