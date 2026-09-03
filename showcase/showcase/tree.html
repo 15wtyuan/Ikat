@@ -20,8 +20,11 @@
   .api-btn:hover { border-color:#5fb4d4; color:#5fb4d4; }
   .tree-pane {display:flex;flex-direction:column; width:320px; padding:32px 8px; gap:4px; overflow-y:auto; }
   .pane-title { color:#e0e6ec; font-size:18px; font-weight:700; padding:0 12px 12px 12px; }
-  /* 树条目：branch 的 label 走 .row 子元素（箭头 + 文字 + 计数徽章）——branch 宿主
-     嵌套条目为 block 子，纯文本 label 会触发 FenceMixedInlineBlock；leaf 纯文本合法。 */
+  /* 树条目：label 一律走 .row 子元素（branch = 箭头 + 文字 + 计数徽章，leaf = 纯文字）——
+     悬停/选中/缩进钩子全挂 .row，裸文本叶拿不到任何交互样式（选中了也看不见）。
+     branch 宿主嵌套条目为 block 子，纯文本 label 会触发 FenceMixedInlineBlock。
+     已知边界：选中钩子 [aria-selected] .row 是后代选择器（围栏子集只收后代组合器，拒 >），
+     选中含嵌套 branch 的条目（材料）会把嵌套 branch 行（金属）一并点亮——web 同源同表现。 */
   .tree {display:flex;flex-direction:column; gap:2px; }
   [role="treeitem"] {display:flex;flex-direction:column; color:#9aa0b4; font-size:15px; border-radius:8px; }
   .row {display:flex;flex-direction:row; align-items:center; gap:8px; padding:10px 12px; border-radius:8px; }
@@ -51,9 +54,9 @@
       <div class="side-title">背包分类</div>
       <div class="side-desc">role=tree/treeitem · 单选 · 折叠分组</div>
       <div class="readout-label">当前选中</div>
-      <div class="readout" id="sel-readout">武器</div>
+      <span class="readout" id="sel-readout">武器</span>
       <div class="readout-label">展开的分组数</div>
-      <div class="readout" id="expand-readout">2</div>
+      <span class="readout" id="expand-readout">2</span>
       <div class="api-row">
         <button class="api-btn" id="btn-tree-expand-all">全展开</button>
         <button class="api-btn" id="btn-tree-collapse-all">全折叠</button>
@@ -65,25 +68,25 @@
       <div class="tree" role="tree" id="inv-tree">
         <div role="treeitem" aria-expanded="true">
           <div class="row"><span class="chev">▸</span><span>武器</span><span class="cnt">12 件</span></div>
-          <div role="treeitem">剑</div>
-          <div role="treeitem">弓</div>
+          <div role="treeitem"><div class="row">剑</div></div>
+          <div role="treeitem"><div class="row">弓</div></div>
         </div>
         <div role="treeitem" aria-expanded="true">
           <div class="row"><span class="chev">▸</span><span>防具</span><span class="cnt">8 件</span></div>
-          <div role="treeitem">头盔</div>
-          <div role="treeitem">护胸</div>
+          <div role="treeitem"><div class="row">头盔</div></div>
+          <div role="treeitem"><div class="row">护胸</div></div>
         </div>
         <div role="treeitem">
           <div class="row"><span class="chev">▸</span><span>消耗品</span><span class="cnt">23 件</span></div>
-          <div role="treeitem">药水</div>
-          <div role="treeitem">卷轴</div>
+          <div role="treeitem"><div class="row">药水</div></div>
+          <div role="treeitem"><div class="row">卷轴</div></div>
         </div>
         <div role="treeitem">
           <div class="row"><span class="chev">▸</span><span>材料</span><span class="cnt">41 件</span></div>
           <div role="treeitem">
             <div class="row"><span class="chev">▸</span><span>金属</span></div>
-            <div role="treeitem">铁锭</div>
-            <div role="treeitem">秘银</div>
+            <div role="treeitem"><div class="row">铁锭</div></div>
+            <div role="treeitem"><div class="row">秘银</div></div>
           </div>
         </div>
       </div>

@@ -56,7 +56,7 @@ public class ShowcaseRunner : MonoBehaviour
     string _shown;
 
     // runtime-css 页（#11）当前 Add 句柄集——离页全 Dispose（注入规则不跨页泄漏）。
-    readonly List<IDisposable> _rtRegs = new();
+    readonly System.Collections.Generic.List<System.IDisposable> _rtRegs = new();
 
     // ── character 页 3D 展位（NativeHost 同屏渲染验证） ──
     Container _nativeSlot;         // 绑定目标（native-slot div；Unbind 需同节点）
@@ -211,11 +211,11 @@ public class ShowcaseRunner : MonoBehaviour
     /// 窗口缩放（vmin）；letterbox 出黑边对照；读数 span 跟随按钮翻转。
     void WireAdaptModeSwitch(Container page)
     {
-        if (!page.TryGet<TextNode>("adapt-readout", out var readout)) return;
+        if (!page.TryGet<TextElement>("adapt-readout", out var readout)) return;
         void SetMode(string mode)
         {
             if (_driver.SetAdaptMode(mode))
-                readout.Text = mode;
+                readout.TextContent = mode;
         }
         if (page.TryGet<Button>("btn-mode-letterbox", out var lb)) lb.Clicked += () => SetMode("letterbox");
         if (page.TryGet<Button>("btn-mode-fit-width", out var fw)) fw.Clicked += () => SetMode("fit-width");
@@ -515,19 +515,26 @@ public class ShowcaseRunner : MonoBehaviour
             if (page.TryGet<Button>("btn-mt-nullsel", out var mtNull))
                 mtNull.Clicked += () =>
                 {
+                    // 严格派探针：setter 赋值即对 [0, ItemCount) 全量求值——null 探针必须落在
+                    // 当前范围内，删项后固定 @5 会探空（求值全非 null → 不抛），误报「未抛」。
+                    if (mt.ItemCount == 0) { mtStatus.TextContent = "共 0 项——无 index 可探"; return; }
+                    int probe = System.Math.Min(5, mt.ItemCount - 1);
+                    var prev = mt.TemplateSelector;
                     try
                     {
                         // 求值抛在推送之前——core 的 per-item 映射未被动过，列表原样。
-                        mt.TemplateSelector = i => (i == 5) ? null : rowNormal;
+                        // setter 先落 C# 字段后校验：捕获后必须显式回设，getter 才不与 core 脱钩。
+                        mt.TemplateSelector = i => (i == probe) ? null : rowNormal;
                         mtStatus.TextContent = "未抛（✗ 严格派失效）";
                     }
                     catch (UIContractException)
                     {
-                        mtStatus.TextContent = "null @5 抛 UIContractException ✓ · 已恢复交替 · " + mt.ItemCount + " 项不变";
+                        mtStatus.TextContent = "null @" + probe + " 抛 UIContractException ✓ · 已恢复原状 · " + mt.ItemCount + " 项不变";
                     }
                     finally
                     {
-                        mt.TemplateSelector = alternating;
+                        // 恢复点击前状态——全强调开着时恢复交替会让 allAccent 与实际 selector 脱钩。
+                        mt.TemplateSelector = prev;
                     }
                 };
         }
@@ -1433,19 +1440,22 @@ public class ShowcaseRunner : MonoBehaviour
     /// 控件事件流演示：settings 滑块拖动更新旁边数值、character 训练按钮给 EXP 进度条加经验。
     /// 只验证 ValueChanged / Clicked → ProgressBar.Value 的端到端事件链，不构建完整逻辑。
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
-    // tree 页 helper（#8）：条目自身 label——branch 取 .row 第二子（首子是折叠箭头 span），
-    // leaf 直接取 TextNode 文本。非预期结构回落层级描述（读数仍可辨）。
+    // tree 页 helper（#8）：条目自身 label——首子常是 HTML 换行缩进折叠出的空白 TextNode，
+    // 须跳过再判形态：branch = .row 容器（label 在第二子 span，首子是折叠箭头）；
+    // leaf = .row 容器（唯一子即 label 文本）。非预期结构回落层级描述（读数仍可辨）。
     static string OwnTreeLabel(TreeItem item)
     {
-        if (item.ChildCount == 0) return item.Level + " 级条目";
-        var first = item.GetChildAt(0);
-        if (first is TextNode tn) return tn.Text;
-        if (first is Container row && row.ChildCount >= 2 && row.GetChildAt(1) is TextElement lbl)
-            return lbl.TextContent;
+        for (int i = 0; i < item.ChildCount; i++)
+        {
+            if (item.GetChildAt(i) is not Container child) continue;   // 空白 TextNode 跳过
+            if (child.ChildCount >= 2 && child.GetChildAt(1) is TextElement lbl)
+                return lbl.TextContent;
+            return child.TextContent;
+        }
         return item.Level + " 级条目";
     }
 
-    static int CountExpanded(Tree tree)
+    static int CountExpanded(Ikat.Tree tree)
     {
         int CountBranch(Container n)
         {
@@ -1491,12 +1501,12 @@ public class ShowcaseRunner : MonoBehaviour
             // tree 页（#8）：HTML 摆台（树 + 全展开/全折叠按钮 + 读数），事件路由证据 = 读数翻转。
             // 选中读数 = 选中条目自身 label（branch 取 .row 第二子 span——首子是折叠箭头；
             // leaf 直接取 TextNode 文本）；展开读数 = 展开态 branch 计数（遍历树条目）。
-            if (page.TryGet<Tree>("inv-tree", out var tree)
+            if (page.TryGet<Ikat.Tree>("inv-tree", out var tree)
                 && page.TryGet<TextElement>("sel-readout", out var selRead)
                 && page.TryGet<TextElement>("expand-readout", out var expRead))
             {
                 // 展开读数：DFS 数展开态 branch（程序化批量后刷新读数用）。
-                var countExpanded = () => CountExpanded(tree);
+                System.Func<int> countExpanded = () => CountExpanded(tree);
                 tree.SelectionChanged += e =>
                 {
                     var item = e.SelectedItem;
@@ -1505,6 +1515,10 @@ public class ShowcaseRunner : MonoBehaviour
                 };
                 if (page.TryGet<Button>("btn-tree-expand-all", out var expBtn)) expBtn.Clicked += () => { tree.ExpandAll(); expRead.TextContent = countExpanded().ToString(); };
                 if (page.TryGet<Button>("btn-tree-collapse-all", out var colBtn)) colBtn.Clicked += () => { tree.CollapseAll(); expRead.TextContent = countExpanded().ToString(); };
+                // 展开读数随交互切换刷新：点击条目折叠/展开、键盘 →← 都发 ExpandedChanged；
+                // ExpandAll/CollapseAll 是程序化批量（不发该事件），上面按钮各自手动刷新。
+                foreach (var ti in tree.Query<TreeItem>())
+                    ti.ExpandedChanged += _ => expRead.TextContent = countExpanded().ToString();
                 // 初始读数（HTML 初值对齐：默认选中首项「武器」、展开分组 2 个）。
                 selRead.TextContent = tree.SelectedItem != null ? OwnTreeLabel(tree.SelectedItem) : "（空）";
                 expRead.TextContent = countExpanded().ToString();

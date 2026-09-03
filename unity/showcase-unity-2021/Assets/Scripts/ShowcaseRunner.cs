@@ -345,19 +345,26 @@ public class ShowcaseRunner : MonoBehaviour
             if (page.TryGet<Button>("btn-mt-nullsel", out var mtNull))
                 mtNull.Clicked += () =>
                 {
+                    // 严格派探针：setter 赋值即对 [0, ItemCount) 全量求值——null 探针必须落在
+                    // 当前范围内，删项后固定 @5 会探空（求值全非 null → 不抛），误报「未抛」。
+                    if (mt.ItemCount == 0) { mtStatus.TextContent = "共 0 项——无 index 可探"; return; }
+                    int probe = System.Math.Min(5, mt.ItemCount - 1);
+                    var prev = mt.TemplateSelector;
                     try
                     {
                         // 求值抛在推送之前——core 的 per-item 映射未被动过，列表原样。
-                        mt.TemplateSelector = i => (i == 5) ? null : rowNormal;
+                        // setter 先落 C# 字段后校验：捕获后必须显式回设，getter 才不与 core 脱钩。
+                        mt.TemplateSelector = i => (i == probe) ? null : rowNormal;
                         mtStatus.TextContent = "未抛（✗ 严格派失效）";
                     }
                     catch (UIContractException)
                     {
-                        mtStatus.TextContent = "null @5 抛 UIContractException ✓ · 已恢复交替 · " + mt.ItemCount + " 项不变";
+                        mtStatus.TextContent = "null @" + probe + " 抛 UIContractException ✓ · 已恢复原状 · " + mt.ItemCount + " 项不变";
                     }
                     finally
                     {
-                        mt.TemplateSelector = alternating;
+                        // 恢复点击前状态——全强调开着时恢复交替会让 allAccent 与实际 selector 脱钩。
+                        mt.TemplateSelector = prev;
                     }
                 };
         }
@@ -726,7 +733,7 @@ public class ShowcaseRunner : MonoBehaviour
     /// 只验证 ValueChanged / Clicked → ProgressBar.Value 的端到端事件链，不构建完整逻辑。
     /// 元素缺失（本页没该控件）TryGet 返 false 跳过——和 WireNav 同样的宽松查询模式。
     // runtime-css 页（#11）当前 Add 句柄集——离页全 Dispose（注入规则不跨页泄漏）。
-    readonly List<IDisposable> _rtRegs = new();
+    readonly System.Collections.Generic.List<System.IDisposable> _rtRegs = new();
 
     /// 离开 runtime-css 页：Dispose 全部 Add 句柄（注入规则不跨页泄漏；主题 SetVar
     /// 随页面节点销毁自然失效——node_vars 挂节点）。

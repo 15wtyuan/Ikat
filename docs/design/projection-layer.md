@@ -101,6 +101,11 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 - **kind 映射**：Rust `NodeKind::Link` 判别值 21，C# `NodeKind.Link = 21` 显式对应（Template=18 跳号先例）；NodeFactory switch 加臂派发 `new Link(ctx, id)`。
 - **类型面**：`Link : Container`（含 `TextContent`）——富文本行内链接的子树是用户内容（文本/嵌 span），走容器投影。
 - **Href 读通道**：getter → FFI `ikat_stage_get_link_href`，双调法（同 `get_node_id_attr`/`get_control_text` 家族：先探容量，-2 按所需扩容重调）。rc 语义：0 = ok；-2 = 扩容重调；-1 = 句柄/场景错误；**1 = 非 Link 节点 → 抛 `UIContractException`**（类型错配的调用方错误，区别于 -1 的内部错）。
+- **TextNode 文本 / Image src 读通道**：`TextNode.Text` → FFI `ikat_stage_get_node_text`、
+  `Image.Src` → FFI `ikat_stage_get_src`（双调法同上家族；无条目 rc=0 空串，死节点 rc=-1）。
+  真值 = core `text_contents` / `image_srcs`——pkg 烙入的 HTML 值从不过 C# setter，读路径
+  必须走 core（曾用 C# 镜像，读合法初值恒空串，tree 页读数实锤后按预案接通）。
+  `Container.TextContent` 读侧递归累加即自动跟进。
 - **点击 = 既有事件面**：`Clicked` 走 `On<ClickEvent>` 订阅翻译（backing-dict 模式同 Button），**无新事件 ABI**——Rust 侧命中细化到 a 节点即够，投影层不加聚合。
 - **无运行时建树入口**：`<a>` 仅 rich 上下文合法（围栏保证），运行时 create_node/TagToNodeKind 均不产此 kind。
 

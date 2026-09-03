@@ -580,6 +580,28 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_get_node_id_attr(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
 
         /// <summary>
+        ///  读 TextNode 文本内容（core 真值，`Scene.text_contents`；无条目 → rc=0 + 空串——
+        ///  与 id_attr 的「未声明」同语义，调用方拿空串即可）。双调法同
+        ///  [`ikat_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；不够（含 0 探
+        ///  大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene / 死节点 → rc=-1（*out_len 置 0）。
+        ///  投影层 TextNode.Text getter 走本出口：C# 侧镜像只在 set_text 路径更新，pkg 烙入的
+        ///  HTML 文本从不过 C# setter，读镜像会把合法初值读成空串（showcase tree 页读数实锤）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_get_node_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_get_node_text(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
+        ///  读 Image 节点的 src（atlas sprite_key；core 真值，`Scene.image_srcs`；无条目 → rc=0 +
+        ///  空串——与 text 同语义）。双调法同 [`ikat_stage_get_node_text`]：buf_cap 足够 → rc=0 写
+        ///  buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene /
+        ///  死节点 → rc=-1（*out_len 置 0）。与 [`crate::node_setters::ikat_stage_set_src`] 成对；
+        ///  C# Image.Src getter 走本出口（HTML 烙入的 src 从不过 C# setter，读镜像恒空串——
+        ///  同 TextNode.Text 的 ghost state 预案）。
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_get_src", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int ikat_stage_get_src(StageHandle* h, ulong node_id, byte* @out, nuint buf_cap, nuint* out_len);
+
+        /// <summary>
         ///  读 `&lt;a&gt;` 节点的 href（#74 链接目标，opaque 字符串；C# Link 事件处理按它路由）。
         ///  双调法同 [`ikat_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；
         ///  不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene / 死节点 → rc=-1

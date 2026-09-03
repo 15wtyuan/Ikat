@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `Notify*` 后 C# 侧重推受影响区间。多模板未给选择（无 ItemTemplate/selector）时
   首次 `ItemCount` 抛 `UIContractException`。
 ### Fixed
+- **`TextNode.Text` / `Image.Src` getter 读 pkg 烙入值恒空串**：读侧原为 C# 镜像（仅
+  set 路径更新），`Instantiate` 出来的 HTML 文本/图片 src 从不过 C# setter → getter
+  对合法初值返 ""。getter 改直读 core 真值（新 FFI `ikat_stage_get_node_text` /
+  `ikat_stage_get_src`），`Container.TextContent` 读侧随之修正。
 - **enter 前设 `ItemTemplate` 被静默丢弃**：旧路径 `ikat_list_set_template` 在
   未进数据驱动模式时返 -1 且 C# 不查 rc——先设 `ItemTemplate` 再设 `ItemCount`
   的常规顺序会丢模板（列表默默用 HTML 备用蓝图）。现 enter 前的模板设定缓冲到

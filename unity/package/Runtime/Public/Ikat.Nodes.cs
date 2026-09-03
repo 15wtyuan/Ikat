@@ -1251,7 +1251,7 @@ namespace Ikat
 
         /// <summary>
         /// DOM textContent：读=递归拼接后代 TextNode.Text（文档序），写=清所有子 + 挂单个 TextNode。
-        /// 读侧递归 Container 子树（含 TextBlock/TextElement/Button 等 Container 子类）累加 TextNode._text；
+        /// 读侧递归 Container 子树（含 TextBlock/TextElement/Button 等 Container 子类）累加 TextNode.Text；
         /// 非 TextNode 叶子（Image / 控件）贡献 0 字符。
         ///
         /// 写侧 DOM 语义：先清所有当前子（**真释放**——remove_node 递归回收，非 detach；见
@@ -1274,8 +1274,8 @@ namespace Ikat
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 string text = value ?? "";
 
-                // 0) 快路径：现有直系子恰为单个 TextNode → 就地 set_text（TextNode.Text
-                //    自带 _text 缓存同步）。必须走快路径：本 setter 是每帧高频改写路径
+                // 0) 快路径：现有直系子恰为单个 TextNode → 就地 set_text（写穿 core，getter
+                //    读 core 真值天然同步）。必须走快路径：本 setter 是每帧高频改写路径
                 //    （OnUpdate 读数刷新），清子重建会每帧烧一次 slotmap generation——
                 //    单槽复用 ~4096 次后 NodeId 的 12-bit gen 截断回卷，产生活着的
                 //    「幽灵死节点」（core from_key 版本截断，get(id) 永久 miss）。
@@ -1314,10 +1314,9 @@ namespace Ikat
                 if (arc != 0)
                     throw new InvalidOperationException("append_child(textNode) failed (child has existing parent)");
 
-                // 3) Cache 镜像到 C# TextNode wrapper——registry.GetOrCreate 据 textId 派发到 TextNode
-                //    （NodeFactory: kind=TextNode → TextNode ctor）。写镜像避免下次读触发 FFI。
-                var tn = (TextNode)_ctx._registry.GetOrCreate(textId);
-                tn._text = text;
+                // 3) registry.GetOrCreate 据 textId 派发到 TextNode（NodeFactory: kind=TextNode →
+                //    TextNode ctor）。无需回填 C# 侧镜像——Text getter 直读 core 真值。
+                _ = _ctx._registry.GetOrCreate(textId);
             }
         }
 
@@ -1654,7 +1653,8 @@ namespace Ikat
         }
 
         /// <summary>
-        /// 递归子树累加 TextNode._text 到 sb（文档序）。Container 子递归；TextNode 叶子累加 _text；
+        /// 递归子树累加 TextNode.Text 到 sb（文档序）。Container 子递归；TextNode 叶子累加 Text
+        /// （core 真值——pkg 烙入文本 C# 镜像曾读空）；
         /// 其它叶子（Image / 控件）贡献 0 字符。TextContent getter 用。
         /// 递归终止：围栏闭合保证无循环引用（parent 指针单向）；深度受场景树规模有界。
         /// </summary>
@@ -1664,7 +1664,7 @@ namespace Ikat
             // 递归路径稳——同一 Node 多次入参不会（无环）。
             foreach (Node child in root.Children)
             {
-                if (child is TextNode tn) sb.Append(tn._text);
+                if (child is TextNode tn) sb.Append(tn.Text);
                 else if (child is Container c) AppendDescendantText(c, sb);
                 // 其它（Image / 控件 / 未知叶子）：跳过。
             }
@@ -1682,41 +1682,36 @@ namespace Ikat
     // 注：无 Panel 类型。作用域是运行时标记（IsScopeRoot），非类型；Instantiate 返回模板根真实类型。
 
     //
-    // TextNode.Text 的读侧是 C# 镜像（_text），不是 core 直读——lib.rs 无 get_text FFI
-    // （grep crates/ffi/src/lib.rs 只有 set_text）。setter 同步写穿到 core（set_text 标 dirty_text
-    // → 下帧 rematch）+ 缓存到 _text；getter 读 _text。Container.TextContent 读递归子树累加
-    // 各 TextNode._text。
-    //
-    // 真值在 core（text_contents HashMap<NodeId, String>），Instantiate 路径把
-    // pkg 内文本写入 core 但不通知 C# → 这类 TextNode 的 _text 保持 ""。读镜像返 ""
-    // 与 core 实际渲染不一致是已知 ghost state；待首个 Instantiate 文本读回场景落地时
-    // 加 get_text FFI（同 set_transform 推后的模式——等真实读回消费者出现再接通，
-    // 避免空 flush / 无用 FFI）。业务侧文本交互（Create<TextNode>() + 写 Text）当前路径正确。
+    // TextNode.Text 读侧直读 core 真值（get_node_text FFI 双调法，同 Node.Id 的
+    // get_node_id_attr 通道）。曾用 C# 镜像（_text）：真值在 core（text_contents
+    // HashMap<NodeId, String>），Instantiate 路径把 pkg 内文本写入 core 但不通知 C#
+    // → 镜像保持 ""，读镜像与 core 实际渲染不一致（已知 ghost state，tree 页读数
+    // 是首个真实读回消费者，按当年预案接通 FFI 后撤销镜像）。
     public unsafe class TextNode : Node
     {
-        // C# 镜像：默认空串（围栏 create_node("span") 建 TextNode 时 core text_contents 也填 "")。
-        // setter 写穿 core（set_text FFI）后更新本字段；getter 直接读，不走 FFI。
-        internal string _text = "";
-
         internal TextNode(UIContext ctx, ulong id) : base(ctx, id) { }
 
         /// <summary>
-        /// 文本内容（对应 DOM Text.data / CharacterData.data）。setter 写穿 core（set_text FFI：
-        /// UTF-8 编码 + ptr+len，标 dirty_text → 下帧重排文本 runs）+ 缓存镜像；getter 读镜像。
-        /// null 当空串处理（与 DOM textContent=null 一致）。Dispose 后访问抛 ObjectDisposedException。
+        /// 文本内容（对应 DOM Text.data / CharacterData.data）。getter 直读 core 真值
+        /// （get_node_text FFI 双调法）——pkg 烙入的 HTML 文本从不过 C# setter，纯 C# 镜像
+        /// 读会把合法初值读成空串（showcase tree 页读数实锤），读路径必须走 core。
+        /// setter 写穿 core（set_text FFI：UTF-8 编码 + ptr+len，标 dirty_text → 下帧重排
+        /// 文本 runs）。null 当空串处理（与 DOM textContent=null 一致）。Dispose 后访问抛
+        /// ObjectDisposedException。
         /// </summary>
         public string Text
         {
             get
             {
                 ThrowIfDisposed();
-                return _text;
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadText(h, _id,
+                    (hp, buf, cap, len) => Native.ikat_stage_get_node_text(hp, _id, buf, cap, len));
             }
             set
             {
                 ThrowIfDisposed();
                 string v = value ?? "";
-                _text = v;
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 byte[] b = Encoding.UTF8.GetBytes(v);
                 fixed (byte* p = b)
@@ -1732,22 +1727,29 @@ namespace Ikat
     public unsafe class Image : Node
     {
         internal Image(UIContext ctx, ulong id) : base(ctx, id) { }
-        string _src = "";   // setter 写穿 core 后镜像；无 get_src FFI，getter 读镜像
 
         /// <summary>
-        /// 图片资源 key（atlas sprite_key，如 "res/icons/item-potion.png"）。setter 写穿 core：
-        /// set_src 标 dirty_mesh → 下帧 render 重读 image_srcs 出 mesh image_path → Unity MirrorPool
-        /// 查 atlas manifest 重映射 UV——故运行时换图有效（前提：新 key 是已打包进 atlas 的 sprite）。
-        /// getter 读镜像（初始空串，set 后反映写入值）。null 当空串。Dispose 后访问抛 ObjectDisposedException。
+        /// 图片资源 key（atlas sprite_key，如 "res/icons/item-potion.png"）。getter 直读 core
+        /// 真值（get_src FFI 双调法）——pkg 烙入的 HTML src 从不过 C# setter，纯 C# 镜像读会
+        /// 把合法初值读成空串（同 TextNode.Text 的 ghost state 预案）。
+        /// setter 写穿 core：set_src 标 dirty_mesh → 下帧 render 重读 image_srcs 出 mesh
+        /// image_path → Unity MirrorPool 查 atlas manifest 重映射 UV——故运行时换图有效
+        /// （前提：新 key 是已打包进 atlas 的 sprite）。null 当空串。Dispose 后访问抛
+        /// ObjectDisposedException。
         /// </summary>
         public string Src
         {
-            get { ThrowIfDisposed(); return _src; }
+            get
+            {
+                ThrowIfDisposed();
+                StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
+                return TextControlFFI.ReadText(h, _id,
+                    (hp, buf, cap, len) => Native.ikat_stage_get_src(hp, _id, buf, cap, len));
+            }
             set
             {
                 ThrowIfDisposed();
                 string v = value ?? "";
-                _src = v;
                 StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
                 byte[] b = Encoding.UTF8.GetBytes(v);
                 fixed (byte* p = b)
