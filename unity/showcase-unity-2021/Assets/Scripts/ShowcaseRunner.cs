@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using Ikat;
 
@@ -31,6 +32,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-anim", "m2-animation"),
         ("nav-infra", "api-infra"),
         ("nav-rtcss", "runtime-css"),
+        ("nav-comp", "component-lab"),
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
@@ -76,6 +78,10 @@ public class ShowcaseRunner : MonoBehaviour
         // 这里注册像素画手型让 pressable 悬停有 affordance。热点 = 食指尖 (12,1)，
         // SetCursor 热点从纹理左上角量（Unity docs），与像素画屏幕坐标同系。
         _driver.SetCursorTexture(1u, BuildPixelHandCursorTexture(), new Vector2(12f, 1f));
+        // 组件类绑定（#20）：注册须在 instantiate 前（setup 期）——晚注册只影响未来构造。
+        // 显式工厂委托 = AOT 零反射（IL2CPP 安全）。
+        _driver.Context.RegisterComponent("lifecycle-widget",
+            (c, id) => new LifecycleWidget(c, id));
         // 让 driver Awake 完成（同帧 Awake 先于 Start，理论已就绪）+ 给 LateUpdate 几帧余量。
         Invoke(nameof(Boot), 0.1f);
     }
@@ -90,6 +96,7 @@ public class ShowcaseRunner : MonoBehaviour
         if (_shown == page) return;
         TeardownCharacterStage();   // 上一页若是 character：解绑 NativeHost + 销毁模型
         TeardownRuntimeCssPage();   // 上一页若是 runtime-css：Dispose 注入句柄
+        TeardownComponentLabPage(); // 上一页若是 component-lab：解生命周期读数刷新事件
         if (_current != null)
         {
             _current.Dispose();   // 递归销毁旧页 + 清旧页事件订阅（Rust remove_node + 后端镜像下帧清）
@@ -870,6 +877,10 @@ public class ShowcaseRunner : MonoBehaviour
         {
             WireRuntimeCssPage(page);
         }
+        if (pageName == "component-lab")
+        {
+            WireComponentLabPage(page);
+        }
         if (pageName == "lab")
         {
             // lab #14 运行时 ZIndex：按钮把 B 片在 4（置顶）/ 0（回落 DOM 序）间切换——
@@ -1093,4 +1104,81 @@ public class ShowcaseRunner : MonoBehaviour
         "................................",
         "................................",
     };
+
+    // ── component-lab 页（#20 RegisterComponent）───────────────────────────
+
+    /// 离开 component-lab：解 OnLifecycleChanged 静态事件（防跨页泄漏——
+    /// 静态事件的订阅目标是本页读数 span，页面 Dispose 后必须摘除）。
+    void TeardownComponentLabPage()
+    {
+        LifecycleWidget.OnLifecycleChanged -= RefreshComponentLabReadouts;
+    }
+
+    void RefreshComponentLabReadouts()
+    {
+        if (_current == null) return;
+        if (_current.TryGet<TextElement>("cl-conn", out var conn))
+            conn.TextContent = LifecycleWidget.Connected.ToString();
+        if (_current.TryGet<TextElement>("cl-disc", out var disc))
+            disc.TextContent = LifecycleWidget.Disconnected.ToString();
+    }
+
+    /// component-lab 页（#20）：RegisterComponent 类绑定 + 生命周期回调摆台。
+    /// 判据（肉眼强信号）：进页静态 ×2 connect（读数非零）；「再挂一个」= 组件出现 +
+    /// connect 读数 +1；「销毁最后」= 组件消失 + disconnect 读数 +1；离页整页 Dispose
+    /// 连带静态/动态实例全 disconnect（回页再 connect，计数累加）。
+    void WireComponentLabPage(Container page)
+    {
+        LifecycleWidget.OnLifecycleChanged += RefreshComponentLabReadouts;
+        RefreshComponentLabReadouts();   // 进页 connect 已发生（instantiate 早于 wire）
+
+        if (page.TryGet<Container>("cl-stage", out var stage))
+        {
+            if (page.TryGet<Button>("cl-add", out var addBtn))
+                addBtn.Clicked += () =>
+                {
+                    // widget-holder 的 custom tag 打包期已展开为 host——运行时克隆即
+                    // 得可路由的 CustomElement（直接 Instantiate 组件文件只得模板根 div）。
+                    Container holder = _driver.Instantiate("showcase", "widget-holder");
+                    if (holder == null) { Debug.Log("[Showcase] comp: widget-holder instantiate FAIL"); return; }
+                    holder.RemoveFromParent();   // driver.Instantiate 挂在 scene 根，摘下重挂进页内
+                    stage.AddChild(holder);
+                    Debug.Log($"[Showcase] comp: +1 (conn={LifecycleWidget.Connected} disc={LifecycleWidget.Disconnected})");
+                };
+            if (page.TryGet<Button>("cl-pop", out var popBtn))
+                popBtn.Clicked += () =>
+                {
+                    var widgets = stage.Query<CustomElement>();
+                    if (widgets.Count == 0) { Debug.Log("[Showcase] comp: nothing to pop"); return; }
+                    widgets[widgets.Count - 1].Dispose();
+                    Debug.Log($"[Showcase] comp: -1 (conn={LifecycleWidget.Connected} disc={LifecycleWidget.Disconnected})");
+                };
+        }
+    }
+}
+
+/// <summary>
+/// #20 RegisterComponent 摆台用的 typed 组件子类：OnConnected/OnDisconnected 静态计数 +
+/// 变更事件（页面读数刷新）。构造链 protected internal 基类构造；工厂委托在
+/// ShowcaseRunner.Start 注册（setup 期）。
+/// </summary>
+public class LifecycleWidget : CustomElement
+{
+    public static int Connected;
+    public static int Disconnected;
+    public static event Action OnLifecycleChanged;
+
+    public LifecycleWidget(UIContext ctx, ulong id) : base(ctx, id) { }
+
+    protected override void OnConnected()
+    {
+        Connected++;
+        OnLifecycleChanged?.Invoke();
+    }
+
+    protected override void OnDisconnected()
+    {
+        Disconnected++;
+        OnLifecycleChanged?.Invoke();
+    }
 }

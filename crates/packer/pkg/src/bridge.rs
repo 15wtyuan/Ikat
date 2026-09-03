@@ -303,7 +303,7 @@ pub(crate) fn attr(el: &IrElement, name: &str) -> Option<String> {
 /// attrs 通用属性仓（#8/#22）入库白名单：fence 校验过的 IDREF 型 aria 属性。
 /// 白名单定在打包侧单点（fence 认属性存在性/IDREF 有效性，这里定哪些进 pkg 持久化）。
 /// name 字典序排序保证打包字节确定性（同输入同字节，schema_lock 门的前提）。
-pub(crate) const ATTR_STORE_WHITELIST: &[&str] = &["aria-controls", "aria-labelledby"];
+pub(crate) const ATTR_STORE_WHITELIST: &[&str] = &["aria-controls", "aria-labelledby", "part"];
 
 /// 从 HTML 元素提取白名单属性进通用属性仓（name 排序）。
 pub(crate) fn extract_attrs(el: &IrElement) -> Vec<(String, String)> {
@@ -602,6 +602,32 @@ mod tests {
             parsed.diagnostics
         );
         bridge(&parsed).unwrap()
+    }
+
+    #[test]
+    fn part_attr_stored_and_part_rule_kept_dynamic() {
+        // #57：part 属性入通用属性仓（::part 匹配的运行时值源）；含 ::part 的规则
+        // 照常进动态规则表（全部 <style> 规则运行时 rematch，part 臂在 core 消费）。
+        let nodes = bridged(
+            r#"<style>.hot::part(title) { color:#f39c12; }</style>
+            <div><span part="title">T</span><span>NoMark</span></div>"#,
+        );
+        let title = nodes
+            .iter()
+            .find(|n| n.attrs.iter().any(|(k, _)| k == "part"))
+            .expect("part attr bridged into attrs store");
+        assert_eq!(
+            title
+                .attrs
+                .iter()
+                .find(|(k, _)| k == "part")
+                .map(|(_, v)| v.as_str()),
+            Some("title")
+        );
+        assert!(
+            nodes.iter().filter(|n| n.attrs.is_empty()).count() >= 1,
+            "无 part 标记的兄弟不带属性条目"
+        );
     }
 
     #[test]

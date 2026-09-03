@@ -1070,3 +1070,37 @@ fn node_id_gen_overflow_panics_instead_of_aliasing() {
         scene.nodes.remove(key);
     }
 }
+
+#[test]
+fn removed_nodes_queue_records_subtree_frees_in_order_and_drains() {
+    // 死亡通知队列（RegisterComponent OnDisconnected 数据源）：子树删除的每个
+    // 后代都经 free_node_slot 单一漏斗入队，顺序 = 释放顺序（递归先删子 → 叶先
+    // 于祖先）；drain 取走后清空，二次 drain 空。建树不入队。
+    use crate::scene::dynamic;
+    let mut scene = Scene::default();
+    let root = dynamic::create_root(&mut scene, "div", "").unwrap();
+    let child = dynamic::create_node(&mut scene, "div", "").unwrap();
+    dynamic::append_child(&mut scene, root, child).unwrap();
+    let leaf = dynamic::create_node(&mut scene, "span", "").unwrap();
+    dynamic::append_child(&mut scene, child, leaf).unwrap();
+
+    let mut tweens = crate::tween::TweenManager::default();
+    assert!(scene.removed_nodes.is_empty(), "建树不入队");
+    dynamic::remove_node(&mut scene, &mut tweens, child);
+    assert_eq!(
+        scene.take_removed_nodes(),
+        vec![leaf, child],
+        "子树删除全量入队，叶先于祖先（释放序）"
+    );
+    assert!(
+        scene.take_removed_nodes().is_empty(),
+        "drain 后清空，不重复通知"
+    );
+
+    dynamic::remove_node(&mut scene, &mut tweens, root);
+    assert_eq!(
+        scene.take_removed_nodes(),
+        vec![root],
+        "单节点删除入队，顺序即释放序"
+    );
+}

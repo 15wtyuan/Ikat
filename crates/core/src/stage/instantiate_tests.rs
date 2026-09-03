@@ -375,6 +375,7 @@ fn single_selector(raw: &str) -> ParsedSelector {
         pseudo_focus: false,
         pseudo_nth_child: None,
         attrs: Vec::new(),
+        part: None,
     };
     let mut rest = raw;
     // tag（开头非 . # 的字母段）
@@ -1764,6 +1765,7 @@ fn tablist_arrow_selection_flips_aria_selected_both_directions() {
                         op: crate::style::dynamic::AttrOp::Eq,
                         value: Some("true".to_string()),
                     }],
+                    part: None,
                 }],
                 specificity: Specificity(0, 1, 0),
             },

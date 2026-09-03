@@ -23,6 +23,7 @@ fn nth_selector(a: i32, b: i32) -> ParsedSelector {
             pseudo_focus: false,
             pseudo_nth_child: Some(NthChildExpr { a, b }),
             attrs: Vec::new(),
+            part: None,
         }],
         specificity: Specificity(0, 1, 0),
     }

@@ -91,9 +91,13 @@ namespace Ikat
         }
 
         /// <summary>
-        /// 从缓存移除（不调 FFI、不 Dispose 节点）+ 清 dirty 集合条目。
-        /// Node.Dispose 完成时 evict 自己；外部直接调用破坏身份稳定，仅 Dispose 路径用。
-        /// dirty 集合同步清，防悬挂引用在帧末 flush 已删节点（FFI 对 dead NodeId 静默返 -1，但清掉更干净）。
+        /// 从缓存移除（不调 FFI、不 Dispose 节点）+ 清 dirty 集合条目 + 标 _disposed
+        /// + 对组件派生 wrapper fire OnDisconnected（RegisterComponent 生命周期）。
+        /// 两条 evict 路径汇入本单一出口：Node.Dispose（用户主动，同步回调）与
+        /// UIContext.PumpRemovedNodes（core 死亡队列帧泵，Rust 侧删除）。dirty 集合
+        /// 同步清，防悬挂引用在帧末 flush 已删节点（FFI 对 dead NodeId 静默返 -1，
+        /// 但清掉更干净）。无缓存 wrapper 的 id 静默跳过（C# Dispose 先于泵到 = 天然
+        /// 去重；list 换绑 churn 的无 wrapper 克隆 id 同理）。
         /// </summary>
         internal void Remove(ulong id)
         {
@@ -101,6 +105,8 @@ namespace Ikat
             {
                 _dirtyStyles.Remove(n);
                 _dirtyTransforms.Remove(n);
+                n._disposed = true;
+                if (n is CustomElement ce) ce.FireDisconnected();
             }
             _nodes.Remove(id);
         }

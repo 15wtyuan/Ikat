@@ -99,6 +99,8 @@ pub struct StageHandle {
     dump_blob: CString,     // dump_scene 缓存（Rust 拥有）
     tree_blob: CString,     // dump_tree 缓存（Rust 拥有）
     warnings_blob: CString, // take_warnings 缓存（Rust 拥有）
+    /// drain_removed_nodes 最近一次快照（Rust 拥有；指针到下次 drain 失效）。
+    removed_blob: Vec<u64>,
     /// StyleSheet.Add 最近一次解析失败的消息缓存（#11；Rust 拥有，last_error 返回其指针）。
     style_err_blob: CString,
     /// 同上：失败定位（1-based 行列，diag.location 拷贝；无失败 = 0/0）。

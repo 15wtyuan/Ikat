@@ -51,6 +51,12 @@ pub struct Compound {
     /// 属性选择器（`[attr]` / `[attr="val"]`）。出现属性选择器即把规则划入动态规则表
     /// （运行时按节点 attrs 匹配，静态 cascade 无法预判），由 compound_matches_node 匹配。
     pub attrs: Vec<AttrSelector>,
+    /// `::part(name)` 载体（#57）：本 compound 的其余字段（tag/classes/id/attrs/伪类）
+    /// 匹配**组件 host**，part 匹配 host 展开子树内带 `part="name"` 属性的**目标节点**
+    /// （一层——嵌套组件内部不递归，其作用域根是嵌套 host）。必须是最后一个 compound
+    /// 且位于其结尾（fence 解析期保证）。None = 普通选择器。runtime 注入（#11 全局规则
+    /// 字面穿墙）与本臂正交：::part 是打包期页面规则穿组件内容墙的唯一许可通道。
+    pub part: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -582,6 +588,37 @@ pub fn match_element_with_state(
         return false;
     }
     let last = &comps[comps.len() - 1];
+
+    // ::part(name) 臂（#57）：last = `prefix::part(name)`——其余字段匹配 **host**，
+    // part 匹配目标节点。语义：目标带 part="name"（RoleInfo.attrs，attrs β 仓）∧
+    // 目标的最近作用域根是 CustomElement host ∧ host 匹配 last 其余字段。嵌套组件
+    // 内部节点的最近作用域根是嵌套 host——若嵌套 host 不匹配 prefix 则天然排除
+    // （web ::part 不递归进嵌套 shadow 的等价物）。更左 compounds 沿 host 的祖先
+    // 链常规匹配（scope_bound 照规则本体——prefix 描述规则所属作用域内的页面侧）。
+    if let Some(part_name) = &last.part {
+        let has_part = scene
+            .roles
+            .get(node_id)
+            .and_then(|i| i.attr("part"))
+            .is_some_and(|v| v == part_name.as_str());
+        if !has_part {
+            return false;
+        }
+        let Some(host) = nearest_scope_root_above(scene, node_id) else {
+            return false; // 无作用域根 = 页面顶层，part 属性在 ::part 语义外
+        };
+        if scene.get_live(host, "dynamic/part:host").kind != NodeKind::CustomElement {
+            return false; // List slot 根等非组件作用域不参与 ::part
+        }
+        if !compound_matches_with_state(last, host, scene) {
+            return false;
+        }
+        if comps.len() == 1 {
+            return true; // 裸 ::part(name)（无 host 定位条件）：组件内同名 part 即命中
+        }
+        return match_chain_with_state(comps, comps.len() - 1, host, scene, scope_bound);
+    }
+
     if !compound_matches_with_state(last, node_id, scene) {
         return false;
     }
@@ -589,6 +626,23 @@ pub fn match_element_with_state(
         return true;
     }
     match_chain_with_state(comps, comps.len() - 1, node_id, scene, scope_bound)
+}
+
+/// 目标节点严格上方最近的 SCOPE_ROOT（不含自身——host 不可能是自己 part 的目标）。
+/// ::part 臂用：组件展开域的 host 即此节点（页面级节点走到底返 None）。
+fn nearest_scope_root_above(scene: &Scene, node: NodeId) -> Option<NodeId> {
+    let mut cur = scene.get(node)?.parent;
+    while let Some(nid) = cur {
+        if let Some(n) = scene.get(nid) {
+            if n.interaction.flags.contains(NodeFlags::SCOPE_ROOT) {
+                return Some(nid);
+            }
+            cur = n.parent;
+        } else {
+            break;
+        }
+    }
+    None
 }
 
 /// 递归匹配 comps[0..end_idx] 在 start_node 的祖先链上（同 selector.rs
@@ -761,7 +815,16 @@ pub fn rematch_pseudo_classes(scene: &mut Scene, root_size: (f32, f32), safe_ins
         let mut matched: Vec<(u32, u32, u32, DynamicRule)> = Vec::new();
         for r in &rules_with_spec {
             let scope_root = r.4;
-            if scope_root != NodeId::INVALID && scope_root != node_scope {
+            // ::part 规则（#57）豁免作用域等值墙：目标节点在组件展开域内（node_scope =
+            // host ≠ 规则的页面作用域根），穿墙许可由选择器语法显式声明——这正是
+            // ::part 的存在意义（打包期页面规则穿组件内容墙的唯一通道）。匹配语义
+            // （一层、host 定位、嵌套不递归）在 match_element_with_state 的 part 臂。
+            let pierces_wall =
+                r.3.selector
+                    .compound
+                    .last()
+                    .is_some_and(|c| c.part.is_some());
+            if scope_root != NodeId::INVALID && scope_root != node_scope && !pierces_wall {
                 continue;
             }
             if match_element_with_state(&r.3.selector, node_id, scene, scope_root) {
@@ -1713,6 +1776,187 @@ mod tests {
     use crate::style::resolved::TransitionSpec;
     use crate::tween::{Ease, TweenProp};
 
+    /// ::part(name) 匹配语义（#57）：`.{host}::part({part})` 只命中「host 展开子树内
+    /// 带 part 属性」的目标节点——嵌套组件内部（其作用域根是嵌套 host，prefix 不匹配
+    /// 则排除）与页面级裸 part 节点（作用域根非 CustomElement）都不命中；host 自身
+    /// 无 part 属性也不命中。
+    #[test]
+    fn part_selector_matches_target_inside_matching_host_only() {
+        let mk = |kind: NodeKind| {
+            let mut n = Node::default();
+            n.kind = kind;
+            n
+        };
+        // 结构：page_root(SCOPE_ROOT) ├─ host(.card, CustomElement, SCOPE_ROOT)
+        //                              │    ├─ title(part="title")
+        //                              │    └─ nested(CustomElement, SCOPE_ROOT) ─ inner(part="title")
+        //                              └─ page_bare(part="title")
+        let mut page_root = mk(NodeKind::Container);
+        page_root.interaction.flags.insert(NodeFlags::SCOPE_ROOT);
+        let mut host = mk(NodeKind::CustomElement);
+        host.classes = vec!["card".to_string()];
+        host.custom_tag = Some("x-card".to_string());
+        host.interaction.flags.insert(NodeFlags::SCOPE_ROOT);
+        let mut nested = mk(NodeKind::CustomElement);
+        nested.custom_tag = Some("x-nest".to_string());
+        nested.interaction.flags.insert(NodeFlags::SCOPE_ROOT);
+        let title = mk(NodeKind::Container);
+        let inner = mk(NodeKind::Container);
+        let page_bare = mk(NodeKind::Container);
+        let mut s = Scene::from_nodes(
+            vec![page_root, host, title, nested, inner, page_bare],
+            vec![(0, 1), (1, 2), (1, 3), (3, 4), (0, 5)],
+        );
+        let ids: Vec<NodeId> = s.nodes.values().map(|n| n.id).collect();
+        let page_root = ids[0];
+        let host_id = ids[1];
+        let title_id = ids[2];
+        let inner_id = ids[4];
+        let page_bare_id = ids[5];
+        for (tid, part) in [
+            (title_id, "title"),
+            (inner_id, "title"),
+            (page_bare_id, "title"),
+        ] {
+            s.roles.insert(
+                tid,
+                RoleInfo {
+                    role: None,
+                    slots: Default::default(),
+                    attrs: vec![("part".to_string(), part.to_string())],
+                },
+            );
+        }
+
+        let sel = ParsedSelector {
+            raw: ".card::part(title)".to_string(),
+            compound: vec![Compound {
+                tag: None,
+                classes: vec!["card".to_string()],
+                id: None,
+                combinator: Combinator::Descendant,
+                pseudo_hover: false,
+                pseudo_active: false,
+                pseudo_disabled: false,
+                pseudo_focus: false,
+                pseudo_nth_child: None,
+                attrs: Vec::new(),
+                part: Some("title".to_string()),
+            }],
+            specificity: Specificity(0, 2, 1),
+        };
+        assert!(
+            match_element_with_state(&sel, title_id, &s, page_root),
+            "host 展开子树内带 part 属性的目标命中"
+        );
+        assert!(
+            !match_element_with_state(&sel, inner_id, &s, page_root),
+            "嵌套组件内部不递归（其作用域根 nested host 不匹配 .card）"
+        );
+        assert!(
+            !match_element_with_state(&sel, page_bare_id, &s, page_root),
+            "页面级裸 part 节点不命中（作用域根非 CustomElement）"
+        );
+        assert!(
+            !match_element_with_state(&sel, host_id, &s, page_root),
+            "host 自身（无 part 属性）不命中"
+        );
+
+        // 换 part 名：不同名不命中
+        let sel2 = ParsedSelector {
+            raw: ".card::part(other)".to_string(),
+            compound: vec![Compound {
+                tag: None,
+                classes: vec!["card".to_string()],
+                id: None,
+                combinator: Combinator::Descendant,
+                pseudo_hover: false,
+                pseudo_active: false,
+                pseudo_disabled: false,
+                pseudo_focus: false,
+                pseudo_nth_child: None,
+                attrs: Vec::new(),
+                part: Some("other".to_string()),
+            }],
+            specificity: Specificity(0, 2, 1),
+        };
+        assert!(!match_element_with_state(&sel2, title_id, &s, page_root));
+    }
+
+    /// ::part 穿墙（#57）：scoped 到页面作用域根的规则经 part 豁免命中组件内部目标
+    ///（rematch 全链——作用域等值过滤放行 + part 臂匹配 + 声明落到目标节点 style）。
+    /// 同规则不带 part 的对照（普通类选择器）仍被墙挡——豁免只给显式 ::part 语法。
+    #[test]
+    fn part_rule_pierces_scope_wall_via_rematch() {
+        let mk = |kind: NodeKind| {
+            let mut n = Node::default();
+            n.kind = kind;
+            n
+        };
+        let mut page_root = mk(NodeKind::Container);
+        page_root.interaction.flags.insert(NodeFlags::SCOPE_ROOT);
+        let mut host = mk(NodeKind::CustomElement);
+        host.classes = vec!["card".to_string()];
+        host.custom_tag = Some("x-card".to_string());
+        host.interaction.flags.insert(NodeFlags::SCOPE_ROOT);
+        let title = mk(NodeKind::Container);
+        let mut s = Scene::from_nodes(vec![page_root, host, title], vec![(0, 1), (1, 2)]);
+        let ids: Vec<NodeId> = s.nodes.values().map(|n| n.id).collect();
+        let page_root = ids[0];
+        let title_id = ids[2];
+        s.roles.insert(
+            title_id,
+            RoleInfo {
+                role: None,
+                slots: Default::default(),
+                attrs: vec![("part".to_string(), "title".to_string())],
+            },
+        );
+
+        // part 规则 scoped 到页面根：穿墙命中组件内 title
+        let part_sel = ParsedSelector {
+            raw: ".card::part(title)".to_string(),
+            compound: vec![Compound {
+                tag: None,
+                classes: vec!["card".to_string()],
+                id: None,
+                combinator: Combinator::Descendant,
+                pseudo_hover: false,
+                pseudo_active: false,
+                pseudo_disabled: false,
+                pseudo_focus: false,
+                pseudo_nth_child: None,
+                attrs: Vec::new(),
+                part: Some("title".to_string()),
+            }],
+            specificity: Specificity(0, 2, 1),
+        };
+        push_scoped(
+            &mut s,
+            page_root,
+            DynamicRule {
+                selector: part_sel,
+                declarations: vec![Declaration {
+                    prop: "background-color".to_string(),
+                    value: "#c0392b".to_string(),
+                }],
+            },
+        );
+        // 对照：普通类选择器同 scope——墙仍挡（title 无 .card 类且 node_scope=host≠page_root）
+        push_scoped(&mut s, page_root, rule(".card", "color", "#0000ff"));
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert_eq!(
+            s.get(title_id).unwrap().style.background_color,
+            Some([0.7529412, 0.22352941, 0.16862746, 1.0]),
+            "::part 规则穿墙命中组件内目标（#c0392b）"
+        );
+        assert_ne!(
+            s.get(title_id).unwrap().style.color,
+            [0.0, 0.0, 1.0, 1.0],
+            "普通 scoped 规则仍被墙挡（豁免只给显式 ::part 语法）"
+        );
+    }
+
     /// 把规则作为全局规则（scope_root=INVALID）推进 scene——跨作用域命中。
     /// 现有单场景测试无实例化，规则走全局路径保持原有行为（node_scope=INVALID，全局规则匹配）。
     fn push_global(s: &mut Scene, r: DynamicRule) {
@@ -1775,6 +2019,7 @@ mod tests {
                 pseudo_focus: false,
                 pseudo_nth_child: None,
                 attrs: Vec::new(),
+                part: None,
             };
             let mut rest = part;
             while !rest.is_empty() {

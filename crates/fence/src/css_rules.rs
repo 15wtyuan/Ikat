@@ -112,6 +112,12 @@ pub fn parse_selector_with_reason(raw: &str) -> Result<ParsedSelector, String> {
     if compounds.is_empty() {
         return Err("empty selector".to_string());
     }
+    if compounds[..compounds.len() - 1]
+        .iter()
+        .any(|c| c.part.is_some())
+    {
+        return Err("::part(name) must be the final compound".to_string());
+    }
     Ok(ParsedSelector {
         raw: raw.to_string(),
         compound: compounds,
@@ -149,6 +155,7 @@ fn parse_compound_detailed(part: &str) -> Result<(Compound, u32, u32, u32), Stri
         pseudo_focus: false,
         pseudo_nth_child: None,
         attrs: Vec::new(),
+        part: None,
     };
     let mut a = 0u32;
     let mut b = 0u32;
@@ -172,6 +179,36 @@ fn parse_compound_detailed(part: &str) -> Result<(Compound, u32, u32, u32), Stri
             c.id = Some(name.to_string());
             a += 1;
             rest = next;
+        } else if let Some(r) = rest.strip_prefix("::") {
+            // ::part(name)（#57）：唯一进围栏的伪元素。compound 其余字段匹配组件 host、
+            // part 匹配展开子树内目标（core match_element_with_state 的 part 臂）。
+            // 网页同源约束：伪元素必须位于 compound 结尾，后面不可再缀简单选择器。
+            let (name, next) = take_ident(r);
+            if name != "part" {
+                return Err(format!(
+                    "pseudo-element \"::{name}\" is outside the fence (only ::part(name))"
+                ));
+            }
+            let after = next
+                .strip_prefix('(')
+                .ok_or("::part requires an argument: ::part(name)")?;
+            let close = after
+                .find(')')
+                .ok_or("::part requires an argument: ::part(name)")?;
+            let (pname, pnext) = take_ident(&after[..close]);
+            if pname.is_empty() || !pnext.trim_start().is_empty() {
+                return Err("::part takes exactly one non-empty name: ::part(name)".to_string());
+            }
+            c.part = Some(pname.to_string());
+            b += 1; // part 名按属性选择器级计（web specificity）
+            cc += 1; // 伪元素本体按元素级计（web specificity）
+            rest = &after[close + 1..];
+            if !rest.is_empty() {
+                return Err(
+                    "::part(name) must end the compound — nothing may follow a pseudo-element"
+                        .to_string(),
+                );
+            }
         } else if let Some(r) = rest.strip_prefix(':') {
             let (name, next) = take_ident(r);
             match name {
@@ -990,13 +1027,58 @@ mod tests {
         parse_selector(raw).unwrap_or_else(|| panic!("parse_selector({raw:?}) 返回 None"))
     }
 
+    /// ::part(name) 解析（#57）：compound 其余字段归 host 匹配、part 归目标；
+    /// specificity 按 web（part 名属性级 + 伪元素元素级）。
+    #[test]
+    fn part_selector_parses_with_host_fields_and_specificity() {
+        let s = parse_selector(".card::part(title)").unwrap();
+        assert_eq!(s.compound.len(), 1);
+        assert_eq!(s.compound[0].classes, vec!["card".to_string()]);
+        assert_eq!(s.compound[0].part.as_deref(), Some("title"));
+        assert_eq!(s.specificity, Specificity(0, 2, 1));
+
+        // 多 compound 前缀：part 只允许最后一个 compound
+        let s2 = parse_selector(".list .card::part(t)").unwrap();
+        assert_eq!(s2.compound.len(), 2);
+        assert_eq!(s2.compound[1].part.as_deref(), Some("t"));
+        assert!(s2.compound[0].part.is_none());
+
+        // 裸 ::part(name)（无 host 定位条件）合法
+        let s3 = parse_selector("::part(title)").unwrap();
+        assert_eq!(s3.compound[0].part.as_deref(), Some("title"));
+
+        // host 侧伪类正常共存
+        let s4 = parse_selector(".card:hover::part(title)").unwrap();
+        assert!(s4.compound[0].pseudo_hover);
+        assert_eq!(s4.compound[0].part.as_deref(), Some("title"));
+    }
+
+    /// ::part 越界形态全拒：伪元素后缀、跨 compound、空/多参数、其他伪元素、无括号。
+    #[test]
+    fn part_selector_rejects_malformed_forms() {
+        assert!(
+            parse_selector(".a::part(x).b").is_none(),
+            "伪元素后不可再缀"
+        );
+        assert!(
+            parse_selector(".a::part(x) .b").is_none(),
+            "part 必须是最后一个 compound"
+        );
+        assert!(parse_selector("::part()").is_none(), "空 name");
+        assert!(parse_selector("::part(a b)").is_none(), "多参数");
+        assert!(parse_selector(".a::part").is_none(), "无括号");
+        assert!(parse_selector("::before").is_none(), "其他伪元素仍越界");
+        assert!(parse_selector(".a::after").is_none());
+        assert!(parse_selector(".a::partX(x)").is_none(), "非 part 伪元素");
+    }
+
     #[test]
     fn selector_errors_name_the_culprit() {
         // 报错点名元凶：整串笼统「unsupported selector」会让 AI 读者把
         // `:not()` 的错归给同串的 `:hover`。
         let cases: &[(&str, &str)] = &[
             (".btn:hover:not(.x)", "pseudo-class \":not\""),
-            (".btn::before", "pseudo-elements"),
+            (".btn::before", "only ::part(name)"),
             ("*:hover", "universal selector \"*\""),
             (".a > .b", "combinator \">\""),
             (".a + .b", "combinator \"+\""),

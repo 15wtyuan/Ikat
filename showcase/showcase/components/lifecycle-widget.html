@@ -1,0 +1,12 @@
+<style>
+  /* 生命周期演示组件（#20 RegisterComponent）：页面静态摆两个 + 运行时动态加挂/销毁，
+     typed 子类 OnConnected/OnDisconnected 计数读数为事件路由证据。 */
+  .lw-root {display:flex; flex-direction:column; gap:6px; width:200px; background-color:#1a2f45;
+            border-radius:10px; padding:14px; }
+  .lw-title { color:#e0e6ec; font-size:15px; font-weight:700; align-self:center; }
+  .lw-note { color:#9aa0b4; font-size:12px; align-self:center; }
+</style>
+<div class="lw-root" style="display:flex;flex-direction:column;gap:6px;width:200px;background-color:#1a2f45;border-radius:10px;padding:14px">
+  <span class="lw-title" part="title" style="color:#e0e6ec;font-size:15px;font-weight:700;align-self:center">生命周期组件</span>
+  <span class="lw-note" part="note" style="color:#9aa0b4;font-size:12px;align-self:center">typed 子类接线</span>
+</div>

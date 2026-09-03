@@ -236,6 +236,18 @@ buy.Get<TextElement>("price").TextContent = "200";   // 只动 span，兄弟 img
 
 频繁开关的窗口用 `Display = None`，不用 Dispose。
 
+### 4.4 组件类绑定（RegisterComponent）
+
+`UIContext.RegisterComponent("my-widget", factory)` 把 custom tag 绑定到 C# 派生类（fgui `extensionCreator` 等价）：此后该 tag 的 wrapper 构造走用户工厂（派生 `CustomElement`，链 `protected internal` 基类构造），派生 ctor 完整跑完后回调 `OnConnected`。工厂是**显式委托**（`(c, id) => new MyWidget(c, id)`，AOT/IL2CPP 零反射）。组件行为逻辑进 typed 子类（持有内部节点引用、订阅事件），替代 wrapper div + `TryGet` 绕法。
+
+- **构造路径全覆盖**：instantiate（eager——`Instantiate` 后子树内注册组件立即构造，不等首次访问）、懒物化（Parent/Children/Get 触发）、事件预物化（事件路由触达即构造）。
+- **OnDisconnected 两条路径**：用户 `Dispose`（同步——回调时 core 节点已删）；Rust 侧删除（list 槽位换绑淘汰克隆 / 外部 `remove_node` / 内部剪枝）经 `UIContext.PumpRemovedNodes()` 帧泵（宿主 `IkatHost.Step` 每帧自动调；headless 手动调）。回调后 wrapper 标 `IsDisposed`，后续公共读抛 `ObjectDisposedException`。
+- **重挂语义**：再 instantiate 同 tag = 新实例 + 新 `OnConnected`（身份缓存不复活旧对象，同 Node 身份契约）。
+- **注册时序**：setup 期（instantiate 前）。晚注册只影响未来构造、已构造 wrapper 不追改（不是错误，身份缓存不可破坏）。
+- **重复注册同 tag / 空 tag / null 工厂** → `UIContractException`（fail loud：静默覆盖藏接线错）。
+- **子树销毁顺序**：后代先于 host 断开（释放顺序，叶先于祖先）。
+- **ListView 边界**：item 模板根若是注册组件，slot 绑定物化时构造 + `OnConnected`；嵌套在模板内部的组件在首次被观测（事件/访问）时构造——渲染 blob 不驱动 wrapper 构造（渲染层与投影层分离）。
+
 ---
 
 ## 5. 事件与注册
@@ -533,6 +545,8 @@ public sealed class UIContext {
     public void CallAfterLayout(Action callback);  // tick 后泵（IkatHost.Step 在 stage tick 之后调）
     public bool IsPointerOnUI { get; }
     public Node Pick(IkatVector2 globalPoint);
+    public void RegisterComponent(string tag, Func<UIContext, ulong, CustomElement> factory);  // §4.4
+    public void PumpRemovedNodes();   // 宿主每帧调（IkatHost.Step 内建）：core 死亡通知 → evict + OnDisconnected
 }
 
 public sealed class UIPackage {

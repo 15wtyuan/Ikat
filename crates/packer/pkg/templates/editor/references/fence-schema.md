@@ -45,12 +45,19 @@ structure).
 ## Global attributes
 
 Every element accepts: `id`, `class`, `style`, `slot`, `hidden`,
-`tabindex`, `type`, `role`, `draggable`, plus any `aria-*`, `data-*`,
-and `--*`-prefixed attributes. `id` must be unique within a template
+`tabindex`, `type`, `role`, `draggable`, `part`, plus any `aria-*`,
+`data-*`, and `--*`-prefixed attributes. `id` must be unique within a template
 scope; `aria-controls` / `aria-labelledby` must point at existing ids.
 A `--*` attribute is passthrough data (matchable by `[attr]` selectors)
 — the var() sources are `<style>` rules, inline `style`, and runtime
 `Style.SetVar` (see css-reference.md "Custom properties and var()").
+
+`part="name"` marks a node inside a component template as a styling
+hook for the page's `::part()` selector (see css-reference.md
+"Selectors"). It only carries `::part()` semantics inside an expanded
+component; a page-level `part` attribute is writable but matches
+nothing (no shadow boundary to pierce), and `[part="x"]` is **not**
+equivalent to `::part(x)`.
 
 `draggable="true"` opts the element into the drag event chain
 (`DragStart` / `DragMove` / `DragEnd` fire after pointer-down passes the

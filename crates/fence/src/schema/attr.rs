@@ -25,7 +25,15 @@ pub struct AttrSpec {
 pub fn is_global_attr(name: &str) -> bool {
     matches!(
         name,
-        "id" | "class" | "style" | "slot" | "hidden" | "tabindex" | "role" | "type" | "draggable"
+        "id" | "class"
+            | "style"
+            | "slot"
+            | "hidden"
+            | "tabindex"
+            | "role"
+            | "type"
+            | "draggable"
+            | "part"
     ) || name.starts_with("aria-")
         || name.starts_with("data-")
         || name.starts_with("--")

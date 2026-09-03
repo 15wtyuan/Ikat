@@ -774,8 +774,19 @@ fn serve_workspace_file(ui: &Path, rel: &str, fonts_css: &str, req: &Request) ->
             .unwrap_or_default()
             .to_string();
         let html = String::from_utf8_lossy(&body).into_owned();
+        let html = rewrite_part_pseudo_in_html(&html);
         body = inject_preview_scripts(&html, &dir, &stem, fonts_css).into_bytes();
         return Response::new(200, "OK", mime, body);
+    }
+    // CSS（<link rel=stylesheet> 静态文件）：::part 伪元素平铺重写（同 HTML <style>
+    // 路径——浏览器平铺 DOM 无 shadow，::part 原生匹配不到，预览会缺样式）。
+    if mime.starts_with("text/css") {
+        if let Ok(b) = std::fs::read(&canon) {
+            let css = String::from_utf8_lossy(&b).into_owned();
+            if css.contains("::part(") {
+                return Response::new(200, "OK", mime, rewrite_part_pseudo(&css).into_bytes());
+            }
+        }
     }
     // revalidate：浏览器回传的 If-Modified-Since 与我们发出的 Last-Modified 同源
     // （浏览器原样回显），字符串等值即命中——省去 HTTP-date 解析。
@@ -1069,6 +1080,56 @@ fn rewrite_env_in_tag(tag: &str) -> String {
     }
     out.push_str(&tag[consumed..]);
     out
+}
+
+/// ::part 平铺重写（#57 preview 保真）：浏览器预览是平铺 DOM（无 shadow 语义），
+/// `::part(name)` 原生匹配不到任何元素 → 运行时有样式、预览缺样式的分叉。重写为
+/// 平铺等价物：`X::part(name)` → `X [part="name"]`（compound 前缀留作 host 元素，
+/// 目标成为其后代——与运行时「host 展开子树内带 part 属性」同构；嵌套组件过宽
+/// 匹配的分歧预览本就宽松（组件 CSS 全局命中），可接受）。逐字符扫描捕获 name，
+/// 零依赖（本 crate 无 regex）。CSS 外出现 `::part(` 的字符序列不是合法选择器语境，
+/// 整串重写无副作用。
+pub fn rewrite_part_pseudo(css: &str) -> String {
+    if !css.contains("::part(") {
+        return css.to_string();
+    }
+    let bytes = css.as_bytes();
+    let mut out = String::with_capacity(css.len() + 16);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(b"::part(") {
+            let start = i + b"::part(".len();
+            let close = css[start..].find(')').map(|o| start + o);
+            match close {
+                Some(end) if end > start => {
+                    let name = &css[start..end];
+                    // name 必须是合法 ident（字母/数字/-/_）——防把 prose 里的 ::part( 误重写
+                    let ok = !name.is_empty()
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+                    if ok {
+                        out.push_str(&format!(" [part=\"{name}\"]"));
+                        i = end + 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            out.push_str("::part(");
+            i += b"::part(".len();
+            continue;
+        }
+        let ch = css[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// HTML 全串过 ::part 重写（<style> 块在 HTML 内；::part 只在 CSS 语境合法）。
+fn rewrite_part_pseudo_in_html(html: &str) -> String {
+    rewrite_part_pseudo(html)
 }
 
 pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str, fonts_css: &str) -> String {

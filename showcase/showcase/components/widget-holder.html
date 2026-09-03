@@ -1,0 +1,7 @@
+<style>
+  .wh-root {display:flex; }
+</style>
+<!-- 动态加挂的持有者模板（#20）：custom tag 在打包期展开为 host CustomElement，
+     运行时 Instantiate 本模板 = 克隆出可被 RegisterComponent 路由的组件实例
+     （直接 Instantiate lifecycle-widget 只得模板根 div，无 host）。 -->
+<div class="wh-root" style="display:flex"><lifecycle-widget></lifecycle-widget></div>

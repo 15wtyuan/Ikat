@@ -39,6 +39,7 @@ fn class_selector(cls: &str) -> ParsedSelector {
             pseudo_focus: false,
             pseudo_nth_child: None,
             attrs: Vec::new(),
+            part: None,
         }],
         specificity: Specificity(0, 1, 0),
     }

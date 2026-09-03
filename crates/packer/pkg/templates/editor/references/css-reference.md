@@ -137,10 +137,24 @@ combinator). Each compound is `tag? (.class | #id | [attr] | :pseudo)*`:
   `:checked`, `:nth-child(An+B | odd | even | N)`. They gate on live
   interaction state and re-evaluate every frame — `:hover` driven
   styling needs no runtime class toggling.
+- `::part(name)` — the only pseudo-element in the fence: a page rule
+  pierces the component content wall and targets nodes inside the
+  component that carry `part="name"`. In `prefix::part(name)`, the
+  compound prefix (class/tag/pseudo) matches the component **host**
+  (hosts live in page scope and can carry class/id); the part matches
+  nodes in that host's expanded subtree. It must end the last compound
+  (`X::part(a) Y` is a build error), does not recurse into nested
+  components (their internals belong to the nested host), and
+  specificity follows the web (part name as attribute + pseudo-element:
+  `.card::part(title)` = (0,2,1)). Also usable in runtime
+  `StyleSheet.Add` (runtime rules already pierce literally; `::part`
+  there is just a matching arm). The preview server rewrites `::part(n)`
+  to the flat `[part="n"]` descendant equivalent so browser preview
+  shows the styling too.
 - Build errors (the diagnostic names the offending construct):
   combinators `>` / `+` / `~` (descendant only), the universal selector
   `*`, unknown pseudo-classes (`:not()`, `:nth-of-type`, ...), and
-  pseudo-elements (`::before`, `::after`, ...).
+  pseudo-elements other than `::part` (`::before`, `::after`, ...).
 - Attribute selectors: `[attr]` and `[attr="value"]` only; higher
   operators (`^=`, `~=`, `$=`, `*=`, `|=`) are build errors.
 - Do not use `:nth-child` on virtualized lists (`role=list` bound to

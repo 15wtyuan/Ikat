@@ -538,6 +538,8 @@ public sealed class UIContext {
     public void CallAfterLayout(Action callback);   // fires after this frame's solve
     public bool IsPointerOnUI { get; }
     public Node Pick(IkatVector2 globalPoint);
+    public void RegisterComponent(string tag, Func<UIContext, ulong, CustomElement> factory);
+    public void PumpRemovedNodes();   // host pumps each frame (built into IkatHost.Step)
 }
 public sealed class UIPackage {
     public string Name { get; }
@@ -559,13 +561,29 @@ public readonly struct TextMetrics {
   `Image` only. Controls and scope roots come exclusively from
   template instantiation (`Instantiate`) — their semantics need the
   HTML signature. Other `T` throws `UIContractException`.
-- **Custom elements have no runtime node type.** A `<my-widget>` in
-  the workspace HTML is a CustomElement at *pack* time; from C# the
-  expanded instance is an ordinary `Container` obtained via
-  `Instantiate("my-widget")` (or `GetTemplate` + deferred
-  `Instantiate()`) — the registered stem, no `components/` prefix and
-  no extension (`ikat show <pkg>` lists them). Query its internals
-  through the instance scope.
+- **Custom elements: derive + register to own their behavior.**
+  `CustomElement` is the typed projection of a hyphenated tag host
+  (pack-time expansion; read `Tag` for the literal). Instantiate a
+  component *file* by stem (`Instantiate("my-widget")` — no
+  `components/` prefix, no extension; `ikat show <pkg>` lists them)
+  and you get its template root, an ordinary `Container`. For
+  behavior, register a subclass:
+  `ctx.RegisterComponent("my-widget", (c, id) => new MyWidget(c, id))`
+  — every host of that tag (page-static or dynamically instantiated)
+  then constructs `MyWidget` (derive `CustomElement`, chain the
+  `protected internal` ctor; the factory delegate keeps construction
+  reflection-free, IL2CPP/AOT-safe). `OnConnected` fires after the
+  derived ctor completes, on every construction path (eager at
+  `Instantiate`, lazy materialization, event pre-materialization).
+  `OnDisconnected` fires on user `Dispose` (synchronous) and on
+  Rust-side deaths via the per-frame `PumpRemovedNodes` pump (list
+  slot rebinding, external `remove_node`); after it fires the wrapper
+  reports `IsDisposed` and reads throw `ObjectDisposedException`.
+  Re-instantiating the tag = a fresh instance + fresh `OnConnected`.
+  Register during setup (before instantiate): late registration only
+  affects future constructions and never retrofits existing wrappers.
+  Duplicate tag / empty tag / null factory throws
+  `UIContractException` (fail loud).
 - **`MeasureText` is node-free pre-layout measurement** (tips line
   breaking, floating-text width, auto-width buttons — no hand-counted
   "N chars per line" constants). It runs the same wrapping code the

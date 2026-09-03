@@ -115,7 +115,16 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 - **Unity 后端（IkatStageDriver）不内置皮肤**：订阅意图变化驱动 `UnityEngine.Cursor.SetCursor`，intent 0/1 缺省均为系统箭头。`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供消费侧按意图注册贴图——null/已销毁 = 清除；注册/清除当前激活意图时立即重放；贴图所有权归消费者（driver 不销毁，激活时已销毁则静默回落默认）。intent 2 例外：cursor:none 是「藏指针」语义而非皮肤，内置 32×32 全透明载体即默认（4×4 非标准硬件光标尺寸，Windows 下 SetCursor 拒收）。Dispose 统一 `SetCursor(null)` 还原系统光标 + 销毁自建载体——SetCursor 贴图是进程级状态，不还原会把替换带出 UI 会话。
 - **两个独立的坐标系约定（易混，混淆实录）**：`Texture2D.SetPixels32` 数组下标 0 = **左下角**像素（行序 bottom-up，按屏幕坐标 y=0=顶 生成的像素画写入要按 `(S-1-y)` 翻行）；`Cursor.SetCursor` 热点从纹理**左上角**量（Unity docs "offset from the top left"，直接用屏幕坐标不换算）。给两者套同一约定是这里的踩坑根因。
 
-### 3.4 待办（按优先级）
+### 3.4 组件类绑定投影（#20）
+
+API 面见 public-api.md §4.4。投影机制：
+
+- **注册表路由在 NodeFactory**：CustomElement arm 经 `CreateCustomRouted`——读 `get_custom_tag` → 查 `UIContext._componentFactories`（显式工厂委托，AOT/IL2CPP 零反射）→ 命中则工厂构造派生类 + `FireConnected()`（虚回调在工厂委托返回后 fire，不进 ctor 链——派生字段未初始化时调虚方法是未定义行为温床）；未命中/读 tag 失败回落基类。所有 wrapper 构造路径（instantiate 根 / eager 物化 / 懒物化 / 事件预物化）都过工厂——注册组件在任何路径被观测即得回调。
+- **eager 物化 = `MaterializeCustomElements`**：`Instantiate` 后 DFS 子树（get_child_count + get_children 容量协议），仅 CustomElement 节点 GetOrCreate（非组件节点不物化，保持懒物化内存画像）。`DoInstantiate` / `DoInstantiateSubtree` / driver `Instantiate` 三入口共用。
+- **死亡通知双路径单一出口**：`NodeRegistry.Remove` 对组件 wrapper fire `OnDisconnected` + 标 `_disposed`。两条 evict 路径汇入：用户 `Dispose`（同步——DisposeDescendantsInRegistry 递归 evict，后代先于自身）与 `PumpRemovedNodes` 帧泵（FFI `ikat_stage_drain_removed_nodes`，take 语义快照缓存于 StageHandle；core 队列挂在 `Scene::free_node_slot` 单一漏斗，任何删除路径都入队，释放序 = 叶先于祖先）。C# Dispose 先 evict → 泵后查无 wrapper = 天然去重；无 wrapper 的死亡（list 换绑 churn 的克隆 id）静默跳过，非组件滞留 wrapper 顺带 evict（死亡显式化：后续读抛 ObjectDisposedException 而非死 id 静默打 FFI）。
+- **IkatHost.Step 泵位**：CollectInput 后、PumpLogic 前——已断开的组件本帧不再跑 OnUpdate。
+
+### 3.5 待办（按优先级）
 
 1. **标记优化点**：字符串 flush 若成热点换二进制 batch FFI（`set_style_props(nodeId, propId[], values[])`，Rust 加绕过 parse 的直写路径）——§2.2。
 

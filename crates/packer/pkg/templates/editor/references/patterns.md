@@ -162,3 +162,63 @@ share tokens, author one external CSS and reference it from both sides
 <!-- component: ui/game/components/actor-card.html -->
 <link rel="stylesheet" href="../../../shared/tokens.css">
 ```
+
+## Component behavior in C# (RegisterComponent)
+
+HTML composes a component's *structure* (the `components/` file); C#
+owns its *behavior* through a registered subclass — no wrapper-div +
+`TryGet` scavenging:
+
+```csharp
+class ItemCard : CustomElement
+{
+    public ItemCard(UIContext ctx, ulong id) : base(ctx, id) { }
+    protected override void OnConnected()
+    {
+        // derived ctor has fully run by now; internals are queryable here
+        Get<Button>("equip").Clicked += OnEquip;
+    }
+    protected override void OnDisconnected() { /* release caches, counters */ }
+    void OnEquip() { /* ... */ }
+}
+// during setup, before the first Instantiate:
+ctx.RegisterComponent("item-card", (c, id) => new ItemCard(c, id));
+```
+
+Every `<item-card>` host — page-static or dynamically instantiated —
+constructs `ItemCard` and fires `OnConnected` (after the ctor; eager
+at `Instantiate`, or on first observation for lazily materialized
+wrappers). `Dispose` and Rust-side removals (list slot rebinding,
+external `remove_node`) fire `OnDisconnected` (override for cleanup;
+the wrapper is `IsDisposed` afterwards). Registration must precede
+instantiate — late registration only affects future constructions;
+re-registering a tag throws `UIContractException`. The factory
+delegate keeps construction reflection-free (IL2CPP/AOT-safe). Full
+contract: api-reference "Custom elements".
+
+## Styling component internals from the page (::part)
+
+Component style walls keep page CSS out of component internals. When a
+page needs to adjust one visual inside a component the author did not
+parameterize, mark the node with `part` in the component file and
+target it with `::part()` in the page:
+
+```html
+<!-- component: ui/game/components/actor-card.html -->
+<span class="ac-name" part="name">...</span>
+
+<!-- page: ui/game/main.html -->
+<style>
+  /* only the actor cards in the vip section get golden names */
+  .vip .actor-card::part(name) { color: #f39c12; }
+</style>
+```
+
+Semantics: the compound before `::part` matches the component **host**
+(give it a class in page markup); `::part(name)` matches nodes with
+`part="name"` inside that host — one level only (nested components'
+internals are not reachable; the component author must relay them).
+Prefer custom properties (`--*` + `var()`) for theme-wide tokens and
+`::part()` for one-off local overrides — `::part()` is the sanctioned
+wall-piercing channel for page rules; do not drop the prefix (a bare
+`::part(name)` hits that part in every component).

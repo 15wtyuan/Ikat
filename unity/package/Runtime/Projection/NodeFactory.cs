@@ -64,9 +64,11 @@ namespace Ikat
 
                 // OptionItem = <option>、Slot = <slot>、CustomElement = 自定义标签。都是容器型节点
                 // （继承 Container），但 NodeFactory 派发到专用子类让业务 Get<OptionItem>() 命中。
+                // CustomElement 先查组件注册表（RegisterComponent）：命中 tag 构造用户派生类
+                // （构造后 fire OnConnected），未命中回落基类。
                 NodeKind.OptionItem     => new OptionItem(ctx, id),
                 NodeKind.Slot           => new Slot(ctx, id),
-                NodeKind.CustomElement  => new CustomElement(ctx, id),
+                NodeKind.CustomElement  => CreateCustomRouted(ctx, id),
 
                 // TabList = <div role=tablist>（持 tab 子，selected_index 由打包期 aria-selected 烘焙 +
                 // 运行时 setter 改写）；Tab = <button role=tab>（aria-selected 从父 TabList.selected_index 派生）。
@@ -90,6 +92,34 @@ namespace Ikat
                 // ABI 漂移或内存损坏，造 Container 不 crash 让上层逻辑继续运行（错类型比进程崩溃更易诊断）。
                 _ => new Container(ctx, id),
             };
+        }
+
+        /// <summary>
+        /// CustomElement 构造路由（RegisterComponent）：读 custom tag → 查 UIContext
+        /// 组件注册表 → 命中则用户工厂构造派生类，工厂委托返回后 fire OnConnected
+        /// （虚回调不进 ctor 链——派生字段未初始化时调虚方法是未定义行为温床）；
+        /// 未命中 / tag 读失败（理论不可达，pkg 烙入；防御回落）构造基类。
+        /// 所有 wrapper 构造路径（instantiate 根、eager 物化、懒物化、事件预物化）
+        /// 都经本方法——注册组件在任何路径被观测即得生命周期回调。
+        /// </summary>
+        static Node CreateCustomRouted(UIContext ctx, ulong id)
+        {
+            string tag = null;
+            try
+            {
+                StageHandle* h = (StageHandle*)ctx._stage.ToPointer();
+                tag = TextControlFFI.ReadText(h, id,
+                    (hp, buf, cap, len) => Native.ikat_stage_get_custom_tag(hp, id, buf, cap, len));
+            }
+            catch (InvalidOperationException) { /* tag 读失败按未注册处理 */ }
+
+            if (tag != null && ctx._componentFactories.TryGetValue(tag, out var factory))
+            {
+                CustomElement ce = factory(ctx, id);
+                ce.FireConnected();
+                return ce;
+            }
+            return new CustomElement(ctx, id);
         }
     }
 }

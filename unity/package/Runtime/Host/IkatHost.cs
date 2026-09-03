@@ -167,6 +167,12 @@ namespace Ikat
             // 1. 输入采集 → set_input 系 FFI（backend 调引擎中立 FFI，不破坏 IkatHost 引擎无关性）。
             _backend.CollectInput((IntPtr)_stage);
 
+            // 1.4 死亡泵：取走 core 节点死亡通知队列（上帧 list 槽位换绑淘汰克隆 /
+            //     外部 remove_node / 内部剪枝）→ evict wrapper + 组件 OnDisconnected。
+            //     先于逻辑泵——已断开的组件本帧不再跑 OnUpdate。C# Dispose 走同步回调，
+            //     此处只见 Rust 侧死亡；无 wrapper 的死亡静默跳过（去重）。
+            _ctx.PumpRemovedNodes();
+
             // 1.5 逻辑泵：OnUpdate / 到期 CallLater / CallNextFrame（UIContext 投影层内建调度器）。
             //     帧头 fire——回调内改 Style 走下述 flush seam 过桥，本帧 solve 生效。
             _ctx.PumpLogic(dt);
