@@ -272,14 +272,15 @@ panel.Style.OverflowY = Overflow.Auto;
 - 属性选择器与伪类同归 class 级（b）。
 - **CSS 规则表进包（不 bake 丢）**：逻辑层运行时大量用 CSS（`Classes.Add/Replace`、`StyleSheet.Add`、class 切换驱动动画），规则表必须活到运行时，否则对设计期未带该 class 的节点 `Classes.Add` 会失效。cascade 引擎是 core 的运行时唯一真相源；fence 只把 `<style>` 解析成规则表。
 - 运行时 rematch 处理伪类 + class + Style override 变化，每帧从 `base_style` 重算基线（`base_style` = 每帧 cascade 基线，非首帧缓存）。
-- 运行时样式 = `base_style + 命中动态规则的合并`。
+- 运行时样式 = `base_style + 命中动态规则的合并`。动态规则含 `<style>` 打包规则与运行时 `StyleSheet.Add` 注入的全局规则（同 specificity 后注入赢，语义见 fence.md §5.4）；含 `var()` 的声明延后到 var 环境解析后应用（环境 = 祖先链 `--*` 声明合并，运行时 `SetVar` 为最高优先级层；解析失败该声明跳过、不抛异常）。
 
 ### 5.4 组件样式边界（Shadow DOM 风格）
 
 - 模板内部选择器只作用于模板内部。
 - 父组件普通选择器不穿透边界。
 - 标准可继承属性和 CSS 自定义属性 `--*` 跨边界传递。
-- 后续可用标准 `part/::part()` 精确开放内部样式。
+- 运行时注入（`StyleSheet.Add`）不受本墙约束：全局规则字面匹配可及组件展开内部（程序员工具非 AI 编辑面，public-api §10.2 明示）。
+- 后续可用标准 `part/::part()` 精确开放内部样式（打包期 AI 编辑面的通道）。
 - 组件 host 节点打三重标记（CSS 隔离 + 查找边界 + host 归属）：对后代 host 是 CSS 与查找边界；host 本体归外层页面作用域（页面规则可样式化 host、组件内部规则不落 host——同 DOM shadow DOM 不样式化 host，当前无 `:host`）。同模板多实例的 scoped 规则按 scope 各自包装，不按 selector 文本去重（按 selector 去重会误丢不同组件的同名 class 规则）。
 
 ---

@@ -120,6 +120,23 @@ The list virtualizes automatically — slot count stays constant regardless
 of `ItemCount`. Style rows via class selectors scoped under the list; do
 not use `:nth-child` here (parked slots skew it), use `[data-index]`.
 
+Mixed row shapes need multiple blueprints — give each `<template>` an
+`id`, declare them all under the list, and pick per item in game code
+(no auto-collection; see the runtime skill's api-reference for the
+strict selector semantics):
+
+```html
+<div role="list" id="bag-items">
+  <template id="row-tpl">…</template>
+  <template id="row-tpl-wide">…</template>
+</div>
+```
+```csharp
+var normal = list.GetTemplate("row-tpl");
+var wide = list.GetTemplate("row-tpl-wide");
+list.TemplateSelector = i => (i % 10 == 0) ? wide : normal;
+```
+
 ## Staggered entrance
 
 ```css

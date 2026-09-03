@@ -1,6 +1,6 @@
 //! FFI 导出层（§14.1 csbindgen）：extern "C" 薄包装，opaque Stage 句柄。
 //! 命名前缀 `ikat_`。按职责拆成子模块（stage/frame/events/node_getters/
-//! node_setters/controls/text/scroll/animation/list/resources），csbindgen 扫描
+//! node_setters/controls/text/scroll/animation/list/resources/style_sheet），csbindgen 扫描
 //! lib.rs + 各含 extern fn 的模块文件生成 C# 绑定（文件清单见 build.rs，与
 //! crates/xtask/src/bindings.rs 的清单互为镜像，改清单两处同步）。
 

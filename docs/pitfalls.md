@@ -72,8 +72,12 @@
 - **设计渲染合成机制前先读对端 shader 能力**：曾设计整套合成 RenderNode 机制，被一次 shader 阅读推翻——对端早已做 source-over 合成。core program 编号 ↔ Unity shader 能力是跨层闭环，先核对两端现状再设计。
 - **删「看似单用途」机制前先 grep 共用者**：曾视作单用途的 flag 实为两条路径共用（div box-shadow 与文字效果层），grep 取证救过一次静默错渲染。
 - **fence 委托 + core 解析永真 = 围栏静默放行破损**：fence 零自有校验、委托 core `apply_decl` 的 CSS 属性，core 解析失败必须返 false，否则 `FenceBadCssValue` 链路整体失效——「fence 放行 + core 渲染坏」可同时成立、打包不报错。
+- **fence 的 prop 白名单校验有三处构造点**（`css_resolve` 行内 / `fence_gate` 属性门 / `css_rules` `<style>` 块——`unsupported_hint` 注释点名）：放行新 prop 面（如 `--*`）必须三处同步，漏一处会 check 过了在另一门才炸（#11 实锤：漏 fence_gate，check 报 `FenceUnknownCssProp` 定位到 style 属性）。放行前 grep `FenceUnknownCssProp` 找全构造点。
 - **core 反向调宿主服务须启动期注册函数指针对**：core 是 cdylib，不能 extern 调宿主符号（链接期不可解析 + C# 给不出 linkable C 符号）——剪贴板/原生弹窗/系统字体查询都走注册回调模式；内存契约：get 缓冲区宿主持有（活到下次 get），core 立即拷贝、不跨分配器 free。
 - **快照测试锁 glyph 度量必须钉仓库内字体**：不同 OS 默认字体（Win arial vs Linux DejaVu）度量漂移、Linux CI 无 arial——fixtures 字体入库是前提，不是优化。
+
+### FFI 面改动 × 本地 dotnet 门
+- **改 FFI 入口/签名后，本地 dotnet 门直接跑会装旧产物 dll**：HeadlessTests 从 `unity/package/Plugins/Ikat/ikat_ffi_c.dll` 拷贝运行时——`EntryPointNotFoundException`（找不到 `ikat_stage_*` 入口）= 旧 dll 信号，不是签名错。中间态验证先 `cargo build -p ikat_ffi_c --release && cp target/release/ikat_ffi_c.dll unity/package/Plugins/Ikat/`（或直接 reout）；随后 pkg 版本 bump 会让其余测试批量 TooOld 红——那批是 fixture 陈货，reout 重打后自愈，别逐个排查。
 
 ### 本地绿 ≠ CI 绿（clippy 双盲区）
 本地 clippy 全绿挡不住 CI 红：① CI 用 `dtolnay/rust-toolchain@stable` 滚动，可比本地 stable 新一档（1.97→1.98 实锤新 lint `chunks_exact_to_as_chunks`）；② clippy 增量缓存跳过未变更 crate——久未 push 的积压 commit 里潜伏的 lint 只在 push 后暴露。push 被 CI bot 镜像 commit 挡直推时先 `git pull --rebase`。
