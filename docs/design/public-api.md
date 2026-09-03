@@ -326,14 +326,16 @@ Node node = ui.Pick(globalPoint);   // 命中测试：返回该点最上层可�
 | div role=option | OptionItem : Container | Value, Selected（只读）, Disabled, Index（只读，父 Dropdown 内序号） |
 | div role=tablist | TabList : Container | SelectedIndex, Activation, SelectionChanged（方向轴按 tablist 的 `flex-direction` 选轴、`*-reverse` 翻转方向、clamp 不 wrap；panel 靠 `aria-controls` 关联。激活模型 `data-activation` 声明 / `Activation` 运行时改：automatic（缺省）方向键即时选中且焦点跟随；manual 方向键只移焦点、Enter/Space 才提交） |
 | div role=tab | Tab : Container | （`aria-selected` 由父 TabList.SelectedIndex 跨节点合成，非字面存储） |
+| div role=tree | Tree : Container | SelectedItem（TreeItem，空树 null）, ExpandAll()/CollapseAll(), SelectionChanged（单选、焦点移动即选中；键盘 APG 核心档。事件只作「变了」信号，SelectedItem 读时点现值） |
+| div role=treeitem | TreeItem : Container | IsBranch, Expanded（branch 独有，leaf 读写抛）, Selected（跨节点派生）, Level（嵌套深度，顶层=1）, Select(), ExpandedChanged, Clicked |
 | a（富文本内） | Link : Container | Href（只读）, Clicked（复用既有语义事件） |
 
 **不变量**：
 - 控件数值（Slider/NumberField/ProgressBar 的 Value/Min/Max/Step）用 `float`，与几何/引擎统一。大数精度需求归业务层。
 - RadioButton 同 `Name` 组框架自动互斥；只有新选中项触发 `CheckedChanged`（对齐 web，不触发被取消项）。RadioGroup（按 name 聚合、读选中 index）是逻辑层积木，不进公共层。
-- 通用事件类型：`ValueChangedEvent<T>`, `SelectionChangedEvent`, `TextSelection`。
+- 通用事件类型：`ValueChangedEvent<T>`, `SelectionChangedEvent`, `ExpandChangedEvent`（Tree branch 展开/折叠，仅交互路径发）, `TextSelection`。
 
-控件与列表的类型由 `role` 分派（见 [fence.md](fence.md) §2.3、§3.1）；控件视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。WAI-ARIA 复合控件沿用同一 `role` 机制：**TabList/Tab 已落地**（见上表）；Tree 等按需单独立项。
+控件与列表的类型由 `role` 分派（见 [fence.md](fence.md) §2.3、§3.1）；控件视觉部件用 `data-slot`（如 slider 的 `data-slot=thumb`、progressbar 的 `data-slot=fill`）。WAI-ARIA 复合控件沿用同一 `role` 机制：**TabList/Tab、Tree/TreeItem 已落地**（见上表）；其余按需单独立项。
 
 ### 7.1 Link（`<a>`，富文本内链接）
 

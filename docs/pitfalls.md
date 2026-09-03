@@ -57,12 +57,13 @@
 - heredoc 喂 python 会**吃掉一层反斜杠**：想在替换串里产出源码字面量 `'\n'`（python 里写 `\\n`），实际落到 python 是真换行——批量编辑含转义序列的 Rust/JS 源码必坏且难察觉（实锤：把换行器测试注释改出断行、断言匹配静默失配）。含反斜杠字面量的文本编辑用 Edit 工具；纯结构化替换（无反斜杠）才走 heredoc python。
 - **全仓批量替换的文件集必须把字体族纳入二进制黑名单**：`.bin/.png/.dll/.exe` 之外还有 `.ttf/.ttf.bytes/.ttc/.otf`——字体被当文本替换后字节错位，症状是测试大面积 `NoHeadTable` / `need font` panic，且只炸加载该字体的那部分用例（DejaVu 全绿仍有 wqy-microhei.ttc 在烂）。提交前 `git checkout -- <file>` 可零损失回滚，验收 = 全量 cargo test 归零才算二进制无害（更名批 #91 实锤：14 个 ttf + ttc 受损靠测试才现形）。另：`xargs` 默认按空白拆路径，带空格路径会伪报 can't read——统一 `tr '\n' '\0' | xargs -0`。
 - 另外 GNU sed 在部分 `-E` 场景对 `\1/\2` 反向引用替换静默失效（不报错、输出原样）：带捕获组引用的替换跑完必须 grep 抽验命中率，不确定就用字面量枚举替换单条验证。
+- **`cargo test | grep -E "FAILED|panicked"` 会漏编译错**：编译失败（E0xxx）输出是 `error[...]` 行非 FAILED，grep 计数 0 = 假绿（合并批实锤：远端新测试撞字段更名，test grep 绿、clippy 门才红）。验收 grep 需含 `error\[`，或干脆以 clippy/退出码为准（`cargo test 2>&1 | tail` 看 error 行）。
 - **Windows 上 spawn npm 全局 CLI 须 `.cmd` 回落**：npm 全局装的是 `tauri.cmd` 之类的 shim，`std::process::Command::new("tauri")` 走 CreateProcess 只自动补 `.exe` 不补 `.cmd` → spawn 失败；裸名失败后用 `tauri.cmd` 重试。bash 里裸名能跑（bash 自己解析 shim）会骗过手工测试——程序化 spawn 必须两个名字都试（xtask gui.rs 实装）。
 
 ## 2. 跨层闭环规则
 
 ### pkg 格式 bump 代价链
-改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`——已机械化进 `xtask reout`（重打 + 拷回 + 清构建现场），MIN/MAX 同拍另有护栏测试 `min_version_tracks_current` 当场拦（v48 实证：漏拍 MIN 会让旧包漏过版本门、以 Bincode 结构错配炸成无指引的 malformed，0.0.16 CI 红一天才定位）；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `IKATGUI_UPDATE_GOLDEN=1 cargo test -p ikat_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。flags 字节加位**布局不变**（字节宽不变、旧包位恒 0）可免 bump 走语义增量（v47 disabled 位实装）。
+改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`——已机械化进 `xtask reout`（重打 + 拷回 + 清构建现场），MIN/MAX 同拍另有护栏测试 `min_version_tracks_current` 当场拦（v48 实证：漏拍 MIN 会让旧包漏过版本门、以 Bincode 结构错配炸成无指引的 malformed，0.0.16 CI 红一天才定位）；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `IKATGUI_UPDATE_GOLDEN=1 cargo test -p ikat_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。加 NodeKind 变体另有三件：`from_u8` 尾界测试值（BadKind 探针）+ from_u8 穷尽 guard 表（编译器抓）+ `RECTDIFF_TAG_MAP_REGEN=1 cargo test -p ikat_pkg --test rectdiff_tag_map` 重出 semantic-tags.json；C# 侧 NodeKindTests 计数/判别集同步。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。flags 字节加位**布局不变**（字节宽不变、旧包位恒 0）可免 bump 走语义增量（v47 disabled 位实装）。
 
 ### 长跑进程锁构建产物
 - **`ikat preview` server 持锁 `target/debug/ikat.exe`**：进程活着时任何 debug 构建/测试都「failed to remove file 拒绝访问 (os error 5)」——多会话共享工作树时常见且难归因（错误像编译失败）。解法：跑测试用私有 `CARGO_TARGET_DIR=<临时目录>` 隔离；release 产物不受影响（锁的是 debug 路径）。别杀别人的 server。
@@ -108,7 +109,8 @@
 - **序列化字段的默认值只对「没保存过该字段」的场景生效**：字段是场景保存之后新加的，旧场景反序列化吃字段初始化器；而改初始化器不影响任何已保存过该字段值的场景——两个方向都可能咬人（`_useSharedHost` 后加默认 false，老场景静默不吃共享宿主）。新序列化字段上线时审一遍默认值语义 + 老场景兼容。
 
 ## 4. 动态契约
-- **CSS 多声明分割必须括号感知**：`animation`/`transition` 等逗号多声明与函数参数逗号共用语法——`split(',')` 会把 `cubic-bezier(.3,0,.7,1)` 的参数切成独立声明，静默错位成默认值（解析不报错、行为不对）。统一走 `mapping::split_top_level_commas`（渐变/rgba 同款）；新收函数形属性（带参数的 CSS 函数值）先过它再分段。
+- **事件号（EVT_* u8）是全库单一号空间**：Rust 侧 `input.rs` 与 `event.rs` 分模块各持常量但共享同一 `event_type:u8` 流，C# `EventType` 枚举是全集镜像——新增事件常量须三方对号查空位（#8 实锤：随手落 27，撞 event.rs 动画 key/hook，C# 枚举先暴露）。C# 守卫：`EventRouteCoreTests.ExpectedEventStructs` 清单 + `NodeKindTests` 判别值集/计数，加事件或 NodeKind 必同步三处测试。
+- **CSS 多声明分割必须括号感知**- **CSS 多声明分割必须括号感知**：`animation`/`transition` 等逗号多声明与函数参数逗号共用语法——`split(',')` 会把 `cubic-bezier(.3,0,.7,1)` 的参数切成独立声明，静默错位成默认值（解析不报错、行为不对）。统一走 `mapping::split_top_level_commas`（渐变/rgba 同款）；新收函数形属性（带参数的 CSS 函数值）先过它再分段。
 
 - **dirty hash 的「全量」是动态契约**：每给 RenderNode/Line 加视觉字段，必同步检 payload/header hash 是否覆盖新字段——漏一个 = 静默 stale（不崩、只是不更新）。历史上反复漏过（uvs / 圆角顶点 / line-height / reuse_key / baseline）。
 - **纯平移不进 payload 顶点（位置编码在矩阵、顶点是局部系）**：任何「按 payload 哈希判变更」的新路径（批合并定级/缓存复用/脏检测）都抓不住纯平移变化（滚动/Transform 位移）——必须把矩阵平移轴单独入键。merged 批的教训：成员局部 hash 拼合 + 恒 IDENTITY 矩阵 = 滚动拖拽整批冻结在旧位置。

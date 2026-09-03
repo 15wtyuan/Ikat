@@ -110,6 +110,7 @@
 | 控件 | `div role=...` | `Slider`/`Toggle`/`RadioButton`/`TextField`/`TextArea`/`NumberField`/`ProgressBar`/`Dropdown`（见 [fence.md](fence.md) §2.3） |
 | 列表 | `div role=list` / `div role=listitem` / `div role=option` | `ListView`/`ListItem`/`OptionItem` |
 | 复合控件 | `div role=tablist` / `div role=tab` | `TabList`/`Tab`（panel `role=tabpanel` 不分派，走 div→Container，靠 `aria-controls` 跨树关联） |
+| 层级列表 | `div role=tree` / `div role=treeitem` | `Tree`/`TreeItem`（直接嵌套声明，无 group 包装层；branch 折叠/leaf） |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
 | 内容投影 | `slot` | Custom Element 的标准 Slot |
 | 自定义元素 | `tag-name`（含 hyphen） | `CustomElement`（R3 注册验证） |
@@ -127,6 +128,7 @@
 - `<div role="combobox">` → `Dropdown`；`<div role="option">` → `OptionItem`
 - `<div role="list">` → `ListView`；`<div role="listitem">` → `ListItem`
 - `<div role="tablist">` → `TabList`；`<button role="tab">` / `<div role="tab">` → `Tab`（panel `role=tabpanel` 不分派，走 div→Container）
+- `<div role="tree">` → `Tree`；`<div role="treeitem">` → `TreeItem`（条目直接嵌套：treeitem 内嵌 treeitem）
 - `<template>` → `Template`；`<slot>` → `Slot`
 - 含 `-` 的标签名 → `CustomElement`（R3 注册验证）
 
@@ -145,7 +147,7 @@
 
 框架负责输入导航、`aria-selected`/`aria-checked`/`aria-expanded` 状态同步。打包器验证 role 组合与必需子结构（fence §6.8）+ ARIA 关系。
 
-首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。panel 显隐由框架切 display：非激活强制 `display:none`（复用剪枝）；激活回落作者声明的 display 值。
+首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.attrs` 通用属性仓（attrs β）存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。panel 显隐由框架切 display：非激活强制 `display:none`（复用剪枝）；激活回落作者声明的 display 值。
 
 ### 3.5 失败策略
 
@@ -297,6 +299,7 @@ panel.Style.OverflowY = Overflow.Auto;
 | `div role=radio` | `RadioButton` | `IsChecked`, `Name`, `Disabled`, `CheckedChanged` |
 | `div role=combobox` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `Disabled`, `SelectionChanged` |
 | `div role=tablist` | `TabList` | `SelectedIndex`, `Disabled`, `SelectionChanged`（panel 靠 `aria-controls` 关联，`role=tab` 是 `Tab` 容器节点，无独立控件 API） |
+| `div role=tree` | `Tree` | `SelectedItem`, `ExpandAll`/`CollapseAll`, `SelectionChanged`（单选、焦点移动即选中；`role=treeitem` 是 `TreeItem` 容器节点：`IsBranch`/`Expanded`/`Level`/`Select`/`ExpandedChanged`） |
 | `div role=progressbar` | `ProgressBar` | `Value`, `Max`, `IsIndeterminate` |
 
 伪类 `:checked/:disabled/:focus` 匹配实时状态；Toggle/RadioButton 也可用属性选择器 `[aria-checked="true"]` 表达选中态。RadioButton 同 `name`（或 `data-name`）组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。

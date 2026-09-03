@@ -146,7 +146,7 @@ cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 **subagent 协作（多 agent 分工的教训）**：
 - 模型选型：默认 `DeepSeek/deepseek-v4-pro` 起步；opus 级在本 repo 反复撑爆 subagent 输出上限——撞了就换模型，别硬重试（顶部模型禁令是硬规则）。
 - **同一工作树上 subagent 串行派发**：全仓库所有 crate 依赖 ikat_core，并行 agent 的半成品编辑会互相打爆对方的 `cargo test`（整 crate 编译含他人在途改动）——机械活串行排队才是真并行省时。
-- **并行用户会话共享工作树**（非 subagent，用户自己开了多个 agent 会话）：先 `git status` 归因——不属于本批的在途改动（~千行级）别碰也别修；提交只 stage 本批文件，且**手工 `git commit` 必须带 `-- <paths>` pathspec**——只控制 `git add` 不够，并行会话可能已往 index 塞了东西，裸 commit 连 index 一起提（实锤：10 文件混入批）；整包 `cargo test` 编译被挡（如 E0063）≠ 本批问题，改用窄 target（`--lib` + 测试名过滤）隔离验证；debug 构建报「拒绝访问 os error 5」= 别人长跑 preview server 锁了 `target/debug/ikat.exe`，用私有 `CARGO_TARGET_DIR` 隔离（见 pitfalls）。
+- **并行用户会话共享工作树**（非 subagent，用户自己开了多个 agent 会话）：先 `git status` 归因——不属于本批的在途改动（~千行级）别碰也别修；提交只 stage 本批文件，且**手工 `git commit` 必须带 `-- <paths>` pathspec**——只控制 `git add` 不够，并行会话可能已往 index 塞了东西，裸 commit 连 index 一起提（实锤：10 文件混入批）；整包 `cargo test` 编译被挡（如 E0063）≠ 本批问题，改用窄 target（`--lib` + 测试名过滤）隔离验证；debug 构建报「拒绝访问 os error 5」= 别人长跑 preview server 锁了 `target/debug/ikat.exe`，用私有 `CARGO_TARGET_DIR` 隔离（见 pitfalls）；**反向 merge 冲突只剩 exe/dll/pkg.bin 二进制时** = 双方各自 reout 过，正解 = 在合并源码树上 `reout` 重造后一并提交（不选边），并跑 clippy 做合并验收——`cargo test | grep FAILED` 漏编译错（见 pitfalls §1），合并批的对方新测试常撞你的字段更名。
 - task 切分别太细：强耦合重构（删共享字段类）的 task 边界要么包含被牵连函数，要么预期 bridge 多一轮 fix。
 - 分支上并行有用户 commit 时，review BASE 用 task commit 的实际 parent（`git rev-parse <taskhead>^`），否则 review 范围混入用户 commit。
 - long-running 分支防 main 漂移：反向 merge（`git merge main` 进 feature 分支），合超集签名，用对方分支的测试当合并验收标准。
@@ -158,7 +158,7 @@ cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 
 **FFI panic 取证用站点标签 + 释放审计，别信 release 行号**：release dll 内联后 panic 行号不可靠。`Scene::get_live`（全库 21 处 live 查取带函数名站点标签，`模块/函数` 格式、勿用行号——行号随编辑漂移会把取证指向错误位置）+ `Scene::free_log`（最近 32 笔释放审计：死 id 距今几笔、走没走漏斗）已常驻——「快照后死亡」类 panic（如 rematch live node）一行日志定位。Rust 压测复现不了时先算量级差（用户几分钟 60fps churn ≈ 上万次 vs 压测几百次）。
 
-**showcase 用例两纪律**（用户两次打回后拍板）：① 运行时 C# API 不许以「HTML 表达不了」为由不设用例——HTML 摆台（目标块 + 触发按钮 + 读数 span 带 id）+ `ShowcaseRunner.WireControls` 里 `TryGet` + `Clicked` 接线（照 lab §14/§15 同款），读数翻转即事件路由证据；② 判据只认肉眼强信号（过冲/出界/瞬移/弹振/消失/读数翻转），禁需对照记忆、心算、盯梢短瞬的判据（如与缺省曲线比、半宽→整宽）——可辨性差的行删掉，不加标记补救。
+**showcase 用例两纪律**（用户两次打回后拍板）：① 运行时 C# API 不许以「HTML 表达不了」为由不设用例——HTML 摆台（目标块 + 触发按钮 + 读数 span 带 id——**读数元素类型必须与 TryGet 泛型对齐**（span→TextElement、div→Container+TextContent；div 配 TryGet<TextElement> 是静默死线：编译/运行都不报，`&&` 短路整块接线死，#8 验收实锤）+ `ShowcaseRunner.WireControls` 里 `TryGet` + `Clicked` 接线（照 lab §14/§15 同款），读数翻转即事件路由证据；② 判据只认肉眼强信号（过冲/出界/瞬移/弹振/消失/读数翻转），禁需对照记忆、心算、盯梢短瞬的判据（如与缺省曲线比、半宽→整宽）——可辨性差的行删掉，不加标记补救。
 
 **uloop 取证自相矛盾（截图正常但探针读空 / 同会话数据反复打架）先查编辑器会话状态**：① `tasklist | grep Unity.exe` 数实例——launch 超时会再起一个，命令轮流命中不同实例；② PlayMode 期间触发过编译（domain reload）会把原生 stage 打裂（渲染正常但 DumpScene 全零）——重启编辑器复测再怀疑产品。规矩：**PlayMode 验收期间绝不编译**。另：`File.WriteAllText` 被 uloop 安全策略拦，大 JSON 用 execute-dynamic-code 的 `return` 值带出。
 
