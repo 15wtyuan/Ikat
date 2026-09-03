@@ -114,7 +114,12 @@ trust the build message.
     `aria-controls`/`aria-labelledby` must point at existing ids.
 16. Initial values go into ARIA (`aria-valuenow`, `aria-checked`, ...) or
     `data-*`; a plain `value` attribute is legal only on `role=option`.
-17. Never edit files under the output directory — they are regenerated.
+17. **Custom properties theme the UI**: declare `--x: val` in `<style>`
+    rules or inline `style`, consume `var(--x)` (with fallback) in any
+    property. They inherit across component boundaries; reference
+    cycles warn at build. HTML `--*` attributes are passthrough data,
+    NOT var() sources. Runtime theming is game-code `Style.SetVar`.
+18. Never edit files under the output directory — they are regenerated.
 
 Full lookup tables (tags, attributes, the 15-role registry, the CSS
 whitelist, canonical control CSS) are in `references/` — load them on
@@ -218,5 +223,5 @@ it before guessing.
 | File | Contents |
 |---|---|
 | `references/fence-schema.md` | tag tables, global attributes, custom elements, component isolation, the 15-role registry |
-| `references/css-reference.md` | CSS whitelist, value domains, browser-difference traps, animations |
+| `references/css-reference.md` | CSS whitelist, value domains, custom properties/var(), browser-difference traps, animations |
 | `references/patterns.md` | canonical control CSS, decorated frames, list blueprints, staggered entrances |

@@ -489,6 +489,9 @@ namespace Ikat
             }
 
             Container inst = (Container)ctx._registry.GetOrCreate(instId);
+            // eager 物化子树内注册组件（RegisterComponent：OnConnected 实例化时跑；
+            // 根自身已由上行 GetOrCreate 路由）。同 UITemplate.DoInstantiate。
+            ctx.MaterializeCustomElements(instId);
             int rc = Native.ikat_stage_append_child(h, ctx._rootId, instId);
             if (rc != 0)
                 Debug.LogWarning($"[IkatStageDriver] append_child(sceneRoot, {pkgName}/{compPath}) failed rc={rc} (child may have existing parent)");

@@ -110,6 +110,7 @@
 | 控件 | `div role=...` | `Slider`/`Toggle`/`RadioButton`/`TextField`/`TextArea`/`NumberField`/`ProgressBar`/`Dropdown`（见 [fence.md](fence.md) §2.3） |
 | 列表 | `div role=list` / `div role=listitem` / `div role=option` | `ListView`/`ListItem`/`OptionItem` |
 | 复合控件 | `div role=tablist` / `div role=tab` | `TabList`/`Tab`（panel `role=tabpanel` 不分派，走 div→Container，靠 `aria-controls` 跨树关联） |
+| 层级列表 | `div role=tree` / `div role=treeitem` | `Tree`/`TreeItem`（直接嵌套声明，无 group 包装层；branch 折叠/leaf） |
 | 模板 | `template` | 惰性 `UITemplate`，不进入实时树 |
 | 内容投影 | `slot` | Custom Element 的标准 Slot |
 | 自定义元素 | `tag-name`（含 hyphen） | `CustomElement`（R3 注册验证） |
@@ -127,6 +128,7 @@
 - `<div role="combobox">` → `Dropdown`；`<div role="option">` → `OptionItem`
 - `<div role="list">` → `ListView`；`<div role="listitem">` → `ListItem`
 - `<div role="tablist">` → `TabList`；`<button role="tab">` / `<div role="tab">` → `Tab`（panel `role=tabpanel` 不分派，走 div→Container）
+- `<div role="tree">` → `Tree`；`<div role="treeitem">` → `TreeItem`（条目直接嵌套：treeitem 内嵌 treeitem）
 - `<template>` → `Template`；`<slot>` → `Slot`
 - 含 `-` 的标签名 → `CustomElement`（R3 注册验证）
 
@@ -145,7 +147,7 @@
 
 框架负责输入导航、`aria-selected`/`aria-checked`/`aria-expanded` 状态同步。打包器验证 role 组合与必需子结构（fence §6.8）+ ARIA 关系。
 
-首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.aria_controls` 存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。panel 显隐由框架切 display：非激活强制 `display:none`（复用剪枝）；激活回落作者声明的 display 值。
+首个落地的复合控件是 **TabList**（M3，2026-08）。tab 高亮靠 `[aria-selected="true"]` 属性选择器，该属性是双向语义：作者在 HTML 里声明的 `aria-selected="true"` 是**初始选中种子**（打包期派生进 selected_index，多重声明取首个、无则 0），运行时该属性反转为只读合成值（从父 TabList.selected_index 跨节点合成——Tab 无 ControlState，像 OptionItem 从父 Dropdown 派生选中态）。panel 显隐靠 `aria-controls="panelX"` ↔ `id="panelX"` 跨树关联（panel 非 tablist 子节点，`RoleInfo.attrs` 通用属性仓（attrs β）存 linkage 字符串，`sync_control_visuals` 每帧用作用域安全查找（组件实例内解析，多实例不串）定位 panel）。panel 显隐由框架切 display：非激活强制 `display:none`（复用剪枝）；激活回落作者声明的 display 值。
 
 ### 3.5 失败策略
 
@@ -270,14 +272,15 @@ panel.Style.OverflowY = Overflow.Auto;
 - 属性选择器与伪类同归 class 级（b）。
 - **CSS 规则表进包（不 bake 丢）**：逻辑层运行时大量用 CSS（`Classes.Add/Replace`、`StyleSheet.Add`、class 切换驱动动画），规则表必须活到运行时，否则对设计期未带该 class 的节点 `Classes.Add` 会失效。cascade 引擎是 core 的运行时唯一真相源；fence 只把 `<style>` 解析成规则表。
 - 运行时 rematch 处理伪类 + class + Style override 变化，每帧从 `base_style` 重算基线（`base_style` = 每帧 cascade 基线，非首帧缓存）。
-- 运行时样式 = `base_style + 命中动态规则的合并`。
+- 运行时样式 = `base_style + 命中动态规则的合并`。动态规则含 `<style>` 打包规则与运行时 `StyleSheet.Add` 注入的全局规则（同 specificity 后注入赢，语义见 fence.md §5.4）；含 `var()` 的声明延后到 var 环境解析后应用（环境 = 祖先链 `--*` 声明合并，运行时 `SetVar` 为最高优先级层；解析失败该声明跳过、不抛异常）。
 
 ### 5.4 组件样式边界（Shadow DOM 风格）
 
 - 模板内部选择器只作用于模板内部。
 - 父组件普通选择器不穿透边界。
 - 标准可继承属性和 CSS 自定义属性 `--*` 跨边界传递。
-- 后续可用标准 `part/::part()` 精确开放内部样式。
+- 运行时注入（`StyleSheet.Add`）不受本墙约束：全局规则字面匹配可及组件展开内部（程序员工具非 AI 编辑面，public-api §10.2 明示）。
+- 后续可用标准 `part/::part()` 精确开放内部样式（打包期 AI 编辑面的通道）。
 - 组件 host 节点打三重标记（CSS 隔离 + 查找边界 + host 归属）：对后代 host 是 CSS 与查找边界；host 本体归外层页面作用域（页面规则可样式化 host、组件内部规则不落 host——同 DOM shadow DOM 不样式化 host，当前无 `:host`）。同模板多实例的 scoped 规则按 scope 各自包装，不按 selector 文本去重（按 selector 去重会误丢不同组件的同名 class 规则）。
 
 ---
@@ -297,6 +300,7 @@ panel.Style.OverflowY = Overflow.Auto;
 | `div role=radio` | `RadioButton` | `IsChecked`, `Name`, `Disabled`, `CheckedChanged` |
 | `div role=combobox` | `Dropdown` | `SelectedIndex`, `SelectedValue`, `Disabled`, `SelectionChanged` |
 | `div role=tablist` | `TabList` | `SelectedIndex`, `Disabled`, `SelectionChanged`（panel 靠 `aria-controls` 关联，`role=tab` 是 `Tab` 容器节点，无独立控件 API） |
+| `div role=tree` | `Tree` | `SelectedItem`, `ExpandAll`/`CollapseAll`, `SelectionChanged`（单选、焦点移动即选中；`role=treeitem` 是 `TreeItem` 容器节点：`IsBranch`/`Expanded`/`Level`/`Select`/`ExpandedChanged`） |
 | `div role=progressbar` | `ProgressBar` | `Value`, `Max`, `IsIndeterminate` |
 
 伪类 `:checked/:disabled/:focus` 匹配实时状态；Toggle/RadioButton 也可用属性选择器 `[aria-checked="true"]` 表达选中态。RadioButton 同 `name`（或 `data-name`）组框架自动互斥（只新选中项触发 `CheckedChanged`）；按 name 聚合的 RadioGroup 是逻辑层积木，作用域边界由 `IsScopeRoot` 标记决定。控件数值（Slider/NumberField/ProgressBar）用 `float`。完整控件契约见 [public-api.md](public-api.md) §7。
@@ -396,7 +400,8 @@ mails.BindItem = (item, index) => {
 - item 模板来源优先级：显式 `ItemTemplate`/`TemplateSelector` > 设计期 `<template id>` > 第一个 listitem 兜底。未设且 list 下单个 `<template>` 自动用、多个 `<template>` 抛 `UIContractException`。
 - `TemplateSelector` 是纯 `Func<int, UITemplate>`；用户 `view.GetTemplate("name")` 取 template 后塞 lambda 闭包按 index 选，框架不自动收集。
 - `TemplateSelector` 返回 `UITemplate` 对象，不返回字符串。
-- ListView 按模板分别池化。
+- 严格派：selector 设了即全权——每个 index 必须返回 UITemplate（null 抛 `UIContractException`）；与 `ItemTemplate` 同设 selector 赢（`ItemTemplate` 为默认蓝图）。selector 求值在投影层完成后按区间批量推送（core 零回调）；换 selector/`Notify*` 后受影响区间重推，模板变了的项 park 旧蓝图 slot、下帧以正确蓝图重新物化。
+- ListView 按模板分别池化；spacer 估高按蓝图均值分化。
 - 虚拟化、可见区、测量补偿、content size 和后端 reuse key 全部是内部实现。内部不变量：slot 永驻 list 不 detach（park = inline `display:none`；unpark = 清 override，让 cascade 回落作者真实 display）；`notify_*` 一律 park/shift 复用、不重建；`reuse_key` 出生即定永不旋转、场景级命名空间（多 ListView 同页不撞 key）。虚拟化判据（可测）：render node 数与 slot 数不随 `ItemCount` 增长。
 - 滚动来源两模式：list 自身 `overflow:auto`（自滚，用自身 viewport）或祖先滚动容器（扣祖先偏移）。
 - ul 为 flex-row+wrap 时自动按行虚拟化（行内全量、spacer 全宽独占行）。
@@ -595,13 +600,17 @@ anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不
 
 ### 12.4 批合（FairyBatching）
 
-两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇 `clip_rect` 的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。mesh 合并锚：合并产物的 `node_id` 取 batch 内最小原始 id（后端 GO 复用防抖动）。排除项：控件节点（后端要建交互实体——控件排除点是「加新控件类型」的 dispatch 位置之一）、文本节点、非纯平移 transform、box-shadow 合成层，均不参与重排合并。
+两元素能并入同批 ⟺ DrawState 相同（AABB 不相交则可重排聚拢；同 DrawState 相交仍可合）。DFS 遇裁剪器（overflow 裁剪或 clip-path 声明，§12.5）的 Container 强制其为 BatchingRoot；批合收集不下钻进 root 子树。core 显式合并 mesh → 真 N→1 draw call。mesh 合并锚：合并产物的 `node_id` 取 batch 内最小原始 id（后端 GO 复用防抖动）。排除项：控件节点（后端要建交互实体——控件排除点是「加新控件类型」的 dispatch 位置之一）、文本节点、非纯平移 transform、box-shadow 合成层，均不参与重排合并。
 
 合并批的增量语义（#109 起）：**批不跨渲染显隐、不跨 world-space 挂载**（合批键含这两维——merged 行的 GO 归属/显隐是整批属性，混批会互相绑架）。合并批**携带 anchor 的世界平移矩阵**且定级按**整批合并 payload 的哈希**：纯平移（滚动/Transform 位移）在 payload 顶点里不可见（位置编码在矩阵，顶点是局部系），批必须靠矩阵轴捕捉——同质批纯平移 → Header 级（只挪 GO 不重传 mesh），成员几何/批成员集变化 → Full 重传；稳态帧仍全批 Skip。
 
 ### 12.5 裁剪/遮罩
 
-**rect mask**：核心给 clip_box；后端自选实现。`mask_context` 是批合边界。嵌套 `overflow:hidden`：clip 区域取祖先 clip 链的交集。裁剪框是轴对齐的：clipper 自身 `border-radius` 非全零时裁剪框带四角半径（圆角裁子内容），但**祖先链圆角不传播**；transform 旋转不旋转裁剪框（作者可见限制）。soft clip/shape mask 未做（deferred）。
+**多 entry clip 栈**（#52，web clip 栈模型）：核心产 clip 表——每个 `mask_context` 对应**整条**祖先裁剪链（每条 entry = 一个裁剪器的测试），后代的有效裁剪 = 链上全部 entry 逐条应用取交集，**不坍缩**。`mask_context` 仍是批合边界（裁剪器开新 context）。链深上限 4（后端 clip uniform 槽定长）：authored 超深 fence 打包期拒（`FenceClipChainTooDeep`），运行时 CSS 越界 core warn-once 丢最内层（少裁不黑屏）。核心给「意图」（box-local 几何 + 裁剪器世界矩阵逆）；后端自选实现（Unity 走片元 discard：design 坐标映回裁剪器局部系后按 entry kind 测 rect/圆角 SDF/circle SDF/polygon crossing）。
+
+**entry 几何 = clipper box-local + 局部系逆矩阵**：几何存裁剪器 border box 局部坐标（(0,0) = 左上），`inv_frame` = 裁剪器世界（design 系）矩阵逆。消费端把点映回裁剪器局部系再测形状——共享祖先的 transform/滚动在映射中自动消解；**裁剪器自身 transform 旋转时裁剪形随之旋转**（web 语义：clip 定义在裁剪器局部系——预览一致性的硬要求）。子代的 transform 不动祖先裁剪形（各 entry 独立测试，天然正确）。
+
+**裁剪器判定与测试项**：`overflow` 非 Visible（rect 测试 + 自身 `border-radius` 圆角）**或** `clip-path` 声明（shape 测试，声明即 clipper——裁自身绘制 + 子树，web 原义）。同元素 `overflow:hidden` + `clip-path` = 单 entry 双测试并存（交集）。**祖先链圆角随 entry 传播**（祖先 rounded rect entry 作用于后代角——web 行为）。命中测试同语义（`clip_gate_passed` 逐裁剪器判定，与渲染共用几何函数——画出来裁的点即命不中的点；border-radius 感知命中 = 浏览器行为）。`overflow:scroll/auto` + `clip-path` fence 硬拒（shape 裁滚动视口无语义）。soft clip（羽化逐像素 alpha）未做（#113 deferred）。
 
 **浮层机制**（通用模式，open dropdown 的 `role=listbox` 子树与 scrollbar thumb 共用）：跳出正常 DFS，render 末尾追加独立 DFS、sort_key 续 post-merge 最大值、mask 重赋脱离祖先裁剪链；命中层对应前置。画序单源 `scene::stacking::paint_order`（stacking context 全局分层，CSS Appendix E 语义：static 子树里的 opacity<1/transform/filter/定位+声明 z 后代会上提到所属 SC 的对应层，#96/#100）——主 DFS、浮层追加、hit 逆序三消费点共用同一份序，绘制与命中一致性由构造保证，无「多处手抄同步」面。
 

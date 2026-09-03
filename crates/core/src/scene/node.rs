@@ -733,6 +733,14 @@ pub struct Scene {
     pub free_log: std::collections::VecDeque<(NodeId, u64)>,
     /// 释放单调序号（free_log 配套）。
     pub free_seq: u64,
+    /// 节点死亡通知队列（RegisterComponent 的 OnDisconnected 数据源）：
+    /// [`Scene::free_node_slot`] 单一漏斗挂入——含子树递归删除的每个后代，任何删除路径
+    /// （用户 remove_node / list 槽位换绑克隆淘汰 / stage 内部剪枝）都经过它。FFI
+    /// drain（读+清）消费。与 [`Scene::free_log`]（环形 32 笔、诊断审计用）分职：
+    /// 本队列是通知通道，drain 后即空；不 drain 会累积——宿主每帧 pump。
+    /// 随 Scene 生灭：整棵 scene 被替换（reload）时队列随之丢弃，宿主侧 context
+    /// 同步重建，不产生 per-node 回调。
+    pub removed_nodes: Vec<NodeId>,
     /// 应用层用 NodeId(u32) 句柄（FFI/C# 透明），经 `Scene::key_for`/`NodeId::to_key` 桥接到 DefaultKey。
     ///
     /// **节点生命周期与下方全部 per-node side table 的联动收口在
@@ -898,6 +906,7 @@ impl Scene {
         if self.free_log.len() > 32 {
             self.free_log.pop_front();
         }
+        self.removed_nodes.push(id);
         let idx = id.index();
         if idx < self.world_transforms.len() {
             self.world_transforms[idx] = crate::transform::IDENTITY;
@@ -925,6 +934,13 @@ impl Scene {
         self.link_hrefs.remove(&id);
         self.mounts.remove(&id);
         self.node_vars.remove(&id);
+    }
+
+    /// 取走死亡通知队列（drain 语义：返回全部并清空）。顺序 = 释放顺序
+    /// （free_seq 单调递增，含子树删除的后代序）。无消费者直接丢弃队列的场景
+    /// 不存在——宿主每帧 drain；本方法供 FFI 通道转发给投影层生命周期回调。
+    pub fn take_removed_nodes(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut self.removed_nodes)
     }
 
     /// 从扁平 entries（DFS 先序）建 Node 树。`parent_idx` 指向 entries 下标，`None` = 根。

@@ -1,7 +1,7 @@
 use crate::scene::animation::TransformAnim;
 use crate::style::color_filter::{self, IDENTITY};
 use crate::style::resolved::{
-    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, CornerRadius, CursorStyle,
+    BackgroundSize, BorderRadius, BorderStyle, BoxShadow, ClipPathDecl, CornerRadius, CursorStyle,
     DeferredLength, DisplayMode, GradCoord, Gradient, GradientStop, OverflowMode, OverflowWrap,
     RadialExtent, RadialShape, ResolvedStyle, SafeSide, SliceInsets, TextAlign, TextDecoration,
     TextSecurity, TextWrap, TransformOrigin, ViewportLen, ViewportUnit, WhiteSpace, WordBreak,
@@ -37,6 +37,78 @@ pub fn parse_lp(s: &str) -> LengthPercentage {
         return LengthPercentage::length(v);
     }
     LengthPercentage::length(0.0)
+}
+
+/// 严格 `<length|%>` token 解析（clip-path 专用）：合法形 = 裸数字 / 数字px / 数字%，
+/// 垃圾返 None。`parse_lp` 对垃圾静默 `Length(0)`（宽松吞值），本函数补严格性——
+/// 值门与 apply_decl 共用同一解析器，静默 0 = 静默错渲染。
+fn parse_lp_strict(tok: &str) -> Option<LengthPercentage> {
+    let tok = tok.trim();
+    let num_part = tok
+        .strip_suffix("px")
+        .or_else(|| tok.strip_suffix('%'))
+        .unwrap_or(tok);
+    num_part.trim().parse::<f32>().ok()?;
+    Some(parse_lp(tok))
+}
+
+/// 解析 clip-path 值（fence 子集：`circle(<len-%> [at <len-%> <len-%>])` /
+/// `polygon(<x> <y>, <x> <y>, ...)`；`none` 由调用方处理）。None = 域外或语法
+/// 非法——ellipse()/inset()/closest-side|farthest-side/fill-rule 前缀/geometry-box
+/// 关键字等围栏外形态统一落 None。fence 值门借本函数判合法性（与运行时同一
+/// 真相源，parse_gradient 同款委托模式）。
+pub fn parse_clip_path(value: &str) -> Option<ClipPathDecl> {
+    let v = value.trim();
+    if let Some(inner) = v.strip_prefix("circle(").and_then(|s| s.strip_suffix(')')) {
+        return parse_circle_clip(inner.trim());
+    }
+    if let Some(inner) = v.strip_prefix("polygon(").and_then(|s| s.strip_suffix(')')) {
+        return parse_polygon_clip(inner.trim());
+    }
+    None
+}
+
+/// circle 子集：半径必显式（裸 `circle()` 围栏拒——CSS 缺省 closest-side 的冷门
+/// 语义不如响亮报错）；`at` 位置缺省 50% 50%（居心）。负半径非法（CSS 值域 [0,∞)）。
+fn parse_circle_clip(inner: &str) -> Option<ClipPathDecl> {
+    let tokens: Vec<&str> = inner.split_whitespace().collect();
+    let (radius_tok, pos) = match tokens.as_slice() {
+        [r] => (*r, None),
+        [r, kw, x, y] if kw.eq_ignore_ascii_case("at") => (*r, Some((*x, *y))),
+        _ => return None,
+    };
+    if radius_tok.starts_with('-') {
+        return None;
+    }
+    let radius = parse_lp_strict(radius_tok)?;
+    let (cx, cy) = match pos {
+        None => (
+            LengthPercentage::percent(0.5),
+            LengthPercentage::percent(0.5),
+        ),
+        Some((x, y)) => (parse_lp_strict(x)?, parse_lp_strict(y)?),
+    };
+    Some(ClipPathDecl::Circle { radius, cx, cy })
+}
+
+/// polygon 子集：点数 3..=16（下界 = 多边形最少顶点；上界 = 渲染 uniform 槽硬限）。
+/// fill-rule 前缀（nonzero/evenodd）不收——实现走 crossing number 奇偶判定，对
+/// 简单（非自交）多边形与 web nonzero 结果一致；自交多边形围栏不承诺。
+fn parse_polygon_clip(inner: &str) -> Option<ClipPathDecl> {
+    let mut points = Vec::new();
+    for pair in inner.split(',') {
+        let mut it = pair.split_whitespace();
+        let x = parse_lp_strict(it.next()?)?;
+        let y = parse_lp_strict(it.next()?)?;
+        if it.next().is_some() {
+            return None;
+        }
+        points.push((x, y));
+    }
+    if !(3..=16).contains(&points.len()) {
+        return None;
+    }
+    Some(ClipPathDecl::Polygon { points })
 }
 
 pub fn parse_dimension(s: &str) -> Dimension {
@@ -1748,6 +1820,23 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
                 style.overflow_y = m;
             }
             true
+        }
+        "clip-path" => {
+            // fence 子集 circle()/polygon()；none 清除。非法值 false（宽松吞值是
+            // 静默错渲染的入口——与 border-radius 同款拒法）。运行时 rematch 的
+            // class 规则重放走同一 arm（runtime CSS 通道免费收下）。
+            if value.trim() == "none" {
+                style.clip_path = None;
+                true
+            } else {
+                match parse_clip_path(value) {
+                    Some(d) => {
+                        style.clip_path = Some(d);
+                        true
+                    }
+                    None => false,
+                }
+            }
         }
         "overflow-x" => {
             // longhand：单轴 x。后于 shorthand apply 即覆盖（CSS 同 specificity 源序后写者胜）。

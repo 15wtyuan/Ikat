@@ -211,6 +211,7 @@ Base 标签按 tag 映射；控件/列表按 `role` 映射（`role` 优先于 ta
 | `aria-*` | WAI-ARIA 状态/属性（打包期校验 IdRef 关系） |
 | `data-*` | 自定义数据属性（透传，不做结构验证） |
 | `--*` | `--` 前缀属性（透传，可被 `[attr]` 选择器匹配；**不是** var() 解析来源——var 来源三模型见 §5.4：样式表规则 / 行内 `style` / 运行时 SetVar） |
+| `part` | 组件内部节点暴露给页面 `::part()` 选择器的名字（Web Components 同名机制，#57）。语义只对组件展开域内节点生效：页面级裸 `part` 属性可写但不参与 `::part()` 匹配（无 shadow 边界可穿）；`[part="x"]` 属性选择器**不**等价 `::part(x)`——前者按字面匹配任何节点，后者是穿墙通道 |
 
 ### 4.2 结构属性（影响类型/核心行为，Fence Gate 校验值域）
 
@@ -283,11 +284,13 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 **视觉**
 
-`opacity`, `box-shadow`, `pointer-events`, `transform`, `transform-origin`, `filter`
+`opacity`, `box-shadow`, `pointer-events`, `transform`, `transform-origin`, `filter`, `clip-path`
 
 > **transform 原点**：`transform-origin` 在围栏——`<length|%>` × 2 + 位置关键字（`left`/`center`/`right`/`top`/`bottom`；单值时 y 缺省 `center`）。缺省 `50% 50%`（= 元素几何中心）。百分比相对自身布局尺寸，**延迟解析**（存描述符、世界矩阵累计期按当帧尺寸解析）。绕非中心点旋转（连线、指针）直接声明 origin，不再需要「中点定位 + 换算」绕路。
 
 > **box-shadow 完整语法**：`[inset] <ox> <oy> [blur] [spread] <color>`，逗号分隔多层（括号深度感知切层）；`inset` 位置任意；至少 2 个数值（偏移）；负 blur 静默 clamp 为 0；层叠序按 CSS——先声明的画在最上。层数硬限：inset 最多 8 层、outer 最多 4 层（渲染层合成 id 的编码容量，超限层会撞相邻编码区错渲染）——超限整条声明打包期 `FenceBadCssValue`（inline 走 `apply_decl` 返 false、`<style>` 规则走共享值域门，单一真相源 = core 解析器）。
+
+- `clip-path`（**不继承**，#52 shape mask，fence 子集 = basic shapes 两形）：`none` / `circle(<length|%> [at <length|%> <length|%>])` / `polygon(<x> <y>, ...)`（3..=16 点，`%`/px）。circle 半径 `%` 按 `sqrt(w²+h²)/√2` 解析（CSS 精确语义——`circle(50%)` 在正方形盒恰内切）；polygon 点 `%` 各按宽/高。`at` 位置缺省 `50% 50%`（居心）。域外形态（`ellipse()` / `inset()` / `closest-side` / `farthest-side` / fill-rule 前缀 / geometry-box 关键字 / 裸 `circle()` / 负半径）→ `FenceBadCssValue`（单一真相源 = core `parse_clip_path`）。声明即 clipper：裁自身绘制 + 子树（与 overflow 独立，web 原义），命中测试同形（被裁区域点击穿透）。同元素 `overflow:hidden` + `clip-path` = 交集；`overflow:scroll/auto` + `clip-path` → `FenceClipPathScrollCombo` 硬错；裁剪链（overflow + clip-path 沿祖先链）深度 > 4 → `FenceClipChainTooDeep` 硬错（后端 clip 槽定长）。fill-rule 不收——实现走 crossing number，对简单（非自交）多边形与 web nonzero 一致。硬边语义（SDF/crossing，无羽化——soft clip 是 #113 deferred）。
 
 - `cursor`（**不继承**，#93）：值集 `auto` / `default` / `none` / `pointer`。桌面端指针 affordance 入口——`auto`（缺省）= UA 默认行为：hover 到 pressable 控件（button/tab/toggle/radio/slider/dropdown/option 与 `<a>` 链接）运行时出手型**意图**（0/1/2 数值经 `CursorIntentChanged` 交后端渲染；Unity driver 缺省渲染系统光标，手型贴图由消费侧 `SetCursorTexture` 注册——见 projection-layer.md §3.3），其余系统箭头（纯 runtime 决策，不经样式通道、无需作者声明）；命中细化到控件内文字/内联子后沿祖先链上溯宿主控件判定（悬停按钮文字同样手型），disabled/不可命中控件不给手型并截断。显式声明恒压 UA 行为——`pointer` 手型（标非控件可点区）、`default` 箭头（把可点控件压回箭头）、`none` 元素级隐藏指针（配合游戏自绘光标）。文本输入类（TextField 等）的 I-beam 暂不在 UA 默认内。预览侧浏览器原生支持 `cursor`，无单侧缺口。
 
@@ -306,7 +309,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 - **禁则（kinsoku）**：CJK 断行自动避头尾——行首不出句读/闭括号（`。，、；：？！）】」』…` 等），行尾不出开括号（`（【「『` 等），违规断点自动左/右移（悬挂标点不做）。
 - 文本控件（TextField/TextArea/NumberField）的空白语义冻结为 pre 系（空格/换行原样保留），换行开关仍尊重声明——空格折叠会破坏光标字节↔布局 1:1 映射（CSS UA 对 input/textarea 同为 pre 系）。
 
-**文本控件私有属性**（CSS 用伪元素表达，围栏无伪元素选择器，故平铺 prop；`None` = render 回退到缺省色）
+**文本控件私有属性**（CSS 用控件伪元素表达——`::placeholder`/`::selection` 一类控件伪元素不在围栏子集（唯一伪元素是 `::part`，见选择器节），故平铺 prop；`None` = render 回退到缺省色）
 
 - `caret-color`（继承，`::selection` 光标色；缺省回退 `color`）
 - `selection-background` / `selection-color`（`::selection` 选区背景/文字色；缺省蓝半透 / 白）
@@ -324,6 +327,8 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 **:nth-child(An+B|odd|even|N) 选择器**——参数化伪类，`<style>` 规则选择器接受。括号内 An+B 语法（`2n+1`/`2n`/`odd`/`even`/`<N>`）解析为 `NthChildExpr{a,b}`，命中条件 = 子序号 i 满足 `i = a*k + b`（1-based）。常配合 `animation` 简写实现错峰入场（delay 作简写第 2 个 time token，如 `.nav-card:nth-child(N){animation:fadeIn .4s .05s both}`——错峰单值也可用 `animation-delay` 长划单独声明）。语法越界（无括号/缺 `)`/坏参数）→ 选择器不匹配；组合子 `>` `+` `~` 仍越界（注意 `+`/`-` 在 `:nth-child(...)` 括号内是 An+B 合法语法，不判为组合子）。
 
 > **⚠️ 虚拟化列表禁止 `:nth-child`**：虚拟化 `<ul>`（`role=list`）的 parked slot 留挂 ul 子树（`display:none`），按 CSS 仍计入 child count。`:nth-child` 的序数包含 parked slot → item 序号不可控。用 item-index / `data-*` 属性 + 属性选择器替代（如 `[data-index="0"]`）。
+
+**::part(name) 选择器（#57）**——唯一进围栏的伪元素：页面规则穿组件内容墙命中组件内部带 `part="name"` 的节点。语法 `prefix::part(name)`：compound 前缀（class/tag/伪类等）匹配**组件 host**（host 归页面域，可带 class/id），`::part(name)` 匹配 host 展开子树内带该 part 属性的**目标节点**。约束：必须位于最后一个 compound 的结尾（伪元素后不可再缀，`X::part(a) Y` 越界）；**一层不递归**——嵌套组件内部节点的 host 是嵌套组件自身，外层 `::part()` 不下钻（跨层要组件作者显式中转，`exportparts` 不在子集）；specificity 按 web（part 名属性级 + 伪元素元素级，`.card::part(title)` = (0,2,1)）。运行时注入（`StyleSheet.Add`）同语法可用——运行时规则本就字面穿墙，`::part` 在该通道只是普通匹配臂。预览（浏览器平铺 DOM 无 shadow）由 preview server 把 `::part(n)` 重写为平铺等价 `[part="n"]` 后代选择器，保真不缺样式。
 
 **溢出**
 
@@ -571,6 +576,8 @@ CSS 自定义属性 `--x` 与 `var()` 引用按 web 语义收窄进围栏。**�
 | `FenceUnknownCssProp` | CSS 属性名不在围栏中 |
 | `FenceBadCssValue` | CSS 值解析失败或不在允许的关键字域内 |
 | `FenceBadAttrValue` | 结构属性值不在允许的枚举域内 |
+| `FenceClipPathScrollCombo` | `overflow:scroll/auto` 与 `clip-path` 同元素（#52）——shape 裁滚动视口无清晰语义，硬拒 |
+| `FenceClipChainTooDeep` | 裁剪链（overflow + clip-path 沿祖先链）深度 > 4（#52）——后端 clip uniform 槽 4 组定长 |
 | `DuplicateId` | 同一模板作用域内 ID 重复 |
 | `UnclosedTag` | 标签未闭合 |
 | `InvalidContentModel` | 子元素不满足父元素的 ContentModel |

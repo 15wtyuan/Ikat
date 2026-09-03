@@ -221,21 +221,50 @@ fn prune_subtrees(scene: &Scene, roots: &[NodeId], pruned: &mut std::collections
     }
 }
 
-/// clip 表条目：context_id（mask_context>0 的层级）→ 该层级的交集绝对 design rect。
-///
-/// 由 `batch::assign_sort_keys` 在 DFS 时产；`context_id` 与 RenderNode 的
-/// `mask_context.0` 对齐（被该 clip 约束的节点引用同一 id）。
-///
-/// `radii` = 圆角裁剪的四角半径对 `(h, v)`，序 [TL, TR, BR, BL]（与
-/// `BorderRadius::as_corners` 同约定）。`None` = 直角裁剪（AABB step）；
-/// `Some` = 圆角 SDF 裁剪（shader CLIPPED_ROUNDED 变体）。仅当 clipper 节点
-/// 自身 `border_radius` 非全零时填 `Some`——祖先链的圆角不传播到子层级的 clip
-/// （每层 clip 只反映该层 clipper 的形状）。
+/// overflow 裁剪盒（box-local）：`(w, h)` + clipper 自身圆角。`radii` 全零折
+/// `None`（直角 AABB 测试，零开销快路）。
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipRectSpec {
+    pub w: f32,
+    pub h: f32,
+    pub radii: Option<[(f32, f32); 4]>,
+}
+
+/// 活跃裁剪链深度上限 = 后端 clip uniform 槽组数（4）。fence 打包期拒 authored
+/// 超深嵌套；运行时 CSS 通道理论可越界——dfs 检出时 warn-once 丢弃溢出 clipper
+/// 的 entry（选「少裁」不「全裁」：全裁是黑屏级故障，少裁是渐进退化）。
+pub const MAX_CLIP_CHAIN: usize = 4;
+
+/// clip 表条目：一条活跃裁剪（box-local 几何 + clipper 局部系逆变换）。
+///
+/// 多 entry 语义（web clip 栈模型，#52）：后代的有效裁剪 = 沿祖先链**所有**
+/// entry 逐条应用取交集，**不坍缩**——旧模型靠 rect∩rect 恰为 rect 才能坍缩成
+/// 单 rect，shape 进来后破产（圆∩矩形不是任何 basic shape）。同一祖先 entry
+/// 因此会在后代的每个 context 里重复出现（数据量 = Σ链长，深度 ≤
+/// [`MAX_CLIP_CHAIN`] 有界）。`context_id` 与 RenderNode 的 `mask_context.0`
+/// 对齐（被该组裁剪约束的节点引用同一 id）。
+///
+/// 几何存 clipper **box-local** 坐标（(0,0) = 裁剪器 border box 左上，px）；
+/// `inv_frame` = clipper 世界矩阵逆。消费端（shader / hit gate）把点映回
+/// clipper 局部系再测形状——共享祖先的 transform/滚动在映射中自动消解
+/// （旧模型的 scroll_offset 补偿随之退役）；clipper **自身** transform 旋转时
+/// 裁剪形随之旋转（web 语义：clip 定义在裁剪器局部系，预览一致性的硬要求）。
+///
+/// `rect`（Some = overflow 裁剪生效）与 `shape`（clip-path，`ClipShape::None`
+/// = 无）独立并存：同元素 `overflow:hidden` + `clip-path` = 两条测试都过
+/// （web 原义，交集）。`radii` 仅随 overflow 裁剪透传（border-radius 裁后代
+/// 以 overflow 为前提，CSS 语义），且**随 entry 传播到后代 context**——祖先
+/// 圆角裁后代角（web 行为；旧「祖先链圆角不传播」限制随多 entry 模型移除）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClipEntry {
     pub context_id: u32,
-    pub rect: Rect,
-    pub radii: Option<[(f32, f32); 4]>,
+    /// clipper 世界矩阵逆（Affine2 六元组：a b c d tx ty）。
+    pub inv_frame: crate::transform::Affine2,
+    /// overflow 裁剪盒（box-local）。None = 无 rect 测试——纯 clip-path clipper
+    /// 不裁到 border box（shape 可出框，CSS clip-path 不隐含盒裁剪）。
+    pub rect: Option<ClipRectSpec>,
+    /// clip-path 形状（box-local，clipper 尺寸已解析）。
+    pub shape: crate::style::resolved::ClipShape,
 }
 
 /// 一帧渲染数据：节点 + clip 表（FFI blob 同帧 emit）。
@@ -246,6 +275,10 @@ pub struct ClipEntry {
 pub struct FrameData {
     pub nodes: Vec<RenderNode>,
     pub clips: Vec<ClipEntry>,
+    /// 帧内产生的运行时警告（如 clip 链超深丢 clipper）——
+    /// `Stage::tick_and_render` 归集进 `Scene::warnings`（宿主经
+    /// `ikat_stage_take_warnings` 拉取）。
+    pub warnings: Vec<String>,
 }
 
 /// 构造合成 scrollbar thumb RenderNode。
@@ -875,7 +908,8 @@ pub fn build_render_nodes_cached(
     // pre-merge 序号；merge_meshes 后空 div 的 RenderNode entry 会被吃掉，但 sort_keys
     // 快照保留供 NativeHost FFI 查询。
     let mut sort_keys: Vec<u32> = vec![0u32; scene.nodes.capacity() + 1];
-    let clips = batch::assign_sort_keys(scene, &mut nodes, &id_to_pos, &mut sort_keys);
+    let (clips, clip_warns) =
+        batch::assign_sort_keys(scene, &mut nodes, &id_to_pos, &mut sort_keys);
     // 跨页 text 子页 sort_key 传播：assign_sort_keys 只认识真 scene 节点（经 id_to_pos 映射），
     // 不认识合成子页。此处把子页 sort_key 设为 primary.sort_key + page_idx，并把后续真节点
     // 的 sort_key 后移子页个数，保持单调连续。
@@ -1026,7 +1060,15 @@ pub fn build_render_nodes_cached(
         };
         new_hashes.insert(rn.node_id, (hh, ph));
     }
-    (FrameData { nodes, clips }, new_hashes, sort_keys)
+    (
+        FrameData {
+            nodes,
+            clips,
+            warnings: clip_warns,
+        },
+        new_hashes,
+        sort_keys,
+    )
 }
 
 /// 合成 node_id：为跨页 text 子页生成区别于主节点的 id。

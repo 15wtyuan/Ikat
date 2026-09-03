@@ -868,6 +868,15 @@ impl Stage {
         }
     }
 
+    /// 取走节点死亡通知队列（RegisterComponent OnDisconnected 的数据源；drain 语义：
+    /// 返回全部并清空，顺序 = 释放顺序）。任何删除路径（remove_node / list 槽位换绑 /
+    /// 内部剪枝）产生的死亡都在其中。无 scene → 空表。
+    pub fn drain_removed_nodes(&mut self) -> Vec<NodeId> {
+        self.scene
+            .as_mut()
+            .map_or_else(Vec::new, |s| s.take_removed_nodes())
+    }
+
     /// scene 不存在则建空骨架（首次 create_root/create_node 调用时初始化）。
     /// scene 初始由 create_root 建（load_package 不建 scene）。
     /// 多次调用幂等（已存在 scene → no-op）。`pub(crate)` 供集成测试直接初始化场景
@@ -1540,6 +1549,9 @@ impl Stage {
         drop(host_ref);
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
+        // 帧内警告（clip 链超深等）归集进场景警告通道（宿主经 take_warnings 拉取）。
+        let mut frame = frame;
+        scene.warnings.append(&mut frame.warnings);
         frame
     }
 

@@ -44,6 +44,22 @@ state-selector transform:
 [role="switch"][aria-checked="true"] .knob { transform: translateX(20px); }
 ```
 
+`tree` has no framework slot either — state lives in CSS via the
+synthesized `aria-selected` / `aria-expanded` / `aria-level` attributes
+(top item = 1; use it for indentation). Put every label (branch and
+leaf) in a child `.row` element: a branch hosts its nested items as
+block children, so a bare text label trips `FenceMixedInlineBlock`, and
+a bare label misses the hover/selected/indent hooks anyway. Hiding
+collapsed children is the runtime's job, never author `display:none`:
+
+```css
+[role="treeitem"] { display: flex; flex-direction: column; }
+[role="treeitem"] .row { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 8px 12px; }
+[role="treeitem"][aria-selected="true"] .row { background: #2e2e42; color: #7c5cfc; }
+[role="treeitem"][aria-expanded="true"] .chev { transform: rotate(90deg); }
+[role="treeitem"][aria-level="2"] .row { padding-left: 32px; }
+```
+
 ## Decorated frames (background image behind foreground content)
 
 Rings, campfire circles, portrait frames — the most common trigger of the
@@ -61,6 +77,38 @@ image and the foreground content are both flex items:
 .actor-frame { position: relative; display: flex; align-items: center; justify-content: center; }
 .actor-frame > img { position: absolute; }   /* stretch behind */
 ```
+
+## Shape masks (circular avatars, diamond/hexagon slots)
+
+Non-rectangular hard-edged clipping is `clip-path` with the fenced basic
+shapes — `circle()` and `polygon()`. Declaring it clips the element's own
+paint **and** its subtree, and hit testing follows the shape (clipped-away
+corners click through), matching browsers:
+
+```css
+.avatar { clip-path: circle(50%); }                    /* inscribes a square box */
+.slot-diamond {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+.slot-hex {
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+```
+
+Notes:
+- `circle(50%)` resolves its percentage against the box diagonal
+  (`sqrt(w^2+h^2)/sqrt(2)`), so on a square box it is the inscribed circle —
+  the usual avatar idiom. Position with `at`: `circle(30px at 25% 50%)`.
+- `polygon()` percentages resolve against width/height per axis; 3..=16
+  points. No `fill-rule` — keep polygons simple (non-self-intersecting).
+- Masks stack by intersection with ancestor `overflow:hidden` (like nested
+  browser clips). Combos that are build errors: `clip-path` on a scroll
+  container (`overflow:scroll/auto`), and clip chains nesting more than 4
+  clippers.
+- Runtime theming works: swap the mask at runtime via a class rule
+  (`StyleSheet.Add` with `clip-path`, or `clip-path: var(--mask)` + `SetVar`).
+- Edges are hard (no feathering). Soft/faded masks are a separate deferred
+  capability, not expressible today.
 
 ## Viewport panning (scroll containers, not Drag events)
 
@@ -104,6 +152,23 @@ The list virtualizes automatically — slot count stays constant regardless
 of `ItemCount`. Style rows via class selectors scoped under the list; do
 not use `:nth-child` here (parked slots skew it), use `[data-index]`.
 
+Mixed row shapes need multiple blueprints — give each `<template>` an
+`id`, declare them all under the list, and pick per item in game code
+(no auto-collection; see the runtime skill's api-reference for the
+strict selector semantics):
+
+```html
+<div role="list" id="bag-items">
+  <template id="row-tpl">…</template>
+  <template id="row-tpl-wide">…</template>
+</div>
+```
+```csharp
+var normal = list.GetTemplate("row-tpl");
+var wide = list.GetTemplate("row-tpl-wide");
+list.TemplateSelector = i => (i % 10 == 0) ? wide : normal;
+```
+
 ## Staggered entrance
 
 ```css
@@ -129,3 +194,63 @@ share tokens, author one external CSS and reference it from both sides
 <!-- component: ui/game/components/actor-card.html -->
 <link rel="stylesheet" href="../../../shared/tokens.css">
 ```
+
+## Component behavior in C# (RegisterComponent)
+
+HTML composes a component's *structure* (the `components/` file); C#
+owns its *behavior* through a registered subclass — no wrapper-div +
+`TryGet` scavenging:
+
+```csharp
+class ItemCard : CustomElement
+{
+    public ItemCard(UIContext ctx, ulong id) : base(ctx, id) { }
+    protected override void OnConnected()
+    {
+        // derived ctor has fully run by now; internals are queryable here
+        Get<Button>("equip").Clicked += OnEquip;
+    }
+    protected override void OnDisconnected() { /* release caches, counters */ }
+    void OnEquip() { /* ... */ }
+}
+// during setup, before the first Instantiate:
+ctx.RegisterComponent("item-card", (c, id) => new ItemCard(c, id));
+```
+
+Every `<item-card>` host — page-static or dynamically instantiated —
+constructs `ItemCard` and fires `OnConnected` (after the ctor; eager
+at `Instantiate`, or on first observation for lazily materialized
+wrappers). `Dispose` and Rust-side removals (list slot rebinding,
+external `remove_node`) fire `OnDisconnected` (override for cleanup;
+the wrapper is `IsDisposed` afterwards). Registration must precede
+instantiate — late registration only affects future constructions;
+re-registering a tag throws `UIContractException`. The factory
+delegate keeps construction reflection-free (IL2CPP/AOT-safe). Full
+contract: api-reference "Custom elements".
+
+## Styling component internals from the page (::part)
+
+Component style walls keep page CSS out of component internals. When a
+page needs to adjust one visual inside a component the author did not
+parameterize, mark the node with `part` in the component file and
+target it with `::part()` in the page:
+
+```html
+<!-- component: ui/game/components/actor-card.html -->
+<span class="ac-name" part="name">...</span>
+
+<!-- page: ui/game/main.html -->
+<style>
+  /* only the actor cards in the vip section get golden names */
+  .vip .actor-card::part(name) { color: #f39c12; }
+</style>
+```
+
+Semantics: the compound before `::part` matches the component **host**
+(give it a class in page markup); `::part(name)` matches nodes with
+`part="name"` inside that host — one level only (nested components'
+internals are not reachable; the component author must relay them).
+Prefer custom properties (`--*` + `var()`) for theme-wide tokens and
+`::part()` for one-off local overrides — `::part()` is the sanctioned
+wall-piercing channel for page rules; do not drop the prefix (a bare
+`::part(name)` hits that part in every component).

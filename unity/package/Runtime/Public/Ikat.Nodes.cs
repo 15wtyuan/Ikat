@@ -2775,9 +2775,15 @@ namespace Ikat
     // 在拼接位消费（产物无 Slot 节点）。host 是硬墙作用域——投影内容归组件域（Get/Query 不穿透），
     // host 自身归页面域。组件注册 = 打包器 components/ 目录（Package 注册表承担
     // customElements.define() 角色）。
+    //
+    // 类绑定（RegisterComponent）：用户经 ctx.RegisterComponent("my-widget", factory) 注册
+    // 派生子类后，NodeFactory 对该 tag 构造用户类型（行为接线进 typed 子类，替代 wrapper div +
+    // TryGet 绕法）。生命周期回调 OnConnected/OnDisconnected 见下。
     public unsafe class CustomElement : Container
     {
-        internal CustomElement(UIContext ctx, ulong id) : base(ctx, id) { }
+        // protected internal：NodeFactory（本程序集）与用户子类（RegisterComponent 工厂
+        // 委托里 new）都可链本构造。
+        protected internal CustomElement(UIContext ctx, ulong id) : base(ctx, id) { }
 
         /// <summary>
         /// 原始 hyphen 标签名（`<game-item-card>` → "game-item-card"；pkg v35 展开保留字面量，
@@ -2794,6 +2800,27 @@ namespace Ikat
                     (hp, buf, cap, len) => Native.ikat_stage_get_custom_tag(hp, _id, buf, cap, len));
             }
         }
+
+        /// <summary>
+        /// wrapper 构造完成（派生类 ctor 已跑完）后由投影层回调——组件接线点（订阅事件 /
+        /// 取内部节点引用 / 初始化状态）。所有构造路径都触发：instantiate（eager 物化）、
+        /// 懒物化（Parent/Children/Get 访问）、事件预物化。由 NodeFactory 在工厂委托
+        /// 返回后调用——不在 ctor 链内调虚方法（派生字段未初始化）。
+        /// </summary>
+        protected virtual void OnConnected() { }
+
+        /// <summary>
+        /// 节点死亡时回调。两条路径汇入：用户调 Dispose（同步，回调时 core 节点已删）；
+        /// Rust 侧删除（list 槽位换绑淘汰克隆 / 外部 remove_node / 内部剪枝——经
+        /// UIContext.PumpRemovedNodes 帧泵，宿主每帧驱动）。回调后 wrapper 标 _disposed，
+        /// 后续公共读抛 ObjectDisposedException。重挂（再 instantiate 同 tag）= 新实例
+        /// + 新 OnConnected——身份缓存不复活旧对象。
+        /// </summary>
+        protected virtual void OnDisconnected() { }
+
+        // 投影层桥：protected virtual 不便跨可见性直调，fire 入口收口在这两桥。
+        internal void FireConnected() => OnConnected();
+        internal void FireDisconnected() => OnDisconnected();
     }
 
     // TabList = <div role="tablist"> 的 typed 投影（WAI-ARIA tablist 容器，持若干 <button role=tab> 子）。
@@ -4030,7 +4057,10 @@ namespace Ikat
             if (rootId == Node.RootSentinel)
                 throw new UIPackageException(
                     "clone_subtree failed: invalid source node / no scene created");
-            return (Container)ctx._registry.GetOrCreate(rootId);
+            Container root = (Container)ctx._registry.GetOrCreate(rootId);
+            // 同 DoInstantiate：eager 物化子树内注册组件（模板根自身已路由）。
+            ctx.MaterializeCustomElements(rootId);
+            return root;
         }
 
         /// <summary>
@@ -4050,7 +4080,11 @@ namespace Ikat
                 throw new UIPackageException(
                     $"instantiate failed: pkg='{pkg}' comp='{path}' " +
                     "(package not loaded / component not found / no scene created)");
-            return (Container)ctx._registry.GetOrCreate(rootId);
+            Container root = (Container)ctx._registry.GetOrCreate(rootId);
+            // eager 物化注册组件（RegisterComponent 契约：OnConnected 在实例化时跑，
+            // 不等首次访问）——根自身已由上行 GetOrCreate 路由。
+            ctx.MaterializeCustomElements(rootId);
+            return root;
         }
     }
 
@@ -4339,6 +4373,12 @@ namespace Ikat
         // 首次访问构造并挂本 context（#11 已接线 FFI）。
         StyleSheet _styleSheet;
 
+        // 组件类绑定注册表（RegisterComponent）：custom tag → wrapper 工厂。显式委托
+        // 构造零反射（IL2CPP/AOT 安全——反射构造泛型实例是经典 AOT 雷）。注册只影响
+        // 未来构造（NodeFactory 路由查表）；已构造 wrapper 不追改（身份缓存不可破坏）
+        // ——注册时序约定 setup 期（instantiate 前）。公共 API 不见本字段。
+        internal readonly Dictionary<string, Func<UIContext, ulong, CustomElement>> _componentFactories = new();
+
         // 回调是 C# 闭包，core 的 C ABI 存不了——调度器整体住在投影层，PumpLogic 由
         // IkatHost.Step 帧头泵（CollectInput 后、FlushPendingWrites 前）：回调内改
         // Style/数据经既有 flush seam 过桥，本帧 solve 生效（零延迟语义）。
@@ -4372,6 +4412,84 @@ namespace Ikat
         {
             _registry.FlushDirtyStyles();
             _registry.FlushDirtyTransforms();
+        }
+
+        /// <summary>
+        /// 注册组件类绑定：custom tag（hyphen 标签，如 "my-widget"）→ wrapper 工厂。
+        /// 此后实例化/物化到该 tag 时，工厂构造用户派生的 CustomElement 子类（派生
+        /// ctor 完整跑完后回调 <see cref="CustomElement.OnConnected"/>——组件行为接线
+        /// 进 typed 子类，替代 wrapper div + TryGet 绕法）。fgui extensionCreator 等价。
+        ///
+        /// 工厂是显式委托（AOT 零反射）：<c>(c, id) => new MyWidget(c, id)</c>；
+        /// MyWidget 链 protected internal 基类构造。重复注册同 tag / null/空 tag /
+        /// null 工厂 → <see cref="UIContractException"/>（fail loud——静默覆盖藏接线错）。
+        /// 注册只影响未来构造的 wrapper：已构造实例不追改（身份缓存不可破坏），约定
+        /// 在 setup 期（instantiate 前）注册。
+        /// </summary>
+        public void RegisterComponent(string tag, Func<UIContext, ulong, CustomElement> factory)
+        {
+            if (string.IsNullOrEmpty(tag))
+                throw new UIContractException("RegisterComponent: tag must be non-empty");
+            if (factory == null)
+                throw new UIContractException($"RegisterComponent('{tag}'): factory must be non-null");
+            if (_componentFactories.ContainsKey(tag))
+                throw new UIContractException(
+                    $"RegisterComponent: tag '{tag}' already registered (re-register hides wiring bugs; fail loud)");
+            _componentFactories[tag] = factory;
+        }
+
+        /// <summary>
+        /// 节点死亡帧泵：取走 core 死亡通知队列（任何删除路径——外部 remove_node /
+        /// list 槽位换绑淘汰克隆 / 内部剪枝），evict 对应 C# wrapper 并对组件派生类
+        /// 回调 <see cref="CustomElement.OnDisconnected"/>。顺序 = 释放顺序（叶先于
+        /// 祖先）。IkatHost.Step 帧头调（CollectInput 后、PumpLogic 前——已断开组件
+        /// 本帧不再跑 OnUpdate）；headless 测试手动调（同 PumpLogic 模式）。
+        ///
+        /// 无缓存 wrapper 的死亡静默跳过：用户 C# Dispose 已同步回调过（双重通知的
+        /// 天然去重），list 换绑 churn 的大批无 wrapper 克隆 id 同理。非组件 wrapper
+        /// 顺带 evict + 标 _disposed——死亡变显式（后续读抛 ObjectDisposedException，
+        /// 不再是死 id 静默打 FFI）。
+        /// </summary>
+        public void PumpRemovedNodes()
+        {
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            nuint len;
+            ulong* p = Native.ikat_stage_drain_removed_nodes(h, &len);
+            if (p == null) return;
+            for (nuint i = 0; i < len; i++)
+                _registry.Remove(p[i]);
+        }
+
+        /// <summary>
+        /// DFS 子树物化 CustomElement wrapper（eager 构造，RegisterComponent 契约的
+        /// 「实例化时」半边）：非组件节点不物化（保持懒物化内存画像——每节点一次
+        /// get_node_kind 查询是 instantiate 期一次性成本，非每帧）。instantiate 根
+        /// 自身由调用方 GetOrCreate 路由。嵌套组件一并物化（递归全深）。
+        /// </summary>
+        internal void MaterializeCustomElements(ulong rootId)
+        {
+            StageHandle* h = (StageHandle*)_stage.ToPointer();
+            int count = Native.ikat_stage_get_child_count(h, rootId);
+            if (count <= 0) return;
+            ulong[] buf = new ulong[count];
+            int written;
+            fixed (ulong* bp = buf)
+                written = Native.ikat_stage_get_children(h, rootId, bp, (nuint)buf.Length);
+            if (written < 0) return; // 节点刚被并发移除（理论单线程不达），防御早退
+            if (written > buf.Length) written = buf.Length;
+
+            for (int i = 0; i < written; i++)
+            {
+                ulong childId = buf[i];
+                byte kind = 0xFF;
+                if (Native.ikat_stage_get_node_kind(h, childId, &kind) == 0
+                    && (NodeKind)kind == NodeKind.CustomElement)
+                {
+                    // GetOrCreate → NodeFactory → 注册表路由 → 派生类构造 + OnConnected
+                    _registry.GetOrCreate(childId);
+                }
+                MaterializeCustomElements(childId);
+            }
         }
 
 

@@ -12,10 +12,14 @@
 //! - **W2**：`background-image` 有但 `background-size` 缺省。CSS 默认 `auto`（原始尺寸），
 //!   Ikat 默认 `stretch`（拉伸填满）→ 预览和运行时尺寸不同。提醒作者显式声明
 //!   `background-size`。
+//! - **E1**（error，#52）：`overflow:scroll/auto` 与 `clip-path` 同元素——shape 裁滚动
+//!   视口无清晰语义，硬拒。
+//! - **E2**（error，#52）：裁剪链深度 > 4（overflow 裁剪器 + clip-path 裁剪器沿祖先链
+//!   总数）——后端 clip uniform 槽 4 组定长，authored 超深在此拒。
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
-use ikat_core::style::resolved::{BackgroundSize, BorderStyle, ResolvedStyle};
+use ikat_core::style::resolved::{BackgroundSize, BorderStyle, OverflowMode, ResolvedStyle};
 
 /// 把 taffy `LengthPercentage` 解析为 px。
 ///
@@ -103,9 +107,59 @@ pub fn check_consistency(
                 line_map.source_location(node.span.start, file.to_string()),
             ));
         }
+
+        // E1：scroll 容器上声明 clip-path——shape 裁滚动视口无清晰语义（scroll 视口
+        // 裁剪是矩形 + scroll_pos 平移）。web 上合法但我们不做：响亮拒优于静默忽略。
+        // overflow:hidden + clip-path 合法（两条测试取交集，web 原义）。
+        if s.clip_path.is_some()
+            && (s.overflow_x == OverflowMode::Scroll || s.overflow_y == OverflowMode::Scroll)
+        {
+            diags.push(Diagnostic::error(
+                DiagnosticCode::FenceClipPathScrollCombo,
+                "clip-path on a scroll container (overflow:scroll/auto) is not supported — the scroll viewport clip is a rect translated by scroll position and has no shape equivalent. Use overflow:hidden if you only need clipping, or clip the content inside the scroller.".to_string(),
+                line_map.source_location(node.span.start, file.to_string()),
+            ));
+        }
+
+        // E2：裁剪链深度。clipper 判定与 core dfs_mask 同源（overflow 非 Visible
+        // 或 clip-path 声明）；沿祖先链计数超上限即拒（后端 clip uniform 槽定长）。
+        // 链从本元素自身起算（自身若是 clipper 也占一槽）。
+        if s.clip_path.is_some()
+            || s.overflow_x != OverflowMode::Visible
+            || s.overflow_y != OverflowMode::Visible
+        {
+            let mut depth = 1usize;
+            let mut cur = node.parent;
+            while let Some(pid) = cur {
+                let pnode = &tree.nodes[pid.0];
+                let is_clipper = styles.get(pid.0).is_some_and(|ps| {
+                    ps.clip_path.is_some()
+                        || ps.overflow_x != OverflowMode::Visible
+                        || ps.overflow_y != OverflowMode::Visible
+                });
+                if is_clipper {
+                    depth += 1;
+                }
+                cur = pnode.parent;
+            }
+            if depth > MAX_CLIP_CHAIN {
+                diags.push(Diagnostic::error(
+                    DiagnosticCode::FenceClipChainTooDeep,
+                    format!(
+                        "clip chain too deep: {} nested clippers (overflow + clip-path) along the ancestor chain — the backend reserves clip slots for at most {} levels. Flatten a layer or remove one clip.",
+                        depth, MAX_CLIP_CHAIN
+                    ),
+                    line_map.source_location(node.span.start, file.to_string()),
+                ));
+            }
+        }
     }
     diags
 }
+
+/// 裁剪链深度上限——与 core `render::MAX_CLIP_CHAIN` 同值（后端 clip uniform 槽
+/// 4 组定长）。双处常量由 fence↔core 测试对账（改一处须同步另一处）。
+const MAX_CLIP_CHAIN: usize = 4;
 
 #[cfg(test)]
 mod tests {
@@ -224,5 +278,50 @@ mod tests {
 
         s.background_size = BackgroundSize::Cover;
         assert!(!is_default_bg_size(&s), "Cover 非默认");
+    }
+
+    /// E1（#52）：overflow:scroll/auto 与 clip-path 同元素 → 硬错。
+    #[test]
+    fn e1_clip_path_on_scroll_container_errors() {
+        let html = r#"<div style="overflow:scroll;clip-path:circle(50%)"></div>"#;
+        let r = parse_template(html, "t.html");
+        assert!(
+            has_diag(&r, DiagnosticCode::FenceClipPathScrollCombo),
+            "scroll + clip-path 应发 E1 error: {:?}",
+            r.diagnostics
+        );
+        // overflow:hidden + clip-path 合法（交集原义）——不发 E1。
+        let ok = parse_template(
+            r#"<div style="overflow:hidden;clip-path:circle(50%)"></div>"#,
+            "t.html",
+        );
+        assert!(
+            !has_diag(&ok, DiagnosticCode::FenceClipPathScrollCombo),
+            "hidden + clip-path 合法"
+        );
+    }
+
+    /// E2（#52）：裁剪链深度 > 4 → 硬错；== 4 合法。
+    #[test]
+    fn e2_clip_chain_depth_gate() {
+        let deep = r#"
+            <div style="overflow:hidden"><div style="overflow:hidden">
+            <div style="overflow:hidden"><div style="overflow:hidden">
+            <div style="clip-path:circle(50%)"></div></div></div></div></div>"#;
+        let r = parse_template(deep, "t.html");
+        assert!(
+            has_diag(&r, DiagnosticCode::FenceClipChainTooDeep),
+            "5 层裁剪链应发 E2 error: {:?}",
+            r.diagnostics
+        );
+        let four = r#"
+            <div style="overflow:hidden"><div style="overflow:hidden">
+            <div style="clip-path:circle(50%)"><div style="overflow:hidden">
+            </div></div></div></div>"#;
+        let ok = parse_template(four, "t.html");
+        assert!(
+            !has_diag(&ok, DiagnosticCode::FenceClipChainTooDeep),
+            "4 层合法"
+        );
     }
 }

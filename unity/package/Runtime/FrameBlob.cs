@@ -223,41 +223,66 @@ namespace Ikat
         }
 
         /// clip 表 entry 数（context>0 入表）。无 mask scene 恒为 0。
-        /// clip 表段布局：clip_count(u32) + entries[count × {ctx,x,y,w,h + 4×(rx,ry) 各 f32} = 52B/entry]。
+        /// clip 表段布局（多 entry，#52）：clip_count(u32) + entries[count × 92B] + poly_arena。
+        /// entry：ctx u32 | flags u32 | inv_frame 6×f32 | rect w,h | radii 8×f32 |
+        /// circle 3×f32 | poly_count u32 | poly_off u32（arena 内字节偏移）。
         public int ClipCount => ClipTableLen >= 4 ? (int)ReadU32(ClipTableOff) : 0;
 
-        /// 读某 clip context 的 design rect（绝对，y-down）+ 四角圆角半径。
-        /// entry 布局：ctx,x,y,w,h 各 4B + radii 4×(rx,ry) 8×f32 = 52B/entry。
-        /// mask_context==0 永不入表（无裁剪）；未找到 ctx → found=false（调用方跳过 SetClipBox）。
-        /// radii 全零 → cornerRadius=0（调用方走 CLIPPED 直角变体）；非全零 → 走 CLIPPED_ROUNDED SDF。
-        public bool ClipRect(uint ctx, out float x, out float y, out float w, out float h,
-                             out float cornerRadius)
+        /// 读某 clip context 的全部链 entry（多 entry 交集语义：该 ctx 的有效裁剪 =
+        /// 链上全部 entry 逐条测试全过）。mask_context==0 永不入表；空表 = 无该 ctx
+        /// entry（调用方跳过 clip uniform 设置）。inv_frame 是 clipper 世界（design
+        /// 空间）矩阵逆——fragment design 坐标经它映回 clipper box-local
+        /// （(0,0) = border box 左上）再测形状。
+        public System.Collections.Generic.List<ClipEntryView> ReadClipEntries(uint ctx)
         {
+            var list = new System.Collections.Generic.List<ClipEntryView>();
             int count = ClipCount;
-            int p = ClipTableOff + 4;   // 跳过 clip_count
+            int entriesEnd = ClipTableOff + 4 + count * 92;
+            int p = ClipTableOff + 4;
             for (int i = 0; i < count; i++)
             {
                 if (ReadU32(p) == ctx)
                 {
-                    x = ReadF32(p + 4);
-                    y = ReadF32(p + 8);
-                    w = ReadF32(p + 12);
-                    h = ReadF32(p + 16);
-                    // MVP 统一半径：取四角 (rx,ry) 的最小值（非均匀 SDF 留后续）。
-                    float tlx = ReadF32(p + 20), tly = ReadF32(p + 24);
-                    float trx = ReadF32(p + 28), try_ = ReadF32(p + 32);
-                    float brx = ReadF32(p + 36), bry = ReadF32(p + 40);
-                    float blx = ReadF32(p + 44), bly = ReadF32(p + 48);
-                    float minRx = Mathf.Min(Mathf.Min(tlx, trx), Mathf.Min(brx, blx));
-                    float minRy = Mathf.Min(Mathf.Min(tly, try_), Mathf.Min(bry, bly));
-                    cornerRadius = Mathf.Min(minRx, minRy);
-                    return true;
+                    var e = new ClipEntryView();
+                    uint flags = ReadU32(p + 4);
+                    e.HasRect = (flags & 0b1) != 0;
+                    e.HasRadii = (flags & 0b10) != 0;
+                    e.HasShape = (flags & 0b100) != 0;
+                    e.ShapeKind = (int)((flags >> 8) & 0xFF);   // 0=circle 1=polygon
+                    // inv_frame：a b c d tx ty（core Affine2 六元组）。
+                    e.A = ReadF32(p + 8); e.B = ReadF32(p + 12);
+                    e.C = ReadF32(p + 16); e.D = ReadF32(p + 20);
+                    e.Tx = ReadF32(p + 24); e.Ty = ReadF32(p + 28);
+                    e.W = ReadF32(p + 32); e.H = ReadF32(p + 36);
+                    // radii 序 [TL, TR, BR, BL] 各 (rx, ry)。
+                    e.RadiiTlTr = new UnityEngine.Vector4(
+                        ReadF32(p + 40), ReadF32(p + 44), ReadF32(p + 48), ReadF32(p + 52));
+                    e.RadiiBrBl = new UnityEngine.Vector4(
+                        ReadF32(p + 56), ReadF32(p + 60), ReadF32(p + 64), ReadF32(p + 68));
+                    e.CircleCx = ReadF32(p + 72);
+                    e.CircleCy = ReadF32(p + 76);
+                    e.CircleR = ReadF32(p + 80);
+                    int polyCount = (int)ReadU32(p + 84);
+                    int polyOff = (int)ReadU32(p + 88);
+                    if (polyCount > 0)
+                    {
+                        e.Poly = new UnityEngine.Vector2[polyCount];
+                        int q = entriesEnd + polyOff;
+                        for (int k = 0; k < polyCount; k++)
+                        {
+                            e.Poly[k] = new UnityEngine.Vector2(ReadF32(q), ReadF32(q + 4));
+                            q += 8;
+                        }
+                    }
+                    else
+                    {
+                        e.Poly = System.Array.Empty<UnityEngine.Vector2>();
+                    }
+                    list.Add(e);
                 }
-                p += 52; // 52B/entry（ctx+rect 20B + radii 32B）
+                p += 92;
             }
-            x = y = w = h = 0f;
-            cornerRadius = 0f;
-            return false;
+            return list;
         }
 
         /// 读节点 i 的 mesh（仅 payload_kind==1 时调用）。所有渲染节点（含 text）统一走 mesh_arena。
@@ -294,6 +319,27 @@ namespace Ikat
         public uint ReadU32Public(int o) => ReadU32(o);
         public float ReadF32Public(int o) => ReadF32(o);
         public int ClipTableOffPub => ClipTableOff;
+    }
+
+    /// ReadClipEntries 返回的单条 clip entry（多 entry 链中一条，#52）。
+    /// 几何在 clipper box-local 坐标（(0,0) = border box 左上，design px y-down）；
+    /// (A,B,C,D,Tx,Ty) 是 clipper design 世界矩阵逆（core Affine2 六元组：
+    /// x' = A·x + C·y + Tx，y' = B·x + D·y + Ty）。HasRect 与 HasShape 独立——
+    /// 同元素 overflow:hidden + clip-path 两条测试都过（web 交集原义）。
+    public sealed class ClipEntryView
+    {
+        public bool HasRect;
+        public bool HasRadii;
+        public bool HasShape;
+        /// 0 = circle，1 = polygon（HasShape=false 时无意义）。
+        public int ShapeKind;
+        public float A, B, C, D, Tx, Ty;
+        public float W, H;
+        /// radii：(tl_rx, tl_ry, tr_rx, tr_ry) / (br_rx, br_ry, bl_rx, bl_ry)。HasRadii=false 全零。
+        public UnityEngine.Vector4 RadiiTlTr, RadiiBrBl;
+        public float CircleCx, CircleCy, CircleR;
+        /// polygon 顶点（box-local）；非 polygon 为空数组。
+        public UnityEngine.Vector2[] Poly = System.Array.Empty<UnityEngine.Vector2>();
     }
 
     /// ReadMesh 返回的 mesh 数据拷贝。verts/uvs/colors 长度 == vertCount，Idx 长度 == idxCount。

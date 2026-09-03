@@ -514,6 +514,193 @@ pub struct BorderRadius {
     pub corners: [CornerRadius; 4],
 }
 
+/// `clip-path` 声明面（fence 子集：`circle(<len-%> [at <x> <y>])` /
+/// `polygon(x y, ...)`）。px/% 存 taffy `LengthPercentage`（与 border_radius 同款，
+/// % 存分数 0.5 = 50%）。元素尺寸相关 → 消费点解析，打包期无布局尺寸。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ClipPathDecl {
+    /// 半径 % 按 `sqrt(w²+h²)/√2` 解析（CSS 精确语义——参考框对角线归一）；
+    /// 圆心 % 按宽/高。默认位置 50% 50%（居心）由解析器填默认值。
+    Circle {
+        radius: LengthPercentage,
+        cx: LengthPercentage,
+        cy: LengthPercentage,
+    },
+    /// 点坐标 % 各按宽/高解析。围栏限 3..=16 点。
+    Polygon {
+        points: Vec<(LengthPercentage, LengthPercentage)>,
+    },
+}
+
+/// clip-path 的消费期几何（clipper box-local 坐标，(0,0) = border box 左上，px）。
+/// render clip 链 entry 与 hit gate 共用——两侧同源判定，画出来裁的点即命不中的点。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ClipShape {
+    #[default]
+    None,
+    Circle {
+        cx: f32,
+        cy: f32,
+        r: f32,
+    },
+    Polygon {
+        points: Vec<(f32, f32)>,
+    },
+}
+
+/// 读 taffy `LengthPercentage`（compact tagged pointer，字段私有）为 px 值：
+/// Length 直取、Percent 按 `base` 分数乘（0.5 → base 半值）。calc 变体（默认
+/// feature 面可出现，本 crate 解析器产不出）落 0——与 `as_corners` 同兜底。
+fn lp_px(lp: LengthPercentage, base: f32) -> f32 {
+    let cl = lp.into_raw();
+    match cl.tag() {
+        taffy::style::CompactLength::LENGTH_TAG => cl.value(),
+        taffy::style::CompactLength::PERCENT_TAG => base * cl.value(),
+        _ => 0.0,
+    }
+}
+
+impl ClipPathDecl {
+    /// 按元素 border box 尺寸解析成 box-local 几何。circle 半径 % 走 CSS 对角线
+    /// 归一语义（`sqrt(w²+h²)/√2`）——`circle(50%)` 在正方形盒里恰内切（半径 =
+    /// 半对角 × 0.5 × √2 = 半边），AI 写圆头像的直觉习语保真。
+    pub fn resolve(&self, w: f32, h: f32) -> ClipShape {
+        match self {
+            ClipPathDecl::Circle { radius, cx, cy } => ClipShape::Circle {
+                cx: lp_px(*cx, w),
+                cy: lp_px(*cy, h),
+                r: lp_px(*radius, (w * w + h * h).sqrt() / std::f32::consts::SQRT_2),
+            },
+            ClipPathDecl::Polygon { points } => ClipShape::Polygon {
+                points: points
+                    .iter()
+                    .map(|&(x, y)| (lp_px(x, w), lp_px(y, h)))
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl ClipShape {
+    /// box-local 点包含判定（render shader 与 hit gate 的共同语义基准；shader 侧
+    /// HLSL 镜像见 Ikat-Unlit.shader clip 段注释）。polygon 走 crossing number
+    /// 奇偶判定——对简单（非自交）多边形与 web nonzero 结果一致。
+    pub fn contains(&self, px: f32, py: f32) -> bool {
+        match self {
+            ClipShape::None => true,
+            ClipShape::Circle { cx, cy, r } => {
+                let dx = px - cx;
+                let dy = py - cy;
+                dx * dx + dy * dy <= r * r
+            }
+            ClipShape::Polygon { points } => {
+                let n = points.len();
+                if n < 3 {
+                    return true;
+                }
+                let mut inside = false;
+                let mut j = n - 1;
+                for i in 0..n {
+                    let (xi, yi) = points[i];
+                    let (xj, yj) = points[j];
+                    let crosses = (yi > py) != (yj > py);
+                    if crosses {
+                        let t = (py - yi) / (yj - yi);
+                        let x_cross = xi + t * (xj - xi);
+                        if px < x_cross {
+                            inside = !inside;
+                        }
+                    }
+                    j = i;
+                }
+                inside
+            }
+        }
+    }
+}
+
+/// CSS border-radius 溢出钳制：相邻半径和超出边长时按比例缩（CSS 规范行为，
+/// `border-radius:100%` 在正方形盒上收敛为内切圆角而非无限半径）。render entry
+/// 构建与 hit gate 共用，保证两侧同形。
+pub fn clamp_corner_radii(w: f32, h: f32, corners: &[(f32, f32); 4]) -> [(f32, f32); 4] {
+    // corners 序 [TL, TR, BR, BL]，各 (水平, 垂直) 半径。任一约束溢出即整体缩 f。
+    let mut f = 1.0f32;
+    let pairs = [
+        (corners[0].0 + corners[1].0, w), // 顶边 TL.h + TR.h
+        (corners[3].0 + corners[2].0, w), // 底边 BL.h + BR.h
+        (corners[0].1 + corners[3].1, h), // 左边 TL.v + BL.v
+        (corners[1].1 + corners[2].1, h), // 右边 TR.v + BR.v
+    ];
+    for (sum, side) in pairs {
+        if sum > side && sum > 1e-6 {
+            f = f.min(side / sum);
+        }
+    }
+    [
+        (corners[0].0 * f, corners[0].1 * f),
+        (corners[1].0 * f, corners[1].1 * f),
+        (corners[2].0 * f, corners[2].1 * f),
+        (corners[3].0 * f, corners[3].1 * f),
+    ]
+}
+
+/// box-local 圆角矩形包含判定（overflow 裁剪 + border-radius 的 hit/render 共同
+/// 语义基准）。radii 序 [TL, TR, BR, BL] 各 (水平, 垂直)——与
+/// `BorderRadius::as_corners` 同约定，须先过 [`clamp_corner_radii`]。点落角带
+/// 且在四分之一椭圆外 → 不含（web 行为：浏览器 hit test 尊重 border-radius，
+/// 圆角外不响应命中）。
+pub fn point_in_rounded_rect(px: f32, py: f32, w: f32, h: f32, radii: &[(f32, f32); 4]) -> bool {
+    if !(0.0..=w).contains(&px) || !(0.0..=h).contains(&py) {
+        return false;
+    }
+    // 角带内才做椭圆测试，否则矩形直过。角圆心：TL=(rx,ry) TR=(w−rx,ry)
+    // BR=(w−rx,h−ry) BL=(rx,h−ry)。
+    let outside_ellipse = |px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32| -> bool {
+        let (dx, dy) = (px - cx, py - cy);
+        dx * dx / rx.max(1e-6).powi(2) + dy * dy / ry.max(1e-6).powi(2) > 1.0
+    };
+    {
+        let (rx, ry) = radii[0];
+        if rx > 0.0 && ry > 0.0 && px < rx && py < ry && outside_ellipse(px, py, rx, ry, rx, ry) {
+            return false;
+        }
+    }
+    {
+        let (rx, ry) = radii[1];
+        if rx > 0.0
+            && ry > 0.0
+            && px > w - rx
+            && py < ry
+            && outside_ellipse(px, py, w - rx, ry, rx, ry)
+        {
+            return false;
+        }
+    }
+    {
+        let (rx, ry) = radii[2];
+        if rx > 0.0
+            && ry > 0.0
+            && px > w - rx
+            && py > h - ry
+            && outside_ellipse(px, py, w - rx, h - ry, rx, ry)
+        {
+            return false;
+        }
+    }
+    {
+        let (rx, ry) = radii[3];
+        if rx > 0.0
+            && ry > 0.0
+            && px < rx
+            && py > h - ry
+            && outside_ellipse(px, py, rx, h - ry, rx, ry)
+        {
+            return false;
+        }
+    }
+    true
+}
+
 impl BorderRadius {
     /// 解析四角为像素半径对 `(h, v)`，序 [TL, TR, BR, BL]（与 `mesh::rounded_rect` /
     /// `border::border_ring` 同约定）。百分比按 `(w, h)`（rect 宽/高）解析——水平半径
@@ -638,6 +825,11 @@ pub struct ResolvedStyle {
     /// overflow 两轴模式。Default 双轴 Visible。
     pub overflow_x: OverflowMode,
     pub overflow_y: OverflowMode,
+    /// CSS `clip-path`（fence 子集：`circle()` / `polygon()`）。None = 无形状遮罩。
+    /// 声明即 clipper（裁自身绘制 + 子树，与 overflow 状态独立——web 原义）。
+    /// 存声明面（px/% 待元素尺寸解析），消费点（render clip 链 / hit gate）惰性
+    /// 派生成 [`ClipShape`]——不落 Node 字段，增量 solve 下无陈旧风险。
+    pub clip_path: Option<ClipPathDecl>,
     pub color: [f32; 4],
     /// CSS `caret-color`（TextField/TextArea 光标色）。None = 缺省回退到 `color`
     /// （render arm `unwrap_or(s.color)`），与 CSS `caret-color: auto` 语义一致。
@@ -826,6 +1018,7 @@ impl Default for ResolvedStyle {
             opacity: 1.0,
             overflow_x: OverflowMode::Visible,
             overflow_y: OverflowMode::Visible,
+            clip_path: None,
             color: [0.0, 0.0, 0.0, 1.0],
             caret_color: None,
             selection_background: None,
@@ -1421,4 +1614,105 @@ mod tests {
         assert_eq!(back.cursor, CursorStyle::Hidden);
         assert_eq!(std::mem::size_of::<CursorStyle>(), 1);
     }
+}
+
+// ---------- clip-path 几何（#52） ----------
+
+/// circle % 半径的 CSS 对角线归一语义：sqrt(w²+h²)/√2 基——正方形盒上
+/// circle(50%) 恰内切（r = 半边）。
+#[test]
+fn clip_path_circle_percent_resolves_diagonal() {
+    let d = ClipPathDecl::Circle {
+        radius: LengthPercentage::percent(0.5),
+        cx: LengthPercentage::percent(0.5),
+        cy: LengthPercentage::percent(0.5),
+    };
+    // 100×100 正方形：r = sqrt(20000)/√2 × 0.5 = 50。
+    match d.resolve(100.0, 100.0) {
+        ClipShape::Circle { cx, cy, r } => {
+            assert!((r - 50.0).abs() < 1e-4, "正方形 circle(50%) 内切，得 {r}");
+            assert!((cx - 50.0).abs() < 1e-4 && (cy - 50.0).abs() < 1e-4);
+        }
+        _ => panic!("resolve 形错"),
+    }
+    // 非方形 200×100：r = sqrt(200²+100²)/√2 × 0.5 = sqrt(50000)/√2 × 0.5 ≈ 79.057。
+    match d.resolve(200.0, 100.0) {
+        ClipShape::Circle { r, .. } => {
+            let expect = (50000.0f32.sqrt() / std::f32::consts::SQRT_2) * 0.5;
+            assert!((r - expect).abs() < 1e-3, "得 {r} 期望 {expect}");
+        }
+        _ => panic!(),
+    }
+}
+
+/// polygon % 各按宽/高解析 + crossing number 包含判定（菱形内外点）。
+#[test]
+fn clip_path_polygon_resolve_and_contains() {
+    let lp = |p: f32| taffy::style::LengthPercentage::percent(p);
+    let d = ClipPathDecl::Polygon {
+        points: vec![
+            (lp(0.5), lp(0.0)),
+            (lp(1.0), lp(0.5)),
+            (lp(0.5), lp(1.0)),
+            (lp(0.0), lp(0.5)),
+        ],
+    };
+    let shape = d.resolve(200.0, 100.0);
+    match &shape {
+        ClipShape::Polygon { points } => {
+            assert!((points[0].0 - 100.0).abs() < 1e-4, "x % 按宽");
+            assert!((points[1].1 - 50.0).abs() < 1e-4, "y % 按高");
+        }
+        _ => panic!(),
+    }
+    assert!(shape.contains(100.0, 50.0), "菱形心在内");
+    assert!(
+        shape.contains(100.0, 49.0) && shape.contains(99.0, 50.0),
+        "心邻域在内"
+    );
+    assert!(!shape.contains(10.0, 10.0), "左上角在菱形外");
+    assert!(!shape.contains(190.0, 90.0), "右下角在菱形外");
+    // circle contains：内外点。
+    let c = ClipShape::Circle {
+        cx: 50.0,
+        cy: 50.0,
+        r: 50.0,
+    };
+    assert!(c.contains(50.0, 50.0) && c.contains(99.9, 50.0));
+    assert!(!c.contains(100.1, 50.0) && !c.contains(10.0, 10.0));
+}
+
+/// 圆角矩形包含 + CSS 溢出钳制：角带外椭圆点不含、边中点含；
+/// border-radius:100% 钳制成内切圆角（外角不含、边中含）。
+#[test]
+fn point_in_rounded_rect_and_clamp() {
+    let zero = [(0.0f32, 0.0f32); 4];
+    // 直角（全零半径）：纯矩形。
+    assert!(point_in_rounded_rect(5.0, 5.0, 100.0, 100.0, &zero));
+    assert!(!point_in_rounded_rect(-0.1, 5.0, 100.0, 100.0, &zero));
+    // 圆角 20：角带内椭圆外点不含，边中点含。
+    let radii = [(20.0f32, 20.0f32); 4];
+    assert!(
+        point_in_rounded_rect(50.0, 0.5, 100.0, 100.0, &radii),
+        "顶边中含"
+    );
+    assert!(
+        !point_in_rounded_rect(2.0, 2.0, 100.0, 100.0, &radii),
+        "TL 角带椭圆外不含（(2,2) 距圆心 (20,20) 为 25.5 > 20）"
+    );
+    assert!(
+        point_in_rounded_rect(20.0, 20.0, 100.0, 100.0, &radii),
+        "角圆心上含"
+    );
+    // 100% 钳制：100×100 盒上四角 100 → 钳成 50（内切圆角）。
+    let clamped = clamp_corner_radii(100.0, 100.0, &[(100.0, 100.0); 4]);
+    assert!((clamped[0].0 - 50.0).abs() < 1e-4, "100% 钳成 50");
+    assert!(
+        !point_in_rounded_rect(1.0, 1.0, 100.0, 100.0, &clamped),
+        "钳后角外不含"
+    );
+    assert!(
+        point_in_rounded_rect(50.0, 0.5, 100.0, 100.0, &clamped),
+        "边中含"
+    );
 }

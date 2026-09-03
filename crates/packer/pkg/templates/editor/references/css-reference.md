@@ -43,6 +43,17 @@ error):
 - `animation` and longhands: `animation-name` / `animation-duration` / `animation-timing-function` / `animation-delay` / `animation-iteration-count` / `animation-direction` / `animation-fill-mode` / `animation-play-state`
 - `transition`
 - `overflow-x` / `overflow-y` — visible / hidden / scroll / auto
+- `clip-path` — geometric shape mask (fence subset): `none` |
+  `circle(<length|%> [at <length|%> <length|%>])` |
+  `polygon(<x> <y>, ...)` with 3..=16 points. Circle `%` radius resolves
+  against `sqrt(w^2+h^2)/sqrt(2)` (exact CSS semantics — `circle(50%)` inscribes
+  a square box); polygon `%` resolves against width/height per axis. Declaring
+  it makes the element a clipper for its own paint AND its subtree (web
+  semantics), independent of `overflow`; hit testing respects the shape
+  (clipped-away areas click through). Hard-rejected combos:
+  `overflow:scroll/auto` + `clip-path`, clip chains deeper than 4 nested
+  clippers. `ellipse()` / `inset()` / `closest-side` / `farthest-side` /
+  `fill-rule` prefixes / geometry-box keywords are outside the fence.
 - `resize` — accepted as a no-op (never consumed)
 
 Shorthands (expand to the properties above):
@@ -137,10 +148,24 @@ combinator). Each compound is `tag? (.class | #id | [attr] | :pseudo)*`:
   `:checked`, `:nth-child(An+B | odd | even | N)`. They gate on live
   interaction state and re-evaluate every frame — `:hover` driven
   styling needs no runtime class toggling.
+- `::part(name)` — the only pseudo-element in the fence: a page rule
+  pierces the component content wall and targets nodes inside the
+  component that carry `part="name"`. In `prefix::part(name)`, the
+  compound prefix (class/tag/pseudo) matches the component **host**
+  (hosts live in page scope and can carry class/id); the part matches
+  nodes in that host's expanded subtree. It must end the last compound
+  (`X::part(a) Y` is a build error), does not recurse into nested
+  components (their internals belong to the nested host), and
+  specificity follows the web (part name as attribute + pseudo-element:
+  `.card::part(title)` = (0,2,1)). Also usable in runtime
+  `StyleSheet.Add` (runtime rules already pierce literally; `::part`
+  there is just a matching arm). The preview server rewrites `::part(n)`
+  to the flat `[part="n"]` descendant equivalent so browser preview
+  shows the styling too.
 - Build errors (the diagnostic names the offending construct):
   combinators `>` / `+` / `~` (descendant only), the universal selector
   `*`, unknown pseudo-classes (`:not()`, `:nth-of-type`, ...), and
-  pseudo-elements (`::before`, `::after`, ...).
+  pseudo-elements other than `::part` (`::before`, `::after`, ...).
 - Attribute selectors: `[attr]` and `[attr="value"]` only; higher
   operators (`^=`, `~=`, `$=`, `*=`, `|=`) are build errors.
 - Do not use `:nth-child` on virtualized lists (`role=list` bound to
@@ -161,7 +186,6 @@ Properties that do NOT exist in the fence (using any of these is a
 - `object-fit`
 - `text-overflow`
 - `list-style`
-- `clip-path`
 <!-- fence-sync:css-not-supported-end -->
 
 ## Custom properties and `var()`

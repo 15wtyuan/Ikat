@@ -116,12 +116,15 @@ public class GameUI : MonoBehaviour
 - **UI drives gameplay** — subscribe to control events:
   `button.Clicked`, `slider.ValueChanged` (`e.NewValue`),
   `textField.Submitted` (`text =>`), `dropdown.SelectionChanged`
-  (`e.NewIndex`), `toggle.CheckedChanged`; routed events via
+  (`e.NewIndex`), `tree.SelectionChanged` (`e.SelectedItem`),
+  `treeItem.ExpandedChanged` (`e.Expanded`), `toggle.CheckedChanged`;
+  routed events via
   `node.On<PointerDownEvent>(...)` (returns an `IDisposable`).
 - **Gameplay drives UI** — hold node references and mutate: text via
   `container.TextContent` / `TextNode.Text`, values via `slider.Value` /
-  `progressBar.Value`, virtualized lists via `listView.ItemCount` +
-  `BindItem`, visual state via `node.Classes.Add(...)`, show/hide via
+  `progressBar.Value`, trees via `tree.SelectedItem` /
+  `treeItem.Expanded` (`ExpandAll()` / `CollapseAll()` for batches),
+  virtualized lists via `listView.ItemCount` + `BindItem`, visual state via `node.Classes.Add(...)`, show/hide via
   `node.Style.Display = DisplayMode.None` (collapses layout + removes
   hit-testing; `DisplayMode.Block` / `Flex` restores — no need to
   hand-roll `.hide` classes), declarative animations via
@@ -133,7 +136,11 @@ public class GameUI : MonoBehaviour
   logic via `node.OnUpdate(dt)` and `driver.Context.CallLater` /
   `CallNextFrame` (fires before solve — fresh-subtree Geometry is still
   zero there; use `CallAfterLayout` to read solved Geometry the same
-  frame). Inline style overrides sit on `node.Style.*`.
+  frame). Inline style overrides sit on `node.Style.*`; runtime
+  theming via `node.Style.SetVar("--x", ...)` /
+  `RemoveVar` (highest-priority custom property layer) and rule
+  injection via `driver.Context.StyleSheet.Add(css)` → `IDisposable`
+  (parse failure throws `UIStyleException` with line/column).
 - **Lifecycle.** `_page.Dispose()` recursively destroys the subtree and
   clears event subscriptions. Page-swap pattern: Dispose old →
   Instantiate new → re-wire. Runtime package load/unload:

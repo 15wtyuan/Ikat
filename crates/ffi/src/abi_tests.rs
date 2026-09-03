@@ -1209,3 +1209,52 @@ fn host_bound_stages_share_resources_abi() {
     // null 句柄 no-op。
     ikat_host_free(std::ptr::null_mut());
 }
+
+/// drain_removed_nodes FFI 契约：take 语义（读+清）、释放顺序（子树删除叶先于祖先）、
+/// 指针协议（u64 数组 + out_len；空队列 → null+0；二次 drain 空）。
+#[test]
+fn drain_removed_nodes_take_semantics_and_order() {
+    let h = stage_new_with_dejavu(200.0, 100.0);
+    let empty = b"";
+    let root = ikat_stage_create_root(h, b"div".as_ptr(), 3, empty.as_ptr(), 0);
+    assert_ne!(root, u64::MAX);
+    let child = ikat_stage_create_node(h, b"div".as_ptr(), 3, empty.as_ptr(), 0);
+    assert_ne!(child, u64::MAX);
+    assert_eq!(ikat_stage_append_child(h, root, child), 0);
+    let leaf = ikat_stage_create_node(h, b"span".as_ptr(), 4, empty.as_ptr(), 0);
+    assert_ne!(leaf, u64::MAX);
+    assert_eq!(ikat_stage_append_child(h, child, leaf), 0);
+
+    // 空队列 → null + 0
+    let mut len: usize = 99;
+    assert_eq!(
+        ikat_stage_drain_removed_nodes(h, &mut len),
+        std::ptr::null()
+    );
+    assert_eq!(len, 0, "empty queue → null + len 0");
+
+    // 子树删除：leaf 先于 child 入队（递归先删子）
+    assert_eq!(ikat_stage_remove_node(h, child), 0);
+    let p = ikat_stage_drain_removed_nodes(h, &mut len);
+    assert!(!p.is_null(), "non-empty drain returns pointer");
+    assert_eq!(len, 2, "subtree removal queues both nodes");
+    let ids = unsafe { std::slice::from_raw_parts(p, len) };
+    assert_eq!(ids[0], leaf, "leaf freed before ancestor");
+    assert_eq!(ids[1], child, "ancestor freed after descendants");
+
+    // drain 已清：二次 drain 空
+    let mut len2: usize = 99;
+    assert_eq!(
+        ikat_stage_drain_removed_nodes(h, &mut len2),
+        std::ptr::null()
+    );
+    assert_eq!(len2, 0, "drain clears the queue");
+
+    // null 句柄防御
+    assert_eq!(
+        ikat_stage_drain_removed_nodes(std::ptr::null_mut(), &mut len2),
+        std::ptr::null()
+    );
+    ikat_stage_remove_node(h, root);
+    ikat_stage_free(h);
+}

@@ -825,3 +825,33 @@ pub extern "C" fn ikat_stage_get_node_disabled(h: *const StageHandle, node_id: u
         }
     })
 }
+
+/// 取走节点死亡通知队列（RegisterComponent OnDisconnected 的数据源）。
+/// take 语义：core 队列读+清，快照缓存于 handle（`removed_blob`），返 `*const u64`
+/// 首址 + 写 `out_len`（条数；NodeId 是 u64 透明句柄）。空队列 / null 句柄 /
+/// out_len null → null + 0。指针到下次调本函数（或 handle 释放）失效——宿主每帧
+/// 读后即弃。顺序 = 释放顺序（子树删除叶先于祖先）。任何删除路径（remove_node /
+/// list 槽位换绑淘汰克隆 / 内部剪枝）都经 `Scene::free_node_slot` 单一漏斗入队。
+///
+/// **常驻（不 gate）。**
+#[no_mangle]
+pub extern "C" fn ikat_stage_drain_removed_nodes(
+    h: *mut StageHandle,
+    out_len: *mut usize,
+) -> *const u64 {
+    ffi_guard(std::ptr::null(), || {
+        if h.is_null() || out_len.is_null() {
+            return std::ptr::null();
+        }
+        let sh = unsafe { &mut *h };
+        let removed = sh.stage.drain_removed_nodes();
+        if removed.is_empty() {
+            sh.removed_blob = Vec::new();
+            unsafe { *out_len = 0 };
+            return std::ptr::null();
+        }
+        sh.removed_blob = removed.into_iter().map(|id| id.0).collect();
+        unsafe { *out_len = sh.removed_blob.len() };
+        sh.removed_blob.as_ptr()
+    })
+}

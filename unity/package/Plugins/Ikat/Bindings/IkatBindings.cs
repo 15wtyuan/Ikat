@@ -663,6 +663,19 @@ namespace Ikat.Bindings
         internal static extern void ikat_stage_get_node_disabled(StageHandle* h, ulong node_id, byte* @out);
 
         /// <summary>
+        ///  取走节点死亡通知队列（RegisterComponent OnDisconnected 的数据源）。
+        ///  take 语义：core 队列读+清，快照缓存于 handle（`removed_blob`），返 `*const u64`
+        ///  首址 + 写 `out_len`（条数；NodeId 是 u64 透明句柄）。空队列 / null 句柄 /
+        ///  out_len null → null + 0。指针到下次调本函数（或 handle 释放）失效——宿主每帧
+        ///  读后即弃。顺序 = 释放顺序（子树删除叶先于祖先）。任何删除路径（remove_node /
+        ///  list 槽位换绑淘汰克隆 / 内部剪枝）都经 `Scene::free_node_slot` 单一漏斗入队。
+        ///
+        ///  **常驻（不 gate）。**
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "ikat_stage_drain_removed_nodes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong* ikat_stage_drain_removed_nodes(StageHandle* h, nuint* out_len);
+
+        /// <summary>
         ///  业务设节点 disabled 状态（伪类源 + active/click 抑制）。NodeId.0 越界静默跳过。
         ///  null 句柄 → no-op。
         ///

@@ -388,6 +388,16 @@ pub static CSS_PROPS: &[CssPropSpec] = &[
         parser: CssValueParser::Overflow,
     },
     CssPropSpec {
+        name: "clip-path",
+        default: "none",
+        inherited: false,
+        // fence 子集 circle()/polygon()（#52 shape mask）。值校验委托 core
+        // `parse_clip_path`（单一解析真相源，transform-origin 同款 Raw + 定向门
+        // 模式）；`none` 清除。ellipse()/inset()/closest-side/fill-rule 等域外
+        // 形态在 core 解析器统一落 None → 打包期 FenceBadCssValue。
+        parser: CssValueParser::Raw,
+    },
+    CssPropSpec {
         name: "color",
         default: "#000000",
         inherited: true,

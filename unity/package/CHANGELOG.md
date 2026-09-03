@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`::part()` 跨组件精确样式通道（#57）**：页面规则穿组件内容墙命中组件内部节点——
+  `prefix::part(name)` 中 compound 前缀匹配组件 host、`::part(name)` 匹配展开子树内带
+  `part="name"` 属性的目标节点（`part` 全局属性入围栏 + attrs β 仓持久化）。一层不递归
+  （嵌套组件内部不可达）；specificity 按 web（`.card::part(title)` = (0,2,1)）；必须位于
+  最后一个 compound 结尾。运行时 `StyleSheet.Add` 同语法可用。pkg v57（与 #52 shape mask 并行撞号合并批——两批各自中间态 v56 互斥，合并升 57）。preview server 把 `::part(n)` 平铺重写为 `[part="n"]` 后代选择器
+  （浏览器平铺 DOM 无 shadow，保真不缺样式）。
+- **组件类绑定 RegisterComponent（#20）**：`UIContext.RegisterComponent(tag, factory)`
+  把 custom tag 绑定到 C# 派生类（fgui extensionCreator 等价）——显式工厂委托构造
+  （IL2CPP/AOT 零反射），派生 `CustomElement` 子类（`protected internal` 基类构造）。
+  构造路径全覆盖（instantiate eager / 懒物化 / 事件预物化），`OnConnected` 在派生
+  ctor 完成后回调；`OnDisconnected` 双路径（用户 Dispose 同步 / Rust 侧删除经
+  `PumpRemovedNodes` 帧泵——list 槽位换绑、外部 remove_node 均覆盖），回调后 wrapper
+  标 `IsDisposed`。重挂 = 新实例新 OnConnected。晚注册只影响未来构造；重复注册/空
+  tag/null 工厂抛 `UIContractException`。附带：节点死亡通知队列（core
+  `Scene::free_node_slot` 单一漏斗 + FFI `ikat_stage_drain_removed_nodes`），Rust 侧
+  死亡的滞留 wrapper（含非组件）随泵 evict——死亡显式化，不再死 id 静默打 FFI。
+- **shape mask（#52）**：`clip-path` 非矩形几何遮罩——fence 子集
+  `circle(<length|%> [at <pos>])` / `polygon(<x> <y>, ...)`（3..=16 点，硬边）。
+  声明即 clipper（裁自身 + 子树，与 overflow 独立），命中测试同形（被裁区域
+  点击穿透，浏览器行为）；circle 百分比半径按 CSS 对角线归一语义（正方形
+  `circle(50%)` = 内切圆）。运行时 CSS 通道接通（`StyleSheet.Add` 类规则 /
+  `var()` 代换）。构建期硬拒组合：`overflow:scroll/auto` + `clip-path`、
+  裁剪链深 > 4。
+### Changed
+- **裁剪管线泛化为多 entry clip 栈（#52，web 语义对齐）**：嵌套裁剪不再坍缩成
+  单矩形，每 context 携带整条祖先链（rect/圆角/circle/polygon 逐条交集）——
+  圆形头像放进滚动列表等组合正确。**祖先圆角现在裁后代角**（此前不传播，已对齐
+  浏览器）。**裁剪形随裁剪器自身 transform 旋转**（此前不旋转的预览分歧已移除）。
+  命中测试感知圆角与形状（此前纯矩形判定）。渲染 blob clip 表换 92B 多 entry
+  布局（pkg v57——与 #57 ::part 并行撞号，合并批共升）。
 - **运行时 CSS 与 custom props（#11）**：`UIContext.StyleSheet.Add/Clear` 接通——
   运行时注入 CSS 规则（围栏选择器+声明子集，含 `--*` 自定义属性与 `var()` 值；
   at-rule 一律拒），解析失败抛 `UIStyleException` 带 `Line`/`Column`。注入规则

@@ -271,6 +271,7 @@ fn class_rule_pointer_events_reaches_hit_test() {
                 pseudo_focus: false,
                 pseudo_nth_child: None,
                 attrs: Vec::new(),
+                part: None,
             }],
             specificity: Specificity(0, 1, 0),
         },

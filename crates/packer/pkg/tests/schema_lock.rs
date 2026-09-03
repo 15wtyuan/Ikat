@@ -15,13 +15,14 @@ use ikat_pkg::build::{pack_components, Component, PackResult};
 const HTML: &str = include_str!("fixtures/schema-lock.html");
 
 /// 当前布局的登记哈希。改 pkg 布局（有意 bump 版本）时同步更新此值。
+/// v56 Compound 加 part（#57 ::part 选择器 IR 进 pkg 序列化，bincode 布局变）；
 /// v55 ResolvedStyle 加 deferred_inline（#11 custom props——行内 --x/var() 延迟声明面，bincode 布局变）；
 /// v54 ControlInit 加 Tree/TreeItem 变体（#8 树控件——版本号变更翻字节）；
 /// v53 attrs 通用属性仓退役 aria_controls 专列（#8/#22——attr_count+对替换尾列，零属性节点同宽）；
 /// v52 ControlInit::TabList 加 manual（#13 手动激活模型）；v50 taffy 0.14（#82：taffy Style
 /// serde 格式变，min/max_size 分型 LPA 等）；v49 progress min（#97 ARIA 填充域）；
 /// #101 后夹具 #root 补 position:relative（E1 门下 static+z 非法），内容变更非布局变更，哈希随之更新。
-const LOCKED_HASH: u64 = 0x3b55_2d58_bf0f_0ece;
+const LOCKED_HASH: u64 = 0xdbf06699faf4883; // v57 并行撞号合并批（#52 clip_path + #57 Compound::part）
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

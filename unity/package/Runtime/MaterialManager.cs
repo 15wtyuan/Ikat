@@ -4,23 +4,32 @@ using UnityEngine;
 namespace Ikat
 {
     /// DrawState 缓存。
-    /// key = (program, texture, mask_context, rounded)。同 key 复用 Material 实例。
-    /// tint×alpha 走顶点色（不在 key 里）；clip_box + corner_radius 进 mask_context 专属 Material 的 uniform。
-    /// 圆角 clip（cornerRadius>0）与直角 clip（cornerRadius==0）是互斥变体——CLIPPED_ROUNDED
-    /// 走 SDF，CLIPPED 走 AABB step，两者都是 clip 实现不叠加。rounded 进 key 让两者各持独立 Material。
+    /// key = (program, texture, mask_context, matrix)。同 key 复用 Material 实例。
+    /// tint×alpha 走顶点色（不在 key 里）；clip 链 uniform 数组进 mask_context 专属
+    /// Material（多 entry 交集语义，#52：rect/圆角/circle/polygon 按 entry kind 分派，
+    /// 单 CLIPPED 变体——不再有独立圆角变体）。
     public sealed class MaterialManager
     {
+        const int MaxEntries = 4;       // 与 core render::MAX_CLIP_CHAIN 同值（shader 数组定长）
+        const int PolyVec4PerEntry = 8; // 每 entry polygon 点槽：16 点 × 2 float = 8 float4
+
         readonly Shader _shader;
         readonly Dictionary<Key, Material> _cache = new();
-        readonly Dictionary<uint, Vector4> _clipBoxByCtx = new();
-        // per-ctx 归一化圆角半径（shader _CornerRadius.x）。0=直角（CLIPPED），>0=圆角（CLIPPED_ROUNDED）。
-        readonly Dictionary<uint, float> _cornerRadiusByCtx = new();
+        // per-ctx clip 链数组（新建 Material 时 Get 会带上；SetClipEntries 同步刷新已缓存实例）。
+        readonly Dictionary<uint, Vector4[]> _clipFrame0ByCtx = new();
+        readonly Dictionary<uint, Vector4[]> _clipFrame1ByCtx = new();
+        readonly Dictionary<uint, Vector4[]> _clipRectByCtx = new();
+        readonly Dictionary<uint, Vector4[]> _clipRadii0ByCtx = new();
+        readonly Dictionary<uint, Vector4[]> _clipRadii1ByCtx = new();
+        readonly Dictionary<uint, Vector4[]> _clipCircleByCtx = new();
+        readonly Dictionary<uint, Vector4[]> _clipPolyByCtx = new();
+        readonly Dictionary<uint, float> _clipCountByCtx = new();
 
         public MaterialManager(Shader shader) { _shader = shader; }
 
-        public Material Get(int program, Texture texture, uint maskContext, bool matrixFlag, bool rounded)
+        public Material Get(int program, Texture texture, uint maskContext, bool matrixFlag)
         {
-            var key = new Key(program, texture, maskContext, matrixFlag, rounded);
+            var key = new Key(program, texture, maskContext, matrixFlag);
             if (!_cache.TryGetValue(key, out var mat))
             {
                 mat = new Material(_shader);
@@ -29,16 +38,14 @@ namespace Ikat
                 mat.SetFloat("_DstFactor", 10f);  // OneMinusSrcAlpha
                 if (maskContext > 0u)
                 {
-                    // ctx>0 → clip 变体。rounded=true 启 CLIPPED_ROUNDED（SDF），否则 CLIPPED（AABB step）。
-                    // mask_context 进 key，每 ctx 独立 Material 实例，keyword 设该实例。
-                    if (rounded) mat.EnableKeyword("CLIPPED_ROUNDED");
-                    else mat.EnableKeyword("CLIPPED");
-                    // 首帧路径：MirrorPool 先 SetClipBox/SetCornerRadius 再 Get；
-                    // 新建 Material 时从此 dict 读。后续帧材质已缓存，Set 的 SetVector 分支刷新。
-                    if (_clipBoxByCtx.TryGetValue(maskContext, out var cb))
-                        mat.SetVector("_ClipBox", cb);
-                    if (rounded && _cornerRadiusByCtx.TryGetValue(maskContext, out var cr))
-                        mat.SetFloat("_CornerRadius", cr);
+                    // ctx>0 → CLIPPED 变体（多 entry 数组：rect/圆角 SDF/circle/polygon
+                    // 按 entry kind 分派，见 Ikat-Unlit.shader clip 段）。
+                    // mask_context 进 key，每 ctx 独立 Material 实例。
+                    mat.EnableKeyword("CLIPPED");
+                    // 首帧路径：MirrorPool 先 SetClipEntries 再 Get；新建 Material 时从
+                    // dict 读数组。后续帧材质已缓存，SetClipEntries 直接刷新实例。
+                    if (_clipFrame0ByCtx.TryGetValue(maskContext, out var f0))
+                        ApplyClipArrays(mat, maskContext);
                 }
                 if (matrixFlag) mat.EnableKeyword("OBJECT_MATRIX");
                 if (program == 1) mat.EnableKeyword("ALPHA_MASK");   // text: font atlas 是 alpha-mask（rgb 黑，glyph 在 alpha）
@@ -53,27 +60,74 @@ namespace Ikat
             return mat;
         }
 
-        /// 注册某 mask_context 的 _ClipBox。先写 _clipBoxByCtx（新建 Material 时 Get 会带上），
-        /// 再把已缓存 Material 实例的 _ClipBox 同步刷新（每 ctx 一实例）。
-        /// 两路都覆盖：SetClipBox 既可在 Get 前（首帧：box 进 dict，Get 建材质时读取）也可在 Get 后
-        /// （后续帧：材质已存，直接 SetVector 刷新）。故调用顺序对 MirrorPool 不构成约束。
-        public void SetClipBox(uint maskContext, Vector4 clipBox)
+        /// 注册某 mask_context 的 clip 链（多 entry）。把 ClipEntryView 列表转 shader
+        /// 数组布局（frame0 = (A, C, Tx, kind)，frame1 = (B, D, Ty, hasRect)，
+        /// poly 两点一 float4）后写 dict + 刷新该 ctx 已缓存 Material 实例。
+        /// 调用顺序对 MirrorPool 不构成约束（同旧 SetClipBox 双路覆盖语义）。
+        public void SetClipEntries(uint maskContext, List<ClipEntryView> entries)
         {
-            _clipBoxByCtx[maskContext] = clipBox;
+            int n = Mathf.Min(entries.Count, MaxEntries);
+            var f0 = new Vector4[MaxEntries];
+            var f1 = new Vector4[MaxEntries];
+            var rect = new Vector4[MaxEntries];
+            var r0 = new Vector4[MaxEntries];
+            var r1 = new Vector4[MaxEntries];
+            var circ = new Vector4[MaxEntries];
+            var poly = new Vector4[MaxEntries * PolyVec4PerEntry];
+            for (int e = 0; e < n; e++)
+            {
+                var en = entries[e];
+                // 双独立 kind（HasRect 与 HasShape 可同 entry 并存——同元素
+                // overflow:hidden + clip-path 两条测试都过，web 交集原义）：
+                // frame0.w = shapeKind（0 无 / 1 circle / 2 polygon），
+                // frame1.w = rectKind（0 无 / 1 直角 / 2 圆角）。
+                float shapeKind = !en.HasShape ? 0f : (en.ShapeKind == 1 ? 2f : 1f);
+                float rectKind = !en.HasRect ? 0f : (en.HasRadii ? 2f : 1f);
+                f0[e] = new Vector4(en.A, en.C, en.Tx, shapeKind);
+                f1[e] = new Vector4(en.B, en.D, en.Ty, rectKind);
+                rect[e] = new Vector4(en.W, en.H, en.Poly.Length, 0f);
+                r0[e] = en.RadiiTlTr;
+                r1[e] = en.RadiiBrBl;
+                circ[e] = new Vector4(en.CircleCx, en.CircleCy, en.CircleR, 0f);
+                // polygon 点：两点一 float4（x1,y1,x2,y2），entry 槽基址 = e × 8。
+                int slot = e * PolyVec4PerEntry;
+                for (int k = 0; k + 1 < en.Poly.Length && k < PolyVec4PerEntry * 2; k += 2)
+                {
+                    var p1 = en.Poly[k];
+                    var p2 = en.Poly[k + 1];
+                    poly[slot + k / 2] = new Vector4(p1.x, p1.y, p2.x, p2.y);
+                }
+                // 奇数点数：末点重复进 float4 尾槽（core 限 3..=16 点，crossing 判定
+                // 用 poly_count 截断，重复点不参与）。
+                if ((en.Poly.Length & 1) == 1 && en.Poly.Length <= PolyVec4PerEntry * 2)
+                {
+                    var last = en.Poly[en.Poly.Length - 1];
+                    poly[slot + (en.Poly.Length - 1) / 2] = new Vector4(last.x, last.y, last.x, last.y);
+                }
+            }
+            _clipFrame0ByCtx[maskContext] = f0;
+            _clipFrame1ByCtx[maskContext] = f1;
+            _clipRectByCtx[maskContext] = rect;
+            _clipRadii0ByCtx[maskContext] = r0;
+            _clipRadii1ByCtx[maskContext] = r1;
+            _clipCircleByCtx[maskContext] = circ;
+            _clipPolyByCtx[maskContext] = poly;
+            _clipCountByCtx[maskContext] = n;
             foreach (var kv in _cache)
-                if (kv.Key.Ctx == maskContext) kv.Value.SetVector("_ClipBox", clipBox);
+                if (kv.Key.Ctx == maskContext) ApplyClipArrays(kv.Value, maskContext);
         }
 
-        /// 注册某 mask_context 的归一化圆角半径（shader _CornerRadius）。
-        /// radius>0 → CLIPPED_ROUNDED 变体（SDF）；radius==0 → CLIPPED 变体（AABB）。
-        /// 调用方（MirrorPool）按 ClipRect 读出的 cornerRadius 是否 >0 决定调不调此方法；
-        /// 不调 = 保持 0 = 直角。同 SetClipBox 双路覆盖（dict + 已缓存实例）。
-        public void SetCornerRadius(uint maskContext, float normalizedRadius)
+        void ApplyClipArrays(Material mat, uint ctx)
         {
-            _cornerRadiusByCtx[maskContext] = normalizedRadius;
-            foreach (var kv in _cache)
-                if (kv.Key.Ctx == maskContext && kv.Key.Rounded)
-                    kv.Value.SetFloat("_CornerRadius", normalizedRadius);
+            if (!_clipFrame0ByCtx.TryGetValue(ctx, out var f0)) return;
+            mat.SetVectorArray("_ClipFrame0", f0);
+            mat.SetVectorArray("_ClipFrame1", _clipFrame1ByCtx[ctx]);
+            mat.SetVectorArray("_ClipRect", _clipRectByCtx[ctx]);
+            mat.SetVectorArray("_ClipRadii0", _clipRadii0ByCtx[ctx]);
+            mat.SetVectorArray("_ClipRadii1", _clipRadii1ByCtx[ctx]);
+            mat.SetVectorArray("_ClipCircle", _clipCircleByCtx[ctx]);
+            mat.SetVectorArray("_ClipPoly", _clipPolyByCtx[ctx]);
+            mat.SetFloat("_ClipCount", _clipCountByCtx[ctx]);
         }
 
         public void Clear()
@@ -84,8 +138,14 @@ namespace Ikat
                 else Object.DestroyImmediate(kv.Value);   // [ExecuteAlways] 编辑器预览走 Edit mode
             }
             _cache.Clear();
-            _clipBoxByCtx.Clear();
-            _cornerRadiusByCtx.Clear();
+            _clipFrame0ByCtx.Clear();
+            _clipFrame1ByCtx.Clear();
+            _clipRectByCtx.Clear();
+            _clipRadii0ByCtx.Clear();
+            _clipRadii1ByCtx.Clear();
+            _clipCircleByCtx.Clear();
+            _clipPolyByCtx.Clear();
+            _clipCountByCtx.Clear();
         }
 
         // key 持 Texture 引用（Unity 对象同一性），避开 Unity 6.5 废弃的 GetInstanceID/GetEntityId/EntityId。
@@ -96,17 +156,14 @@ namespace Ikat
             readonly Texture _tex;
             readonly uint _ctx;
             readonly bool _matrix;
-            readonly bool _rounded;   // CLIPPED_ROUNDED vs CLIPPED（圆角 clip 与直角 clip 互斥变体）
-            public Key(int p, Texture t, uint c, bool m, bool r) { _program = p; _tex = t; _ctx = c; _matrix = m; _rounded = r; }
-            public uint Ctx => _ctx;   // SetClipBox/SetCornerRadius 按 ctx 反查已缓存 material。
-            public bool Rounded => _rounded;
-            public override int GetHashCode() => System.HashCode.Combine(_program, _tex, (int)_ctx, _matrix, _rounded);
+            public Key(int p, Texture t, uint c, bool m) { _program = p; _tex = t; _ctx = c; _matrix = m; }
+            public uint Ctx => _ctx;   // SetClipEntries 按 ctx 反查已缓存 material。
+            public override int GetHashCode() => System.HashCode.Combine(_program, _tex, (int)_ctx, _matrix);
             public override bool Equals(object o) => o is Key k
                 && k._program == _program
                 && k._tex == _tex
                 && k._ctx == _ctx
-                && k._matrix == _matrix
-                && k._rounded == _rounded;
+                && k._matrix == _matrix;
         }
     }
 }
