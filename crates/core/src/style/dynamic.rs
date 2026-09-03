@@ -526,8 +526,14 @@ fn synth_aria_value(scene: &Scene, id: NodeId, aria: &str) -> Option<String> {
         }
         ("expanded", ControlState::Dropdown { open, .. }) => open.to_string(),
         // Tree branch 条目的展开态（#8）：作者用 [aria-expanded="true"] 折叠箭头旋转/
-        // 高亮等定样式（leaf 无控件态 → 该属性无语义，不命中）。
-        ("expanded", ControlState::TreeItem { expanded }) => expanded.to_string(),
+        // 高亮等定样式。leaf 虽持 TreeItem 态（指针激活目标解析用），expanded 合成仅对
+        // branch 有语义——叶子不 synth（ARIA：aria-expanded 不上 leaf；web 预览模拟器
+        // 同口径，只给 branch 盖戳）。
+        ("expanded", ControlState::TreeItem { expanded })
+            if crate::scene::control::is_branch(scene, id) =>
+        {
+            expanded.to_string()
+        }
         ("valuenow", ControlState::Progress { value, .. } | ControlState::Slider { value, .. }) => {
             // f32 Display 用最短往返表示（50.0→"50"、33.5→"33.5"）。CSS 作者按量化后的值写选择器。
             value.to_string()
@@ -2598,6 +2604,34 @@ mod tests {
         );
         let sel_false = hand_selector(r#"[aria-expanded="false"]"#);
         assert!(!compound_matches_node(&sel_false.compound[0], id, &s));
+    }
+
+    #[test]
+    fn synth_treeitem_expanded_branch_only() {
+        // leaf treeitem 持态（指针激活目标解析需要——见 bridge 烘焙/回归
+        // tree_leaf_hit_refines_to_leaf_not_parent_branch），但 aria-expanded 合成仅对
+        // branch 有语义：ARIA 不给 leaf 上 aria-expanded，web 预览模拟器同口径。
+        use crate::scene::dynamic::{append_child, create_node_from_template};
+        use crate::style::resolved::ResolvedStyle;
+        let mut s = Scene::default();
+        let branch =
+            create_node_from_template(&mut s, NodeKind::TreeItem, ResolvedStyle::default(), None);
+        let leaf =
+            create_node_from_template(&mut s, NodeKind::TreeItem, ResolvedStyle::default(), None);
+        append_child(&mut s, branch, leaf).unwrap();
+        s.controls
+            .ensure(branch, ControlState::TreeItem { expanded: true });
+        s.controls
+            .ensure(leaf, ControlState::TreeItem { expanded: false });
+        assert_eq!(
+            synth_aria_value(&s, branch, "expanded"),
+            Some("true".to_string())
+        );
+        assert_eq!(
+            synth_aria_value(&s, leaf, "expanded"),
+            None,
+            "leaf 持态但不合成 aria-expanded"
+        );
     }
 
     #[test]

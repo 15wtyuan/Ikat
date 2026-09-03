@@ -157,8 +157,10 @@ pub enum NodeKind {
     /// treeitem（无 group 包装层）。容器型（镜像 ListView/TabList），自身不聚焦。
     Tree,
     /// WAI-ARIA `role="treeitem"`（#8）— 树条目。容器型（label 内容 + 可选嵌套
-    /// treeitem，镜像 Tab 持 label 子）。有嵌套 treeitem = branch（展开/折叠态在
-    /// ControlState::TreeItem{expanded}），无 = leaf（无控件态）。选中态从所属
+    /// treeitem，镜像 Tab 持 label 子）。**全部条目持 ControlState::TreeItem{expanded}**
+    /// （指针激活的目标解析按控件态上溯，叶子无态会被跳过落到父 branch——点叶子
+    /// 变成激活父分组）；有嵌套 treeitem = branch（expanded 有折叠语义），无 = leaf
+    /// （expanded 恒 false、读写/synth 均 branch-only 守卫）。选中态从所属
     /// Tree.selected 跨节点派生（aria-selected 是只读 synth）。
     TreeItem,
 }

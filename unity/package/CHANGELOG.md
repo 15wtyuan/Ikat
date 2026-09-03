@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `Notify*` 后 C# 侧重推受影响区间。多模板未给选择（无 ItemTemplate/selector）时
   首次 `ItemCount` 抛 `UIContractException`。
 ### Fixed
+- **树叶子条目点击激活父分组**：leaf treeitem 原不持控件态，指针激活的目标解析
+  （find_control_at 按控件态上溯）会跳过叶子落到父 branch——点叶子 = 选中父 +
+  误折叠。全部 treeitem 持 `TreeItem` 态（leaf `expanded` 恒 false）；`expanded`
+  读写（FFI `get/set_treeitem_expanded` → -1）与 `aria-expanded` 合成仍
+  branch-only，`IsBranch`/`Expanded` 的 C# 契约不变。web 预览模拟器行为不变。
 - **`TextNode.Text` / `Image.Src` getter 读 pkg 烙入值恒空串**：读侧原为 C# 镜像（仅
   set 路径更新），`Instantiate` 出来的 HTML 文本/图片 src 从不过 C# setter → getter
   对合法初值返 ""。getter 改直读 core 真值（新 FFI `ikat_stage_get_node_text` /

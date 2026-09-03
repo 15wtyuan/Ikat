@@ -1156,7 +1156,9 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_set_tree_selected(StageHandle* h, ulong node_id, ulong item_id);
 
         /// <summary>
-        ///  读 treeitem 展开态（branch）。非 branch treeitem（leaf 无控件态）/ null → -1。
+        ///  读 treeitem 展开态（branch）。leaf treeitem 虽持 TreeItem 态（指针激活目标解析
+        ///  用），expanded 仅对 branch 有语义——非 branch / 无态 / null → -1（C# IsBranch 即
+        ///  靠本 rc 区分 branch：leaf 恒 -1）。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>
@@ -1164,7 +1166,8 @@ namespace Ikat.Bindings
         internal static extern int ikat_stage_get_treeitem_expanded(StageHandle* h, ulong node_id, byte* @out);
 
         /// <summary>
-        ///  设 treeitem 展开态（branch，程序化，不发 ExpandChanged）。非 branch → -1。
+        ///  设 treeitem 展开态（branch，程序化，不发 ExpandChanged）。非 branch → -1
+        ///  （leaf 持态但无折叠语义；C# Expanded setter 靠 -1 抛 InvalidOperationException）。
         ///
         ///  **常驻（不 gate）。**
         /// </summary>

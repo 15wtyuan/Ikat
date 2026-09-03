@@ -379,7 +379,7 @@ pub fn sync_control_visuals(scene: &mut Scene, id: NodeId, viewport_h: f32) {
         // Tree branch 条目（#8）：折叠 = 对直接 treeitem 子逐个写 display:none（子树随
         // 父被 display 剪枝，嵌套深层自动隐藏——每层 branch 各管自己的直接子）；展开 =
         // 清 inline display 回落作者 CSS。同 TabList panel 的显隐所有权模型：显隐归控件，
-        // 布局方式归作者。leaf 无控件态不进本臂。非 treeitem 子（label 内容）不受影响。
+        // 布局方式归作者。leaf 也持态进本臂但零直接 treeitem 子 → no-op。非 treeitem 子（label 内容）不受影响。
         ControlState::TreeItem { expanded } => {
             let child_items: Vec<NodeId> = scene
                 .get(id)

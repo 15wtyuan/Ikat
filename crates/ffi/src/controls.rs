@@ -1151,7 +1151,9 @@ pub extern "C" fn ikat_stage_set_tree_selected(
     })
 }
 
-/// 读 treeitem 展开态（branch）。非 branch treeitem（leaf 无控件态）/ null → -1。
+/// 读 treeitem 展开态（branch）。leaf treeitem 虽持 TreeItem 态（指针激活目标解析
+/// 用），expanded 仅对 branch 有语义——非 branch / 无态 / null → -1（C# IsBranch 即
+/// 靠本 rc 区分 branch：leaf 恒 -1）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1168,8 +1170,11 @@ pub extern "C" fn ikat_stage_get_treeitem_expanded(
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match scene.controls.get(NodeId(node_id)) {
-            Some(ControlState::TreeItem { expanded }) => {
+        let id = NodeId(node_id);
+        match scene.controls.get(id) {
+            Some(ControlState::TreeItem { expanded })
+                if ikat_core::scene::control::is_branch(scene, id) =>
+            {
                 unsafe { *out = *expanded as u8 };
                 0
             }
@@ -1178,7 +1183,8 @@ pub extern "C" fn ikat_stage_get_treeitem_expanded(
     })
 }
 
-/// 设 treeitem 展开态（branch，程序化，不发 ExpandChanged）。非 branch → -1。
+/// 设 treeitem 展开态（branch，程序化，不发 ExpandChanged）。非 branch → -1
+/// （leaf 持态但无折叠语义；C# Expanded setter 靠 -1 抛 InvalidOperationException）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
@@ -1195,9 +1201,11 @@ pub extern "C" fn ikat_stage_set_treeitem_expanded(
         let Some(scene) = sh.stage.scene.as_mut() else {
             return -1;
         };
-        if let Some(ControlState::TreeItem { expanded: e }) =
-            scene.controls.get_mut(NodeId(node_id))
-        {
+        let id = NodeId(node_id);
+        if !ikat_core::scene::control::is_branch(scene, id) {
+            return -1;
+        }
+        if let Some(ControlState::TreeItem { expanded: e }) = scene.controls.get_mut(id) {
             *e = expanded != 0;
             0
         } else {

@@ -19,6 +19,12 @@ fn make_tree(scene: &mut Scene) -> (NodeId, NodeId, NodeId, NodeId, NodeId, Node
     let mk = |scene: &mut Scene, kind: NodeKind| {
         create_node_from_template(scene, kind, ResolvedStyle::default(), None)
     };
+    // 镜像 bridge 烘焙行为：全部 treeitem 持 TreeItem 态（leaf expanded 恒 false）。
+    let ensure_item = |scene: &mut Scene, id: NodeId, expanded: bool| {
+        scene
+            .controls
+            .ensure(id, ControlState::TreeItem { expanded });
+    };
     let tree = mk(scene, NodeKind::Tree);
     scene
         .controls
@@ -26,22 +32,43 @@ fn make_tree(scene: &mut Scene) -> (NodeId, NodeId, NodeId, NodeId, NodeId, Node
 
     let branch_a = mk(scene, NodeKind::TreeItem);
     append_child(scene, tree, branch_a).unwrap();
-    scene
-        .controls
-        .ensure(branch_a, ControlState::TreeItem { expanded: true });
+    ensure_item(scene, branch_a, true);
     let leaf_a1 = mk(scene, NodeKind::TreeItem);
     append_child(scene, branch_a, leaf_a1).unwrap();
+    ensure_item(scene, leaf_a1, false);
     let leaf_a2 = mk(scene, NodeKind::TreeItem);
     append_child(scene, branch_a, leaf_a2).unwrap();
+    ensure_item(scene, leaf_a2, false);
 
     let branch_b = mk(scene, NodeKind::TreeItem);
     append_child(scene, tree, branch_b).unwrap();
-    scene
-        .controls
-        .ensure(branch_b, ControlState::TreeItem { expanded: false });
+    ensure_item(scene, branch_b, false);
     let leaf_b1 = mk(scene, NodeKind::TreeItem);
     append_child(scene, branch_b, leaf_b1).unwrap();
+    ensure_item(scene, leaf_b1, false);
     (tree, branch_a, leaf_a1, leaf_a2, branch_b, leaf_b1)
+}
+
+#[test]
+fn tree_leaf_hit_refines_to_leaf_not_parent_branch() {
+    // 回归（#8）：leaf treeitem 无态时代，find_control_at 从叶子 label 上溯会跳过
+    // 叶子落到父 branch——指针点叶子 = 激活父分组（选中父 + 误折叠）。全部条目持态
+    // 后叶子命中自身。synth 侧的 branch-only 守卫由 style::dynamic 测试覆盖
+    // （synth_treeitem_expanded_branch_only）。
+    let mut scene = Scene::default();
+    let (_tree, branch_a, leaf_a1, ..) = make_tree(&mut scene);
+    // 叶子 label 子（非 treeitem 容器）上溯 → 必须是叶子自身。
+    let label = create_node_from_template(
+        &mut scene,
+        NodeKind::Container,
+        ResolvedStyle::default(),
+        None,
+    );
+    append_child(&mut scene, leaf_a1, label).unwrap();
+    assert_eq!(find_control_at(&scene, Some(label)), Some(leaf_a1));
+    // branch 判定结构口径不因叶子持态而变。
+    assert!(!is_branch(&scene, leaf_a1));
+    assert!(is_branch(&scene, branch_a));
 }
 
 #[test]

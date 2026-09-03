@@ -414,10 +414,13 @@ pub(crate) fn extract_control_init(
         NodeKind::Tree => Some(ControlInit::Tree {
             selected_item: tree_selected_item(ir_idx, tree),
         }),
-        // Tree branch 条目初始展开态（#8）：aria-expanded="true" 烘焙，缺省 false（ARIA
-        // 可折叠元素缺省折叠）。仅当元素有嵌套 treeitem 后代才产 init——leaf 无态。
-        NodeKind::TreeItem => has_nested_treeitem(ir_idx, tree).then(|| ControlInit::TreeItem {
-            expanded: bool_attr(el, "aria-expanded"),
+        // Tree 条目初始态（#8）：**全部** treeitem 烘 TreeItem init。branch 的展开态取
+        // aria-expanded="true"（ARIA 可折叠元素缺省折叠）；leaf 恒 expanded=false。leaf
+        // 也须持态：指针激活的目标解析按控件态上溯（find_control_at 只认 ControlState），
+        // 无态叶子会被跳过落到父 branch——点叶子变成激活父分组（选中父 + 误折叠）。
+        // expanded 的读写/合成仍 branch-only（FFI 与 synth_aria_value 侧结构守卫）。
+        NodeKind::TreeItem => Some(ControlInit::TreeItem {
+            expanded: has_nested_treeitem(ir_idx, tree) && bool_attr(el, "aria-expanded"),
         }),
         NodeKind::NumberField => {
             let edit =
@@ -822,7 +825,7 @@ mod tests {
     fn tree_init_extracts_selected_ordinal_and_branch_expansion() {
         // 文档序（先序 DFS）：0=武器(expanded) 1=剑 2=弓 3=防具(collapsed) 4=盾。
         // aria-selected="true" 在「弓」（序 2）→ ControlInit::Tree{selected_item:2}；
-        // branch aria-expanded 烘焙（武器 true / 防具缺省 false）；leaf（剑/弓/盾）无 init。
+        // branch aria-expanded 烘焙（武器 true / 防具缺省 false）；全部条目（含 leaf）持 init。
         let nodes = bridged(
             // branch 的 label 走子元素（block 全边）——branch 条目宿主嵌套条目为 block 子，
             // 纯文本 label 会触发 FenceMixedInlineBlock（真实树的 label 行也要组箭头/徽章，
@@ -849,29 +852,34 @@ mod tests {
             Some(ControlInit::Tree { selected_item: 2 }),
             "aria-selected=true 的 treeitem 文档序序号进初始选中"
         );
-        // branch 展开/折叠烘焙：branch 判定 = 有直接 treeitem 子（label 在 wrapper div 里
-        // 不影响）。按 aria-expanded 声明 + 内容文本定位 leaf。
-        let branches: Vec<&ikat_core::asset::TemplateNode> = nodes
+        // 全部 treeitem（branch + leaf）烘 TreeItem init：branch 判定 = 有直接
+        // treeitem 子（label 在 wrapper div 里不影响），展开态取 aria-expanded
+        //（武器 true / 防具缺省 false）；leaf 恒 expanded=false（持态供指针激活
+        // 目标解析——find_control_at 按控件态上溯，无态叶子会落到父 branch）。
+        let inits: Vec<&ikat_core::asset::TemplateNode> = nodes
             .iter()
             .filter(|n| matches!(n.control_init, Some(ControlInit::TreeItem { .. })))
             .collect();
         assert_eq!(
-            branches.len(),
-            2,
-            "两个 branch（武器/防具）烘 TreeItem init"
+            inits.len(),
+            5,
+            "全部 5 条目（2 branch + 3 leaf）烘 TreeItem init"
         );
-        assert!(branches
+        assert!(inits
             .iter()
             .any(|n| n.control_init == Some(ControlInit::TreeItem { expanded: true })));
-        assert!(branches
+        assert!(inits
             .iter()
             .any(|n| n.control_init == Some(ControlInit::TreeItem { expanded: false })));
-        // leaf（剑/弓/盾）无嵌套 treeitem → 无控件态；文本在各自 TextNode 子上。
+        // leaf（剑/弓/盾）无嵌套 treeitem → expanded 恒 false。
         let leaves = nodes
             .iter()
-            .filter(|n| n.kind == NodeKind::TreeItem && n.control_init.is_none())
+            .filter(|n| n.control_init == Some(ControlInit::TreeItem { expanded: false }))
             .count();
-        assert_eq!(leaves, 3, "三个 leaf 无 TreeItem init");
+        assert_eq!(
+            leaves, 4,
+            "leaf 恒 false + 无 aria-expanded 的 branch（防具）同值"
+        );
     }
 
     #[test]

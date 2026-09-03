@@ -35,7 +35,10 @@ pub(crate) fn tree_owner(scene: &Scene, item: NodeId) -> Option<NodeId> {
 }
 
 /// branch 判定：有直接 treeitem 子（展开/折叠语义只对 branch 成立；leaf 恒 false）。
-fn is_branch(scene: &Scene, item: NodeId) -> bool {
+/// pub：FFI get/set_treeitem_expanded 与 synth_aria_value 的 expanded 合成用它做
+/// branch-only 守卫——leaf 虽持 TreeItem 态（指针激活目标解析需要，见 bridge 烘焙），
+/// expanded 的读写/合成仅对 branch 有语义。
+pub fn is_branch(scene: &Scene, item: NodeId) -> bool {
     !direct_treeitem_children(scene, item).is_empty()
 }
 
