@@ -85,6 +85,10 @@
 ### 预览模拟脚本的级联序（经典 script vs ESM）
 旧内联 `<script>`（解析中执行）往 head `appendChild` 的 `<link>`/`<style>` 天然落在页面 `<style>` **之前**；换成 ESM（defer 语义，解析完执行）后同样代码落在**最后**——同名规则级联胜负翻转。预览 base.css 注入必须显式 `insertBefore(head.firstChild)` 复原「polyfill 先、页面样式后」的旧序（showcase/preview/main.js 实锚）。
 
+### showcase 双 runner 镜像（2021 ≠ 主工程）
+
+showcase 有**两份** runner（`unity/showcase-unity/Assets/Scripts/ShowcaseRunner.cs` 与 `unity/showcase-unity-2021/...`），文件已大幅分叉（主工程多 shape-mask/world 等页），共享同一个 pkg bundle 与 HTML 源。**新页面接线（NAV_CARDS 表项 + Start 注册 + Show teardown + WireControls 分派 + Wire 方法体）必须两边都落**——漏一边该工程里 home 卡片点了没反应（实锤：component-lab 页只在 2021 接线，主工程死卡片，外部发现）。两份 runner 不能整文件 diff 对齐（分叉），按锚点机械移植 + 移植后核对括号平衡与类落位（顶层类要放文件尾，别插进 MonoBehaviour 类中段）。
+
 ## 3. Unity 平台特性
 
 - **非纯平移节点的 renderer.bounds ≠ 真实视觉 AABB**：rotate/scale 走 `_ObjM` shader 矩阵、GO 只带平移分量 → Unity 剔除/拾取看到的 bounds = GO 平移 × 未旋转 mesh。任何新消费 renderer.bounds 的功能（剔除/遮挡/视口判定）都须过 `MirrorPool.CompensateMeshBoundsForLinear`（bounds 置线性矩阵 × 顶点 AABB）；否则旋转节点滚动/移动中被错误剔除（#66 实锤）。
