@@ -78,6 +78,38 @@ image and the foreground content are both flex items:
 .actor-frame > img { position: absolute; }   /* stretch behind */
 ```
 
+## Shape masks (circular avatars, diamond/hexagon slots)
+
+Non-rectangular hard-edged clipping is `clip-path` with the fenced basic
+shapes — `circle()` and `polygon()`. Declaring it clips the element's own
+paint **and** its subtree, and hit testing follows the shape (clipped-away
+corners click through), matching browsers:
+
+```css
+.avatar { clip-path: circle(50%); }                    /* inscribes a square box */
+.slot-diamond {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+.slot-hex {
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+```
+
+Notes:
+- `circle(50%)` resolves its percentage against the box diagonal
+  (`sqrt(w^2+h^2)/sqrt(2)`), so on a square box it is the inscribed circle —
+  the usual avatar idiom. Position with `at`: `circle(30px at 25% 50%)`.
+- `polygon()` percentages resolve against width/height per axis; 3..=16
+  points. No `fill-rule` — keep polygons simple (non-self-intersecting).
+- Masks stack by intersection with ancestor `overflow:hidden` (like nested
+  browser clips). Combos that are build errors: `clip-path` on a scroll
+  container (`overflow:scroll/auto`), and clip chains nesting more than 4
+  clippers.
+- Runtime theming works: swap the mask at runtime via a class rule
+  (`StyleSheet.Add` with `clip-path`, or `clip-path: var(--mask)` + `SetVar`).
+- Edges are hard (no feathering). Soft/faded masks are a separate deferred
+  capability, not expressible today.
+
 ## Viewport panning (scroll containers, not Drag events)
 
 Big content in a small viewport — maps, long feeds, panels — is the

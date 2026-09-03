@@ -140,6 +140,15 @@ pub enum DiagnosticCode {
     /// 纯结构判定零内容猜测；装饰 overlay 的合法修复是显式声明画序意图
     /// （`position:relative; z-index:0`，同视觉）。
     FenceMixedPaintOrder,
+    /// `overflow:scroll/auto` 与 `clip-path` 同元素声明（error，#52）。scroll 视口
+    /// 裁剪是矩形 + scroll_pos 平移语义，shape 裁滚动视口无清晰含义；web 上合法
+    /// 但 Ikat 不做——响亮拒优于静默降级。shape 与 `overflow:hidden` 组合合法
+    /// （两条测试取交集，web 原义）。
+    FenceClipPathScrollCombo,
+    /// 裁剪链深度超上限（error，#52）。后端 clip uniform 槽 4 组定长；沿祖先链
+    /// 的 overflow 裁剪器 + clip-path 裁剪器总数超 4 时超限。authored 超深在此
+    /// 拒（运行时 CSS 注入路径由 core warn-once 兜底）。
+    FenceClipChainTooDeep,
 }
 
 #[derive(Debug, Clone)]

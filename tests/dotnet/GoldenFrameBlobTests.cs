@@ -132,28 +132,32 @@ namespace Ikat.Tests.Core
         }
 
         [Fact]
-        public void ClipTableEntry_DecodesDesignRect()
+        public void ClipTableEntry_DecodesChainEntries()
         {
             var blob = new FrameBlob(LoadGolden("frame-blob.bin"));
             Assert.True(blob.IsValid);
-            // golden 场景的 clipper：500×60 overflow:hidden —— 找到任一 clip entry，
-            // 断言 rect 数值落在场景尺寸内且 w/h 与声明宽度一致量级（52B entry 布局锁）。
+            // golden 场景的 clipper：500×60 overflow:hidden —— 找到任一 clip 链，
+            // 断言 entry 数值有限、box-local rect 落在场景尺寸量级、frame 六元组
+            // 有限（92B 多 entry 布局锁）。inv_frame 的 tx/ty = clipper design 位置
+            // 取负（identity 旋转时），落在场景坐标范围内。
             bool found = false;
             for (int i = 0; i < blob.NodeCount && !found; i++)
             {
                 uint ctx = blob.MaskContext(i);
                 if (ctx == 0) continue;
-                if (blob.ClipRect(ctx, out float x, out float y, out float w, out float h, out float r))
+                var entries = blob.ReadClipEntries(ctx);
+                if (entries.Count == 0) continue;
+                Assert.True(entries.Count <= 4, "链深 ≤ MAX_CLIP_CHAIN(4)");
+                foreach (var en in entries)
                 {
-                    Assert.True(Finite(x) && Finite(y) && Finite(w) && Finite(h) && Finite(r));
-                    Assert.InRange(x, 0f, 800f);
-                    Assert.InRange(y, 0f, 600f);
-                    Assert.InRange(w, 0f, 800f);
-                    Assert.InRange(h, 0f, 600f);
-                    found = true;
+                    Assert.True(Finite(en.A) && Finite(en.B) && Finite(en.C) && Finite(en.D));
+                    Assert.True(Finite(en.Tx) && Finite(en.Ty) && Finite(en.W) && Finite(en.H));
+                    Assert.InRange(en.W, 0f, 2000f);
+                    Assert.InRange(en.H, 0f, 2000f);
                 }
+                found = true;
             }
-            Assert.True(found, "应存在 mask_context>0 且可从 clip 表解码 rect 的节点");
+            Assert.True(found, "应存在 mask_context>0 且可从 clip 表解码链 entry 的节点");
         }
     }
 }

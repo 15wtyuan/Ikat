@@ -1549,6 +1549,9 @@ impl Stage {
         drop(host_ref);
         scene.node_sort_keys = sort_keys;
         self.prev_node_hashes = new_hashes;
+        // 帧内警告（clip 链超深等）归集进场景警告通道（宿主经 take_warnings 拉取）。
+        let mut frame = frame;
+        scene.warnings.append(&mut frame.warnings);
         frame
     }
 

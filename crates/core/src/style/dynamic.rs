@@ -3959,6 +3959,32 @@ mod tests {
         assert_eq!(s.get(bid).unwrap().style.color, RED);
     }
 
+    /// 运行时 CSS 通道收下 clip-path（#52）：Add 类规则 → 下一次 rematch 生效
+    /// （apply_decl 同一 arm；消费点惰性派生，无需 solve 存储字段）。
+    #[test]
+    fn runtime_rule_clip_path_applies_on_rematch() {
+        use crate::style::resolved::{ClipPathDecl, ClipShape};
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        crate::scene::dynamic::style_sheet_add(
+            &mut s,
+            vec![rule(".btn", "clip-path", "circle(50%)")],
+        );
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        let style = &s.get(bid).unwrap().style;
+        assert!(matches!(style.clip_path, Some(ClipPathDecl::Circle { .. })));
+        // 惰性派生：按 layout 100×100 解析成内切圆（消费点同款调用）。
+        let shape = style.clip_path.as_ref().unwrap().resolve(100.0, 100.0);
+        match shape {
+            ClipShape::Circle { r, .. } => assert!((r - 50.0).abs() < 1e-4),
+            _ => panic!(),
+        }
+        // none 清除（toggle 场景）。
+        crate::scene::dynamic::style_sheet_add(&mut s, vec![rule(".btn", "clip-path", "none")]);
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert!(s.get(bid).unwrap().style.clip_path.is_none(), "none 清除");
+    }
+
     #[test]
     fn runtime_rule_same_specificity_later_add_wins() {
         // 「与模板 CSS 同 cascade 优先级」+ 追加序 = 文档序：同 specificity 后 Add 赢。
@@ -4036,6 +4062,62 @@ mod tests {
             BLUE,
             "全局注入规则跨作用域命中"
         );
+    }
+
+    /// var() 代换 clip-path（#52 涌现能力实锤）：规则声明 --sm-mask + 值消费
+    /// `clip-path: var(--sm-mask)`，SetVar 换值后 rematch 重放 → shape 翻转。
+    #[test]
+    fn var_substitution_drives_clip_path() {
+        use crate::style::resolved::{ClipPathDecl, ClipShape};
+        let mut s = btn_scene();
+        let bid = btn_id(&s);
+        push_global(
+            &mut s,
+            rule_decls(
+                ".btn",
+                &[
+                    ("--sm-mask", "circle(50%)"),
+                    ("clip-path", "var(--sm-mask)"),
+                ],
+            ),
+        );
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert!(
+            matches!(
+                s.get(bid).unwrap().style.clip_path,
+                Some(ClipPathDecl::Circle { .. })
+            ),
+            "var() 代换 circle 生效"
+        );
+        // SetVar 换 polygon → rematch 后 shape 翻转（运行时换遮罩通道）。
+        crate::scene::dynamic::node_set_var(
+            &mut s,
+            bid,
+            "--sm-mask",
+            "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
+        )
+        .expect("set_var");
+        rematch_pseudo_classes(&mut s, (1080.0, 1920.0), [0.0; 4]);
+        assert!(
+            matches!(
+                s.get(bid).unwrap().style.clip_path,
+                Some(ClipPathDecl::Polygon { .. })
+            ),
+            "SetVar 换形后 polygon 生效"
+        );
+        // 惰性派生链路完整：多边形几何按 100×100 解析。
+        let shape = s
+            .get(bid)
+            .unwrap()
+            .style
+            .clip_path
+            .as_ref()
+            .unwrap()
+            .resolve(100.0, 100.0);
+        match shape {
+            ClipShape::Polygon { points } => assert_eq!(points.len(), 4),
+            _ => panic!("polygon 形错"),
+        }
     }
 
     #[test]

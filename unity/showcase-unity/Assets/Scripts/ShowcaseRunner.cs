@@ -32,6 +32,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("nav-layout", "layout-anim"),
         ("nav-infra", "api-infra"),
         ("nav-rtcss", "runtime-css"),
+        ("nav-shape", "shape-mask"),
         ("nav-tree", "tree"),
         ("nav-fx", "effects"),
         ("nav-world", "world"),
@@ -1121,6 +1122,71 @@ public class ShowcaseRunner : MonoBehaviour
         _rtRegs.Clear();
     }
 
+    /// shape-mask 页（#52）：命中穿透读数（圆/角计数）+ 运行时注入圆遮罩。
+    /// 判据（肉眼强信号）：点橙角=角读数翻（clip-path 裁命中——穿透到下层按钮）、
+    /// 点圆心=圆读数翻、注入后方图变圆/撤销复原。静态区（头像/槽位/嵌套滚动/旋转卡）
+    /// 无接线——浏览器预览与运行时同为 CSS 声明面。
+    /// 注入句柄复用 _rtRegs（离页 TeardownRuntimeCssPage 统一 Dispose——改名不动，
+    /// 句柄生命周期语义同源）。
+    void WireShapeMaskPage(Container page)
+    {
+        var ui = _driver.Context;
+        var ss = ui.StyleSheet;
+        if (page.TryGet<TextElement>("sm-status", out var status))
+            status.TextContent = "待命";
+        // 命中穿透读数：圆按钮与角按钮各计数（TryGet 类型对齐：button 命中 Button）。
+        if (page.TryGet<TextElement>("sm-hit-c", out var hitC)
+            && page.TryGet<TextElement>("sm-hit-x", out var hitX))
+        {
+            int c = 0, x = 0;
+            if (page.TryGet<Button>("sm-center", out var centerBtn))
+                centerBtn.Clicked += () => { c++; hitC.TextContent = c.ToString(); };
+            if (page.TryGet<Button>("sm-corner", out var cornerBtn))
+                cornerBtn.Clicked += () => { x++; hitX.TextContent = x.ToString(); };
+        }
+        // 运行时注入：.sm-rt-img 圆遮罩（类规则 clip-path），Dispose 复原。
+        if (page.TryGet<Button>("sm-rt", out var rtBtn))
+            rtBtn.Clicked += () =>
+            {
+                foreach (var r in _rtRegs) r?.Dispose();
+                _rtRegs.Clear();
+                _rtRegs.Add(ss.Add(".sm-rt-img { clip-path: circle(50%); }"));
+                if (status != null) status.TextContent = "已注入圆";
+            };
+        if (page.TryGet<Button>("sm-rt-off", out var offBtn))
+            offBtn.Clicked += () =>
+            {
+                foreach (var r in _rtRegs) r?.Dispose();
+                _rtRegs.Clear();
+                if (status != null) status.TextContent = "已撤销";
+            };
+        // G 圆角命中读数：圆角裁剪器（overflow+radius）角外点击穿透（Q6 存量偏差修复）。
+        if (page.TryGet<TextElement>("sm-rhit-c", out var rHitC)
+            && page.TryGet<TextElement>("sm-rhit-x", out var rHitX))
+        {
+            int rc = 0, rx = 0;
+            if (page.TryGet<Button>("sm-r-center", out var rCenterBtn))
+                rCenterBtn.Clicked += () => { rc++; rHitC.TextContent = rc.ToString(); };
+            if (page.TryGet<Button>("sm-r-corner", out var rCornerBtn))
+                rCornerBtn.Clicked += () => { rx++; rHitX.TextContent = rx.ToString(); };
+        }
+        // F2 var() 换形：遮罩值走 var(--sm-mask)，SetVar(string) 在圆/六边形间切
+        // （var 代换 clip-path 的端到端肉眼判据——core 已有契约测试）。
+        if (page.TryGet<Image>("sm-var-img", out var varImg))
+        {
+            bool round = false;
+            if (page.TryGet<Button>("sm-var", out var varBtn))
+                varBtn.Clicked += () =>
+                {
+                    round = !round;
+                    varImg.Style.SetVar(
+                        "--sm-mask",
+                        round ? "circle(50%)" : "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)");
+                    if (status != null) status.TextContent = round ? "var·圆" : "var·六边";
+                };
+        }
+    }
+
     /// runtime-css 页（#11）：StyleSheet.Add/Dispose/Clear + SetVar/RemoveVar + var() 消费面。
     /// 判据（肉眼强信号）：目标块变色/复原、同优先后 Add 赢、非法 CSS 异常读数带行列、
     /// chips 组整组翻色/回落、嵌套链 swatch 变色、行内源 chip 恒橙（打包期通路回归）。
@@ -1527,6 +1593,10 @@ public class ShowcaseRunner : MonoBehaviour
         if (pageName == "runtime-css")
         {
             WireRuntimeCssPage(page);
+        }
+        if (pageName == "shape-mask")
+        {
+            WireShapeMaskPage(page);
         }
         if (pageName == "lab")
         {

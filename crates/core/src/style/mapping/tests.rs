@@ -2477,3 +2477,94 @@ fn effective_line_height_resolves_px_against_font_size() {
     s.line_height_px = Some(0.0); // 无效 px（≤0）回退倍数槽
     assert_eq!(s.effective_line_height(), 1.8);
 }
+
+// ---------- clip-path（#52 shape mask） ----------
+
+/// circle/polygon 合法形解析 + 默认位置 50% 50%。
+#[test]
+fn parse_clip_path_valid_forms() {
+    use crate::style::resolved::ClipPathDecl;
+    // circle：半径必显式；at 缺省 → 50% 50%（居心）。
+    match parse_clip_path("circle(50%)") {
+        Some(ClipPathDecl::Circle { radius, cx, cy }) => {
+            assert_eq!(radius, LengthPercentage::percent(0.5));
+            assert_eq!(cx, LengthPercentage::percent(0.5));
+            assert_eq!(cy, LengthPercentage::percent(0.5));
+        }
+        other => panic!("circle(50%) 解析形错：{other:?}"),
+    }
+    // circle + at 位置（px + % 混合，大小写不敏感 at）。
+    match parse_clip_path("circle(30px AT 25% 10px)") {
+        Some(ClipPathDecl::Circle { radius, cx, cy }) => {
+            assert_eq!(radius, LengthPercentage::length(30.0));
+            assert_eq!(cx, LengthPercentage::percent(0.25));
+            assert_eq!(cy, LengthPercentage::length(10.0));
+        }
+        other => panic!("circle at 解析形错：{other:?}"),
+    }
+    // polygon：4 点菱形（% 坐标）。
+    match parse_clip_path("polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)") {
+        Some(ClipPathDecl::Polygon { points }) => assert_eq!(points.len(), 4),
+        other => panic!("polygon 解析形错：{other:?}"),
+    }
+    // polygon 最少 3 点、最多 16 点。
+    assert!(parse_clip_path("polygon(0 0, 10 10, 0 10)").is_some());
+    let pts17 = (0..17)
+        .map(|i| format!("{i} {i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        parse_clip_path(&format!("polygon({pts17})")).is_none(),
+        "17 点拒"
+    );
+}
+
+/// 域外/非法形统一拒（None）：围栏子集外的 basic shapes、裸 circle、负半径、
+/// fill-rule 前缀、垃圾 token。
+#[test]
+fn parse_clip_path_rejects_out_of_fence() {
+    assert!(parse_clip_path("circle()").is_none(), "裸 circle() 拒");
+    assert!(parse_clip_path("circle(-10px)").is_none(), "负半径拒");
+    assert!(
+        parse_clip_path("circle(closest-side)").is_none(),
+        "closest-side 拒"
+    );
+    assert!(parse_clip_path("ellipse(50% 50%)").is_none(), "ellipse 拒");
+    assert!(
+        parse_clip_path("inset(10px round 4px)").is_none(),
+        "inset 拒"
+    );
+    assert!(
+        parse_clip_path("polygon(nonzero, 0 0, 10 0, 5 10)").is_none(),
+        "fill-rule 前缀拒"
+    );
+    assert!(
+        parse_clip_path("polygon(0 0, abc 10, 5 10)").is_none(),
+        "垃圾 token 拒"
+    );
+    assert!(parse_clip_path("circle(50% at)").is_none(), "at 缺坐标拒");
+    assert!(
+        parse_clip_path("circle(50% at 10% 20% 30%)").is_none(),
+        "at 多余 token 拒"
+    );
+    assert!(
+        parse_clip_path("circle(50px extra)").is_none(),
+        "多余 token 拒"
+    );
+    // polygon 2 点拒。
+    assert!(parse_clip_path("polygon(0 0, 10 10)").is_none(), "2 点拒");
+}
+
+/// apply_decl：合法值写入 / none 清除 / 非法值返 false（运行时 rematch 同路径）。
+#[test]
+fn apply_decl_clip_path_roundtrip() {
+    let mut style = crate::style::resolved::ResolvedStyle::default();
+    assert!(apply_decl(&mut style, "clip-path", "circle(50%)"));
+    assert!(style.clip_path.is_some());
+    assert!(apply_decl(&mut style, "clip-path", "none"));
+    assert!(style.clip_path.is_none());
+    assert!(
+        !apply_decl(&mut style, "clip-path", "ellipse(10px)"),
+        "域外值 false"
+    );
+}

@@ -1,6 +1,5 @@
 use super::*;
 use ikat_core::render::ClipEntry;
-use ikat_core::scene::node::Rect;
 use ikat_core::transform::Affine2Ext;
 
 /// 测试层 build_blob：多数用例不涉 list 池，用空 Scene（无 parked slot → 无 keepalive 段）。
@@ -14,6 +13,7 @@ fn frame(nodes: &[RenderNode]) -> FrameData {
     FrameData {
         nodes: nodes.to_vec(),
         clips: Vec::new(),
+        warnings: Vec::new(),
     }
 }
 
@@ -885,20 +885,38 @@ impl<'a> TestView<'a> {
             0
         }
     }
-    fn read_clips(&self) -> Vec<(u32, Rect, Option<[(f32, f32); 4]>)> {
+    /// 解析 92B clip entry（多 entry 布局，见 blob.rs 注释）。返回
+    /// (context_id, flags, inv_frame, rect(w,h), radii, circle(cx,cy,r), poly)。
+    /// poly = arena 内点表（表尾段，按 entry 的 poly_off 读）。
+    #[allow(clippy::type_complexity)]
+    fn read_clips(
+        &self,
+    ) -> Vec<(
+        u32,
+        u32,
+        [f32; 6],
+        (f32, f32),
+        Option<[(f32, f32); 4]>,
+        (f32, f32, f32),
+        Vec<(f32, f32)>,
+    )> {
         let count = self.clip_count() as usize;
+        let entries_end = self.clip_table_off + 4 + count * 92;
         let mut p = self.clip_table_off + 4;
         (0..count)
             .map(|_| {
                 let cid = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
                 p += 4;
-                let x = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                let flags = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
                 p += 4;
-                let y = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                let mut frame = [0.0f32; 6];
+                for v in frame.iter_mut() {
+                    *v = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                    p += 4;
+                }
+                let rw = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
                 p += 4;
-                let w = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
-                p += 4;
-                let h = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                let rh = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
                 p += 4;
                 let mut radii = [(0.0f32, 0.0f32); 4];
                 for corner in radii.iter_mut() {
@@ -910,15 +928,34 @@ impl<'a> TestView<'a> {
                 }
                 let all_zero = radii.iter().all(|&(rx, ry)| rx == 0.0 && ry == 0.0);
                 let radii_opt = if all_zero { None } else { Some(radii) };
-                (cid, Rect { x, y, w, h }, radii_opt)
+                let cx = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                p += 4;
+                let cy = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                p += 4;
+                let r = f32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap());
+                p += 4;
+                let poly_count =
+                    u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
+                p += 4;
+                let poly_off = u32::from_le_bytes(self.buf[p..p + 4].try_into().unwrap()) as usize;
+                p += 4;
+                let mut poly = Vec::with_capacity(poly_count);
+                let mut q = entries_end + poly_off;
+                for _ in 0..poly_count {
+                    let x = f32::from_le_bytes(self.buf[q..q + 4].try_into().unwrap());
+                    let y = f32::from_le_bytes(self.buf[q + 4..q + 8].try_into().unwrap());
+                    poly.push((x, y));
+                    q += 8;
+                }
+                (cid, flags, frame, (rw, rh), radii_opt, (cx, cy, r), poly)
             })
             .collect()
     }
 }
 
-/// §4.4 / §4.1：clip 表 round-trip——context_id + 交集绝对 rect 序列化进 blob 末段。
-/// 构造 FrameData 带 2 个 clip entry（含一个零面积 disjoint 交集），读回值正确；
-/// 且 mask_context==0 永不入表（context 从 1 起）。
+/// §4.4 / §4.1：clip 表 round-trip（多 entry 布局，#52）——rect entry + circle
+/// entry 的 flags/inv_frame/几何字段序列化进 blob 末段；mask_context==0 永不入表
+/// （context 从 1 起）。
 #[test]
 fn clip_table_round_trip_with_entries() {
     let node = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
@@ -927,63 +964,106 @@ fn clip_table_round_trip_with_entries() {
         clips: vec![
             ClipEntry {
                 context_id: 1,
-                rect: Rect {
-                    x: 0.0,
-                    y: 0.0,
+                inv_frame: [1.0, 0.0, 0.0, 1.0, 10.0, 20.0],
+                rect: Some(ikat_core::render::ClipRectSpec {
                     w: 100.0,
                     h: 100.0,
-                },
-                radii: None,
+                    radii: None,
+                }),
+                shape: ikat_core::style::resolved::ClipShape::None,
             },
             ClipEntry {
                 context_id: 2,
-                rect: Rect {
-                    x: 50.0,
-                    y: 50.0,
-                    w: 0.0,
-                    h: 0.0,
+                inv_frame: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                rect: None,
+                shape: ikat_core::style::resolved::ClipShape::Circle {
+                    cx: 50.0,
+                    cy: 50.0,
+                    r: 50.0,
                 },
-                radii: None,
             },
         ],
+        warnings: Vec::new(),
     };
     let blob = build_blob(&frame);
     let view = TestView::parse(&blob);
     assert_eq!(view.clip_count(), 2, "clip_count == 2");
     let clips = view.read_clips();
     assert_eq!(clips.len(), 2);
+    // entry 0：rect 测试生效（flags bit0），无 shape、无 radii。
     assert_eq!(clips[0].0, 1);
-    assert_eq!(
-        (clips[0].1.x, clips[0].1.y, clips[0].1.w, clips[0].1.h),
-        (0.0, 0.0, 100.0, 100.0)
-    );
+    assert_eq!(clips[0].1, 0b001, "rect-only entry flags");
+    assert_eq!(clips[0].2, [1.0, 0.0, 0.0, 1.0, 10.0, 20.0]);
+    assert_eq!(clips[0].3, (100.0, 100.0));
+    assert!(clips[0].4.is_none(), "radii=None → 全零");
+    assert_eq!(clips[0].5, (0.0, 0.0, 0.0), "无 circle 参数");
+    assert!(clips[0].6.is_empty(), "无 poly");
+    // entry 1：shape=circle（bit2 + kind 0 in bits 8..），无 rect 测试。
     assert_eq!(clips[1].0, 2);
-    // 零面积 disjoint 交集 round-trip（w/h=0）。
-    assert_eq!(
-        (clips[1].1.x, clips[1].1.y, clips[1].1.w, clips[1].1.h),
-        (50.0, 50.0, 0.0, 0.0)
-    );
-    // radii=None → 序列化为全零 32B，读回仍 None（直角 clip）。
-    assert!(clips[0].2.is_none(), "radii=None round-trip 为 None");
-    assert!(clips[1].2.is_none(), "radii=None round-trip 为 None");
-    // clip 表段长度 = 4(count) + 2×52(entry: ctx+rect 20B + radii 32B) = 108。
-    assert_eq!(view.clip_table_len, 108, "clip_table_len = 4 + count×52");
+    assert_eq!(clips[1].1, 0b100, "circle-only entry flags");
+    assert_eq!(clips[1].3, (0.0, 0.0), "无 rect");
+    assert_eq!(clips[1].5, (50.0, 50.0, 50.0), "circle cx,cy,r");
+    // clip 表段长度 = 4(count) + 2×92(entry) + 0(poly arena) = 188。
+    assert_eq!(view.clip_table_len, 188, "clip_table_len = 4 + count×92");
     // v7：path_table 紧跟 clip_table 之后，是 blob 末段。
-    //   本测试 mesh 无 image_path → path_table 仅 4B（path_count=0）。
     assert_eq!(
         view.path_table_off,
         view.clip_table_off + view.clip_table_len as usize,
         "path_table 紧跟 clip_table"
     );
     assert_eq!(
-        view.path_table_len, 4,
-        "无 image_path：path_table 仅 path_count=0，len=4"
-    );
-    assert_eq!(
         view.path_table_off + view.path_table_len as usize,
         blob.len(),
         "path_table 应是 blob 末段"
     );
+}
+
+/// polygon entry round-trip：点表经 poly_arena（表尾段）偏移读取，points 值保真；
+/// 两个 polygon entry 各自 arena 偏移互不串扰。
+#[test]
+fn clip_table_polygon_round_trip() {
+    let node = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
+    let frame = FrameData {
+        nodes: vec![node],
+        clips: vec![
+            ClipEntry {
+                context_id: 1,
+                inv_frame: ikat_core::transform::IDENTITY,
+                rect: None,
+                shape: ikat_core::style::resolved::ClipShape::Polygon {
+                    points: vec![(50.0, 0.0), (100.0, 50.0), (50.0, 100.0), (0.0, 50.0)],
+                },
+            },
+            ClipEntry {
+                context_id: 2,
+                inv_frame: ikat_core::transform::IDENTITY,
+                rect: None,
+                shape: ikat_core::style::resolved::ClipShape::Polygon {
+                    points: vec![(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)],
+                },
+            },
+        ],
+        warnings: Vec::new(),
+    };
+    let blob = build_blob(&frame);
+    let view = TestView::parse(&blob);
+    assert_eq!(view.clip_count(), 2);
+    let clips = view.read_clips();
+    // flags = bit2(shape) | kind=1<polygon> in bits 8..。
+    assert_eq!(clips[0].1, 0b100 | (1 << 8), "polygon entry flags");
+    assert_eq!(
+        clips[0].6,
+        vec![(50.0, 0.0), (100.0, 50.0), (50.0, 100.0), (0.0, 50.0)],
+        "菱形 4 点保真"
+    );
+    assert_eq!(clips[1].1, 0b100 | (1 << 8));
+    assert_eq!(
+        clips[1].6,
+        vec![(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)],
+        "三角形 3 点保真"
+    );
+    // 表长 = 4 + 2×92 + (4+3)点×8B = 188 + 56 = 244。
+    assert_eq!(view.clip_table_len, 244, "clip_table_len 含 poly arena");
 }
 
 /// 空 clip 表（无 overflow:hidden）：clip_count=0，clip_table_len=4（仅 count 占位）。
@@ -999,8 +1079,8 @@ fn empty_clip_table_round_trip() {
     assert_eq!(view.read_clips().len(), 0);
 }
 
-/// 圆角 clip entry round-trip：radii=Some([(rx,ry);4]) 序列化为 32B（4×(rx,ry)），
-/// 读回值保真。验四角独立 (rx,ry) 对均正确透传（TL,TR,BR,BL 序）。
+/// 圆角 clip entry round-trip：rect + radii=Some([(rx,ry);4]) 序列化，读回值保真。
+/// 验四角独立 (rx,ry) 对均正确透传（TL,TR,BR,BL 序）+ flags bit0|bit1。
 #[test]
 fn clip_table_radii_round_trip() {
     let node = mesh_node(0, None, 0.0, 0.0, 1.0, 1.0);
@@ -1014,37 +1094,33 @@ fn clip_table_radii_round_trip() {
         nodes: vec![node],
         clips: vec![ClipEntry {
             context_id: 1,
-            rect: Rect {
-                x: 5.0,
-                y: 6.0,
+            inv_frame: ikat_core::transform::IDENTITY,
+            rect: Some(ikat_core::render::ClipRectSpec {
                 w: 100.0,
                 h: 80.0,
-            },
-            radii: Some(radii),
+                radii: Some(radii),
+            }),
+            shape: ikat_core::style::resolved::ClipShape::None,
         }],
+        warnings: Vec::new(),
     };
     let blob = build_blob(&frame);
     let view = TestView::parse(&blob);
     assert_eq!(view.clip_count(), 1);
-    // entry 52B：clip_table_len = 4 + 1×52 = 56。
-    assert_eq!(view.clip_table_len, 56, "圆角 clip entry 52B");
+    // entry 92B：clip_table_len = 4 + 1×92 = 96。
+    assert_eq!(view.clip_table_len, 96, "圆角 clip entry 92B");
     let clips = view.read_clips();
     assert_eq!(clips.len(), 1);
     assert_eq!(clips[0].0, 1);
-    assert_eq!(
-        (clips[0].1.x, clips[0].1.y, clips[0].1.w, clips[0].1.h),
-        (5.0, 6.0, 100.0, 80.0)
-    );
-    let r = clips[0].2.expect("radii 应 Some");
+    assert_eq!(clips[0].1, 0b011, "rect + radii flags");
+    assert_eq!(clips[0].3, (100.0, 80.0), "box-local rect (w,h)");
+    let r = clips[0].4.expect("radii 应 Some");
     for i in 0..4 {
         assert!(
             (r[i].0 - radii[i].0).abs() < 1e-5 && (r[i].1 - radii[i].1).abs() < 1e-5,
-            "corner[{}] round-trip: 期望 ({},{})，得 ({},{})",
-            i,
-            radii[i].0,
-            radii[i].1,
-            r[i].0,
-            r[i].1
+            "corner[{i}] 期望 {:?} 得 {:?}",
+            radii[i],
+            r[i]
         );
     }
 }
@@ -1105,6 +1181,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
     let frame = FrameData {
         nodes: vec![merged],
         clips: vec![],
+        warnings: vec![],
     };
     let buf = build_blob(&frame);
     let view = TestView::parse(&buf);
@@ -1164,6 +1241,7 @@ fn blob_world_matrix_roundtrip() {
     let blob = build_blob(&FrameData {
         nodes: vec![pure, skew],
         clips: vec![],
+        warnings: vec![],
     });
     assert_eq!(
         u32::from_le_bytes(blob[4..8].try_into().unwrap()),
@@ -1181,6 +1259,7 @@ fn blob_pure_mesh_kind_is_one() {
     let frame = FrameData {
         nodes: vec![rn],
         clips: vec![],
+        warnings: vec![],
     };
     let blob = build_blob(&frame);
     assert!(!blob.is_empty(), "纯色 mesh 节点 blob 非空");
@@ -1232,6 +1311,7 @@ fn blob_color_matrix_column_round_trips() {
     let blob = build_blob(&FrameData {
         nodes,
         clips: vec![],
+        warnings: vec![],
     });
     let view = TestView::parse(&blob);
     assert_eq!(view.version(), 15, "VERSION=15（v15：列级增量）");
