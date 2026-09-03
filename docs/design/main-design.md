@@ -400,7 +400,8 @@ mails.BindItem = (item, index) => {
 - item 模板来源优先级：显式 `ItemTemplate`/`TemplateSelector` > 设计期 `<template id>` > 第一个 listitem 兜底。未设且 list 下单个 `<template>` 自动用、多个 `<template>` 抛 `UIContractException`。
 - `TemplateSelector` 是纯 `Func<int, UITemplate>`；用户 `view.GetTemplate("name")` 取 template 后塞 lambda 闭包按 index 选，框架不自动收集。
 - `TemplateSelector` 返回 `UITemplate` 对象，不返回字符串。
-- ListView 按模板分别池化。
+- 严格派：selector 设了即全权——每个 index 必须返回 UITemplate（null 抛 `UIContractException`）；与 `ItemTemplate` 同设 selector 赢（`ItemTemplate` 为默认蓝图）。selector 求值在投影层完成后按区间批量推送（core 零回调）；换 selector/`Notify*` 后受影响区间重推，模板变了的项 park 旧蓝图 slot、下帧以正确蓝图重新物化。
+- ListView 按模板分别池化；spacer 估高按蓝图均值分化。
 - 虚拟化、可见区、测量补偿、content size 和后端 reuse key 全部是内部实现。内部不变量：slot 永驻 list 不 detach（park = inline `display:none`；unpark = 清 override，让 cascade 回落作者真实 display）；`notify_*` 一律 park/shift 复用、不重建；`reuse_key` 出生即定永不旋转、场景级命名空间（多 ListView 同页不撞 key）。虚拟化判据（可测）：render node 数与 slot 数不随 `ItemCount` 增长。
 - 滚动来源两模式：list 自身 `overflow:auto`（自滚，用自身 viewport）或祖先滚动容器（扣祖先偏移）。
 - ul 为 flex-row+wrap 时自动按行虚拟化（行内全量、spacer 全宽独占行）。

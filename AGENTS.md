@@ -103,7 +103,7 @@ cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 | 改动面 | 必同步文档 |
 |---|---|
 | fence schema（新标签/属性/值域/伪类/UA 默认行为） | `docs/design/fence.md`（内部权威）+ `templates/editor/references/fence-schema.md`、`css-reference.md`（消费侧镜像，测试锁名字） |
-| 公共 API / FFI 签名 | `docs/design/public-api.md`、`projection-layer.md` + `templates/runtime/references/api-reference.md`（镜像 C# 签名） |
+| 公共 API / FFI 签名 | `docs/design/public-api.md`、`projection-layer.md` + `templates/runtime/references/api-reference.md`（镜像 C# 签名）；API 的**组合用法/配方**另同步 `templates/editor/references/patterns.md`（签名面 ≠ 用法面，#12 实锤：api-reference 更了、配方手册漏） |
 | preview 行为层（A 层/boot/注入语义） | `templates/preview/SKILL.md` + `references/recipes.md` |
 | CLI 命令面 / 工作区拓扑 / scaffold 产物 | `templates/ikat/SKILL.md`、`templates/editor/SKILL.md` + `docs/ai-setup.md` |
 | 对外可见行为/修复 | `unity/package/CHANGELOG.md` Unreleased 段（发版时折版本段） |
