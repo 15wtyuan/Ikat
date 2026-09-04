@@ -55,14 +55,14 @@
         <button class="api-btn" id="cl-rt">注入::part红</button>
       </div>
       <div class="api-row">
-        <button class="api-btn" id="cl-swap">换蓝图重物化</button>
+        <button class="api-btn" id="cl-swap">销毁列表</button>
       </div>
       <div class="readout-label">操作读数</div>
       <span class="readout" id="cl-status">待命</span>
     </div>
     <div class="cl-page">
       <div class="main-title">组件类绑定与生命周期</div>
-      <div class="section-label">换蓝图重物化（旧蓝图克隆 Rust 侧死亡 → 帧泵 OnDisconnected，disc 跳增 + 整列翻面）</div>
+      <div class="section-label">列表整树销毁（蓝图/克隆全释放 → Rust 侧死亡 → 帧泵 OnDisconnected，disc 大跳增）</div>
       <div class="cl-pane">
         <div role="list" id="cl-list" class="cl-list">
           <template id="cl-row"><div role="listitem" class="cl-row"><lifecycle-widget></lifecycle-widget></div></template>

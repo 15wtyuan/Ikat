@@ -1218,17 +1218,6 @@ public class ShowcaseRunner : MonoBehaviour
 
         if (page.TryGet<Container>("cl-stage", out var stage))
         {
-            if (page.TryGet<Button>("cl-add", out var addBtn))
-                addBtn.Clicked += () =>
-                {
-                    // widget-holder 的 custom tag 打包期已展开为 host——运行时克隆即
-                    // 得可路由的 CustomElement（直接 Instantiate 组件文件只得模板根 div）。
-                    Container holder = _driver.Instantiate("showcase", "widget-holder");
-                    if (holder == null) { Debug.Log("[Showcase] comp: widget-holder instantiate FAIL"); return; }
-                    holder.RemoveFromParent();   // driver.Instantiate 挂在 scene 根，摘下重挂进页内
-                    stage.AddChild(holder);
-                    Debug.Log($"[Showcase] comp: +1 (conn={LifecycleWidget.Connected} disc={LifecycleWidget.Disconnected})");
-                };
             // 重复注册 fail-loud（#20）：同 tag 二次注册必须抛 UIContractException。
             if (page.TryGet<Button>("cl-dup", out var dupBtn))
                 dupBtn.Clicked += () =>
@@ -1250,8 +1239,10 @@ public class ShowcaseRunner : MonoBehaviour
                 rtBtn.Clicked += () =>
                 {
                     _clPartReg?.Dispose();
+                    // specificity 对齐烘焙规则（.lw-hot::part(title) = (0,2,1)）：注入同选择器，
+                    // 同优先后 Add 赢（#11 cascade 语义）→ 金组件翻红；裸 ::part (0,1,1) 会输。
                     _clPartReg = _driver.Context.StyleSheet.Add(
-                        "::part(title) { color: #e74c3c; }");
+                        ".lw-hot::part(title) { color: #e74c3c; }");
                     Say("已注入 ::part 红");
                 };
             // 列表换绑淘汰（#20 pump 路径）：ItemCount 减员 → core 杀克隆 → 下帧
@@ -1275,27 +1266,40 @@ public class ShowcaseRunner : MonoBehaviour
                 lv.ItemCount = 8;
                 if (page.TryGet<Button>("cl-swap", out var swapBtn))
                 {
-                    bool plain = false;
+                    ListView captured = lv;
                     swapBtn.Clicked += () =>
                     {
-                        plain = !plain;
-                        // 换蓝图重物化：模板变了的 item 旧蓝图克隆被 core 释放（Rust 侧死亡，
-                        // 非 C# Dispose）→ 下帧 PumpRemovedNodes 对已物化 wrapper fire
-                        // OnDisconnected。减员不触发（槽位池化 parked 不释放）。
-                        UITemplate t = plain ? rowPlain : rowWidget;
-                        lv.TemplateSelector = _ => t;
-                        Say(plain ? "换普通行蓝图（disc 跳增）" : "换组件蓝图（conn 跳增）");
+                        // Rust 侧死亡触发器 = 整列表销毁（蓝图/全部克隆一次释放——park 语义下
+                        // 换蓝图/减员都不 free 节点，那是池化不是死亡）。disc 大跳增即泵实证。
+                        captured.Dispose();
+                        Say("列表已销毁（disc 跳增；重新进页复原）");
                     };
                 }
             }
             if (page.TryGet<Button>("cl-pop", out var popBtn))
+            {
+                // 销毁动态挂的最后一个（按挂载记录，不按 Query 序——DFS 序与视觉序不必然一致，
+                // 按文档尾取会销毁错对象：金色静态组件可能恰在末位）。
+                System.Collections.Generic.List<Container> added = new System.Collections.Generic.List<Container>();
+                if (page.TryGet<Button>("cl-add", out var addBtn))
+                    addBtn.Clicked += () =>
+                    {
+                        Container holder = _driver.Instantiate("showcase", "widget-holder");
+                        if (holder == null) { Debug.Log("[Showcase] comp: widget-holder instantiate FAIL"); return; }
+                        holder.RemoveFromParent();
+                        stage.AddChild(holder);
+                        added.Add(holder);
+                        Debug.Log($"[Showcase] comp: +1 (conn={LifecycleWidget.Connected} disc={LifecycleWidget.Disconnected})");
+                    };
                 popBtn.Clicked += () =>
                 {
-                    var widgets = stage.Query<CustomElement>();
-                    if (widgets.Count == 0) { Debug.Log("[Showcase] comp: nothing to pop"); return; }
-                    widgets[widgets.Count - 1].Dispose();
+                    if (added.Count == 0) { Say("没有动态组件可销毁（先点「再挂一个」）"); return; }
+                    Container last = added[added.Count - 1];
+                    added.RemoveAt(added.Count - 1);
+                    last.Dispose();
                     Debug.Log($"[Showcase] comp: -1 (conn={LifecycleWidget.Connected} disc={LifecycleWidget.Disconnected})");
                 };
+            }
         }
     }
 }
