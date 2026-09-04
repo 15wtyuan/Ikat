@@ -105,7 +105,11 @@ from the same table. For each page (new or restyled):
 ## Trust list (what a preview can and cannot show)
 
 - **Trustworthy**: flex layout, gap, px sizes, colors, gradient subset,
-  `position:absolute`, `border-radius`, `@keyframes timing` (including inside
+  `position:absolute`, `clip-path` shape masks
+  (#52 — the browser renders circle()/polygon() natively with the same subset
+  semantics: diagonal-normalized circle percentages, hit-testing through
+  clipped-away areas, intersection with ancestor overflow clips, and clips
+  rotating with the clipper's own transform),, `border-radius`, `@keyframes timing` (including inside
   component `<style>`; same-name collisions resolve page-wins, matching the
   packer's host priority), component expansion with scoped styles (server
   rewritten — root-class rules on the template root DO apply), control visual

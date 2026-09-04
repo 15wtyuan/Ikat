@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   浏览器）。**裁剪形随裁剪器自身 transform 旋转**（此前不旋转的预览分歧已移除）。
   命中测试感知圆角与形状（此前纯矩形判定）。渲染 blob clip 表换 92B 多 entry
   布局（pkg v57——与 #57 ::part 并行撞号，合并批共升）。
+- **嵌套滚动条 thumb 随外层滚动（#52 验收轮修复）**：合成 thumb 的 design
+  rect 此前不含祖先滚动偏移——滚动容器嵌在另一个滚动容器里（首个形态：
+  shape-mask 页 D 区）时 thumb 钉死在静态位置。现沿祖先链累计 scroll_pos
+  补偿（与后代 world_matrix 的 T(-scroll) 注入同语义），嵌套两层级单测覆盖。
 - **运行时 CSS 与 custom props（#11）**：`UIContext.StyleSheet.Add/Clear` 接通——
   运行时注入 CSS 规则（围栏选择器+声明子集，含 `--*` 自定义属性与 `var()` 值；
   at-rule 一律拒），解析失败抛 `UIStyleException` 带 `Line`/`Column`。注入规则

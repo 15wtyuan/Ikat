@@ -76,6 +76,10 @@
 - **core 反向调宿主服务须启动期注册函数指针对**：core 是 cdylib，不能 extern 调宿主符号（链接期不可解析 + C# 给不出 linkable C 符号）——剪贴板/原生弹窗/系统字体查询都走注册回调模式；内存契约：get 缓冲区宿主持有（活到下次 get），core 立即拷贝、不跨分配器 free。
 - **快照测试锁 glyph 度量必须钉仓库内字体**：不同 OS 默认字体（Win arial vs Linux DejaVu）度量漂移、Linux CI 无 arial——fixtures 字体入库是前提，不是优化。
 
+### 并行会话在途时 pathspec 提交 = 渔网
+
+主 worktree 共享给并行用户会话时，目录级 pathspec（`git add -- crates/`）会把别人分钟级新鲜的在途 WIP 一起收进 commit（实锤：#52 热修批混入 #20/#57 的 build.rs/expand.rs/component-lab 半成品——他们在我两次 git 操作间隙活跃写树）。已推送无法 force-push 拆分（并行会话活跃期禁重写），只能通知对方从 HEAD 续写。纪律：提交前 `git status` 逐项归因（不认识的文件不 stage）；pathspec 列**具体文件清单**；提交后立刻 `git show --stat` 复核混入面。
+
 ### FFI 面改动 × 本地 dotnet 门
 - **改 FFI 入口/签名后，本地 dotnet 门直接跑会装旧产物 dll**：HeadlessTests 从 `unity/package/Plugins/Ikat/ikat_ffi_c.dll` 拷贝运行时——`EntryPointNotFoundException`（找不到 `ikat_stage_*` 入口）= 旧 dll 信号，不是签名错。中间态验证先 `cargo build -p ikat_ffi_c --release && cp target/release/ikat_ffi_c.dll unity/package/Plugins/Ikat/`（或直接 reout）；随后 pkg 版本 bump 会让其余测试批量 TooOld 红——那批是 fixture 陈货，reout 重打后自愈，别逐个排查。
 
@@ -100,6 +104,8 @@ showcase 有**两份** runner（`unity/showcase-unity/Assets/Scripts/ShowcaseRun
 - **`Resources.Load` 不搜 `Editor/Resources/`**（那是 `AssetDatabase.LoadAssetAtPath` 专用，后者要含扩展名全路径）；`.md`/`.html` 在 Unity 里是 DefaultAsset 非 TextAsset。
 - **ScriptableObject 禁 `new`** → `CreateInstance<T>()`（`new` 绕过原生对象追踪，IL2CPP 静默失败或产损坏资产）。
 - **shader keyword 须 `multi_compile` 非 `shader_feature`**——未启用的 variant 会被 strip，clip 类功能静默失效且构建期不可见。
+- **blob 顶点是节点本地坐标，不是 render 侧的父系坐标**：build_blob 对纯平移行 re-base 顶点（减 Mtx/Mty 得本地，平移在矩阵列/GO localPosition）；OBJECT_MATRIX 行顶点是盒本地。shader 里任何「吃 design 坐标」的逐片元逻辑（clip 测试、SDF、世界系光照）必须经 per-renderer MPB 补回平移（`_ObjT = (Mtx, Mty)`；合并行 Mtx=0 + 绝对顶点同式自洽）——直接拿 `v.pos.xy` 喂 design 系计算 = 全部测试跑在垃圾坐标上（#52 clip 链首验实锤：图形全灭、文字残条）。动 shader 顶点坐标语义前先读 blob.rs 头注释的 re-base 约定。
+- **F8 / DumpBlobState 的表解析器随布局演进退役会输出乱码**：按定长 stride 手扫二进制表的诊断代码不在编译门罩内（运行时字符串拼接），布局变了它不炸、只吐浮点位模式乱码（如 1065353216 = 1.0f）——恰好把取证引到歧途。改 blob 表布局的批次必须同步 grep 诊断侧解析器（UnityIkatBackend.DumpBlobState / DumpSceneJson 类）；诊断输出里出现「不可能的数值」先怀疑解析器陈旧再看数据。
 - **ShaderLab Properties 无 Matrix 类型**；MPB 只覆盖 `UnityPerMaterial` CBUFFER 内字段——per-renderer uniform 必须进 CBUFFER 才能被 MPB 覆盖。
 - **PlayMode 首帧 `Time.unscaledDeltaTime` 可达秒级**（加载延迟）——tween/动画别在 Start 自动播（瞬间 complete 写末值）。
 - **UPM 包内代码引用包资源**用 `Packages/<name>/...` 路径，非 `Assets/...`。

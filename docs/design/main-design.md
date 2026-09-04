@@ -572,7 +572,7 @@ safe-area 语义（#110 定案，web viewport-fit=cover 模型）：**fit 模式
 
 **惯性回弹物理**：ScrollPane 自维护可变 target 的 tween，content size 变化时按状态补偿 start、不突变。不走 GTween（content 异步变化时 GTween 的固定 end 会跳变）。tick 分两段：`advance_all`（惯性/回弹物理推进）在 solve 前消费指针输入并推进滚动位置；`refresh_content_sizes`（内容尺寸刷新）在 solve 后、compute_world_transforms 前。
 
-能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新后期。嵌套滚轮透传（内层滚到边界自动交外层）未做。
+能力：滚动类型、惯性+回弹、滚动条、鼠标滚轮。分页/吸附/下拉刷新后期。嵌套滚轮透传（内层滚到边界自动交外层）未做。合成滚动条 thumb 的 design rect 含祖先滚动补偿（`ancestor_scroll_offset`——后代节点的 world_matrix 注入 T(-祖先.scroll_pos)，thumb 是根级追加行不享此通道，须手工补；嵌套滚动首个用例 #52 shape-mask 页）。
 
 anchoring 豁免：虚拟列表内容回填引起的几何变化走 clamp 但不清滚动 tween（回填 ≠ 内容突变，惯性应继续）。
 
