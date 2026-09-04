@@ -772,7 +772,7 @@ player/tween 可动**布局属性**：width / height / flex-grow（端点同域�
 
 每帧 FFI 传：
 1. RenderNode 公共头 SOA **lean 列**（定长字段并行存储；#109 v15 起胖参数块——color_matrix/effect/shadow/gradient——移出列进**按需 fat arena**：字节全零的块不写，行持 1-based 引用 + 子掩码）。
-2. 按类型分区的 per-frame arena（mesh 顶点/UV/颜色/索引、path 表、fat arena 等）。
+2. 按类型分区的 per-frame arena（mesh 顶点/UV/颜色/索引、path 表、fat arena 等；#52 起 clip 表亦在此族——多 entry 布局：92B 定长 entry（ctx/flags/inv_frame/rect/radii/circle/poly 头）+ 段尾 poly arena 按需存 polygon 点，布局详见 §12.5）。
 3. **段末 skip 段**（#109 v15）：定级 Skip 的行不再占 SOA 列，进段末极简条目（node_id + reuse_key + flags；parked keepalive 走此段，flags bit1）——全 Skip 帧的带宽从「每行全列」降到「每行极简条目」。skip 条目的 flags 与 lean 行 visible 列**不同义**（skip = 沿用上帧态，不传递显隐）。
 4. ChangeLevel（Skip/Header/Full）：Skip 进段末条目，Header/Full 在 lean 列；Skip/Header 不写 mesh arena。
 

@@ -160,6 +160,8 @@ cp target/release/ikat_gui.exe unity/package/Editor/Tools/ikat_gui.exe
 
 **showcase 用例两纪律**（用户两次打回后拍板）：① 运行时 C# API 不许以「HTML 表达不了」为由不设用例——HTML 摆台（目标块 + 触发按钮 + 读数 span 带 id——**读数元素类型必须与 TryGet 泛型对齐**（span→TextElement、div→Container+TextContent；div 配 TryGet<TextElement> 是静默死线：编译/运行都不报，`&&` 短路整块接线死，#8 验收实锤）+ `ShowcaseRunner.WireControls` 里 `TryGet` + `Clicked` 接线（照 lab §14/§15 同款），读数翻转即事件路由证据。**每个新 API 都要有按钮+读数，重载按类型粒度数**（#12 实锤：Notify*/重物化/严格派只摆了静态分派；#11 实锤：SetVar 四重载只摆了 IkatColor）——交付前拿新 API 清单逐个过这道筛；② 判据只认肉眼强信号（过冲/出界/瞬移/弹振/消失/读数翻转），禁需对照记忆、心算、盯梢短瞬的判据（如与缺省曲线比、半宽→整宽）——可辨性差的行删掉，不加标记补救。
 
+**showcase 摆台素材纪律**：遮罩/裁剪/形变类判据的载体禁用带大片透明区的游戏美术图标（#52 三连实锤：character/helm/boots/glove 全是透明 padding，裁了个寂寞看不出效果）——用程序生成的测试卡（如对角双色 + 描边 + 中心十字的纯色 PNG，仓库 `showcase/res/icons/mask-avatar.png` 即模板），任何形状/偏移/裁切一眼可辨。
+
 **uloop 取证自相矛盾（截图正常但探针读空 / 同会话数据反复打架）先查编辑器会话状态**：① `tasklist | grep Unity.exe` 数实例——launch 超时会再起一个，命令轮流命中不同实例；② PlayMode 期间触发过编译（domain reload）会把原生 stage 打裂（渲染正常但 DumpScene 全零）——重启编辑器复测再怀疑产品。规矩：**PlayMode 验收期间绝不编译**。另：`File.WriteAllText` 被 uloop 安全策略拦，大 JSON 用 execute-dynamic-code 的 `return` 值带出。
 
 **圆角/小尺寸视觉差异别信目测或视觉模型**——python 像素取样 + 数学验证（如像素中心到角圆心距离 vs 半径）；「渲染出来的圆角比预期小」先算正确视觉该是什么样再下结论。

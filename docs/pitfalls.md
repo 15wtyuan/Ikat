@@ -95,6 +95,8 @@ showcase 有**两份** runner（`unity/showcase-unity/Assets/Scripts/ShowcaseRun
 
 ## 3. Unity 平台特性
 
+- **Unity-only C# 层（`unity/package/Tests` 与顶层 Runtime）不在任何编译门内**，对该层做 python/splice 类批量文本手术后必过机械括号审计（剥字符串/注释后数 `{}`/`()` 平衡）——锚点取错会让重复块静默落盘，直到用户 Unity 打开才 CS1022（#52 实锤：MaterialManagerTests 类闭合后拖旧测试重复块，22/23 括号，E: 机首编译才炸）。
+
 - **非纯平移节点的 renderer.bounds ≠ 真实视觉 AABB**：rotate/scale 走 `_ObjM` shader 矩阵、GO 只带平移分量 → Unity 剔除/拾取看到的 bounds = GO 平移 × 未旋转 mesh。任何新消费 renderer.bounds 的功能（剔除/遮挡/视口判定）都须过 `MirrorPool.CompensateMeshBoundsForLinear`（bounds 置线性矩阵 × 顶点 AABB）；否则旋转节点滚动/移动中被错误剔除（#66 实锤）。
 - **`git tag` 输出按字典序**：`v0.0.10` 排在 `v0.0.5` 之前——`git tag | tail` 会漏最新版本号、误判「未发过版」。查 tag 存在性用 `git tag | grep <精确版本>` 或 `git ls-remote --tags origin | grep`。
 
