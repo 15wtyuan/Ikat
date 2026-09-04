@@ -1,0 +1,378 @@
+===== F8 DIAGNOSTIC 095738 =====
+stage=1920x1080 screen=1920x1080
+
+[Scene tree]
+└─ div# (0,0,1920,1080)
+   └─ div#.root (0,0,1920,1080)
+      ├─ span# (0,0,0,0)
+      ├─ div#.sidebar (0,0,280,1080)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ button#back-home.side-back (20,32,239,18)
+      │  │  └─ span# (102,32,75,18) font=14 lh=normal lines=1 "← 返回首页"
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.side-title (20,76,239,29) font=22 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.side-desc (20,119,239,32) font=12 lh=normal lines=2
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.readout-label (20,191,239,15) font=12 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.hit-readout-row (20,212,239,20)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ span#sm-hit-c.readout (20,212,9,20) font=15 lh=normal lines=1
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ span#sm-hit-x.readout (45,212,9,20) font=15 lh=normal lines=1
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.readout-label (20,252,239,16) font=12 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.hit-readout-row (20,274,239,19)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ span#sm-rhit-c.readout (20,274,9,19) font=15 lh=normal lines=1
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ span#sm-rhit-x.readout (45,274,9,19) font=15 lh=normal lines=1
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.readout-label (20,313,239,16) font=12 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ span#sm-status.readout (20,335,239,20) font=15 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.api-row (20,379,239,33)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ button#sm-rt.api-btn (20,379,95,33)
+      │  │  │  └─ span# (36,387,65,17) font=13 lh=normal lines=1 "注入圆遮罩"
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ button#sm-rt-off.api-btn (125,379,56,33)
+      │  │  │  └─ span# (141,387,26,17) font=13 lh=normal lines=1 "撤销"
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.api-row (20,436,239,33)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ button#sm-var.api-btn (20,436,80,33)
+      │  │  │  └─ span# (36,444,50,17) font=13 lh=normal lines=1 "var 换形"
+      │  │  └─ span# (0,0,0,0)
+      │  └─ span# (0,0,0,0)
+      ├─ span# (0,0,0,0)
+      ├─ div#.sm-page (280,0,1640,1080) scroll[vp 1544x984 ct 1544x1401 ov 0x417 pos 0,417 tw 0,0]
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.main-title (328,48,1544,47) font=36 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.section-label (328,121,1544,17) font=13 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-row (328,152,1544,96)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ img#.sm-avatar (328,152,96,96)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ img#.sm-avatar-plain (442,152,96,96)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.section-label (328,274,1544,17) font=13 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-row (328,305,1544,110)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-slot.sm-slot-diamond (328,305,110,110)
+      │  │  │  └─ img#.sm-slot-icon (357,334,52,52)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-slot.sm-slot-hex (456,305,110,110)
+      │  │  │  └─ img#.sm-slot-icon (485,334,52,52)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-slot.sm-slot-oct (584,305,110,110)
+      │  │  │  └─ img#.sm-slot-icon (613,334,52,52)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-c-section (328,429,1544,195)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.section-label.sm-c-label (328,441,1544,17) font=13 lh=normal lines=1
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-hit-stage (328,464,160,160)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ button#sm-corner.sm-hit-under (328,464,54,54)
+      │  │  │  │  └─ span# (348,482,14,18) font=14 lh=normal lines=1 "角"
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ button#sm-center.sm-hit-circle (328,464,160,160)
+      │  │  │  │  └─ span# (400,534,16,21) font=16 lh=normal lines=1 "圆"
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.section-label (328,650,1544,17) font=13 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-scroll (328,681,280,132) scroll[vp 260x112 ct 260x212 ov 0x100 pos 0,0 tw 0,0]
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-scroll-row (338,691,260,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (338,691,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ div#.sm-slot-s (414,691,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (490,691,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ div#.sm-slot-s (566,691,64,64)
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-scroll-row (338,765,260,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (338,765,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (414,765,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ div#.sm-slot-s (490,765,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (566,765,64,64)
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-scroll-row (338,839,260,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ div#.sm-slot-s (338,839,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (414,839,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (490,839,64,64)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ img#.sm-avatar-s (566,839,64,64)
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.section-label (328,839,1544,17) font=13 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-rot-row (328,870,1544,100)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-rot-clip (328,870,150,100) scroll[vp 150x100 ct 98x17 ov 0x0 pos 0,0 tw 0,0]
+      │  │  │  └─ span#.sm-rot-clip-text (354,911,98,17) font=13 lh=normal lines=1
+      │  │  │     └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-rot-shape (496,870,150,100)
+      │  │  │  └─ span#.sm-rot-shape-text (547,911,48,17) font=13 lh=normal lines=1
+      │  │  │     └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.section-label (328,996,1544,17) font=13 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-row (328,1027,1544,96)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ img#sm-rt-img.sm-rt-img (328,1027,96,96)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ img#sm-var-img.sm-var-img (442,1027,96,96)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-c-section (328,1137,1544,175)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.section-label.sm-c-label (328,1149,1544,17) font=13 lh=normal lines=1
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-rhit-stage (328,1172,140,140)
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ button#sm-r-corner.sm-rhit-under (328,1172,44,44)
+      │  │  │  │  └─ span# (344,1185,13,17) font=13 lh=normal lines=1 "角"
+      │  │  │  ├─ span# (0,0,0,0)
+      │  │  │  ├─ button#sm-r-center.sm-rhit-round (328,1172,140,140) scroll[vp 140x140 ct 28x19 ov 0x0 pos 0,0 tw 0,0]
+      │  │  │  │  └─ span# (384,1233,28,19) font=14 lh=normal lines=1 "圆角"
+      │  │  │  └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.section-label (328,1338,1544,17) font=13 lh=normal lines=1
+      │  │  └─ span# (0,0,0,0)
+      │  ├─ span# (0,0,0,0)
+      │  ├─ div#.sm-row (328,1369,1544,80)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-wide (328,1369,200,80)
+      │  │  │  └─ span#.sm-wide-text (396,1401,64,15) font=12 lh=normal lines=1
+      │  │  │     └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-offset (546,1369,160,80)
+      │  │  │  └─ span#.sm-wide-text (606,1401,40,15) font=12 lh=normal lines=1
+      │  │  │     └─ span# (0,0,0,0)
+      │  │  ├─ span# (0,0,0,0)
+      │  │  ├─ div#.sm-inter (724,1369,160,80) scroll[vp 160x80 ct 46x15 ov 0x0 pos 0,0 tw 0,0]
+      │  │  │  └─ span#.sm-inter-text (781,1401,46,15) font=12 lh=normal lines=1
+      │  │  │     └─ span# (0,0,0,0)
+      │  │  └─ span# (0,0,0,0)
+      │  └─ span# (0,0,0,0)
+      └─ span# (0,0,0,0)
+
+
+[Blob] nodes=97 (lean=0 skip=97)
+  i    nodeId   mask  pure  Mtx    Mty    program  meshBBox
+  [skip segment] count=97 (parked=0)
+  [clip table] count=65
+    ctx=1 rect=(0,1,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=2147483648 rect=(0,1,-280,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=3282305024 rect=(265,0,0,0)
+    ctx=1111490560 rect=(48,0,0,0)
+    ctx=1149698048 rect=(0,0,0,0)
+    ctx=0 rect=(0,0,1,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1065353216 rect=(0,0,1,-280)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1065353216 rect=(-456,112,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1154285568 rect=(1080,0,0,0)
+    ctx=0 rect=(0,0,0,1)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1 rect=(1,0,0,1)
+    ctx=0 rect=(0,0,0,0)
+    ctx=2147483648 rect=(1,-328,-47,0)
+    ctx=0 rect=(80,80,80,0)
+    ctx=2147483648 rect=(1640,1080,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1099956224 rect=(18,18,18,18)
+    ctx=8 rect=(0,1,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=2147483648 rect=(0,1,-328,-264)
+    ctx=1099956224 rect=(18,0,0,0)
+    ctx=3282632704 rect=(-274,0,0,0)
+    ctx=1107296256 rect=(32,0,0,0)
+    ctx=1149698048 rect=(0,0,0,0)
+    ctx=0 rect=(0,0,1,0)
+    ctx=1099956224 rect=(18,18,18,18)
+    ctx=1065353216 rect=(0,0,1,-414)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1065353216 rect=(-280,0,1640,1080)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1133248512 rect=(132,18,18,18)
+    ctx=0 rect=(0,0,0,1)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1 rect=(1,0,0,1)
+    ctx=0 rect=(0,0,0,0)
+    ctx=2147483648 rect=(1,-328,-264,280)
+    ctx=1099956224 rect=(0,0,0,0)
+    ctx=3280535552 rect=(0,0,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=12 rect=(0,1,0,0)
+    ctx=1099956224 rect=(18,18,18,18)
+    ctx=2147483648 rect=(0,1,-338,-348)
+    ctx=0 rect=(0,32,32,32)
+    ctx=3280732160 rect=(0,1640,1080,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1124335616 rect=(18,18,18,18)
+    ctx=0 rect=(0,0,1,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1065353216 rect=(0,0,1,-280)
+    ctx=0 rect=(0,0,0,0)
+    ctx=1065353216 rect=(-328,-264,280,132)
+    ctx=0 rect=(0,0,0,0)
+    ctx=0 rect=(0,0,0,0)
+    ctx=4 rect=(0,0,0,1)
+    ctx=0 rect=(0,0,0,0)
+    ctx=3 rect=(1,0,0,1)
+    ctx=1099956224 rect=(18,18,18,0)
+    ctx=2147483648 rect=(1,-566,-348,0)
+
+[MirrorPool] byNodeId=97 byReuse=0
+  poolKey  nodeId    sort  pos(x,y)            meshBounds(center,size)
+  [id4294967297] nid=4294967297 sort=3 pos=(0,0) mb=((960,540),(1920,1080)) active=True clip=False entries=0
+  [id12884902246] nid=12884902246 sort=4 pos=(102,32) mb=((37,9),(81,20)) active=True clip=False entries=0
+  [id12884902086] nid=12884902086 sort=78 pos=(442,610) mb=((48,48),(96,96)) active=True clip=True entries=2
+  [id12884902091] nid=12884902091 sort=76 pos=(328,610) mb=((772,48),(1544,96)) active=True clip=True entries=1
+  [id12884902245] nid=12884902245 sort=5 pos=(20,76) mb=((120,15),(239,29)) active=True clip=False entries=0
+  [id2522015804212380005] nid=2522015804212380005 sort=6 pos=(20,76) mb=((62,16),(133,31)) active=True clip=False entries=0
+  [id12884902241] nid=12884902241 sort=7 pos=(20,119) mb=((120,16),(239,32)) active=True clip=False entries=0
+  [id2522015804212380001] nid=2522015804212380001 sort=8 pos=(20,119) mb=((116,16),(236,34)) active=True clip=False entries=0
+  [id12884902175] nid=12884902175 sort=9 pos=(20,191) mb=((120,8),(239,15)) active=True clip=False entries=0
+  [id2522015804212379935] nid=2522015804212379935 sort=10 pos=(20,191) mb=((50,8),(106,18)) active=True clip=False entries=0
+  [id12884902232] nid=12884902232 sort=12 pos=(20,212) mb=((120,10),(239,20)) active=True clip=False entries=0
+  [id2522015804212379992] nid=2522015804212379992 sort=13 pos=(20,212) mb=((4,9),(14,19)) active=True clip=False entries=0
+  [id12884902230] nid=12884902230 sort=14 pos=(45,212) mb=((5,10),(9,20)) active=True clip=False entries=0
+  [id2522015804212379990] nid=2522015804212379990 sort=15 pos=(45,212) mb=((4,9),(14,19)) active=True clip=False entries=0
+  [id12884902226] nid=12884902226 sort=16 pos=(20,252) mb=((120,8),(239,16)) active=True clip=False entries=0
+  [id2522015804212379986] nid=2522015804212379986 sort=17 pos=(20,252) mb=((62,8),(129,18)) active=True clip=False entries=0
+  [id12884902220] nid=12884902220 sort=19 pos=(20,274) mb=((120,10),(239,19)) active=True clip=False entries=0
+  [id2522015804212379980] nid=2522015804212379980 sort=20 pos=(20,274) mb=((4,9),(14,19)) active=True clip=False entries=0
+  [id12884902218] nid=12884902218 sort=21 pos=(45,274) mb=((5,10),(9,19)) active=True clip=False entries=0
+  [id2522015804212379978] nid=2522015804212379978 sort=22 pos=(45,274) mb=((4,9),(14,19)) active=True clip=False entries=0
+  [id12884902214] nid=12884902214 sort=23 pos=(20,313) mb=((120,8),(239,16)) active=True clip=False entries=0
+  [id2522015804212379974] nid=2522015804212379974 sort=24 pos=(20,313) mb=((43,8),(89,17)) active=True clip=False entries=0
+  [id12884902211] nid=12884902211 sort=25 pos=(20,335) mb=((120,10),(239,20)) active=True clip=False entries=0
+  [id2522015804212379971] nid=2522015804212379971 sort=26 pos=(20,335) mb=((29,9),(64,21)) active=True clip=False entries=0
+  [id12884902205] nid=12884902205 sort=28 pos=(20,379) mb=((120,17),(239,33)) active=True clip=False entries=0
+  [id12884902204] nid=12884902204 sort=29 pos=(36,387) mb=((32,9),(70,19)) active=True clip=False entries=0
+  [id12884902203] nid=12884902203 sort=30 pos=(125,379) mb=((28,17),(56,33)) active=True clip=False entries=0
+  [id12884902202] nid=12884902202 sort=31 pos=(141,387) mb=((12,8),(31,18)) active=True clip=False entries=0
+  [id12884902196] nid=12884902196 sort=33 pos=(20,436) mb=((120,17),(239,33)) active=True clip=False entries=0
+  [id12884902193] nid=12884902193 sort=34 pos=(36,444) mb=((25,8),(55,18)) active=True clip=False entries=0
+  [id12884902189] nid=12884902189 sort=36 pos=(280,0) mb=((820,356),(1640,1449)) active=True clip=True entries=1
+  [id2522015804212379950] nid=2522015804212379950 sort=37 pos=(328,-369) mb=((102,26),(218,50)) active=True clip=True entries=1
+  [id12884902187] nid=12884902187 sort=38 pos=(328,-296) mb=((772,9),(1544,17)) active=True clip=True entries=1
+  [id2522015804212379947] nid=2522015804212379947 sort=39 pos=(328,-296) mb=((234,9),(474,19)) active=True clip=True entries=1
+  [id12884902181] nid=12884902181 sort=40 pos=(328,-265) mb=((772,48),(1544,96)) active=True clip=True entries=1
+  [id12884902182] nid=12884902182 sort=41 pos=(328,-265) mb=((48,48),(96,96)) active=True clip=True entries=2
+  [id12884902177] nid=12884902177 sort=42 pos=(442,-265) mb=((48,48),(96,96)) active=True clip=True entries=1
+  [id12884902176] nid=12884902176 sort=43 pos=(328,-143) mb=((772,9),(1544,17)) active=True clip=True entries=1
+  [id2522015804212379936] nid=2522015804212379936 sort=44 pos=(328,-143) mb=((163,8),(332,19)) active=True clip=True entries=1
+  [id12884902173] nid=12884902173 sort=45 pos=(328,-112) mb=((772,55),(1544,110)) active=True clip=True entries=1
+  [id12884902172] nid=12884902172 sort=46 pos=(328,-112) mb=((55,55),(110,110)) active=True clip=True entries=2
+  [id12884902170] nid=12884902170 sort=47 pos=(357,-83) mb=((26,26),(52,52)) active=True clip=True entries=2
+  [id12884902169] nid=12884902169 sort=48 pos=(456,-112) mb=((55,55),(110,110)) active=True clip=True entries=2
+  [id12884902164] nid=12884902164 sort=49 pos=(485,-83) mb=((26,26),(52,52)) active=True clip=True entries=2
+  [id12884902168] nid=12884902168 sort=50 pos=(584,-112) mb=((55,55),(110,110)) active=True clip=True entries=2
+  [id12884902165] nid=12884902165 sort=51 pos=(613,-83) mb=((26,26),(52,52)) active=True clip=True entries=2
+  [id12884902147] nid=12884902147 sort=53 pos=(328,233) mb=((772,-102),(1544,238)) active=True clip=True entries=1
+  [id2522015804212379907] nid=2522015804212379907 sort=54 pos=(328,233) mb=((393,9),(792,19)) active=True clip=True entries=1
+  [id12884902143] nid=12884902143 sort=56 pos=(338,274) mb=((130,56),(280,132)) active=True clip=True entries=2
+  [id12884902136] nid=12884902136 sort=57 pos=(338,274) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902140] nid=12884902140 sort=58 pos=(414,274) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902138] nid=12884902138 sort=59 pos=(490,274) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902134] nid=12884902134 sort=60 pos=(566,274) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902118] nid=12884902118 sort=61 pos=(338,348) mb=((130,32),(260,64)) active=True clip=True entries=2
+  [id12884902128] nid=12884902128 sort=62 pos=(338,348) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902127] nid=12884902127 sort=63 pos=(414,348) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902125] nid=12884902125 sort=64 pos=(490,348) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902123] nid=12884902123 sort=65 pos=(566,348) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902120] nid=12884902120 sort=66 pos=(338,422) mb=((130,32),(260,64)) active=True clip=True entries=2
+  [id12884902117] nid=12884902117 sort=67 pos=(338,422) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902116] nid=12884902116 sort=68 pos=(414,422) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902115] nid=12884902115 sort=69 pos=(490,422) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902108] nid=12884902108 sort=70 pos=(566,422) mb=((32,32),(64,64)) active=True clip=True entries=3
+  [id12884902110] nid=12884902110 sort=71 pos=(328,422) mb=((772,9),(1544,17)) active=True clip=True entries=1
+  [id2522015804212379870] nid=2522015804212379870 sort=72 pos=(328,422) mb=((221,9),(446,19)) active=True clip=True entries=1
+  [id12884902096] nid=12884902096 sort=74 pos=(328,579) mb=((772,-55),(1544,143)) active=True clip=True entries=1
+  [id2522015804212379856] nid=2522015804212379856 sort=75 pos=(328,579) mb=((384,9),(772,19)) active=True clip=True entries=1
+  [id12884902069] nid=12884902069 sort=80 pos=(328,921) mb=((772,-92),(1544,218)) active=True clip=True entries=1
+  [id12884902076] nid=12884902076 sort=77 pos=(328,610) mb=((48,48),(96,96)) active=True clip=True entries=2
+  [id2522015804212379829] nid=2522015804212379829 sort=81 pos=(328,921) mb=((683,9),(1369,19)) active=True clip=True entries=1
+  [id12884902068] nid=12884902068 sort=82 pos=(328,952) mb=((772,40),(1544,80)) active=True clip=True entries=1
+  [id12884902063] nid=12884902063 sort=84 pos=(396,984) mb=((32,8),(200,80)) active=True clip=True entries=2
+  [id2522015804212379823] nid=2522015804212379823 sort=85 pos=(396,984) mb=((31,8),(67,18)) active=True clip=True entries=2
+  [id12884902058] nid=12884902058 sort=87 pos=(606,984) mb=((20,8),(160,80)) active=True clip=True entries=2
+  [id2522015804212379818] nid=2522015804212379818 sort=88 pos=(606,984) mb=((20,8),(44,16)) active=True clip=True entries=2
+  [id12884902052] nid=12884902052 sort=90 pos=(724,952) mb=((80,40),(160,80)) active=True clip=True entries=2
+  [id2522015804212379815] nid=2522015804212379815 sort=91 pos=(781,984) mb=((24,8),(52,16)) active=True clip=True entries=2
+  [id12884902159] nid=12884902159 sort=92 pos=(328,24) mb=((772,9),(1544,17)) active=True clip=True entries=1
+  [id2522015804212379919] nid=2522015804212379919 sort=93 pos=(328,24) mb=((232,9),(469,19)) active=True clip=True entries=1
+  [id12884902155] nid=12884902155 sort=95 pos=(328,47) mb=((80,80),(160,160)) active=True clip=True entries=1
+  [id12884902150] nid=12884902150 sort=96 pos=(348,65) mb=((6,9),(19,20)) active=True clip=True entries=1
+  [id12884902154] nid=12884902154 sort=97 pos=(328,47) mb=((80,80),(160,160)) active=True clip=True entries=2
+  [id12884902151] nid=12884902151 sort=98 pos=(400,117) mb=((9,10),(22,22)) active=True clip=True entries=2
+  [id12884902090] nid=12884902090 sort=99 pos=(340,438) mb=((63,65),(168,129)) active=True clip=True entries=2
+  [id12884902102] nid=12884902102 sort=100 pos=(357,484) mb=((46,19),(99,37)) active=True clip=True entries=2
+  [id2522015804212379862] nid=2522015804212379862 sort=101 pos=(357,484) mb=((46,18),(104,38)) active=True clip=True entries=2
+  [id12884902099] nid=12884902099 sort=102 pos=(488,467) mb=((83,36),(165,125)) active=True clip=True entries=2
+  [id12884902094] nid=12884902094 sort=103 pos=(546,498) mb=((25,4),(50,25)) active=True clip=True entries=2
+  [id2522015804212379854] nid=2522015804212379854 sort=104 pos=(546,498) mb=((25,5),(53,27)) active=True clip=True entries=2
+  [id12884902084] nid=12884902084 sort=105 pos=(328,732) mb=((772,9),(1544,17)) active=True clip=True entries=1
+  [id2522015804212379844] nid=2522015804212379844 sort=106 pos=(328,732) mb=((394,9),(793,19)) active=True clip=True entries=1
+  [id12884902077] nid=12884902077 sort=108 pos=(328,755) mb=((70,70),(140,140)) active=True clip=True entries=1
+  [id12884902075] nid=12884902075 sort=109 pos=(344,768) mb=((7,8),(18,19)) active=True clip=True entries=1
+  [id12884902074] nid=12884902074 sort=110 pos=(328,755) mb=((70,70),(140,140)) active=True clip=True entries=2
+  [id12884902072] nid=12884902072 sort=111 pos=(384,816) mb=((14,9),(32,20)) active=True clip=True entries=2
+  [id1152921517491749120] nid=1152921517491749120 sort=112 pos=(0,0) mb=((604,294),(8,59)) active=True clip=False entries=0
+  [id1152921517491749165] nid=1152921517491749165 sort=112 pos=(0,0) mb=((1916,734),(8,691)) active=True clip=False entries=0
+
