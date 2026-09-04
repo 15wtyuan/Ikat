@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `var()` 代换）。构建期硬拒组合：`overflow:scroll/auto` + `clip-path`、
   裁剪链深 > 4。
 ### Changed
+- **尺寸语义修正为 CSS 初始值 content-box**：声明 `width`/`height` 现为内容尺寸，
+  padding/border 加在外侧（浏览器 UA 缺省语义；`ResolvedStyle` 的 taffy
+  `box_sizing` 显式钉 `ContentBox`）。此前 taffy 0.14 默认 BorderBox（#82 升级时
+  未显式设置、静默翻转）导致「定宽 + padding」元素运行时外框比浏览器预览窄
+  padding 两圈——引擎与文档（css-reference "padding adds to the set width/height"）
+  矛盾，#52 shape-mask 验收实锤。现有页面凡定宽+padding 元素外框会变大一圈
+  （= 与预览一致方向）。pkg v57 重打。
 - **裁剪管线泛化为多 entry clip 栈（#52，web 语义对齐）**：嵌套裁剪不再坍缩成
   单矩形，每 context 携带整条祖先链（rect/圆角/circle/polygon 逐条交集）——
   圆形头像放进滚动列表等组合正确。**祖先圆角现在裁后代角**（此前不传播，已对齐

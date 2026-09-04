@@ -995,7 +995,16 @@ impl Default for ResolvedStyle {
         // vertically instead of flowing in a row. Default now matches the CSS
         // initial value (Row), same as taffy's own default.
         Self {
-            taffy_style: TaffyStyle::DEFAULT,
+            // box_sizing 显式钉 ContentBox（CSS 初始值 / 浏览器 UA 缺省）：taffy 0.14 的
+            // Style::DEFAULT 是 BorderBox（0.12 无此字段、行为等价 ContentBox）——#82 升级
+            // 时未显式设置，定宽+padding 元素的外框静默比预览（content-box）窄一圈，
+            // 引擎与 css-reference 的 "padding adds to the set width/height" 文档矛盾
+            // （#52 shape-mask D 区 preview/Unity 宽度差 20px 实锤）。
+            taffy_style: {
+                let mut ts = TaffyStyle::DEFAULT;
+                ts.box_sizing = taffy::style::BoxSizing::ContentBox;
+                ts
+            },
             position_declared: PositionDeclared::Static,
             viewport: ViewportStyle::default(),
             // display fields (display_mode + taffy_style.display) here are Flex

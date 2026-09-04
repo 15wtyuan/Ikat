@@ -257,16 +257,25 @@ namespace Ikat
             int parkedCount = 0;
             for (int s = 0; s < blob.SkipCount; s++) if (blob.SkipParked(s)) parkedCount++;
             sb.AppendLine($"  [skip segment] count={blob.SkipCount} (parked={parkedCount})");
-            // clip 表：overflow:auto 容器的 mask_context 是否进表（Unity 据此设 _ClipBox）
+            // clip 表（#52 多 entry 布局：92B entry + poly arena）：per-entry 打印
+            // ctx/flags/inv_frame 平移/几何 kind——shapeKind 1=circle 2=polygon，
+            // rectKind 1=直角 2=圆角。取证 var 换形滞后类问题：对照 [MirrorPool] 段
+            // 的材质 kind 回读，两侧不一致即定位到刷新链路。
             sb.AppendLine($"  [clip table] count={blob.ClipCount}");
             for (int c = 0; c < blob.ClipCount; c++)
             {
-                // ClipRect 是按 ctx 查；这里线性扫表读原 entry（复用同一段读法）
-                int p = blob.ClipTableOffPub + 4 + c * 52;
+                int p = blob.ClipTableOffPub + 4 + c * 92;
                 uint ctx = blob.ReadU32Public(p);
-                float dx = blob.ReadF32Public(p + 4), dy = blob.ReadF32Public(p + 8);
-                float dw = blob.ReadF32Public(p + 12), dh = blob.ReadF32Public(p + 16);
-                sb.AppendLine($"    ctx={ctx} rect=({dx:F0},{dy:F0},{dw:F0},{dh:F0})");
+                uint flags = blob.ReadU32Public(p + 4);
+                float tx = blob.ReadF32Public(p + 24), ty = blob.ReadF32Public(p + 28);
+                float rw = blob.ReadF32Public(p + 32), rh = blob.ReadF32Public(p + 36);
+                int polyCount = (int)blob.ReadU32Public(p + 84);
+                int shapeKind = (int)((flags >> 8) & 0xFF);
+                bool hasRect = (flags & 1) != 0, hasRadii = (flags & 2) != 0, hasShape = (flags & 4) != 0;
+                string kind = hasShape
+                    ? (shapeKind == 1 ? $"circle(r={blob.ReadF32Public(p + 80):F0})" : $"poly({polyCount})")
+                    : (hasRect ? (hasRadii ? "rounded" : "rect") : "none");
+                sb.AppendLine($"    ctx={ctx} t=({tx:F0},{ty:F0}) box=({rw:F0}x{rh:F0}) {kind}");
             }
             return sb.ToString();
         }

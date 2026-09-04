@@ -315,6 +315,21 @@ namespace Ikat
         ulong ReadU64(int o) => BitConverter.ToUInt64(_buf, o);
         float ReadF32(int o) => BitConverter.ToSingle(_buf, o);
 
+        /// clip 表中出现的全部 context id（去重）——MirrorPool 每帧为**每个** ctx 刷新
+        /// clip 链数组（不依赖任何 lean 行被处理；idle 全 Skip 帧也刷新）。
+        public System.Collections.Generic.HashSet<uint> ClipContextIds()
+        {
+            var set = new System.Collections.Generic.HashSet<uint>();
+            int count = ClipCount;
+            int p = ClipTableOff + 4;
+            for (int i = 0; i < count; i++)
+            {
+                set.Add(ReadU32(p));
+                p += 92;
+            }
+            return set;
+        }
+
         // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityIkatBackend.DumpBlobState 线性扫表）。
         public uint ReadU32Public(int o) => ReadU32(o);
         public float ReadF32Public(int o) => ReadF32(o);

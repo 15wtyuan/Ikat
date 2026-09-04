@@ -55,9 +55,7 @@ namespace Ikat
         // blob mount_id 列非 0 的行 SetParent 到对应容器（顶点已 re-base 到挂载根局部系，
         // 容器层随业务 → 场景相机渲染 + ZTest LEqual 吃 3D 深度遮挡）。
         readonly Dictionary<ulong, Transform> _mountContainers = new();
-        // 每 ctx 每帧首次读 clip 链并 SetClipEntries。
-        // Sync 开头清空；clip 表 entry 少（few ctx），每帧开销可忽略。
-        readonly HashSet<uint> _clipsAppliedThisFrame = new();
+
 
         /// <summary>
         /// 行归属解析：挂载行（mount_id ≠ 0 且容器登记存活）→ 容器；其余（含容器已销毁的
@@ -119,8 +117,11 @@ namespace Ikat
             // ① 全标 stale（两个 dict）
             foreach (var kv in _poolByNodeId) kv.Value.Stale = true;
             foreach (var kv in _poolByReuse) kv.Value.Stale = true;
-            // 本帧 clip 应用集清空（per-ctx-per-frame 一次性设 clip 链数组）。
-            _clipsAppliedThisFrame.Clear();
+            // clip 链数组刷新：每帧为 blob 表里**每个** ctx 全量重设（不依赖 lean 行——
+            // idle 全 Skip 帧也刷；ctx 少、数组小，开销可忽略）。SetClipEntries 先写
+            // dict：本帧新建的材质（mm.Get）创建时即带上。
+            foreach (uint clipCtx in blob.ClipContextIds())
+                mm.SetClipEntries(clipCtx, blob.ReadClipEntries(clipCtx));
 
             // ② v15 skip 段先走：Skip 行 = 「对象还在，清 stale」；parked keepalive =
             //    保留 GO 并隐藏。这行不进 SOA（16B/条）——后端不读 header/mesh。
@@ -237,16 +238,6 @@ namespace Ikat
             ro.Mr.sortingOrder = (int)blob.SortKey(i) + SortBase;
 
             uint maskCtx = blob.MaskContext(i);
-
-            // mc>0 节点本帧首次见 → 读该 ctx 的整条 clip 链（多 entry，#52）设到 per-ctx
-            // Material 的 uniform 数组。必须在 mm.Get 之前调，使新建 Material 时即带链数据；
-            // 同 ctx 后续节点跳过（HashSet 去重）。
-            if (maskCtx > 0u && _clipsAppliedThisFrame.Add(maskCtx))
-            {
-                mm.SetClipEntries(maskCtx, blob.ReadClipEntries(maskCtx));
-                // 空链（表里无该 ctx）→ 不设数组；material 仍按 mc 建（CLIPPED 变体 +
-                // _ClipCount=0 → 循环不进 → 全保留，clip 无效但不崩；正常 flow 表必含所有 mc>0 ctx）。
-            }
 
             // 材质：按 program+texture 选（包括 text 节点，program=1，tex 由 SyncFontAtlas 注入 font atlas）。
             Material mat = mm.Get((int)blob.Program(i), tex, maskCtx, !pure);
@@ -490,14 +481,27 @@ namespace Ikat
                 var p = ro.Go.transform.localPosition;
                 int sort = ro.Mr != null ? ro.Mr.sortingOrder : 0;
                 var b = ro.Mesh != null ? ro.Mesh.bounds : new Bounds();
-                // 材质 clip 诊断：是否启 CLIPPED keyword + clip 链 entry 数（多 entry 布局，#52）。
+                // 材质 clip 诊断：CLIPPED keyword + 链 entry 数 + 每 entry kind 回读
+                // （材质实际值——shapeKind 1=circle 2=polygon；与 [clip table] 段对拍，
+                // 不一致 = 刷新链路断了，一致但视觉旧 = 渲染侧没吃到）。
                 string matInfo = "";
                 if (ro.Mr != null && ro.Mr.sharedMaterial != null)
                 {
                     var m = ro.Mr.sharedMaterial;
                     bool clipped = m.IsKeywordEnabled("CLIPPED");
-                    float clipCount = m.GetFloat("_ClipCount");
-                    matInfo = $" clip={clipped} entries={clipCount:F0}";
+                    int clipCount = Mathf.RoundToInt(m.GetFloat("_ClipCount"));
+                    string kinds = "";
+                    if (clipped && clipCount > 0)
+                    {
+                        var f0 = m.GetVectorArray("_ClipFrame0");
+                        var f1 = m.GetVectorArray("_ClipFrame1");
+                        for (int e = 0; e < clipCount && e < 4; e++)
+                            kinds += (int)f1[e].w == 0 ? "-" : ((int)f1[e].w == 2 ? "R" : "r");
+                        kinds += "/";
+                        for (int e = 0; e < clipCount && e < 4; e++)
+                            kinds += (int)f0[e].w == 0 ? "-" : ((int)f0[e].w == 1 ? "c" : "p");
+                    }
+                    matInfo = $" clip={clipped} entries={clipCount} kinds=[{kinds}]";
                 }
                 sb.AppendLine($"  [{tag}{kv.Key}] nid={ro.LastNodeId} sort={sort} pos=({p.x:F0},{p.y:F0}) mb=(({b.center.x:F0},{b.center.y:F0}),({b.size.x:F0},{b.size.y:F0})) active={ro.Go.activeSelf}{matInfo}");
             }

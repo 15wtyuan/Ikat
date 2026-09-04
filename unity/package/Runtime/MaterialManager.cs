@@ -15,6 +15,12 @@ namespace Ikat
 
         readonly Shader _shader;
         readonly Dictionary<Key, Material> _cache = new();
+        // clip 链数组代数计数：每次 SetClipEntries 递增并写 _ClipGen（shader CBUFFER
+        // 哑字段，逻辑不用）——值恒变，防 SRP batcher 对「数组同长重写」的材质数据
+        // 缓存不失效（var 换形滞后取证的保险）。
+        static int _clipGen;
+
+        public int ClipGen => _clipGen;
         // per-ctx clip 链数组（新建 Material 时 Get 会带上；SetClipEntries 同步刷新已缓存实例）。
         readonly Dictionary<uint, Vector4[]> _clipFrame0ByCtx = new();
         readonly Dictionary<uint, Vector4[]> _clipFrame1ByCtx = new();
@@ -113,6 +119,7 @@ namespace Ikat
             _clipCircleByCtx[maskContext] = circ;
             _clipPolyByCtx[maskContext] = poly;
             _clipCountByCtx[maskContext] = n;
+            _clipGen++;
             foreach (var kv in _cache)
                 if (kv.Key.Ctx == maskContext) ApplyClipArrays(kv.Value, maskContext);
         }
@@ -128,6 +135,7 @@ namespace Ikat
             mat.SetVectorArray("_ClipCircle", _clipCircleByCtx[ctx]);
             mat.SetVectorArray("_ClipPoly", _clipPolyByCtx[ctx]);
             mat.SetFloat("_ClipCount", _clipCountByCtx[ctx]);
+            mat.SetFloat("_ClipGen", _clipGen);
         }
 
         public void Clear()

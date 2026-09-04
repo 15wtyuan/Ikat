@@ -121,6 +121,9 @@ Shader "Ikat/Unlit"
                 float4 _ClipCircle[4];   // (cx, cy, r, _)
                 float4 _ClipPoly[32];    // 每 entry 8 个 float4 × 2 点（16 点上限）
                 float _ClipCount;
+                // 哑字段：MaterialManager 每次 clip 链更新递增写入——值恒变逼 SRP batcher
+                // 重建材质 CBUFFER（对「数组同长重写」不失效的保险）。shader 逻辑不用。
+                float _ClipGen;
                 // _ObjectMatrix 拆 4 Vector（Properties 对应，MPB 覆盖）。列主序：重组 float4x4(_ObjM0..3)。
                 float4 _ObjM0;
                 float4 _ObjM1;
