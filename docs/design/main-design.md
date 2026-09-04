@@ -280,7 +280,7 @@ panel.Style.OverflowY = Overflow.Auto;
 - 父组件普通选择器不穿透边界。
 - 标准可继承属性和 CSS 自定义属性 `--*` 跨边界传递。
 - 运行时注入（`StyleSheet.Add`）不受本墙约束：全局规则字面匹配可及组件展开内部（程序员工具非 AI 编辑面，public-api §10.2 明示）。
-- 后续可用标准 `part/::part()` 精确开放内部样式（打包期 AI 编辑面的通道）。
+- `::part(name)`（#57 已交付）是打包期页面规则穿本墙的唯一许可通道：compound 前缀匹配 host、part 匹配展开子树内带 `part` 属性的目标节点（单层不递归，语义细目见 fence.md 选择器节）。运行时注入则本就不受本墙约束（上一条）。
 - 组件 host 节点打三重标记（CSS 隔离 + 查找边界 + host 归属）：对后代 host 是 CSS 与查找边界；host 本体归外层页面作用域（页面规则可样式化 host、组件内部规则不落 host——同 DOM shadow DOM 不样式化 host，当前无 `:host`）。同模板多实例的 scoped 规则按 scope 各自包装，不按 selector 文本去重（按 selector 去重会误丢不同组件的同名 class 规则）。
 
 ---

@@ -161,7 +161,11 @@ combinator). Each compound is `tag? (.class | #id | [attr] | :pseudo)*`:
   `StyleSheet.Add` (runtime rules already pierce literally; `::part`
   there is just a matching arm). The preview server rewrites `::part(n)`
   to the flat `[part="n"]` descendant equivalent so browser preview
-  shows the styling too.
+  shows the styling too. **Authoring rule:** keep overridable properties
+  (color and friends) off inline `style` on part-target nodes — inline
+  declarations beat every class rule including `::part` (the page can
+  never win); put the component's default visuals in `<style>` classes
+  and reserve inline for structural layout.
 - Build errors (the diagnostic names the offending construct):
   combinators `>` / `+` / `~` (descendant only), the universal selector
   `*`, unknown pseudo-classes (`:not()`, `:nth-of-type`, ...), and

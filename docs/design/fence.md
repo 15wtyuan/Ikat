@@ -328,7 +328,7 @@ CSS 在围栏中以三个正交维度建模。每个 CSS 属性声明的结局�
 
 > **⚠️ 虚拟化列表禁止 `:nth-child`**：虚拟化 `<ul>`（`role=list`）的 parked slot 留挂 ul 子树（`display:none`），按 CSS 仍计入 child count。`:nth-child` 的序数包含 parked slot → item 序号不可控。用 item-index / `data-*` 属性 + 属性选择器替代（如 `[data-index="0"]`）。
 
-**::part(name) 选择器（#57）**——唯一进围栏的伪元素：页面规则穿组件内容墙命中组件内部带 `part="name"` 的节点。语法 `prefix::part(name)`：compound 前缀（class/tag/伪类等）匹配**组件 host**（host 归页面域，可带 class/id），`::part(name)` 匹配 host 展开子树内带该 part 属性的**目标节点**。约束：必须位于最后一个 compound 的结尾（伪元素后不可再缀，`X::part(a) Y` 越界）；**一层不递归**——嵌套组件内部节点的 host 是嵌套组件自身，外层 `::part()` 不下钻（跨层要组件作者显式中转，`exportparts` 不在子集）；specificity 按 web（part 名属性级 + 伪元素元素级，`.card::part(title)` = (0,2,1)）。运行时注入（`StyleSheet.Add`）同语法可用——运行时规则本就字面穿墙，`::part` 在该通道只是普通匹配臂。预览（浏览器平铺 DOM 无 shadow）由 preview server 把 `::part(n)` 重写为平铺等价 `[part="n"]` 后代选择器，保真不缺样式。
+**::part(name) 选择器（#57）**——唯一进围栏的伪元素：页面规则穿组件内容墙命中组件内部带 `part="name"` 的节点。语法 `prefix::part(name)`：compound 前缀（class/tag/伪类等）匹配**组件 host**（host 归页面域，可带 class/id），`::part(name)` 匹配 host 展开子树内带该 part 属性的**目标节点**。约束：必须位于最后一个 compound 的结尾（伪元素后不可再缀，`X::part(a) Y` 越界）；**一层不递归**——嵌套组件内部节点的 host 是嵌套组件自身，外层 `::part()` 不下钻（跨层要组件作者显式中转，`exportparts` 不在子集）；specificity 按 web（part 名属性级 + 伪元素元素级，`.card::part(title)` = (0,2,1)）。运行时注入（`StyleSheet.Add`）同语法可用——运行时规则本就字面穿墙，`::part` 在该通道只是普通匹配臂。预览（浏览器平铺 DOM 无 shadow）由 preview server 把 `::part(n)` 重写为平铺等价 `[part="n"]` 后代选择器，保真不缺样式。**作者规则：part 目标节点的可覆盖属性（color 等）不要写进行内 style**——行内声明按 CSS 语义压过一切 class 含 `::part`（页面侧怎么写都赢不了）；组件默认视觉全走 `<style>` 类，行内只放结构性布局。
 
 **溢出**
 
