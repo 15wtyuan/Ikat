@@ -1258,7 +1258,12 @@ public class ShowcaseRunner : MonoBehaviour
             // PumpRemovedNodes 对已物化 wrapper fire OnDisconnected（disc 跳增）。
             if (page.TryGet<ListView>("cl-list", out var lv))
             {
-                lv.ItemTemplate = lv.GetTemplate("cl-row");
+                // 模板句柄必须在 ItemCount（enter_data_driven 收编并清掉 <template> 子）之前
+                // 全部取好——enter 之后再 GetTemplate 会「not found in scope」抛异常
+                //（api-infra 同款顺序：全部 GetTemplate → 模板设定 → BindItem → ItemCount）。
+                UITemplate rowWidget = lv.GetTemplate("cl-row");
+                UITemplate rowPlain = lv.GetTemplate("cl-row-plain");
+                lv.ItemTemplate = rowWidget;
                 // BindItem 触达子树（Query 物化 widget wrapper → OnConnected）；
                 // 不触达则克隆永不物化、死亡无 wrapper 可通知。
                 lv.BindItem = (item, i) =>
@@ -1270,8 +1275,6 @@ public class ShowcaseRunner : MonoBehaviour
                 lv.ItemCount = 8;
                 if (page.TryGet<Button>("cl-swap", out var swapBtn))
                 {
-                    UITemplate rowWidget = lv.GetTemplate("cl-row");
-                    UITemplate rowPlain = lv.GetTemplate("cl-row-plain");
                     bool plain = false;
                     swapBtn.Clicked += () =>
                     {

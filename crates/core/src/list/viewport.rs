@@ -27,7 +27,14 @@ pub(super) fn warn_no_pane_once(scene: &mut Scene, ul: NodeId) {
         .get(ul)
         .map(|ls| ls.warned_no_pane)
         .unwrap_or(true);
-    if !warned {
+    // 首个 plan 可能先于滚动容器 scroll 条目物化（tick 序 plan < rematch < refresh），
+    // 一帧宽限：第二次 plan 起仍无窗才确属配置错、才推警告。
+    let grace = scene
+        .lists
+        .get(ul)
+        .map(|ls| ls.plans_seen >= 2)
+        .unwrap_or(true);
+    if !warned && grace {
         if let Some(ls) = scene.lists.get_mut(ul) {
             ls.warned_no_pane = true;
         }

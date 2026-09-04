@@ -250,6 +250,9 @@ pub fn plan_visible(scene: &mut Scene) -> Vec<PendingOps> {
 
 fn plan_one(scene: &mut Scene, ul: NodeId) -> Option<PendingOps> {
     ensure_grid_detected(scene, ul);
+    if let Some(ls) = scene.lists.get_mut(ul) {
+        ls.plans_seen = ls.plans_seen.saturating_add(1);
+    }
     // Phase A：单次不可变借完成所有只读计算——可见区（Copy 的 Range）+ spacer 高度 + gap。
     // spacer 高需 heights.sum，故一并在此算出，避免后续跨可变借再 clone heights。
     let (visible, spacer_head_h, spacer_tail_h, measured) =

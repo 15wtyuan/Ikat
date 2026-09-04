@@ -201,6 +201,7 @@ pub fn enter_data_driven(
         columns: 0,
         row_pitch: 0.0,
         warned_no_pane: false,
+        plans_seen: 0,
     };
     stage.scene.as_mut().unwrap().lists.0.insert(ul, ls);
     Ok(())

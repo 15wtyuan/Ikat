@@ -156,6 +156,10 @@ pub struct ListState {
     pub row_pitch: f32,
     /// warn-once 旗标：无滚动容器退化全量渲染已警告（每列表一次，防每帧刷屏）。
     pub warned_no_pane: bool,
+    /// plan 次数计数（no-pane 警告宽限）：首个 plan 可能先于滚动容器 scroll 条目
+    /// 物化（tick 序 plan < rematch < refresh_content_sizes），无窗首帧必 None——
+    /// 第二次 plan 起仍无窗才确属配置错。防首帧竞态误报。
+    pub plans_seen: u32,
 }
 
 impl ListState {
@@ -215,6 +219,7 @@ impl Default for ListState {
             columns: 0,
             row_pitch: 0.0,
             warned_no_pane: false,
+            plans_seen: 0,
         }
     }
 }

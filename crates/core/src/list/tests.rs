@@ -824,8 +824,13 @@ fn no_pane_degenerates_to_full_render_with_warning() {
             "2 spacers + 100 slots (no silent truncation to INITIAL_SLOTS)"
         );
     }
-    // 警告一次性：第一帧已推，第二帧 plan 不再重复。
-    assert_eq!(s.scene.as_ref().unwrap().warnings.len(), 1);
+    // 警告带一帧宽限（首 plan 可能先于滚动容器 scroll 条目物化——tick 序
+    // plan < rematch < refresh）：第一帧 0 条，第二帧 plan 确认无窗才推 1 条。
+    assert_eq!(
+        s.scene.as_ref().unwrap().warnings.len(),
+        0,
+        "首帧宽限：不警"
+    );
     let ops = crate::list::plan_visible(s.scene.as_mut().unwrap());
     crate::list::execute_visible(s.scene.as_mut().unwrap(), ops);
     assert_eq!(
