@@ -355,7 +355,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0b2db86121404754db890f4c8dfe81b2, type: 3}
-  m_Name: Byio
+  m_Name: Bloom
   m_EditorClassIdentifier: 
   active: 1
   skipIterations:
@@ -487,7 +487,7 @@ MonoBehaviour:
   tintColor:
     m_OverrideState: 1
     m_Value: {r: 1, g: 1, b: 1, a: 1}
-  byioMip:
+  bloomMip:
     m_OverrideState: 1
     m_Value: 1
   firstFlareIntensity:
