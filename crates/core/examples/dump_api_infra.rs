@@ -5,12 +5,12 @@
 //! 4) infra-mt-list 虚拟列表滚动覆盖（set_item_count(30) + set_scroll_pos 逐档量化，
 //!    active slot 是否覆盖视口 / 是否只渲染前 N 行）
 
-use ikat_core::hit::hit_test;
-use ikat_core::input::{PointerEvent, PointerKind};
-use ikat_core::list::{enter_data_driven, set_item_count};
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{ControlState, NodeKind};
-use ikat_core::stage::Stage;
+use yio_core::hit::hit_test;
+use yio_core::input::{PointerEvent, PointerKind};
+use yio_core::list::{enter_data_driven, set_item_count};
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{ControlState, NodeKind};
+use yio_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -263,14 +263,14 @@ fn main() {
     let stage_root = s.create_root("div", "").expect("stage root 2");
     {
         let sc = s.scene.as_mut().unwrap();
-        use ikat_core::scene::dynamic::set_inline_override;
+        use yio_core::scene::dynamic::set_inline_override;
         let _ = set_inline_override(sc, stage_root, "display:flex;flex-direction:row");
     }
     for k in 0..3 {
         let win = s.instantiate("infra-copy", "api-infra").expect("mini");
         {
             let sc = s.scene.as_mut().unwrap();
-            use ikat_core::scene::dynamic::set_inline_override;
+            use yio_core::scene::dynamic::set_inline_override;
             let _ = set_inline_override(sc, win, "width:420px");
             let _ = set_inline_override(sc, win, "height:88px");
             let _ = set_inline_override(sc, win, "overflow:clip");
@@ -295,8 +295,8 @@ fn main() {
 }
 
 fn count_visible(
-    sc: &ikat_core::scene::node::Scene,
-    id: ikat_core::scene::node::NodeId,
+    sc: &yio_core::scene::node::Scene,
+    id: yio_core::scene::node::NodeId,
     visible: &mut usize,
     total: &mut usize,
 ) {
@@ -312,8 +312,8 @@ fn count_visible(
 }
 
 fn tablist_selected(
-    sc: &ikat_core::scene::node::Scene,
-    id: ikat_core::scene::node::NodeId,
+    sc: &yio_core::scene::node::Scene,
+    id: yio_core::scene::node::NodeId,
 ) -> Option<usize> {
     match sc.controls.get(id) {
         Some(ControlState::TabList { selected_index, .. }) => Some(*selected_index),
@@ -325,8 +325,8 @@ fn tablist_selected(
 }
 
 fn dump_subtree(
-    sc: &ikat_core::scene::node::Scene,
-    id: ikat_core::scene::node::NodeId,
+    sc: &yio_core::scene::node::Scene,
+    id: yio_core::scene::node::NodeId,
     depth: usize,
 ) {
     let n = sc.get(id).unwrap();

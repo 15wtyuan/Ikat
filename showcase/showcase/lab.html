@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="utf-8">
-  <title>Ikat 靶子冻结 Showcase · 标本馆</title>
+  <title>Yio 靶子冻结 Showcase · 标本馆</title>
   <link rel="stylesheet" href="lab.dynamic.css">
   <style>
   .root {display:flex;flex-direction:column; width:100vw; height:100vh; padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background-color:#0e1620; }
@@ -354,7 +354,7 @@
         <div class="section-desc">判据只认肉眼看得见的信号：① 缓动画廊八行，圆点全部 1.6 秒循环左→右，行间差异一眼可判——linear 匀速（对照基准）；ease-out-bounce 到右端弹跳回落数次；ease-out-elastic 到右端弹簧式振几下；cubic-bezier 末段冲出轨道右缘再贴回；step-end 全程钉在左端、循环末尾瞬移右端；step-start 相反（起点即瞬移右端、保持到底）；shorthand·elastic / shorthand·bezier 两行须与各自的 elastic / bezier 行完全同步（同起同落同弹——不同步即 shorthand 位声明丢失）。② origin 对照——蓝条绕几何中心旋转（扫出圆环），金条左上角钉死不动、整条像圆规甩转。③ per-stop timing——红条去程匀速、回程末端冲过左端界再弹回（同一条动画两段节奏肉眼不同）。④ 混合百分比——浅蓝条从轨道右端外滑入、匀速横穿、滑出左端外完全消失，循环；条不动或穿得不对称（半宽量级不对）即失败。⑤ runtime TweenBuilder——点「播放 tween」：红块 0.5 秒右滑贴轨道右段、再 0.5 秒原路滑回，跑满读数变「tween 完成」；只滑一趟不回、读数停在「播放中」即失败；可重复点击重放。</div>
         <div class="specimen" style="display:flex;flex-direction:row;gap:24px;flex-wrap:wrap;align-items:flex-start">
           <div style="display:flex;flex-direction:column;gap:6px">
-            <span class="eg-label">缓动画廊（ikat 超集 + bezier + steps）</span>
+            <span class="eg-label">缓动画廊（yio 超集 + bezier + steps）</span>
             <div class="eg-row"><span class="eg-name">linear</span><div class="eg-track"><div class="eg-dot"></div></div></div>
             <div class="eg-row"><span class="eg-name">ease-out-bounce</span><div class="eg-track"><div class="eg-dot eg-bounce"></div></div></div>
             <div class="eg-row"><span class="eg-name">ease-out-elastic</span><div class="eg-track"><div class="eg-dot eg-elastic"></div></div></div>

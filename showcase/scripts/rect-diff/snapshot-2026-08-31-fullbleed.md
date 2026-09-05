@@ -22,6 +22,6 @@
 ## 刘海避让验证路径
 
 - 桌面/编辑器 inset=0 → A/B 零变化即证 padding 声明无害。
-- 预览侧：`ikat preview` 选 iPhone 14/16 PM（横持 left/right inset 生效）+ fit-width
+- 预览侧：`yio preview` 选 iPhone 14/16 PM（横持 left/right inset 生效）+ fit-width
   模式，页面内容应让开左右参考线。
-- 运行时：真机/模拟 inset 下 env() 经 `ikat_stage_set_safe_area` 注入（上批链路）。
+- 运行时：真机/模拟 inset 下 env() 经 `yio_stage_set_safe_area` 注入（上批链路）。

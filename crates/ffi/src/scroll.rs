@@ -1,14 +1,14 @@
 //! 滚动面：编程滚动位置（含缓动）、虚拟列表 content_size override 注入/清除、
 //! scroll_pos 读取。
 
-use ikat_core::scene::NodeId;
+use yio_core::scene::NodeId;
 
 use crate::{ffi_guard, StageHandle};
 
 /// 编程滚动到指定位置。非 scroll 容器 / 越界 node → no-op（不 panic）。
 /// animated: u8（0=瞬移 1=缓动 cubic-out）。null 句柄 → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_scroll_pos(
+pub extern "C" fn yio_stage_set_scroll_pos(
     h: *mut StageHandle,
     node_id: u64,
     x: f32,
@@ -29,7 +29,7 @@ pub extern "C" fn ikat_stage_set_scroll_pos(
 /// driver 注入滚动容器 content_size（虚拟列表）。node 无效/非滚动容器 → no-op。
 /// null 句柄 → no-op（不 panic）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_content_size(
+pub extern "C" fn yio_stage_set_content_size(
     h: *mut StageHandle,
     node_id: u64,
     w: f32,
@@ -47,7 +47,7 @@ pub extern "C" fn ikat_stage_set_content_size(
 /// 清除 driver 注入的 content_size override（列表销毁/退回普通滚动时用）。
 /// null 句柄/无效 node → no-op（不 panic）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_clear_content_size_override(h: *mut StageHandle, node_id: u64) {
+pub extern "C" fn yio_stage_clear_content_size_override(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -60,7 +60,7 @@ pub extern "C" fn ikat_stage_clear_content_size_override(h: *mut StageHandle, no
 /// 读 scroll_pos。null 句柄/无效 node → out 填 0（不 panic）。
 /// out_x/out_y 是 out 参数（C# 传 ref float）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_scroll_pos(
+pub extern "C" fn yio_stage_get_scroll_pos(
     h: *const StageHandle,
     node_id: u64,
     out_x: *mut f32,

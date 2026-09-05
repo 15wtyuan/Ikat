@@ -1,5 +1,5 @@
-/* Ikat browser preview base（框架真相副本，嵌在 ikat 二进制里由 preview server
-   路由供给 /ikat-preview/lib/base.css；boot.js 自动注入 head 顶部）。
+/* Yio browser preview base（框架真相副本，嵌在 yio 二进制里由 preview server
+   路由供给 /yio-preview/lib/base.css；boot.js 自动注入 head 顶部）。
    只含「与 core 渲染约定对齐」的结构性 polyfill——主题（配色/字体）是消费侧资产，
    @font-face 归工作区自己的 preview 样式，不在此处。
    polyfill-only：打包器只消费 body，head 不进 pkg.bin。 */

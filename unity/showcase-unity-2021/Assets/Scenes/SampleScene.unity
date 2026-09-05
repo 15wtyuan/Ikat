@@ -134,7 +134,7 @@ GameObject:
   - component: {fileID: 47073607}
   - component: {fileID: 47073606}
   m_Layer: 6
-  m_Name: IkatUICamera
+  m_Name: YioUICamera
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -527,7 +527,7 @@ GameObject:
   - component: {fileID: 1364148016}
   - component: {fileID: 1364148017}
   m_Layer: 6
-  m_Name: IkatUI
+  m_Name: YioUI
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

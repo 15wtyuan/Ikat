@@ -22,7 +22,7 @@ use crate::scene::animation::{player_key_as_u64, PlayerKey};
 use crate::scene::node::NodeId;
 
 /// 动画启动（player 首次 update；class 触发 + node.Play 都发）。
-/// 值对齐 C# `EventType.AnimationStart`（Ikat.EventType.cs，公共 API 冻结值）。
+/// 值对齐 C# `EventType.AnimationStart`（Yio.EventType.cs，公共 API 冻结值）。
 pub const EVT_ANIMATION_START: u8 = 18;
 /// 迭代结束（每个 iteration 边界；完成帧不发——CSS：最后一次 iteration 结束只发 END，
 /// animationiteration 不因最后一次 iteration 触发）。
@@ -33,7 +33,7 @@ pub const EVT_ANIMATION_ITERATION: u8 = 19;
 pub const EVT_ANIMATION_END: u8 = 20;
 /// OnKey 百分比跨越（句柄私有，不广播 EventBus）。
 pub const EVT_ANIMATION_KEY: u8 = 27;
-/// @ikat-hook stop 跨越（句柄私有）。
+/// @yio-hook stop 跨越（句柄私有）。
 pub const EVT_ANIMATION_HOOK: u8 = 28;
 
 /// 事件字符串表：动画事件 payload 的 name/hook_name 载体（EventRecord 32B 扁平 POD

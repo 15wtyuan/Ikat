@@ -8,7 +8,7 @@
 //! 脚本覆盖的通道即指纹的输入清单验收面：稳态 / set_text / inline 改色 / transform
 //! 平移 / 祖先 opacity 级联 / display:none 结构翻转 / tween 动画帧 / 字体重注册。
 
-use ikat_core::stage::Stage;
+use yio_core::stage::Stage;
 
 fn font_bytes() -> Vec<u8> {
     std::fs::read(format!(
@@ -99,7 +99,7 @@ fn incremental_matches_full_rebuild_across_mutation_script() {
             let body = s.scene.as_ref().unwrap().get(root).unwrap().children[1];
             let mut t = s.scene.as_ref().unwrap().get(body).unwrap().user_transform;
             t.translate[1] += 40.0;
-            ikat_core::scene::dynamic::set_user_transform(s.scene.as_mut().unwrap(), body, t)
+            yio_core::scene::dynamic::set_user_transform(s.scene.as_mut().unwrap(), body, t)
                 .unwrap();
         }
         7 => {}
@@ -127,11 +127,11 @@ fn incremental_matches_full_rebuild_during_tween() {
             let header = s.scene.as_ref().unwrap().get(root).unwrap().children[0];
             s.tween(
                 header,
-                ikat_core::tween::TweenSpec {
-                    prop: ikat_core::tween::TweenProp::BgColor,
+                yio_core::tween::TweenSpec {
+                    prop: yio_core::tween::TweenProp::BgColor,
                     start: [0.13, 0.27, 0.4, 1.0, 0.0, 0.0, 0.0, 0.0],
                     end: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                    ease: ikat_core::tween::Ease::Linear,
+                    ease: yio_core::tween::Ease::Linear,
                     delay: 0.0,
                     duration: 0.1,
                     tag: 0,

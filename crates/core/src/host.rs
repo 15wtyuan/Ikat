@@ -4,7 +4,7 @@
 //! 树/输入/动画/时钟等每实例态留在 `Stage`。单 Stage 行为不变（`Stage::new` 自建宿主）；
 //! 多 Stage 通过 `Stage::new_bound` 挂同一 `Rc<RefCell<ResourceHost>>` 共享一份驻留
 //! （字体字节一份、glyph atlas 一份、包解析一份），这是 per-Stage 固定成本从 N 份降回
-//! 1 份的地基。FFI 面：`ikat_host_*` 操作宿主，`ikat_stage_new_bound(host, w, h)` 挂接。
+//! 1 份的地基。FFI 面：`yio_host_*` 操作宿主，`yio_stage_new_bound(host, w, h)` 挂接。
 
 use crate::asset::Package;
 use crate::text::atlas::GlyphAtlas;
@@ -46,7 +46,7 @@ impl ResourceHost {
 }
 
 /// 解析 pkg.bin 存进宿主包池（`Stage::load_package` 与 FFI 宿主级入口共用体）。
-/// 版本错配记录进 `last_pkg_load_version`（FFI 诊断「Unity 包与 ikat.exe 同版本
+/// 版本错配记录进 `last_pkg_load_version`（FFI 诊断「Unity 包与 yio.exe 同版本
 /// 重打」的专属指引）；成功/其他错误置 0。
 pub fn load_package_into(
     host: &mut ResourceHost,

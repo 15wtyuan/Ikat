@@ -15,7 +15,7 @@ pub struct Summary {
     pub warnings: usize,
 }
 
-/// `ikat version [--format json]` 的输出。cli == unity（crate 版本与 Unity 包同轨，
+/// `yio version [--format json]` 的输出。cli == unity（crate 版本与 Unity 包同轨，
 /// 由 release-check 断言）；pkg_format 引 core 的 `PKG_FORMAT_VERSION` 常量。
 #[derive(Debug, Clone, Serialize)]
 pub struct VersionInfo {
@@ -30,14 +30,14 @@ impl VersionInfo {
         Self {
             cli: env!("CARGO_PKG_VERSION"),
             unity: env!("CARGO_PKG_VERSION"),
-            pkg_format: ikat_core::asset::PKG_FORMAT_VERSION,
+            pkg_format: yio_core::asset::PKG_FORMAT_VERSION,
             format_version: FORMAT_VERSION,
         }
     }
 
     pub fn render_human(&self) -> String {
         format!(
-            "ikat {} (unity {}, pkg_format {})",
+            "yio {} (unity {}, pkg_format {})",
             self.cli, self.unity, self.pkg_format
         )
     }
@@ -63,7 +63,7 @@ pub struct CommandOutput {
     pub verify: Option<VerifySummary>,
 }
 
-/// `ikat verify` 成功的摘要（CommandOutput.verify）。
+/// `yio verify` 成功的摘要（CommandOutput.verify）。
 #[derive(Serialize)]
 pub struct VerifySummary {
     pub assets_checked: usize,

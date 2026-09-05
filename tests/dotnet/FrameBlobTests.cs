@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using Xunit;
 
-namespace Ikat.Tests.Core
+namespace Yio.Tests.Core
 {
     public class FrameBlobTests
     {
-        // 构造 v15 blob（镜像 ikat_ffi_c/src/blob.rs::VERSION=15 + FrameBlob.cs）。
+        // 构造 v15 blob（镜像 yio_ffi_c/src/blob.rs::VERSION=15 + FrameBlob.cs）。
         // v15 = 列级增量：Skip 行出 SOA 进 skip 段、胖参数进 fat arena、+mount_id/fat_off 列（21 列）。
         // nodeCount 参数 = lean 行数（Header/Full）；skipCount = skip 段条目数（全零占位）。
         static byte[] BuildBlob(int nodeCount, byte[][] columnData, byte[] meshArena = null,
@@ -31,7 +31,7 @@ namespace Ikat.Tests.Core
             int skipOff = fatArenaOff + fatArena.Length;
 
             var b = new List<byte>();
-            b.AddRange(BitConverter.GetBytes(0x4D4F4F4Cu)); // magic
+            b.AddRange(BitConverter.GetBytes(0x314F4959u)); // magic
             b.AddRange(BitConverter.GetBytes(15u));          // version = 15
             b.AddRange(BitConverter.GetBytes((uint)(nodeCount + skipCount)));
             b.AddRange(BitConverter.GetBytes((uint)skipCount));

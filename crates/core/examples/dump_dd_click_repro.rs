@@ -1,10 +1,10 @@
 //! 精确复现「点击下拉列表触发 FFI panic（rematch live node [dynamic:675]）」：
 //! 时钟 churn 并行 + 真实指针事件点 combobox（展开）→ 点 option（提交+收起）→ 连续 tick。
 
-use ikat_core::input::{PointerEvent, PointerKind};
-use ikat_core::list::{enter_data_driven, set_item_count};
-use ikat_core::scene::dynamic::{append_child, create_node, remove_node, set_text};
-use ikat_core::stage::Stage;
+use yio_core::input::{PointerEvent, PointerKind};
+use yio_core::list::{enter_data_driven, set_item_count};
+use yio_core::scene::dynamic::{append_child, create_node, remove_node, set_text};
+use yio_core::stage::Stage;
 
 fn click(s: &mut Stage, x: f32, y: f32) {
     s.set_input(&[PointerEvent {
@@ -154,7 +154,7 @@ fn main() {
             .children
             .iter()
             .copied()
-            .find(|&c| sc.roles.role_of(c) == Some(ikat_core::scene::control::ROLE_LISTBOX))
+            .find(|&c| sc.roles.role_of(c) == Some(yio_core::scene::control::ROLE_LISTBOX))
             .or_else(|| sc.get(dd).unwrap().children.iter().copied().nth(1));
         let lb = listbox.expect("listbox");
         let opt = sc
@@ -165,7 +165,7 @@ fn main() {
             .copied()
             .find(|&c| {
                 sc.get(c)
-                    .map(|n| n.kind == ikat_core::scene::node::NodeKind::OptionItem)
+                    .map(|n| n.kind == yio_core::scene::node::NodeKind::OptionItem)
                     == Some(true)
             })
             .expect("option");

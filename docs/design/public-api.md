@@ -1,8 +1,8 @@
-# Ikat 公共 API 权威契约
+# Yio 公共 API 权威契约
 
-> **单一真相源**：`unity/package/Runtime/Public/Ikat.*.cs`（冻结的 C# 签名，machine-readable）。本文档为人类可读契约，以签名文件为准。
+> **单一真相源**：`unity/package/Runtime/Public/Yio.*.cs`（冻结的 C# 签名，machine-readable）。本文档为人类可读契约，以签名文件为准。
 >
-> **防漂移门**：`tests/dotnet/Ikat.PublicApi` 编译校验——改公共签名后必编过。
+> **防漂移门**：`tests/dotnet/Yio.PublicApi` 编译校验——改公共签名后必编过。
 >
 > **定位**：面向游戏业务程序员的终态公共 API。自上而下设计，公共契约优先，core/FFI/后端为它服务。摸黑+三束的实现完成后，用本契约作验收靶子。实现机制（真身 Rust + C# 投影）见 [projection-layer.md](projection-layer.md)。
 
@@ -142,28 +142,28 @@ public sealed class NodeStyle {
     public Length Left/Top/Right/Bottom { get; set; }
     public PositionMode Position { get; set; }
     public int ZIndex { get; set; }                   // 兄弟层叠序（CSS z-index）：绘制/命中层，不改 flex 排列
-    public IkatColor BackgroundColor/TextColor { get; set; }   // TextColor = 文字色（CSS color 通道；旧名 IkatColor 已 Obsolete）
+    public YioColor BackgroundColor/TextColor { get; set; }   // TextColor = 文字色（CSS color 通道；旧名 YioColor 已 Obsolete）
     public float Opacity { get; set; }
-    public void SetVar(string name, Length/IkatColor/float/string value);
+    public void SetVar(string name, Length/YioColor/float/string value);
     public void RemoveVar(string name);
 }
 ```
 
 **不变量（inline override 层语义）**：
 - Style 是**最高优先级的 inline override 层**，不是 cascade 的读取窗口。
-- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `IkatColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走只读 computed style 查询接口（时效：rematch 后有效、本帧 tick 后反映最新 cascade）。
+- getter **只反映 C# setter 写过的属性**；未写过的返回 `Unset` 哨兵（`Length.Unset()` / `YioColor.Unset` / enum 的 `Unset` 成员）。布局产物（rect/matrix）走 `Geometry`；computed 样式值（颜色/字号等）走只读 computed style 查询接口（时效：rematch 后有效、本帧 tick 后反映最新 cascade）。
 - setter 写 `Unset` = 撤销该属性的 inline override，回落 CSS cascade。单属性撤销即用 `Style.X = Unset()`，无 `Clear`/`Reset`。
-- `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递（继承沿祖先链，声明点解析）。`SetVar` 是 custom prop **最高优先级层**（高于行内 style 与样式表规则声明）；`RemoveVar` 只撤 SetVar 条目、回落 CSS 声明值。值格式化为 CSS 值串（`Length` → px/%、`IkatColor` → `#rrggbbaa`、`float` 不变文化十进制、`string` 原样）；名字须 `--` 前缀（否则 `UIContractException`）。不提供 `GetVar`（var 不当状态存储读回）。var() 消费语义（fallback/嵌套/环 invalid）见 fence.md §5.4。
+- `SetVar`/`RemoveVar` 管 CSS 自定义属性 `--*`；`--*` 跨作用域根传递（继承沿祖先链，声明点解析）。`SetVar` 是 custom prop **最高优先级层**（高于行内 style 与样式表规则声明）；`RemoveVar` 只撤 SetVar 条目、回落 CSS 声明值。值格式化为 CSS 值串（`Length` → px/%、`YioColor` → `#rrggbbaa`、`float` 不变文化十进制、`string` 原样）；名字须 `--` 前缀（否则 `UIContractException`）。不提供 `GetVar`（var 不当状态存储读回）。var() 消费语义（fallback/嵌套/环 invalid）见 fence.md §5.4。
 - 隐藏节点用 `Display = None`（不占位、不渲染、不命中，等同 fgui `visible=false`）；占位隐藏（保留布局空间）用 `Opacity = 0`。（`Visibility` API 已移除——fence CSS 子集无 `visibility` prop，无后盾；占位隐藏 `opacity:0` 覆盖。引擎集成层另有**运行时渲染隐**原语——visibility:hidden 继承语义、不动布局/命中，供世界锚点出屏自动隐藏等宿主机制用，见 §11.3，不进公共 Node API。）
 
 ### 3.2 Transform（可写，渲染层，不触发 solve）
 
 ```csharp
 public sealed class NodeTransform {
-    public IkatVector2 Position { get; set; }   // 视觉偏移
-    public IkatVector2 Scale { get; set; }
+    public YioVector2 Position { get; set; }   // 视觉偏移
+    public YioVector2 Scale { get; set; }
     public float Rotation { get; set; }      // 弧度
-    public IkatVector2 Origin { get; set; }
+    public YioVector2 Origin { get; set; }
 }
 ```
 
@@ -173,12 +173,12 @@ public sealed class NodeTransform {
 
 ```csharp
 public readonly struct NodeGeometry {
-    public IkatRect LayoutRect { get; }          // 父坐标系
-    public IkatRect WorldRect { get; }           // 全局坐标系
-    public IkatVector2 LocalToGlobal(IkatVector2 point);
-    public IkatVector2 GlobalToLocal(IkatVector2 point);
-    public IkatRect LocalToGlobal(IkatRect rect);
-    public IkatRect GlobalToLocal(IkatRect rect);
+    public YioRect LayoutRect { get; }          // 父坐标系
+    public YioRect WorldRect { get; }           // 全局坐标系
+    public YioVector2 LocalToGlobal(YioVector2 point);
+    public YioVector2 GlobalToLocal(YioVector2 point);
+    public YioRect LocalToGlobal(YioRect rect);
+    public YioRect GlobalToLocal(YioRect rect);
 }
 ```
 
@@ -201,9 +201,9 @@ public class Container : Node {
     public void SetChildIndex(Node child, int index);
     public void SwapChildren(Node a, Node b);
     public void SwapChildrenAt(int indexA, int indexB);
-    public IkatVector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
+    public YioVector2 ScrollPos { get; }   // 滚动容器当前滚动位置（非滚动容器返 (0,0)）；与 ScrollTo 成对
     public void RestartAnimations();     // 重启子树内声明式（class 触发）keyframes：player 原地重建，节点状态全保留；node.Play 程序化 player 不受影响
-    public void ScrollTo(IkatVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
+    public void ScrollTo(YioVector2 pos, ScrollBehavior behavior = ScrollBehavior.Smooth);
     public event Action<ScrollChangedEvent> Scrolled;
     public UITemplate GetTemplate(string name);          // 取内联 template
 }
@@ -241,7 +241,7 @@ buy.Get<TextElement>("price").TextContent = "200";   // 只动 span，兄弟 img
 `UIContext.RegisterComponent("my-widget", factory)` 把 custom tag 绑定到 C# 派生类（fgui `extensionCreator` 等价）：此后该 tag 的 wrapper 构造走用户工厂（派生 `CustomElement`，链 `protected internal` 基类构造），派生 ctor 完整跑完后回调 `OnConnected`。工厂是**显式委托**（`(c, id) => new MyWidget(c, id)`，AOT/IL2CPP 零反射）。组件行为逻辑进 typed 子类（持有内部节点引用、订阅事件），替代 wrapper div + `TryGet` 绕法。
 
 - **构造路径全覆盖**：instantiate（eager——`Instantiate` 后子树内注册组件立即构造，不等首次访问）、懒物化（Parent/Children/Get 触发）、事件预物化（事件路由触达即构造）。
-- **OnDisconnected 两条路径**：用户 `Dispose`（同步——回调时 core 节点已删）；Rust 侧删除（list 槽位换绑淘汰克隆 / 外部 `remove_node` / 内部剪枝）经 `UIContext.PumpRemovedNodes()` 帧泵（宿主 `IkatHost.Step` 每帧自动调；headless 手动调）。回调后 wrapper 标 `IsDisposed`，后续公共读抛 `ObjectDisposedException`。
+- **OnDisconnected 两条路径**：用户 `Dispose`（同步——回调时 core 节点已删）；Rust 侧删除（list 槽位换绑淘汰克隆 / 外部 `remove_node` / 内部剪枝）经 `UIContext.PumpRemovedNodes()` 帧泵（宿主 `YioHost.Step` 每帧自动调；headless 手动调）。回调后 wrapper 标 `IsDisposed`，后续公共读抛 `ObjectDisposedException`。
 - **重挂语义**：再 instantiate 同 tag = 新实例 + 新 `OnConnected`（身份缓存不复活旧对象，同 Node 身份契约）。
 - **注册时序**：setup 期（instantiate 前）。晚注册只影响未来构造、已构造 wrapper 不追改（不是错误，身份缓存不可破坏）。
 - **重复注册同 tag / 空 tag / null 工厂** → `UIContractException`（fail loud：静默覆盖藏接线错）。
@@ -462,14 +462,14 @@ public sealed class AnimationHandle {
 | `AnimationEndEvent` | `OnEnd` | 完成（最后一次 iteration 结束帧；class 触发也走此）|
 | `AnimationIterationEvent` | — | 非最后一次的 iteration 边界跨越（最后一次只发 End，对齐浏览器 `animationiteration`）|
 | `AnimationKeyEvent` | `OnKey(float pct)` | 时间轴跨越注册的百分比键 |
-| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@ikat-hook` 命名键（见 §9.4）|
+| `AnimationHookEvent` | `OnHook(string name)` | 时间轴跨越 `@yio-hook` 命名键（见 §9.4）|
 | `TransitionEndEvent` | — | transition 完成后发（type=TweenComplete 分流）|
 
 class 触发的动画无句柄，只走 EventBus 全局 `On<T>` 广播；`Play` 触发的动画句柄回调与全局广播并存（同一事件两路由都触发）。
 
-### 9.4 @ikat-hook
+### 9.4 @yio-hook
 
-`/* @ikat-hook name */` 注释标记命名锚点。百分比 + 语义名双锚并存。
+`/* @yio-hook name */` 注释标记命名锚点。百分比 + 语义名双锚并存。
 
 ### 9.5 调度
 
@@ -542,11 +542,11 @@ public sealed class UIContext {
     public TextMetrics MeasureText(string text, string fontFamily, float sizePx, float maxWidth = 0f);
     public void CallLater(float delay, Action callback);
     public void CallNextFrame(Action callback);
-    public void CallAfterLayout(Action callback);  // tick 后泵（IkatHost.Step 在 stage tick 之后调）
+    public void CallAfterLayout(Action callback);  // tick 后泵（YioHost.Step 在 stage tick 之后调）
     public bool IsPointerOnUI { get; }
-    public Node Pick(IkatVector2 globalPoint);
+    public Node Pick(YioVector2 globalPoint);
     public void RegisterComponent(string tag, Func<UIContext, ulong, CustomElement> factory);  // §4.4
-    public void PumpRemovedNodes();   // 宿主每帧调（IkatHost.Step 内建）：core 死亡通知 → evict + OnDisconnected
+    public void PumpRemovedNodes();   // 宿主每帧调（YioHost.Step 内建）：core 死亡通知 → evict + OnDisconnected
 }
 
 public sealed class UIPackage {
@@ -589,17 +589,17 @@ fallback 到默认字体会给出误导性宽度）。
 
 ### 11.3 边界与入口（引擎集成层职责）
 
-公共 API 是引擎中立的语义层。以下**不进公共 API**，由引擎集成层（如 Unity 的 `IkatStageDriver`）实现：
+公共 API 是引擎中立的语义层。以下**不进公共 API**，由引擎集成层（如 Unity 的 `YioStageDriver`）实现：
 
 - **UIContext 是「获取而非创建」**：无公共构造，由集成层创建、持有、驱动。业务程序员从集成层暴露的入口获取一个已跑起来的 UIContext。
 - **tick / 输入采集 / 渲染产出**：集成层每帧驱动 tick、采集引擎输入喂入、把渲染树交后端镜像。
 - **纹理注册**：`Image.Src` 是字符串 key（包内 or 运行时注册）。动态纹理的注册（`byte[]→Texture` 解码 + 注册 key）是引擎后端契约（Unity 侧 `SpriteResolver.Register(key, Texture2D)` 一类），用户自己解码塞入。查不到 key = 静默 error 态 + 警告一次，不抛。**每个引擎后端必须提供 runtime key 注册能力。**
 - **原生渲染挂载**：3D 模型/粒子等非 UI 渲染挂载是引擎后端契约（Unity 侧 NativeHost），不进公共 API；集成层自行桥接。
-- **世界锚点（投影路世界 UI）**：`IkatStageDriver.SetWorldAnchor(Node, Camera, Vector3 worldPos, Vector2 offsetPx)` / `ClearWorldAnchor(Node)`——Driver 每帧（Step 前）把世界点经相机投到屏幕 → 换算设计坐标写 `node.Transform.Position`（跟随 3D 实体；跳字/血条类 HUD 的官方路）。节点直挂 stage 根且 `position:absolute; left/top:0`（布局位 (0,0)，transform 即绝对坐标）。出屏/相机背后自动隐藏：core 侧 `ikat_stage_set_node_visible`（渲染层开关，与 `display:none` 正交——不动布局/命中；**继承语义**同 CSS `visibility:hidden`，隐藏祖先 = 整子树行 visible=0，后端保留镜像对象仅 SetActive(false)）。跳字动画 = 业务侧 TweenBuilder（如 Opacity 通道）× 锚点组合，无框架 helper。
-- **world-space 子树挂载（整棵子树进 3D 世界）**：`IkatStageDriver.BindWorldMount(Node mountRoot, Transform worldParent)` / `UnbindWorldMount(Node)`——core 把挂载子树渲染行顶点 re-base 到挂载根局部系（挂载根设计位置成为局部原点），行带 mount 槽位标注（blob `mount_id` 列），后端按槽位把镜像 GO SetParent 到业务 3D 变换（内层 y-flip 容器；行层随业务容器 → 场景相机渲染 + ZTest LEqual 吃 3D 深度遮挡）。布局/命中仍在屏幕系——挂载只改渲染归属。批不跨挂载（mesh_key 含挂载维）。v1 约束：**挂载根须成 stacking context（声明 z-index）；挂载内禁 dropdown / 滚动容器 / 外阴影根 / overflow clip**（clip 平面定义在屏幕系，挂到 3D 后无意义，core 在挂载根重置 mask）。
-- **光标指针 affordance**：意图是核心契约——core 沿 hover 命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none，含 `cursor` 声明），经 `IkatHost.CursorIntent` 属性 + `CursorIntentChanged` 事件（去抖，仅变化帧）交集成层；**渲染是引擎后端契约**，同纹理注册/NativeHost 一类。Unity 侧 `IkatStageDriver`：缺省 intent 0/1 = 系统光标（不内置皮肤），intent 2 = 内置全透明载体（藏指针是语义）；`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供业务按意图注册贴图（null = 清除；hotspot 从纹理左上角量；实现契约详见 projection-layer.md §3.3）。浏览器 preview 走原生 `cursor`，无此层。
+- **世界锚点（投影路世界 UI）**：`YioStageDriver.SetWorldAnchor(Node, Camera, Vector3 worldPos, Vector2 offsetPx)` / `ClearWorldAnchor(Node)`——Driver 每帧（Step 前）把世界点经相机投到屏幕 → 换算设计坐标写 `node.Transform.Position`（跟随 3D 实体；跳字/血条类 HUD 的官方路）。节点直挂 stage 根且 `position:absolute; left/top:0`（布局位 (0,0)，transform 即绝对坐标）。出屏/相机背后自动隐藏：core 侧 `yio_stage_set_node_visible`（渲染层开关，与 `display:none` 正交——不动布局/命中；**继承语义**同 CSS `visibility:hidden`，隐藏祖先 = 整子树行 visible=0，后端保留镜像对象仅 SetActive(false)）。跳字动画 = 业务侧 TweenBuilder（如 Opacity 通道）× 锚点组合，无框架 helper。
+- **world-space 子树挂载（整棵子树进 3D 世界）**：`YioStageDriver.BindWorldMount(Node mountRoot, Transform worldParent)` / `UnbindWorldMount(Node)`——core 把挂载子树渲染行顶点 re-base 到挂载根局部系（挂载根设计位置成为局部原点），行带 mount 槽位标注（blob `mount_id` 列），后端按槽位把镜像 GO SetParent 到业务 3D 变换（内层 y-flip 容器；行层随业务容器 → 场景相机渲染 + ZTest LEqual 吃 3D 深度遮挡）。布局/命中仍在屏幕系——挂载只改渲染归属。批不跨挂载（mesh_key 含挂载维）。v1 约束：**挂载根须成 stacking context（声明 z-index）；挂载内禁 dropdown / 滚动容器 / 外阴影根 / overflow clip**（clip 平面定义在屏幕系，挂到 3D 后无意义，core 在挂载根重置 mask）。
+- **光标指针 affordance**：意图是核心契约——core 沿 hover 命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none，含 `cursor` 声明），经 `YioHost.CursorIntent` 属性 + `CursorIntentChanged` 事件（去抖，仅变化帧）交集成层；**渲染是引擎后端契约**，同纹理注册/NativeHost 一类。Unity 侧 `YioStageDriver`：缺省 intent 0/1 = 系统光标（不内置皮肤），intent 2 = 内置全透明载体（藏指针是语义）；`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供业务按意图注册贴图（null = 清除；hotspot 从纹理左上角量；实现契约详见 projection-layer.md §3.3）。浏览器 preview 走原生 `cursor`，无此层。
 - **多 Stage 隔离（A4）**：同场景多 Driver 并存是集成层职责——per-Scene 引用计数共享 UI 相机（按名认领存量先于新建）；各 Stage `sortingOrder` 基址 = 层序 × 档宽（16 位预算，超出告警共用末档）；多 Driver 并存时指针输入按层序顶→底探测首个 Pick 命中者**独占本帧全部输入**（帧级仲裁 focus-follows-pointer；单 Driver 零开销直通；`_inputEnabled` per-Driver 退出路由）。运行时拉起第二 Driver：先在 inactive GO 上配好共享宿主/层序再激活（Awake 在 SetActive 时跑），且 GO 须自带输入采集器。**stage 文档根不可命中**（§9.3）——overlay 类 Stage 页面根声明 `pointer-events:none` 收窄命中面，否则铺满画布的根会饿死指针下全部底层 Stage。
-- **分辨率适配**：策略数学在核心（`ikat_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `ikat.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `IkatHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随）+ `IkatHost.SetSafeArea` 注入适配映射与屏幕 safe 矩形（core 单源算 root 伸进 unsafe 区的深度折 design px，作 CSS `env(safe-area-inset-*)` 的取值源；fit 贴物理边 → 真实值，letterbox → 恒 0），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
+- **分辨率适配**：策略数学在核心（`yio_compute_adaptation` 纯函数：design/screen/safe/mode → scale + root + offset，三模式 `letterbox` / `fit-width` / `fit-height`），集成层只消费——Driver 读 `yio.runtime.json` 的 `design`/`match_mode`（workspace 透传，Inspector 字段是 fallback），屏幕/safe 区变化时调数学 + `YioHost.SetRootSize` 喂画布（core 下帧重排，`vw/vh` 声明跟随）+ `YioHost.SetSafeArea` 注入适配映射与屏幕 safe 矩形（core 单源算 root 伸进 unsafe 区的深度折 design px，作 CSS `env(safe-area-inset-*)` 的取值源；fit 贴物理边 → 真实值，letterbox → 恒 0），渲染根变换与输入逆映射共用同一组 scale/offset（不本地重推，防双源漂移）。适配语义详见 main-design §11.5。
 
 ### 11.4 变长内容范式（替代预置满额）
 
@@ -615,7 +615,7 @@ fallback 到默认字体会给出误导性宽度）。
 
 **id 语义**：运行时创建的子树里，模板内静态 id 每实例一份；跨实例重名由作用域根隔离（`IsScopeRoot`）——从实例根（`Instantiate` 返回值）向下 `Get`，不从全局根跨作用域查。
 
-Unity 集成层的接入手册（IkatStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 ikat CLI 的 workspace 脚手架分发：`ikat-runtime` skill（scaffold 落各工作区会话根的 `.agents/skills/` / `.claude/skills/`；模板源在打包器 crate 的 `templates/runtime/SKILL.md`）。
+Unity 集成层的接入手册（YioStageDriver 挂载、加载钩子覆写、UI↔3D 互通、输入门控）随 yio CLI 的 workspace 脚手架分发：`yio-runtime` skill（scaffold 落各工作区会话根的 `.agents/skills/` / `.claude/skills/`；模板源在打包器 crate 的 `templates/runtime/SKILL.md`）。
 
 模板根、作用域根用 `IsScopeRoot` 运行时标记（非类型），`Get<T>` 边界据此判定。
 
@@ -636,7 +636,7 @@ inventory.Style.Top = Length.Px(200);
 inventory.Style.ZIndex = 1;
 
 Container mask = ui.Create<Container>();
-mask.Style.BackgroundColor = new IkatColor(0, 0, 0, 0.5f);
+mask.Style.BackgroundColor = new YioColor(0, 0, 0, 0.5f);
 mask.Touchable = true;
 mask.Style.ZIndex = 0;
 layer.AddChild(mask);

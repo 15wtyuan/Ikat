@@ -1,6 +1,6 @@
 //! workspace 管理命令：查询（list / show）与变更（new / font add / atlas add）。
 //!
-//! AI 的主编辑路径——改 ikat.workspace.json 一律走这些命令而非手编（实体量级成百
+//! AI 的主编辑路径——改 yio.workspace.json 一律走这些命令而非手编（实体量级成百
 //! 上千，手编是事故制造机）。查询分两级：list 摘要（一行一实体，护 AI 上下文）；
 //! show 单包明细（纯配置 + 文件系统扫描，不跑 analyze——重校验是 check 的事）。
 //! 写操作整文件重写、无锁（与 GUI 表单双写容忍：低频、最后写者赢）。
@@ -298,7 +298,7 @@ pub fn set_default_font(root: &Path, family: &str) -> Result<FontSummary, BuildF
     })
 }
 
-/// `ikat design` 回显实体（写命令成功回显实体 JSON 契约）。
+/// `yio design` 回显实体（写命令成功回显实体 JSON 契约）。
 #[derive(serde::Serialize)]
 pub struct DesignEcho {
     pub design: Option<DesignDim>,
@@ -306,7 +306,7 @@ pub struct DesignEcho {
 }
 
 /// `design [WxH] [--match letterbox|fit-width|fit-height] [--clear]`：设/清设计分辨率
-/// 与适配模式（workspace.design/match_mode——分辨率适配配置正主，`ikat build` 透传
+/// 与适配模式（workspace.design/match_mode——分辨率适配配置正主，`yio build` 透传
 /// runtime.json，引擎集成层消费）。size/mode 只在显式给时动；`--clear` 全清。
 pub fn set_design(
     root: &Path,
@@ -468,14 +468,14 @@ mod tests {
         std::fs::create_dir_all(tmp.join("ui/showcase")).unwrap();
         std::fs::write(tmp.join("ui/showcase/home.html"), r#"<div>hi</div>"#).unwrap();
         std::fs::write(
-            tmp.join("ikat.workspace.json"),
+            tmp.join("yio.workspace.json"),
             r#"{"version":1,"output_dir":"output","packages":[{"name":"showcase","dirs":["ui/showcase"],"html":[]}],"atlases":[],"fonts":[]}"#,
         )
         .unwrap();
     }
 
     fn tmpdir(tag: &str) -> std::path::PathBuf {
-        let tmp = std::env::temp_dir().join(format!("ikat_wcmd_{tag}_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("yio_wcmd_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         tmp

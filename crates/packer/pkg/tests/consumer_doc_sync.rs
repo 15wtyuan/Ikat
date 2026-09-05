@@ -14,8 +14,8 @@
 //! - css-reference.md 必须以反引号形式提及每个 `CSS_PROPS`/`CSS_SHORTHANDS` 名
 //!   （消费文档的属性名格式契约就是反引号，本门顺带锁住该契约）。
 
-use ikat_fence::schema::css::{CSS_PROPS, CSS_SHORTHANDS};
-use ikat_fence::schema::tag::{SHELL_TAGS, TAGS};
+use yio_fence::schema::css::{CSS_PROPS, CSS_SHORTHANDS};
+use yio_fence::schema::tag::{SHELL_TAGS, TAGS};
 
 /// 解析 md 表格首个单元格里的反引号名（与 fence `doc_schema_sync` 同款口径的本地
 /// 实现——跨 crate 测试共享不便，两边各自 40 行可接受）。

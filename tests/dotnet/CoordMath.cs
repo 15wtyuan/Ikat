@@ -1,11 +1,11 @@
 using System;
 
-namespace Ikat
+namespace Yio
 {
     /// 屏幕→设计坐标变换 与 裁剪框推导——纯数学，零 Unity/FFI 依赖。
     public static class CoordMath
     {
-        /// screen→design 逆映射。公式与 IkatStageDriver.ConfigureTransforms 前向一致：
+        /// screen→design 逆映射。公式与 YioStageDriver.ConfigureTransforms 前向一致：
         ///   sf = min(areaW/rootW, areaH/rootH)
         ///   offX = areaX + (areaW - rootW*sf)*0.5
         ///   offYTop = areaY + areaH

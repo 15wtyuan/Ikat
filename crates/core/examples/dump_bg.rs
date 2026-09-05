@@ -1,8 +1,8 @@
 //! 诊断 bg-image / filter / nineslice：
 //! dump rect / program / vcol / uv 区间 / color_matrix / verts，定位偏移、滤镜色差、slice 失真。
 //! pkg.bin 路径（load_package 读 StreamingAssets/showcase.pkg.bin，验打包产物含 atlas UV）。
-use ikat_core::render::node::NodePayload;
-use ikat_core::stage::Stage;
+use yio_core::render::node::NodePayload;
+use yio_core::stage::Stage;
 
 fn main() {
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");
@@ -21,20 +21,20 @@ fn main() {
     let want = ["bg-demo", "cf-demo", "ns-demo", "br-demo"];
     for rn in &frame.nodes {
         let nid = rn.node_id as usize;
-        let n = match scene.get(ikat_core::scene::node::NodeId(rn.node_id)) {
+        let n = match scene.get(yio_core::scene::node::NodeId(rn.node_id)) {
             Some(n) => n,
             None => continue,
         };
-        let is_img = matches!(n.kind, ikat_core::scene::node::NodeKind::Image);
+        let is_img = matches!(n.kind, yio_core::scene::node::NodeKind::Image);
         if !is_img && !want.iter().any(|c| n.classes.iter().any(|cl| cl == c)) {
             continue;
         }
         let r = n.layout_rect;
         let bg_img = n.style.background_image.as_deref().unwrap_or("-");
         let bg_size = match n.style.background_size {
-            ikat_core::style::resolved::BackgroundSize::Stretch => "Stretch",
-            ikat_core::style::resolved::BackgroundSize::Cover => "Cover",
-            ikat_core::style::resolved::BackgroundSize::Contain => "Contain",
+            yio_core::style::resolved::BackgroundSize::Stretch => "Stretch",
+            yio_core::style::resolved::BackgroundSize::Cover => "Cover",
+            yio_core::style::resolved::BackgroundSize::Contain => "Contain",
         };
         let has_filter = n.style.color_filter.is_some();
         let has_slice = n.style.border_image_slice.is_some();

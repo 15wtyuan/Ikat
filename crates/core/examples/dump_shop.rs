@@ -4,10 +4,10 @@
 //! 待证假设：`.dialog-overlay#buy-dialog` 虽 inline display:none，但若其 layout_rect 仍非零
 //! 且 touchable，而 hit_test 不跳 display:none 节点 → 顶层 overlay 误命中，吞掉 back-home 点击。
 
-use ikat_core::hit::hit_test;
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{Node, NodeKind};
-use ikat_core::stage::Stage;
+use yio_core::hit::hit_test;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{Node, NodeKind};
+use yio_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");

@@ -28,9 +28,9 @@
 //! 字体从 unity/showcase-unity 读取（仓库入库文件，CI 可用；#38 仓库瘦身若挪字体
 //! 路径须同步此处与 dump_layout_anim_jitter example）。
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::stage::Stage;
-use ikat_pkg::build::{pack_components, Component};
+use yio_core::scene::dynamic::append_child;
+use yio_core::stage::Stage;
+use yio_pkg::build::{pack_components, Component};
 
 /// 与 dump_layout_anim_jitter example / 改版前 layout-anim 页第 1 节同构的最小模板。
 /// 2026-08-28 实测：0.12 上 37 帧第 19 帧（t=333ms，anim height 194.68）误换列，

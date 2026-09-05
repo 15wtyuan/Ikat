@@ -1,4 +1,4 @@
-// Ikat Packer — frontend (plain JS, Tauri 2)
+// Yio Packer — frontend (plain JS, Tauri 2)
 // Start screen: recent workspaces + new/open via native directory picker.
 
 (function () {
@@ -111,8 +111,8 @@
       });
   }
 
-  // 生成物（skills + .ikat CLI）落后于 GUI 配套版本 → 亮「更新工作区」。
-  // 一键 = ikat scaffold（刷新 skills / CLI / 版本戳；config 与源文件不动）。
+  // 生成物（skills + .yio CLI）落后于 GUI 配套版本 → 亮「更新工作区」。
+  // 一键 = yio scaffold（刷新 skills / CLI / 版本戳；config 与源文件不动）。
   function probeWorkspaceUpdate(path) {
     var btn = $("btn-update-ws");
     btn.classList.add("hidden");
@@ -137,8 +137,8 @@
 
     $("main-path").textContent = path;
 
-    if (window.IkatEditor) {
-      window.IkatEditor.renderMain(ws, path);
+    if (window.YioEditor) {
+      window.YioEditor.renderMain(ws, path);
     }
   }
 
@@ -150,7 +150,7 @@
       .then(function (st) {
         btn.disabled = false;
         if (st.stale) {
-          alert("刷新完成，但版本戳仍落后（" + st.stamped + " → " + st.current + "）——请重试或手动跑 ikat scaffold。");
+          alert("刷新完成，但版本戳仍落后（" + st.stamped + " → " + st.current + "）——请重试或手动跑 yio scaffold。");
         } else {
           btn.classList.add("hidden");
         }
@@ -162,7 +162,7 @@
   });
 
   // 独立小弹窗（不与 editor.js 的 init-overlay 复用——那个绑定主屏的脚手架更新流程）。
-  // 会话根 = agent 会话打开的目录（skills/.ikat 落这里）；ui 目录 = UI 工作区
+  // 会话根 = agent 会话打开的目录（skills/.yio 落这里）；ui 目录 = UI 工作区
   // （workspace.json 落这里）。默认 ui（根下子目录），可改成 "."（单目录形态）。
   // UI 目录三种输入：手输相对路径 / 「浏览」选目录 / 拖文件夹进输入区；后两者走
   // 后端 relativize（基准 = 会话根）转相对，根外路径行内报错（init 语义 ui 须在根内）。
@@ -176,8 +176,8 @@
       '<div class="nw-root-banner"><span class="nw-root-icon">📁</span>' +
       '<span class="nw-root-label">会话根</span>' +
       '<span class="nw-root-path"></span></div>' +
-      '<p class="modal-desc">会话根将获得 skills 与 .ikat/（ikat CLI + config.json，建议入库）；' +
-      "UI 工作区（ikat.workspace.json 与源文件）放在下面的目录。</p>" +
+      '<p class="modal-desc">会话根将获得 skills 与 .yio/（yio CLI + config.json，建议入库）；' +
+      "UI 工作区（yio.workspace.json 与源文件）放在下面的目录。</p>" +
       '<div class="field-label"><span>UI 目录</span><span class="field-hint">手输相对路径 · 浏览 · 拖入文件夹</span></div>' +
       '<div class="nw-ui-row" id="nw-ui-row">' +
       '<div class="nw-ui-line">' +
@@ -318,7 +318,7 @@
   });
 
   btnBack.addEventListener("click", function () {
-    if (window.IkatEditor && window.IkatEditor.flushSave) window.IkatEditor.flushSave();
+    if (window.YioEditor && window.YioEditor.flushSave) window.YioEditor.flushSave();
     showStart();
   });
 

@@ -1,0 +1,15 @@
+{
+    "name": "Showcase.YioBridge",
+    "rootNamespace": "Showcase.YioBridge",
+    "references": [
+        "Yio.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "autoReferenced": true,
+    "versionDefines": [],
+    "noEngineReferences": false
+}

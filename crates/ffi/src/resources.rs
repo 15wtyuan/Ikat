@@ -6,7 +6,7 @@ use crate::{ffi_guard, StageHandle};
 /// paths_ptr: count 个 C 字符串指针；ws/hs: count 个 u32。任一为 null 或 count=0 → no-op。
 /// 首帧 solve 前调（启动加载阶段）。FFI 入口不 panic。
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_image_sizes(
+pub extern "C" fn yio_stage_set_image_sizes(
     h: *mut StageHandle,
     paths_ptr: *const *const std::os::raw::c_char,
     ws: *const u32,
@@ -37,7 +37,7 @@ pub extern "C" fn ikat_stage_set_image_sizes(
 
 /// 拉脏页 page_idx 列表（写入 out，返实际数）。null 句柄 / null out → 返 0。
 #[no_mangle]
-pub extern "C" fn ikat_stage_font_atlas_dirty_pages(
+pub extern "C" fn yio_stage_font_atlas_dirty_pages(
     h: *const StageHandle,
     out: *mut u32,
     max: usize,
@@ -55,7 +55,7 @@ pub extern "C" fn ikat_stage_font_atlas_dirty_pages(
 /// 读某页 R8 像素 + 尺寸。buf_len 不够返所需大小（双调法：先传小 buf 探大小）。
 /// 无此页 / null 句柄 / null out_buf → 返 0。
 #[no_mangle]
-pub extern "C" fn ikat_stage_font_atlas_page(
+pub extern "C" fn yio_stage_font_atlas_page(
     h: *const StageHandle,
     page: u32,
     out_w: *mut u32,
@@ -100,7 +100,7 @@ pub extern "C" fn ikat_stage_font_atlas_page(
 
 /// 清脏页（backend 拉完后调）。null 句柄 → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_font_atlas_clear_dirty(h: *mut StageHandle) {
+pub extern "C" fn yio_stage_font_atlas_clear_dirty(h: *mut StageHandle) {
     ffi_guard((), || {
         if h.is_null() {
             return;

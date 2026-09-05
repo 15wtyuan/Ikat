@@ -5,8 +5,8 @@
 //! mirroring how downstream stages (6.5 img exemption, packer bridge) consume
 //! the classification.
 
-use ikat_fence::diagnostic::DiagnosticCode;
-use ikat_fence::pipeline::parse_template;
+use yio_fence::diagnostic::DiagnosticCode;
+use yio_fence::pipeline::parse_template;
 
 fn mixed_diags(html: &str) -> Vec<String> {
     let out = parse_template(html, "t.html");

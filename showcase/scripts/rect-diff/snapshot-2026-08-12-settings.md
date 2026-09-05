@@ -24,7 +24,7 @@
 | 3 | div（vol-sfx thumb, value=65） | x | 1703.59 | 1532 | 同上 |
 | 4 | div（vol-sfx thumb） | y | 212 | 216 | 同上 |
 
-**根因**：core 按 AGENTS.md 不变量「transform 是渲染/命中层，不进布局」用 `user_transform.translate` 定位 thumb（`crates/core/src/scene/control.rs:691-706`），Unity PlayMode 会显示在 value% 处；dump_page --json 只发 `layout_rect`（thumb 在 slider 左缘 1532），漏了 world_transform。browser（ikat-preview.js wireSliders）镜像运行时：thumb at `slider.x + (slider_w-thumb_w)*pct` = 1532+211 = 1743。**非 core bug**（core 渲染正确）。
+**根因**：core 按 AGENTS.md 不变量「transform 是渲染/命中层，不进布局」用 `user_transform.translate` 定位 thumb（`crates/core/src/scene/control.rs:691-706`），Unity PlayMode 会显示在 value% 处；dump_page --json 只发 `layout_rect`（thumb 在 slider 左缘 1532），漏了 world_transform。browser（yio-preview.js wireSliders）镜像运行时：thumb at `slider.x + (slider_w-thumb_w)*pct` = 1532+211 = 1743。**非 core bug**（core 渲染正确）。
 
 ### B. CJK field-label 字宽漂移（3 条，超 tol-text=3）
 
@@ -65,4 +65,4 @@
 | idless-unpaired 6 条（informational，exit 不计） | 留 Task 4（低优先） | 含 tag 映射差：core `kind_to_html_tag(OptionItem)="option"`（dump.rs:40）vs 源 HTML `<div role="option">`。隐藏面板 0x0 无害。可选：dump_page 对 role 驱动节点发射源标签，或 diff.mjs 归一化。 |
 | 顺手修（本轮，Task 5 已 commit） | 已落地 | 3 commit 4 修复：dump_page 合成根 DFS（`7dd80aa6`）/ diff.mjs 0-size x/y-skip（`f3482473`）/ reset.css+browser-rect letterbox（`52dd0cc3`）。 |
 | `spec4b_dump.rs` 死引用 | 待决定 | 指向已清 pkg（`spec4b-acceptance.pkg.bin` 不在 Bundles），当前不可运行，仅编译通过（Task 2 门）+ 单测载体。保留 vs 删除待定。 |
-| letterbox 修复普适性 | 留 Task 4 全量验证 | reset.css / browser-rect 改的是全局共享的 preview-base.css + ikat-preview.js，对 home/inventory 等同样生效（.root 都恢复 1920×1080）。settings 已确认 .root=1920×1080@0,0；其余 7 页待 Task 4 全量验证。 |
+| letterbox 修复普适性 | 留 Task 4 全量验证 | reset.css / browser-rect 改的是全局共享的 preview-base.css + yio-preview.js，对 home/inventory 等同样生效（.root 都恢复 1920×1080）。settings 已确认 .root=1920×1080@0,0；其余 7 页待 Task 4 全量验证。 |

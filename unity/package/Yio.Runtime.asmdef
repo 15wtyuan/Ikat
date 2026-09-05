@@ -1,0 +1,8 @@
+{
+    "name": "Yio.Runtime",
+    "rootNamespace": "Yio",
+    "references": ["Yio.Bindings", "Unity.InputSystem"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true
+}

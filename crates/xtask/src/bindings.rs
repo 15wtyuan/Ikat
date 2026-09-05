@@ -1,6 +1,6 @@
 //! csbindgen 绑定生成 + 分发。
 //! 路径推算: 从 xtask 的 CARGO_MANIFEST_DIR (= crates/xtask) 出发。
-//! ffi 源 = ../ffi/src/ 下 lib.rs + 各含 extern fn 的子模块; Unity 目标 = ../../unity/package/Plugins/Ikat/Bindings/
+//! ffi 源 = ../ffi/src/ 下 lib.rs + 各含 extern fn 的子模块; Unity 目标 = ../../unity/package/Plugins/Yio/Bindings/
 
 use crate::paths;
 use std::path::PathBuf;
@@ -42,9 +42,9 @@ pub fn sync_bindings() -> Result<(), Box<dyn std::error::Error>> {
         .join("unity")
         .join("package")
         .join("Plugins")
-        .join("Ikat")
+        .join("Yio")
         .join("Bindings")
-        .join("IkatBindings.cs");
+        .join("YioBindings.cs");
 
     if let Some(parent) = unity_target.parent() {
         std::fs::create_dir_all(parent)?;
@@ -55,15 +55,15 @@ pub fn sync_bindings() -> Result<(), Box<dyn std::error::Error>> {
         builder = builder.input_extern_file(ffi_src.join(m));
     }
     builder
-        .csharp_dll_name("ikat_ffi_c")
-        .csharp_namespace("Ikat.Bindings")
+        .csharp_dll_name("yio_ffi_c")
+        .csharp_namespace("Yio.Bindings")
         .csharp_class_name("Native")
         .csharp_use_function_pointer(false)
         .generate_csharp_file(&unity_target)?;
 
     println!("sync-bindings: Unity -> {}", unity_target.display());
 
-    // TODO(future): cbindgen -> ikat.h for Godot/Unreal backends
+    // TODO(future): cbindgen -> yio.h for Godot/Unreal backends
 
     Ok(())
 }

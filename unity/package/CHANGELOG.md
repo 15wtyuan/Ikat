@@ -1,18 +1,29 @@
 # Changelog
 
-All notable changes to `com.ikat.unity` will be documented here.
+All notable changes to `com.yio.unity` will be documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **项目更名 Ikat → Yio（breaking）**：品牌、crate 与二进制名（`ikat_core`→`yio_core` 等、
+  `ikat`→`yio`、`ikat_gui.exe`→`yio_gui.exe`）、DLL 与 FFI 符号前缀（`ikat_ffi_c.dll`→
+  `yio_ffi_c.dll`、`ikat_*`→`yio_*`）、C# 命名空间与程序集（`Ikat.*`→`Yio.*`）、Unity 包 id
+  （`com.ikat.unity`→`com.yio.unity`）、工作区配置文件名（`.ikat/`→`.yio/`、
+  `ikat.workspace.json`→`yio.workspace.json`、`ikat.runtime.json`→`yio.runtime.json`）、
+  DSL token（`ikat-hook`→`yio-hook`、`ikat-preview`→`yio-preview`）全量更名。磁盘格式身份
+  同步换血：pkg 魔数 `LPKG`→`YPKG`、frame blob 魔数 `LOOM`→`YIO1`——旧 pkg.bin 全部失效，
+  须用新 `yio.exe` 重打；旧配置文件名与 DSL token 不再识别；消费侧 `Packages/manifest.json`
+  的包 id 引用须同步改。
+
 ### Added
 - **组件文件按 stem 可实例化**：`components/` 目录文件直收进 pkg 组件映射，
   运行时 `Instantiate("my-widget")` / `GetTemplate` 按 stem 克隆（fgui 组件一等公民
   同构；api-reference 既有承诺的兑现）。独立实例化走组件语义——`<slot>` 无 light 子
   可投影、全走 fallback 原位渲染，文件内嵌套 hyphen 标签照常经注册表展开。
-  页面与组件撞名打包期 fail loud。`ikat list/show` 的页面计数不含组件条目。
+  页面与组件撞名打包期 fail loud。`yio list/show` 的页面计数不含组件条目。
 - **`::part()` 跨组件精确样式通道（#57）**：页面规则穿组件内容墙命中组件内部节点——
   `prefix::part(name)` 中 compound 前缀匹配组件 host、`::part(name)` 匹配展开子树内带
   `part="name"` 属性的目标节点（`part` 全局属性入围栏 + attrs β 仓持久化）。一层不递归
@@ -27,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `PumpRemovedNodes` 帧泵——list 槽位换绑、外部 remove_node 均覆盖），回调后 wrapper
   标 `IsDisposed`。重挂 = 新实例新 OnConnected。晚注册只影响未来构造；重复注册/空
   tag/null 工厂抛 `UIContractException`。附带：节点死亡通知队列（core
-  `Scene::free_node_slot` 单一漏斗 + FFI `ikat_stage_drain_removed_nodes`），Rust 侧
+  `Scene::free_node_slot` 单一漏斗 + FFI `yio_stage_drain_removed_nodes`），Rust 侧
   死亡的滞留 wrapper（含非组件）随泵 evict——死亡显式化，不再死 id 静默打 FFI。
 - **shape mask（#52）**：`clip-path` 非矩形几何遮罩——fence 子集
   `circle(<length|%> [at <pos>])` / `polygon(<x> <y>, ...)`（3..=16 点，硬边）。
@@ -59,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   at-rule 一律拒），解析失败抛 `UIStyleException` 带 `Line`/`Column`。注入规则
   与模板 CSS 同 cascade 优先级（同 specificity 后 Add 赢）、全局跨作用域命中
   （打包期组件内容墙不约束运行时注入），下一帧生效；`Add` 返回 `IDisposable`
-  句柄、Dispose 撤销。`Style.SetVar` ×4（`Length`/`IkatColor`/`float`/`string`）
+  句柄、Dispose 撤销。`Style.SetVar` ×4（`Length`/`YioColor`/`float`/`string`）
   / `RemoveVar` 接通——CSS 自定义属性最高优先级层，`RemoveVar` 回落 CSS 声明值。
   CSS 侧（打包期）同步开 `--x: val` 声明（样式表 + 行内 style）与 `var(--x[, fallback])`
   消费（任意属性值位、嵌套引用、继承跨组件边界）；引用环打包期 warning
@@ -79,9 +90,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   branch-only，`IsBranch`/`Expanded` 的 C# 契约不变。web 预览模拟器行为不变。
 - **`TextNode.Text` / `Image.Src` getter 读 pkg 烙入值恒空串**：读侧原为 C# 镜像（仅
   set 路径更新），`Instantiate` 出来的 HTML 文本/图片 src 从不过 C# setter → getter
-  对合法初值返 ""。getter 改直读 core 真值（新 FFI `ikat_stage_get_node_text` /
-  `ikat_stage_get_src`），`Container.TextContent` 读侧随之修正。
-- **enter 前设 `ItemTemplate` 被静默丢弃**：旧路径 `ikat_list_set_template` 在
+  对合法初值返 ""。getter 改直读 core 真值（新 FFI `yio_stage_get_node_text` /
+  `yio_stage_get_src`），`Container.TextContent` 读侧随之修正。
+- **enter 前设 `ItemTemplate` 被静默丢弃**：旧路径 `yio_list_set_template` 在
   未进数据驱动模式时返 -1 且 C# 不查 rc——先设 `ItemTemplate` 再设 `ItemCount`
   的常规顺序会丢模板（列表默默用 HTML 备用蓝图）。现 enter 前的模板设定缓冲到
   enter 时消费；enter 后设 ItemTemplate 遇陈旧源（节点已删）抛
@@ -123,23 +134,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   最后按下的键优先、keyup 即停、失焦清状态。仅重发 keydown 通道——
   可打印字符不重复插字（KeyCode→char 映射键盘布局相关，不做）。
 - **多 Stage 隔离：共享相机 + 排序基址 + 输入独占路由（#109）**：同场景多
-  Driver 并存不再互相打爆——per-Scene 引用计数共享 `IkatUICamera`（按名
+  Driver 并存不再互相打爆——per-Scene 引用计数共享 `YioUICamera`（按名
   认领存量相机先于新建，编辑器重编译幸存相机不再积累重复）；各 Stage
   sortingOrder 基址 = 层序 × 8192（16 位预算 4 档）；多 Driver 时输入按
   层序顶→底探测首个 Pick 命中者独占本帧全部输入（单 Driver 零开销直通）。
-- **世界锚点（投影路世界 UI，#109）**：`IkatStageDriver.SetWorldAnchor /
+- **世界锚点（投影路世界 UI，#109）**：`YioStageDriver.SetWorldAnchor /
   ClearWorldAnchor`——每帧把 3D 世界点经相机投影成设计坐标写
   `node.Transform.Position`（跳字/血条类 HUD 跟随 3D 实体）；出屏/相机
   背后自动隐藏（渲染层开关，与 `display:none` 正交；**继承语义**：隐藏
   祖先 = 整子树隐藏，后端保留镜像对象仅 SetActive(false)）。
-- **world-space 子树挂载（#109）**：`IkatStageDriver.BindWorldMount /
+- **world-space 子树挂载（#109）**：`YioStageDriver.BindWorldMount /
   UnbindWorldMount`——整棵 UI 子树挂到业务 3D 变换下渲染（行顶点 re-base
   到挂载根局部系 + 按槽位路由 SetParent，容器层随业务 → 场景相机渲染 +
   ZTest LEqual 吃 3D 深度遮挡）；布局/命中仍在屏幕系。v1 约束：挂载根须
   声明 z-index 成 stacking context；挂载内禁 dropdown / 滚动容器 / 外阴
   影根 / overflow clip。
 - **共享资源宿主（#109）**：多 Stage 共享字体注册/字形图集/图片尺寸表
-  （`IkatResourceHost`），字体注册一次全 Stage 复用（无 id churn / 图集
+  （`YioResourceHost`），字体注册一次全 Stage 复用（无 id churn / 图集
   重光栅）；单 Stage 行为不变。
 
 ### Changed
@@ -185,14 +196,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   引用变悬挂；URP 首帧渲染 Base 相机时报一次警告并自清。挂载前先清 stack
   里的死引用（场景加载 Awake 期执行，先于首帧渲染），警告不再外溢。
 - **关闭双 Stage 小窗不再清空整个屏幕 UI（#109 验收批）**：两个 Driver 共享
-  同一台 hub `IkatUICamera`，但小窗 Driver 销毁时无条件把相机从宿主 Base 的
+  同一台 hub `YioUICamera`，但小窗 Driver 销毁时无条件把相机从宿主 Base 的
   URP cameraStack 摘除——Overlay 相机不在任何 stack = 整机不渲染，主 Stage
   的面板/血条/全部屏幕 UI 消失（3D 挂载面板走场景相机幸存），直到 resize
   触发重配才恢复。摘除现在带引用计数判据：相机仍被其它 Driver 持有时只减
-  引用不摘 stack（`IkatStageHub.CameraHeldByOthers`），最后持有者随相机销毁
+  引用不摘 stack（`YioStageHub.CameraHeldByOthers`），最后持有者随相机销毁
   摘除。
 - **孤儿共享相机清扫——「看不到 3D 场景 / 相机一片黄」的真根因（#109 验收批）**：
-  Driver 是 `[ExecuteAlways]`，编辑态 Awake 也会建 `IkatUICamera`
+  Driver 是 `[ExecuteAlways]`，编辑态 Awake 也会建 `YioUICamera`
   （DontSaveInEditor）；domain reload 不跑 OnDestroy，幸存相机被 Unity 挪进无
   效场景，hub 的按名认领（扫 caller 场景根）永远看不到它。孤儿以 Base 型 +
   depth 0 压在宿主 3D 相机之上每帧重渲染：clear=Depth 时把宿主 3D 输出整帧抹
@@ -216,7 +227,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `render_input_version`，增量渲染指纹全部 miss（缓存失效 churn）。同值写入
   幂等短路。
 - **运行时第二 Driver（双 Stage）此前收不到任何输入（#109 验收批）**：运行时
-  `AddComponent<IkatStageDriver>` 拉起的小窗 GO 上没挂 `IkatInputCollector`——
+  `AddComponent<YioStageDriver>` 拉起的小窗 GO 上没挂 `YioInputCollector`——
   hub 路由探测（`PointerHitProbe`）与输入采集都吃它，缺 collector 时小窗永远
   轮不到输入所有权，点击全部穿透到底层 Stage 的按钮。小窗 GO 现在配好自己的
   collector。配套：**stage 文档根不可命中**（`create_root` 建的宿主容器
@@ -233,7 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `<page-top>` 返回首页（其余页同款）；首页 nav-grid 吸收画布富余高度（footer
   落底，拖高窗口不再留死区）+ 页根允许滚动（窗口拖矮时底部列表被屏幕裁掉 →
   改为可滚动）。
-- **IkatUICamera 裁剪窗扩为 UI 平面中心的前后对称大窗（#102）**：此前
+- **YioUICamera 裁剪窗扩为 UI 平面中心的前后对称大窗（#102）**：此前
   `near=0.1 / far=100`——NativeHost 3D 内容按 design px 归一化（数百 px
   高 × root scale 即数千世界单位深），居中摆位时深度越过 UI 平面向后延
   伸到相机（z=-10）之后，旧窗口把模型后段/远端整片裁掉（视觉上只剩贴
@@ -248,15 +259,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   惯例：3D 相机 cullingMask 排除 UI 层。曾手工排除 layer 6 的工程改为
   排除 layer 5 即可。
 - **编辑态自建 UI 相机不再序列化进场景（#108）**：`[ExecuteAlways]` 下
-  Awake 自建的 IkatUICamera 无 DontSave 标记、且把引用写进序列化字段
+  Awake 自建的 YioUICamera 无 DontSave 标记、且把引用写进序列化字段
   `_uiCamera`——编辑态保存场景把相机 GO 烤进场景文件，换设计分辨率后
   场景里残留旧适配缩放 + 跨场景悬空引用。自建相机改走 `[NonSerialized]`
   独立字段（序列化字段只承载用户指派意图）+ `HideFlags.DontSaveInEditor`
   （对齐 NativeHostManager 先例），`OnDestroy` 主动销毁（DontSave 物
-  Unity 不接管回收）。存量场景里已烤入的 IkatUICamera GO 删一次即净。
-- **`ikat build` 省键化可选 manifest 字段（#103）**：`design` / `match_mode`
-  未设置时 `ikat.runtime.json` 此前写出字面 `null`，Unity 侧手写 reader
-  （`IkatManifests.cs`）对 null 直接抛解析错——manifest 整体作废，包列表随之
+  Unity 不接管回收）。存量场景里已烤入的 YioUICamera GO 删一次即净。
+- **`yio build` 省键化可选 manifest 字段（#103）**：`design` / `match_mode`
+  未设置时 `yio.runtime.json` 此前写出字面 `null`，Unity 侧手写 reader
+  （`YioManifests.cs`）对 null 直接抛解析错——manifest 整体作废，包列表随之
   丢失，下游报出离根因三层的笼统 `instantiate failed`。现在 None 一律省键
   （字节级测试锁定），兑现「缺项 = 引擎侧兜底」的既有契约。同时 manifest
   解析失败升级为阻断错误：`LogError` + 中止装 UI（此前 warning + 继续，
@@ -269,7 +280,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **preview 按工作区字体注册自动注入（#104）**：server 给每个服务页在
-  `<head>` 开标签后注入 `<style id="ikat-preview-fonts">`——fonts 段每字体
+  `<head>` 开标签后注入 `<style id="yio-preview-fonts">`——fonts 段每字体
   一条 `@font-face`（`src: url(/ws/<file>)` 绝对路径，任意页面目录深度可解
   析）+ `default` family 一条 `body` 规则（镜像 core「未声明 font-family →
   默认字体兜底」语义——此前浏览器 UA 默认 serif，无 font-family 文本在预览
@@ -277,13 +288,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `.ttc`（浏览器不支持 TrueType Collection）与磁盘缺失的注册字体跳过 +
   stderr 告警——排版失真不再无提示。recipes.md 的手写 `@font-face` 教程
   降级为「仅覆盖时需要」（不同源文件 / 超大字体换 `font-display: swap`）。
-- **字体管理命令闭环 + 单一默认契约（#106）**：`ikat font remove <family>`
+- **字体管理命令闭环 + 单一默认契约（#106）**：`yio font remove <family>`
   （摘注册；`fonts/` 下源文件保留——文件可能由人手管理，摘除后成孤儿由人清）
-  与 `ikat font default <family>`（设为唯一默认）。`--default` 语义改为互斥
+  与 `yio font default <family>`（设为唯一默认）。`--default` 语义改为互斥
   转移：新设默认自动摘除旧默认，不再产生双默认 workspace（运行时取哪个未
   定义）。未注册 family 报数据错（exit 1）。
-- **`ikat verify`：Unity batchmode 导入冒烟（#99）**：build 重打 → 拉起工程绑定的
-  Unity 编辑器（batchmode）→ 包内 `Ikat.Editor.IkatVerifySmoke.Run` 做 Refresh +
+- **`yio verify`：Unity batchmode 导入冒烟（#99）**：build 重打 → 拉起工程绑定的
+  Unity 编辑器（batchmode）→ 包内 `Yio.Editor.YioVerifySmoke.Run` 做 Refresh +
   逐文件正向加载（png → Texture2D、其余 → 非空 Object）→ 解析报告。把「产物可
   导入」从人肉开 Unity 变成一条命令（发版本地验收面）。编辑器三层查找：
   `--unity-editor` 参数 → `ProjectVersion.txt` 匹配 Hub 标准目录 → exit 2 教
@@ -303,10 +314,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   最常见误报形态），showcase 存量 28 处 W1 warning（不拦构建，债可见化）。
 
 ### Added
-- **CLI ↔ Unity 包版本漂移自动检测（#80）**：`ikat check` 顺 config 的
-  `unity_root` 读 `Packages/packages-lock.json`，`com.ikat.unity` 版本与
-  CLI 版本不一致时告 `IkatVersionDrift` warning（双向：CLI 落后指向刷新
-  `.ikat/` 的 exe，CLI 超前指向更新 Unity 包——`format_version` 只增）。
+- **CLI ↔ Unity 包版本漂移自动检测（#80）**：`yio check` 顺 config 的
+  `unity_root` 读 `Packages/packages-lock.json`，`com.yio.unity` 版本与
+  CLI 版本不一致时告 `YioVersionDrift` warning（双向：CLI 落后指向刷新
+  `.yio/` 的 exe，CLI 超前指向更新 Unity 包——`format_version` 只增）。
   支持三种 lock 形态：裸 semver / `file:` 本地引用（顺路径读目标
   package.json）/ git URL（取 `#v` 片段，裸 commit hash 无法离线定版则
   跳过）。无 `unity_root`（本地模式）或 lock 无条目（未装包）不检。
@@ -315,7 +326,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **progressbar 填充比例 ARIA 语义化（#97）**：`aria-valuemin` 此前不参与填充
   数学（core 按 `value/max`，ARIA 标准是 `(value-min)/(max-min)`，min≠0 时
   填充偏少）。`ControlInit/ControlState::Progress` 补 min 字段（pkg 格式
-  v49，旧包拒绝——Unity 包与 ikat.exe 同版本重打），打包期解析
+  v49，旧包拒绝——Unity 包与 yio.exe 同版本重打），打包期解析
   `aria-valuemin`（缺省 0，min=0 行为不变、零迁移）；FFI `set/get_control_min`
   对 ProgressBar 开放（此前返回 -1 的「无 min 语义」禁区废除），C# `ProgressBar.Min`
   可读写；运行时合成 `aria-valuemin` 属性镜像（改 min 后 CSS 属性选择器同拍
@@ -326,12 +337,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 - **pkg 版本门修复：MIN_VERSION 漏拍 v48（0.0.16 起 CI 红的真因之一）**：v48
   bump 只抬了 MAX、MIN 停在 47——v47 旧包漏过版本门，以 Bincode 结构错配炸成
-  无指引的「malformed pkg.bin」（rc -1），而非 rc 1 的「Unity 包与 ikat.exe
+  无指引的「malformed pkg.bin」（rc -1），而非 rc 1 的「Unity 包与 yio.exe
   同版本重打」专属文案。MIN 已钉回 48 并加护栏测试（`min_version_tracks_current`
   ：MIN/MAX 必须恒等于当前版本——历史不变量：每版 bump 都改 bincode 布局）。
   同批把 HeadlessTests 的 13 个 fixture 包重打到 v48（此前是 v47 陈货，
   `dotnet headless` CI 门自 0.0.16 起全挂）。流程堵漏：`xtask reout` 新增
-  fixture 重打步骤（`<name>.workspace` → `ikat build` → 拷回 `.pkg.bin` →
+  fixture 重打步骤（`<name>.workspace` → `yio build` → 拷回 `.pkg.bin` →
   清构建现场），与 showcase bundle 同一「无条件重打 + 字节对比幂等」纪律。
 - **core 画序升级为 stacking context 全局分层（#100 分歧粒度修复）**：0.0.16 的
   画序分层是**逐父兄弟排序**——嵌套在 static 子树里的 opacity<1 / transform /
@@ -378,7 +389,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.0.15] - 2026-08-28
 
 ### Changed
-- **光标皮肤去内置，改消费侧注册（#93 followup）**：`IkatStageDriver` 删除内置手型
+- **光标皮肤去内置，改消费侧注册（#93 followup）**：`YioStageDriver` 删除内置手型
   像素画——intent 0/1（箭头/手型）缺省均为系统光标；新增
   `SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 按意图注册
   消费侧贴图（null/已销毁 = 清除；作用于当前激活意图时立即重放；贴图所有权归
@@ -392,7 +403,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `Cursor.SetCursor` 热点从纹理左上角量（此前误按 bottom-up 换算），修正为食尖
   (12,1)。两个坐标系约定独立，勿混用。
 - **preview 组件样式作用域根类规则失配（#95）**：组件 `<style>` 的浏览器作用域
-  改写收编进 Rust 单实现（server 新路由 `/ikat-preview/comp-style/<name>.css`，
+  改写收编进 Rust 单实现（server 新路由 `/yio-preview/comp-style/<name>.css`，
   fence 同一入口抽样式），每条规则输出「后代 + 根匹配」双分支——core 语义
   「作用域 = 子树含模板根、选择器原样」在浏览器侧全等兑现，模板根自身类的规则
   （`.tip { … }`）不再整条静默失效。同批口径对齐：@keyframes 同名碰撞宿主优先
@@ -436,13 +447,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `disabled`（button）接通运行时 disabled 态——此前过围栏但运行时无人消费
   （禁用按钮悬停仍手型、点击不被抑制），现映射既有 disabled 语义（点击抑制 /
   `:disabled` 伪类 / 光标 affordance）。Unity 侧 Driver 订阅
-  `IkatHost.CursorIntentChanged`（0 箭头/1 手型/2 隐藏），手型纹理程序化生成（按
+  `YioHost.CursorIntentChanged`（0 箭头/1 手型/2 隐藏），手型纹理程序化生成（按
   Unity 光标纹理要求构建：RGBA32 / 保持可读 / 无 mip 链 / 标准 32×32 尺寸——
   隐藏载体初版 4×4 被 Windows 硬件光标拒收）、Destroy 还原系统光标；自定义软件光标纹理帧业务仍走
   `Cursor.visible=false + 自绘 sprite` 的既有方案。
 - **preview 行为层分层（#92）**：组件展开/控件语义/结构性 polyfill 收编为框架
-  真相副本（嵌在 ikat 二进制），preview server 对每个 HTML 页**恒注入** A 层 boot；
-  消费侧脚本（B 层：演示数据/导航/页面交互）经 `/ikat-preview/lib/*` 绝对 URL
+  真相副本（嵌在 yio 二进制），preview server 对每个 HTML 页**恒注入** A 层 boot；
+  消费侧脚本（B 层：演示数据/导航/页面交互）经 `/yio-preview/lib/*` 绝对 URL
   import，不再拷贝 showcase 参考实现——第二真相源腐烂路径（宿主态选择器失配/
   keyframes 帧选择器误杀/#90 式契约漂移不同步）结构性消除。Tripawd 三处狗粮
   补丁已吸收进真相副本（宿主态镜像到模板根 + `@keyframes` 内部原样放行）。
@@ -450,11 +461,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   展开层完全收编进 Rust 单实现开 deferred 票 #94。
 
 ### Changed
-- **品牌更名 LoomGUI → Ikat（#91）**：crate 前缀 `loomgui_*`→`ikat_*`、CLI `loom`→`ikat`、
-  C# namespace/类型 `LoomGUI.*`/`Loom*`→`Ikat`（一步到位不留过渡 alias）、
-  dll `loomgui_ffi_c.dll`→`ikat_ffi_c.dll`、UPM 包名 `com.ikat.unity`、
-  工作区协议 `.loom/`→`.ikat/`（`ikat.workspace.json` / `ikat.runtime.json`）、
-  CSS 注释锦点 `@loom-hook`→`@ikat-hook`、preview 关停协议 `X-Ikat-Token` / `/_ikat/shutdown`。
+- **品牌更名 LoomGUI → Yio（#91）**：crate 前缀 `loomgui_*`→`yio_*`、CLI `loom`→`yio`、
+  C# namespace/类型 `LoomGUI.*`/`Loom*`→`Yio`（一步到位不留过渡 alias）、
+  dll `loomgui_ffi_c.dll`→`yio_ffi_c.dll`、UPM 包名 `com.yio.unity`、
+  工作区协议 `.loom/`→`.yio/`（`yio.workspace.json` / `yio.runtime.json`）、
+  CSS 注释锦点 `@loom-hook`→`@yio-hook`、preview 关停协议 `X-Yio-Token` / `/_yio/shutdown`。
   **pkg/frame 魔数字节不变**（既有 `.pkg.bin` 兼容）；FFI 导出符号改名并与 C# 绑定同批再生，两端一致。
 
 ### Added
@@ -480,7 +491,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.0.13] - 2026-08-27
 
 v0.0.12 后一批：动画引擎终态基建（#9/#10，core 动画通道 + C# TweenBuilder
-全接线）+ `ikat preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
+全接线）+ `yio preview` 本地预览工作台 + 稳态帧文本换行回归修复 +
 AI 安装手册重写；发版轮收尾批（transition 首帧修复 / 预览体验三连修 /
 agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F8 dump
 归因增强 / 运行时告警面 / 动态内容范式文档 + lab §17 用例）；验收后
@@ -507,7 +518,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
     `Instantiate("stem")` 拿普通 Container」等式补全。
   - 仓库内 fence.md 两处内部矛盾顺手修（诊断表「四通道」→ 全集表述、
     Dropdown value 锚「可选」→ 必需）。
-  - 随 ikat.exe 分发；消费侧 `ikat scaffold` 刷新技能即可拿到新文档。
+  - 随 yio.exe 分发；消费侧 `yio scaffold` 刷新技能即可拿到新文档。
 
 ### Added
 - **文本测量公共 API（#86）**：`UIContext.MeasureText(text, family, sizePx,
@@ -519,7 +530,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
 - **F8 dump 布局归因增强（#85）**：scene JSON 文本节点附 resolved 块
   （font-size / 行高乘数——`line-height:26` 被当 26 倍乘数类问题从反推变直读 /
   行数 / 每行宽），滚动容器附几何块（viewport/content/overlap/pos/物理）；
-  新增可读树视图 `IkatHost.DumpSceneTree(filter)`（每节点一行
+  新增可读树视图 `YioHost.DumpSceneTree(filter)`（每节点一行
   `tag#id.class rect` + 文本/滚动关键值，ASCII 树缩进；filter = id/class
   子串只出命中子树），F8 诊断输出接入 `[Scene tree]` 段。
 - **运行时告警面（#87）**：滚轮打进「声明 overflow:auto/scroll 但内容未溢出
@@ -543,7 +554,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
 - **layout & box-shadow 动画通道（#10）**：同域端点插值，box-shadow
   渐变动画；C# `TweenBuilder` layout/box-shadow 接线 + showcase
   layout-anim 页（pkg v44）。
-- **`ikat preview` 预览工作台**：CLI 新子命令——起本地 server 供人工
+- **`yio preview` 预览工作台**：CLI 新子命令——起本地 server 供人工
   浏览器预览设计工作区；showcase 预览栈迁移其上（ESM 入口改写）。
 - **AI 安装手册**：`docs/ai-setup.md` 重写安装链路（两问流程——输出目录
   也询问）；README install 章节同步改版。
@@ -563,7 +574,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
   transform，不触发 iframe reflow，页内仍按设计分辨率渲染——保真语义
   不变），默认开启、上限 100% 不放大；顶栏「适应窗口」可切回 1:1 像素
   检查（此时恢复滚动）。修「窗口小于 1920×1080 就必须滚动」的预览体验
-  问题。随 ikat.exe 发布。
+  问题。随 yio.exe 发布。
 - **preview：去掉 preview-base.css 的 body 卡片包装**（旧 file:// 直开
   时代的 `padding:24px`+居中美化）：iframe 视口即设计视口，包装会把
   1080 高页面顶成 1128 出 iframe 内滚动条，且 .root@(24,24) 与运行时
@@ -576,7 +587,7 @@ agent 文档补齐）；狗粮反馈批（#85-#88：MeasureText 文本测量 / F
   另补 `preview/pages/layout-anim.js`：预览里四个验收按钮可驱动。
 - **agent 文档补齐（#84）**：runtime api-reference 的动画章节不再声称
   「没有命令式补间」，补 `TweenBuilder`/`TweenChannel`/`EaseKind`/
-  `TweenShadow` 完整签名与语义（随 skill 模板经 ikat.exe 分发）。
+  `TweenShadow` 完整签名与语义（随 skill 模板经 yio.exe 分发）。
 
 ## [0.0.12] - 2026-08-25
 
@@ -596,7 +607,7 @@ v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补�
   setPointerCapture 对等，Up 自动释放）、`StopImmediatePropagation` 复活
   （EventBus 重写时丢）、`Node.CancelClick`（配 LongPress 的长按取消）。
 - **border/背景共存打包 warning（#58）**：彩色边框与 background-image/gradient
-  共存时互斥不画（render 层既有限制）——`ikat check`/build 现在当场点破
+  共存时互斥不画（render 层既有限制）——`yio check`/build 现在当场点破
   （`BorderBgExclusive`），不再让作者猜。
 - **tabpanel 打包期门（review 批）**：`role="tabpanel"` 手写内联 `display:none` →
   `FenceTabpanelHiddenByAuthor` error。显隐所有权归 TabList 运行时（激活面板靠 unset
@@ -604,7 +615,7 @@ v0.0.11 后两波：狗粮残留批（#47/#49/#50，公共 API 投影缺口补�
   面板永久隐身的静默坏，存量写法打包期点破。另 fence.md 补「运行时合成属性不参与
   打包期 CSS 命中」：只写 `[aria-indeterminate="true"] [data-slot=fill]` 一类态规则
   会吃 `FenceControlChildWithoutCss` 假错误，子部件须另有命中打包期 HTML 的基础规则。
-- **solve 基准**：首个 criterion bench（`cargo bench -p ikat_core`，
+- **solve 基准**：首个 criterion bench（`cargo bench -p yio_core`，
   api-infra 形状 ~2400 节点三组对拍）。
 
 ### Changed
@@ -659,7 +670,7 @@ v0.0.10 后三波累积：#48/#45/#43/#44/#46/#42 修复批、M2 分辨率适配
 
 ### Added
 - **分辨率适配（#5）**：Letterbox/FitWidth/FitHeight 三模式 + `vw/vh/vmin/vmax`
-  视口单位（重排语言，随屏幕/适配模式重排）；`ikat design` 命令 + GUI
+  视口单位（重排语言，随屏幕/适配模式重排）；`yio design` 命令 + GUI
   design/match 配置面。
 - **Drag 事件载荷接线（#63）**：`DragMoveEvent.DeltaX/Y` 逐 Move 增量（core 权威，
   EventRecord 28B）、`DragStartEvent.StartPosition`、`Pointer{Down,Up}Event.Button`
@@ -671,7 +682,7 @@ v0.0.10 后三波累积：#48/#45/#43/#44/#46/#42 修复批、M2 分辨率适配
 
 ### Fixed
 - **line-height px 形被当 27 倍 → 文本高度爆炸（#65）**：`line-height: 27px` 此前
-  剥掉单位塞进倍数槽——17px 字号单行 459px、卡片溢出屏幕，且 `ikat check` 不拦
+  剥掉单位塞进倍数槽——17px 字号单行 459px、卡片溢出屏幕，且 `yio check` 不拦
   （Number 域不校验）。修后映射双槽 + `effective_line_height()` 换算 + 围栏值域
   门（em/% 打包期报错）。pkg 格式 v41→v42（旧 pkg 加载报 TooOld，需重打包）。
 - **min-height:0 弹性滚动视口被内容撑爆（#64）**：overflow 容器（含装饰性
@@ -734,8 +745,8 @@ Issue #46/#42 批：box-shadow 层数围栏拦截、无滚动容器列表静默�
 
 ### Added
 - **运行时警告通道**：core `Scene::warnings` 缓冲（推送方 warn-once 去重）
-  + FFI `ikat_stage_take_warnings`（drain 语义，多条 `\n` 连接）+
-  `IkatHost.RuntimeWarning` 事件（引擎无关层不直接打日志）——Unity Driver
+  + FFI `yio_stage_take_warnings`（drain 语义，多条 `\n` 连接）+
+  `YioHost.RuntimeWarning` 事件（引擎无关层不直接打日志）——Unity Driver
   订阅转 `Debug.LogWarning`，配错一眼可见（此前此类问题零诊断）。
 
 ## [0.0.10] - 2026-08-24
@@ -745,7 +756,7 @@ Issue #1/#2/#4 批：打包失败静默弃包、slot 投影行不参与宿主布
 ### Fixed
 - **bridge 错误不再静默吞掉（#1）**：悬空 slot 投影（页面投影 `slot="X"` 而组件
   模板无此槽）或展开域 id 撞车（投影 light 子 id 与组件模板 id 同名）此前让
-  `ikat build` 打印 OK、exit 0，**pkg.bin 悄悄不落盘**（旧文件先被清掉）——CI
+  `yio build` 打印 OK、exit 0，**pkg.bin 悄悄不落盘**（旧文件先被清掉）——CI
   绿灯之下产物消失。根因：analyze 只消费诊断列表、丢弃只有 message 的 bridge
   失败。现在错误以 `PackError` Error 级诊断可见（build/check 都 exit 1 并指明
   出错页面）；失败但无 Error 诊断的路径由 analyze 兜底合成，此类吞错永不复发。
@@ -765,9 +776,9 @@ Issue #1/#2/#4 批：打包失败静默弃包、slot 投影行不参与宿主布
   Pick，顶层命中变化时 Console 打印命中节点到根的祖先链（每层 HTML id /
   class / C# 类型 / opacity / touchable / world rect）。「看不见但接鼠标」
   的演出层偷命中时链顶即凶手（opacity=0 且 touchable=True）。本体
-  `IkatDebugProbe.DescribePickChain(ctx, x, y)` 常驻可用（正式构建自定义
+  `YioDebugProbe.DescribePickChain(ctx, x, y)` 常驻可用（正式构建自定义
   热键绑定）。配套：`Node.Id` 从数值占位换成真 HTML id 读取（新增
-  `ikat_stage_get_node_id_attr` / `ikat_stage_get_node_classes` FFI）。
+  `yio_stage_get_node_id_attr` / `yio_stage_get_node_classes` FFI）。
 
 ## [0.0.9] - 2026-08-23
 
@@ -801,20 +812,20 @@ Tripawd Field Notes 三批（地图交互/演出打磨）回应：absolute 包�
 - **缺字诊断日志（N25 取证）**：shaping 全链（主字体+回退）缺某字时，
   Console 点名 `font-family "X" has no glyph for 'c' (U+....)` + 修法
   （tofu 框本体不变——开发期故意暴露）。会话级去重（同字体族+字符只报
-  一次），`IkatHost.MissingGlyphReport` 事件暴露给引擎层。
+  一次），`YioHost.MissingGlyphReport` 事件暴露给引擎层。
 - **`CallAfterLayout(cb)`（N26）**：tick 后 fire 的一次性回调——刚
   `Instantiate` 的子树在本回调里读 `Geometry` 已是实测值（`CallNextFrame`
   帧头 fire 先于 solve，新子树首读必全零）。业务免逐帧自旋等待。
 - **`Play(name, durationSeconds)` 重载（N27）**：无 `animation:` 声明绑定的
   keyframes 无声明层时长，`Play(name)` 固定按 1s 播（无 delay/单次/normal/
   fill both/cubic-out，已随包文档写明）；重载让程序化演出节奏由调用方给。
-- **pkg 版本错配专属报错**：Unity 包与 ikat.exe 只升一侧时，
+- **pkg 版本错配专属报错**：Unity 包与 yio.exe 只升一侧时，
   `load_package` 报 `pkg format v38 is older than this runtime's v39 …
-  re-run ikat build with the matching ikat.exe`——不再淹没在通用 malformed
+  re-run yio build with the matching yio.exe`——不再淹没在通用 malformed
   文案里（此前报错完全不提版本，只能靠经验定位）。
 
 ### Changed
-- **`NodeStyle.TextColor`（N29）**：文字色内联通道此前叫 `IkatColor`（类型名
+- **`NodeStyle.TextColor`（N29）**：文字色内联通道此前叫 `YioColor`（类型名
   误入属性名，几乎不可发现），补 `TextColor`（与 `BackgroundColor` 对称），
   旧名保留为 Obsolete 别名（同一 "color" 通道，零 core 改动）。
 
@@ -879,7 +890,7 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
   mouseleave 语义，本不冒泡）——「后代退链」的 Leave 被误投给祖先订阅，与
   enter/leave 驱动的抬升动画叠加成自激振荡。修复：Enter/Leave 只派发给事件
   目标节点自身，其余事件维持冒泡。
-- **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`IkatStageDriver.Update`
+- **InputSystem-only 项目 F8 诊断每帧抛异常（N3）**：`YioStageDriver.Update`
   的 F8 轮询按 `ENABLE_INPUT_SYSTEM` / `ENABLE_LEGACY_INPUT_MANAGER` 分流。
 - `background-size: stretch`（schema 广告的默认值）此前被 core 静默拒（仅认
   `100%`）；`resize` noop 声明此前误报 `FenceBadCssValue`。
@@ -896,37 +907,37 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - **浏览器先验警告族（warning）**：`display: inline` 语义偏差（按 flex 处理）；
   `transition` 属性域外（含 `all`）；rich-text inline flow 内 span 的死
   width/height；页面侧只可能命中投影内容的类规则（样式墙下恒死代码）。
-- **工作区生成物刷新通道**：`ikat scaffold` 现为生成物全刷新（三 skill +
-  `.ikat/` CLI 自拷贝 + `.ikat/scaffold.version` 版本戳；config/workspace.json/
-  源文件不碰，无 `--agent` 时按在场 agent 目录自动探测）；`ikat check` 发现
+- **工作区生成物刷新通道**：`yio scaffold` 现为生成物全刷新（三 skill +
+  `.yio/` CLI 自拷贝 + `.yio/scaffold.version` 版本戳；config/workspace.json/
+  源文件不碰，无 `--agent` 时按在场 agent 目录自动探测）；`yio check` 发现
   版本戳落后出 `StaleScaffold` 警告；GUI 打开工作区时探测并亮「更新工作区」
-  按钮（一键 = ikat scaffold 子进程）。消费端更新流：UPM 更新包（新双 exe 随
+  按钮（一键 = yio scaffold 子进程）。消费端更新流：UPM 更新包（新双 exe 随
   包落地）→ 跑一次 scaffold 刷新。
-- runtime API reference 补齐：值类型工厂（`Length.Px/Pct`）、`IkatColor` 4 参
+- runtime API reference 补齐：值类型工厂（`Length.Px/Pct`）、`YioColor` 4 参
   构造、transition 支持矩阵、ProgressBar 值域（`[0, Max]`，Max 默认
   aria-valuemax=100）与 AnimateValue、`Image.Src` key 格式与验证手段、
-  IkatStageDriver 序列化字段速查（`_designSize` 默认 1080×1920 竖屏警示）。
+  YioStageDriver 序列化字段速查（`_designSize` 默认 1080×1920 竖屏警示）。
 
 ### Changed
 - **公共类型改名（breaking，消 CS0104 歧义）**：`Animation` → `AnimationHandle`、
-  `Color` → `IkatColor`、`Vector2` → `IkatVector2`、`Rect` → `IkatRect`、
-  `KeyCode` → `IkatKeyCode`（接线层同时 `using Ikat; using UnityEngine;` 时
+  `Color` → `YioColor`、`Vector2` → `YioVector2`、`Rect` → `YioRect`、
+  `KeyCode` → `YioKeyCode`（接线层同时 `using Yio; using UnityEngine;` 时
   每文件必撞歧义，N10）。C# 侧机械替换；FFI ABI 不变。
 - `box-sizing` 错误引导文案修正为 content-box 事实（此前误称 border-box）；
   Keyword 值错误消息列出合法值域。
 
 ## [0.0.5] - 2026-08-19
 ### Added
-- **runtime skill 自足**：新增 `ikat-runtime` 的 `references/api-reference.md`（随 init 落工作区会话根，完整公共 API 查找表——对象层级、控件 role 全表、事件、ListView、动画、样式、异常）。此前 skill 把「完整 API 契约」指回 Ikat 源码仓库的 `docs/design/public-api.md`，逼消费者 agent clone 源码翻文档；现以随包 C# 签名为准镜像成离线参考，skill 不再指路仓库。防漂移门加对账（role 宇宙 ↔ fence schema、skill 必须指名 references、禁止回指 repo 文档）。
-- **ikat CLI**（打包器 CLI 升格，二进制 ikat.exe，随 Release 分发 + Editor/Tools 双 exe）：check（零写入校验，--format json 机读诊断）、build（结构化输出）、init（脚手架 + CLI 自拷贝到 .ikat/ + 反向配置）、new / list / show / font add / atlas add（workspace 编排——AI 的主编辑路径）、version。
+- **runtime skill 自足**：新增 `yio-runtime` 的 `references/api-reference.md`（随 init 落工作区会话根，完整公共 API 查找表——对象层级、控件 role 全表、事件、ListView、动画、样式、异常）。此前 skill 把「完整 API 契约」指回 Yio 源码仓库的 `docs/design/public-api.md`，逼消费者 agent clone 源码翻文档；现以随包 C# 签名为准镜像成离线参考，skill 不再指路仓库。防漂移门加对账（role 宇宙 ↔ fence schema、skill 必须指名 references、禁止回指 repo 文档）。
+- **yio CLI**（打包器 CLI 升格，二进制 yio.exe，随 Release 分发 + Editor/Tools 双 exe）：check（零写入校验，--format json 机读诊断）、build（结构化输出）、init（脚手架 + CLI 自拷贝到 .yio/ + 反向配置）、new / list / show / font add / atlas add（workspace 编排——AI 的主编辑路径）、version。
 - 诊断 collect-all 修复：跨组件/跨包/注册表/资源（字体缺失、图集溢出、覆盖缺失与冲突）全量收集后统一报告，一次给全（修前首个含 Error 的组件即中断）；失败时 warning 一并携带。
 - 退出码契约：0 干净 · 1 Error 级诊断/写命令冲突 · 2 用法/配置/io 错。
-- 反向配置 `.ikat/config.json`（ui_root + unity_root 双指针，基座）：output_dir 相对 Unity 工程根解析，AI 在会话根一步 ikat build 直落 Assets/Bundles。
-- 版本同轨：ikat_pkg crate 版本 == Unity 包版本（release-check 断言），ikat version 单一来源。
-- **工作区拓扑重构（Tripawd 反馈：skill 困在 ui 目录、AI 会话管不到 Unity）**：会话根 ≠ ui 目录分离形态——skills 与 `.ikat/`（ikat.exe + config.json，整个入库，团队 clone 即得配套 CLI）落会话根，`ikat.workspace.json` 留 ui 目录；`ikat init <root> --ui <dir>`（省略 `--ui` = 单目录老形态），config 发现规则统一（会话根 / ui 本体 / ui 直接子目录都可作参数或 cwd）。不再生成 AGENTS.md / CLAUDE.md（入侵性），`--agent` 只决定 skills 目录（.claude/skills / .agents/skills）。
-- **agent skills 三件全部重写**（对齐成熟 skill 范式：Figma figma-use / OpenAI figma-implement-design / unity-cli-loop）：`ikat-editor`（操作手册——Critical Rules 集中开篇、增量工作流含浏览器预览自验步、❌/✅ 反模式、错误表带修法、收尾清单；完整查找表渐进披露到 references/ 三件）；`ikat-runtime`（**新增**——场景挂载、加载管线钩子、`Get<T>`/事件、`IsPointerOnUI` 门控 3D、NativeHost 内嵌 3D、id 契约双面互指，补上「UI↔3D 桥」）；`ikat`（uloop 范式命令手册 + workspace.json/config.json 字段表）。随包 `Editor/Resources/Ikat/skill/` 副本删除（新拓扑下 root skills 全覆盖，消除三份漂移面）。
+- 反向配置 `.yio/config.json`（ui_root + unity_root 双指针，基座）：output_dir 相对 Unity 工程根解析，AI 在会话根一步 yio build 直落 Assets/Bundles。
+- 版本同轨：yio_pkg crate 版本 == Unity 包版本（release-check 断言），yio version 单一来源。
+- **工作区拓扑重构（Tripawd 反馈：skill 困在 ui 目录、AI 会话管不到 Unity）**：会话根 ≠ ui 目录分离形态——skills 与 `.yio/`（yio.exe + config.json，整个入库，团队 clone 即得配套 CLI）落会话根，`yio.workspace.json` 留 ui 目录；`yio init <root> --ui <dir>`（省略 `--ui` = 单目录老形态），config 发现规则统一（会话根 / ui 本体 / ui 直接子目录都可作参数或 cwd）。不再生成 AGENTS.md / CLAUDE.md（入侵性），`--agent` 只决定 skills 目录（.claude/skills / .agents/skills）。
+- **agent skills 三件全部重写**（对齐成熟 skill 范式：Figma figma-use / OpenAI figma-implement-design / unity-cli-loop）：`yio-editor`（操作手册——Critical Rules 集中开篇、增量工作流含浏览器预览自验步、❌/✅ 反模式、错误表带修法、收尾清单；完整查找表渐进披露到 references/ 三件）；`yio-runtime`（**新增**——场景挂载、加载管线钩子、`Get<T>`/事件、`IsPointerOnUI` 门控 3D、NativeHost 内嵌 3D、id 契约双面互指，补上「UI↔3D 桥」）；`yio`（uloop 范式命令手册 + workspace.json/config.json 字段表）。随包 `Editor/Resources/Yio/skill/` 副本删除（新拓扑下 root skills 全覆盖，消除三份漂移面）。
 - **GUI 打包器向导双目录**：新建工作区选会话根 + UI 目录（默认 `ui`，允许 `.` 单目录形态）；「打开工作区」接受会话根或 ui 目录（config 发现解析），recent 列表存原始路径。
-- `ikat font add`：字体已在 `fonts/` 目录时跳过自拷贝直接注册（此前同源同目标拷贝在 Windows 报共享冲突，形似文件被锁）。
+- `yio font add`：字体已在 `fonts/` 目录时跳过自拷贝直接注册（此前同源同目标拷贝在 Windows 报共享冲突，形似文件被锁）。
 - **`<link rel="stylesheet">` 外部 CSS 支持**（Tripawd 反馈）：href 相对所在 HTML 文件（页面与组件同规则）、CSS 内 `url()` 相对 CSS 文件；规则/`@keyframes`/诊断与内联 `<style>` 同待遇，缺文件报 `FenceStylesheetNotFound`（此前静默丢弃）。
 - 检查器修复（Tripawd 反馈）：class 规则声明的 `display:block` 此前不被 inline 上下文检查认（报错文案给的修法 (2) 失效），现与 inline style 同待遇；`FenceMixedInlineBlock` 文案不再误称 span 为 block container；组件 `@keyframes` 同名同内容多实例展开静默去重（此前每实例一条告警刷屏）；自定义元素嵌 `<span>` 的报错补教学（slot 属性写在直接子上）。
 - 结构检查选择器覆盖对齐（Tripawd 反馈 12–14 批）：display 判定现认静态可判定的单 compound 选择器——class / id / 属性选择器（`[role="tablist"]`、`[data-slot="fill"]`），与控件 CSS 命中检查同覆盖；运行时可变状态属性（aria-checked 等）仍保守不放行。文档：装饰框（背景图 + 前景内容）canonical pattern 写进 skill 与 `FenceMixedInlineBlock` 文案；`switch`/`radio` 无框架槽位（knob 位移用 `[aria-checked]` 状态选择器）写进 skill 与 fence.md。
@@ -936,7 +947,7 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - Runtime API：`z-index` 层叠、动画 longhand 属性、dropdown 视口定位（pkg 格式 v38）；调度器三件套、`UnloadPackage`、选项 getter、`GetTemplate`（pkg 格式 v37）。
 - FFI 全导出统一 panic 边界（catch_unwind guard）；`get_live` 站点标签（函数名格式）+ 释放审计日志常驻，release dll 内「快照后死亡」类 panic 可一行定位。
 - 围栏：控件结构 CSS 契约（combobox anchor + popup absolute 定位）；`-webkit-text-security`（disc/circle/square/none）。
-- 打包器 GUI：per-project 最近列表 + 移除按钮；窗口标题改短为 "Ikat"。
+- 打包器 GUI：per-project 最近列表 + 移除按钮；窗口标题改短为 "Yio"。
 ### Fixed
 - `TextContent` 每帧重建泄漏 + NodeId 12-bit generation 回卷守卫；`TextContent` 清子后子 wrapper 正确标 disposed（调用方句柄读数抛 `ObjectDisposedException` 而非静默 no-op）。
 - 世界空间控件几何 + 自滚动列表虚拟化；文本管线正确性、嵌套滚动命中、dropdown/滚轮手感（浏览器校准基线 + notch 单位直传）。
@@ -954,7 +965,7 @@ Tripawd dogfood Field Notes（N 系列）回应批：四个运行时 bug 修复�
 - 声明式动画：`@keyframes` / `animation`、`Container.Play` 句柄（Pause/Resume/Stop/Seek）、`Container.RestartAnimations` 原位重启。
 - 视觉补全：CSS 渐变背景（linear / radial / ellipse + GRADIENT shader 变体）、box-shadow。
 - 虚拟列表 slot 模型（parked-but-attached，slot 永驻子树、离场仅标记）。
-- 打包器 GUI（Tauri）exe 闭环，Unity 菜单 `Ikat > Open Packer` 拉起。
+- 打包器 GUI（Tauri）exe 闭环，Unity 菜单 `Yio > Open Packer` 拉起。
 - runtime API 接线：`Node.Touchable`、`Container.ScrollPos`、NumberField 边界 / `Radio.Name` / Slider `IsIndeterminate`。
 ### Fixed
 - 圆角裁切 SDF 像素空间化（rounded overflow clip 视觉扁平）；radial circle 关键字 extents、ellipse 角点 √2 贯穿。

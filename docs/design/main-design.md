@@ -1,4 +1,4 @@
-﻿# Ikat 主设计
+﻿# Yio 主设计
 
 > 跨引擎游戏 UI 框架。Rust 核心（引擎无关纯库）+ 多引擎后端（Unity 首发，Godot 等），标准 HTML/CSS 子集作设计期 DSL，类型化对象树作运行时 API，自绘渲染。
 >
@@ -93,7 +93,7 @@
 - `display:flex` 默认 `flex-direction:row`（标准 CSS 默认）。
 - 需要纵向堆叠明确写 `display:flex; flex-direction:column`。
 - `display:block/flex/none` 选择内部布局 Strategy，**不改变节点类型**。
-- `box-sizing`：Ikat **border-box 专属**（width 含 padding+border，游戏 UI 友好），作者声明被 fence 拒绝并提示移除（`css_resolve.rs`）——已定决策，非待实现。
+- `box-sizing`：Yio **border-box 专属**（width 含 padding+border，游戏 UI 友好），作者声明被 fence 拒绝并提示移除（`css_resolve.rs`）——已定决策，非待实现。
 
 ### 3.2 围栏元素
 
@@ -162,7 +162,7 @@
 
 单一真相源 = machine-readable schema（标签、属性、结构属性、CSS 值、运行时类型、后端需求）。解析器、打包器、绑定生成器、文档和测试不得各维护一份白名单。
 
-防漂移门：`cargo test -p ikat_fence`——改围栏后必跑。
+防漂移门：`cargo test -p yio_fence`——改围栏后必跑。
 
 ---
 
@@ -550,15 +550,15 @@ taffy 0.12 同时支持 Flex 和 Block 布局算法。统一走 `compute_layout_
 
 设计稿 1080×1920 在 1440×2560 整体等比放大只是适配的平凡半边（均匀缩放）；**真问题是长宽比不匹配**。模型分三层：
 
-- **配置正主 = workspace**：`ikat.workspace.json` 的 `design {w,h}` + `match_mode` 由打包器透传进 `ikat.runtime.json`，引擎集成层（C# Driver）读产物；Inspector 字段是 manifest 缺项时的 fallback。设计分辨率是设计师事实，活在 AI 可编辑的文本空间，不活在 Unity 场景手填。
-- **策略数学 = core**（`ikat_compute_adaptation` 纯函数，全引擎共享同一份）：三模式枚举——
+- **配置正主 = workspace**：`yio.workspace.json` 的 `design {w,h}` + `match_mode` 由打包器透传进 `yio.runtime.json`，引擎集成层（C# Driver）读产物；Inspector 字段是 manifest 缺项时的 fallback。设计分辨率是设计师事实，活在 AI 可编辑的文本空间，不活在 Unity 场景手填。
+- **策略数学 = core**（`yio_compute_adaptation` 纯函数，全引擎共享同一份）：三模式枚举——
   - `letterbox`（默认，contain）：root 锁设计分辨率，取较小缩放比，safe 区内居中留黑边。布局永远按设计稿排，最可预测。
   - `fit-width` / `fit-height`：拆黑边重排——锁一维锚（宽或高 = 设计稿），另一维 root 直接取屏幕换算值，`Stage.set_root_size` 喂核心下帧重排（flex/% / vw-vh 声明流动）。px 不变形（缩放仍均匀），无黑边无裁切。
 - **重排语言 = 围栏视口单位 + env()**：`vw`/`vh`/`vmin`/`vmax`（分母 = root_size 画布，区别于 `%` 相对父容器）与 `env(safe-area-inset-*)` 同为**延迟长度**（`DeferredLength`），进 `ResolvedStyle.viewport` 平行字段（taffy CompactLength 装不下第四种 tag）。消费分两路：几何通道 solve 建树期按当帧 root/safe 换算覆写 taffy 副本；视觉通道（font-size/letter-spacing 是继承属性）在继承传播的 tree-order 走查里先解析成 px 再向下传（父的 resolved px 是子的继承源）。收哪些通道见 fence.md §5.2（#110 起全长度属性：尺寸/inset/margin/padding/gap 族 + flex-basis + font-size + letter-spacing + border-radius）。
 
-safe-area 语义（#110 定案，web viewport-fit=cover 模型）：**fit 模式 root 贴物理全屏**（scale 按物理宽/高算，unsafe 带被 root 覆盖、背景满铺贴边），元素用 `env(safe-area-inset-*)` 自行避让；letterbox 仍以 safe 矩形为 contain 框——root 全在 safe 内，env() 恒 0（黑边已让位、不重复避让）。三模式同一条公式「env() = root 伸进 unsafe 屏区的深度（design px）」，由宿主按 adapt 结果 + 屏幕 safe 矩形经 `ikat_stage_set_safe_area` 注入（core 单源换算，跨引擎不重写）。叠加顺序：适配算 scale/root → safe inset 注入 → 布局 → 渲染根变换 + 输入逆映射消费同一组 scale/offset（单源 = core 数学，集成层不自己重推）。
+safe-area 语义（#110 定案，web viewport-fit=cover 模型）：**fit 模式 root 贴物理全屏**（scale 按物理宽/高算，unsafe 带被 root 覆盖、背景满铺贴边），元素用 `env(safe-area-inset-*)` 自行避让；letterbox 仍以 safe 矩形为 contain 框——root 全在 safe 内，env() 恒 0（黑边已让位、不重复避让）。三模式同一条公式「env() = root 伸进 unsafe 屏区的深度（design px）」，由宿主按 adapt 结果 + 屏幕 safe 矩形经 `yio_stage_set_safe_area` 注入（core 单源换算，跨引擎不重写）。叠加顺序：适配算 scale/root → safe inset 注入 → 布局 → 渲染根变换 + 输入逆映射消费同一组 scale/offset（单源 = core 数学，集成层不自己重推）。
 
-跨引擎契约：模式枚举是 FFI u32 ABI（只增不改）；未来 Godot 后端复用同一 `ikat_compute_adaptation`，保三引擎适配行为逐像素一致。
+跨引擎契约：模式枚举是 FFI u32 ABI（只增不改）；未来 Godot 后端复用同一 `yio_compute_adaptation`，保三引擎适配行为逐像素一致。
 
 ### 11.6 滚动
 
@@ -688,7 +688,7 @@ c. KeyframePlayer.update(dt)      ← animation 的 transform/opacity/bg_color/t
 
 **Animation 句柄 L3 全套**（见 [public-api.md](public-api.md) §9）：`Node.Play(name)` 返回 `Animation` 句柄，事件 `AnimationStart`/`End`/`Iteration`/`Key`/`Hook` + `TransitionEnd` 经 `borrow_events` 双路由（全局 `On<T>` + 句柄 `player_key` 私有回调）。
 
-**引擎终态（#9 已交付）**：池化 Tween（`TweenManager { active, pool }`，稳定序回收）+ 缓动全集（CSS 标准 keyword 精确 bezier + `cubic-bezier()` + ikat 超集 back/elastic/bounce + steps；per-stop `animation-timing-function`）+ 链式 builder（Rust `Stage::tween_builder` / FFI `IkatTweenSpec` 单入口 / C# `Node.Tween` fluent，`OnComplete` 走 TweenComplete 事件 tag 路由）+ 插值原语统一（共享 `TweenValue` 定长缓冲 + `lerp_n`）。tween 支持 `repeat`+`yoyo` 多轮（alternate 语义）；keyframes transform 的 translate 分量收百分比形（`LenPct` px+pct 混合描述符，写入期按节点布局尺寸解析——player 保持纯时间轴）。**缺省 timing 全端 = 精确 CSS `ease` bezier(0.25,0.1,0.25,1)**（幂函数近似已废）。Ease/TweenProp 判别值末尾追加纪律（pkg bincode variant index + FFI kind 契约）。
+**引擎终态（#9 已交付）**：池化 Tween（`TweenManager { active, pool }`，稳定序回收）+ 缓动全集（CSS 标准 keyword 精确 bezier + `cubic-bezier()` + yio 超集 back/elastic/bounce + steps；per-stop `animation-timing-function`）+ 链式 builder（Rust `Stage::tween_builder` / FFI `YioTweenSpec` 单入口 / C# `Node.Tween` fluent，`OnComplete` 走 TweenComplete 事件 tag 路由）+ 插值原语统一（共享 `TweenValue` 定长缓冲 + `lerp_n`）。tween 支持 `repeat`+`yoyo` 多轮（alternate 语义）；keyframes transform 的 translate 分量收百分比形（`LenPct` px+pct 混合描述符，写入期按节点布局尺寸解析——player 保持纯时间轴）。**缺省 timing 全端 = 精确 CSS `ease` bezier(0.25,0.1,0.25,1)**（幂函数近似已废）。Ease/TweenProp 判别值末尾追加纪律（pkg bincode variant index + FFI kind 契约）。
 
 ### 13.3 Transition
 
@@ -731,7 +731,7 @@ player/tween 可动**布局属性**：width / height / flex-grow（端点同域�
 
 ### 14.3 运行时 Bootstrap
 
-驱动启动时读 `ikat.runtime.json`（声明包/图集/字体列表）→ 加载各 `.pkg.bin` + 图集 → 解析 atlas.json 中每张图的 `orig` 尺寸推入核心 → 初始化 SpriteResolver。
+驱动启动时读 `yio.runtime.json`（声明包/图集/字体列表）→ 加载各 `.pkg.bin` + 图集 → 解析 atlas.json 中每张图的 `orig` 尺寸推入核心 → 初始化 SpriteResolver。
 
 ### 14.4 包格式
 
@@ -745,7 +745,7 @@ player/tween 可动**布局属性**：width / height / flex-grow（端点同域�
 
 核心只持 `TexId`（整数）。图集：一张大纹理 + N 个轻量 TextureView（只存 UV）。子 view 首引用连带 root；归零通知后端可卸载。GPU 生命周期全在后端。
 
-「按包释放纹理」不是本架构的概念：`ikat.runtime.json` 的 packages 与 atlases 是 workspace 级平行列表，SpriteResolver 按 (atlasIdx, page) 全局懒缓存、与包注册表解耦（重载同名包不重载纹理），字体是 driver 级注册——`UnloadPackage` 只动模板注册表（上面的归零卸载模型属于核心 TexId 通用层，本架构的 Unity 侧不使用）。
+「按包释放纹理」不是本架构的概念：`yio.runtime.json` 的 packages 与 atlases 是 workspace 级平行列表，SpriteResolver 按 (atlasIdx, page) 全局懒缓存、与包注册表解耦（重载同名包不重载纹理），字体是 driver 级注册——`UnloadPackage` 只动模板注册表（上面的归零卸载模型属于核心 TexId 通用层，本架构的 Unity 侧不使用）。
 
 ### 14.6 资源宿主与 Stage 实例分离（#109 A3）
 
@@ -845,21 +845,21 @@ C# tick 内一次拷完。后端维护双 dict（`_poolByNodeId` + `_poolByReuse
 [引擎无关 · C# 共享 · Unity+Godot-C# 复用]
   Public/         UIContext/Node/Button/Style（业务 API，4a 已有）
   Projection/     NodeRegistry/EventDemuxer/EventBus（4a 已有）
-  Host/           IkatHost        ← stage 宿主 + 每帧驱动序（零 UnityEngine）
-                  IkatBackend      ← 抽象契约（本 § 三件事）
+  Host/           YioHost        ← stage 宿主 + 每帧驱动序（零 UnityEngine）
+                  YioBackend      ← 抽象契约（本 § 三件事）
 
 [Unity 特定 · 各引擎各写]
-  UnityIkatBackend : IkatBackend   ← 持 MirrorPool/MaterialManager/NativeHostManager/SpriteResolver/InputCollector
-  IkatStageDriver (MonoBehaviour)  ← 瘦宿主：Unity 生命周期 + 资源 IO + 创建 Host/Backend
+  UnityYioBackend : YioBackend   ← 持 MirrorPool/MaterialManager/NativeHostManager/SpriteResolver/InputCollector
+  YioStageDriver (MonoBehaviour)  ← 瘦宿主：Unity 生命周期 + 资源 IO + 创建 Host/Backend
 ```
 
-- **IkatHost(引擎无关,`Runtime/Host/`)**:持 stage handle (IntPtr) + UIContext + IkatBackend。零 `using UnityEngine`。每帧驱动 `Step(dt)` 严格按 §16 五步序:(1) `backend.CollectInput(stage)` → set_input;(2) `UIContext.FlushPendingWrites()` 攒批过桥脏属性（StyleMirror + NodeTransform，标脏不即时）；(2.5) `ctx.DrainPendingBinds()` ListView bind 排空；(3) `ikat_stage_tick` FFI;(4) `borrow_frame` FFI → `backend.SyncFrame(stage, framePtr, frameLen)`;(5) `borrow_events` FFI → EventDemuxer → EventBus typed `On<T>` 路由。资源 FFI 引擎中立(RegisterFont / SetImageSizes / SetFallbackFamilies)放此层。`borrow_frame` 的 FFI 调用归 IkatHost(产生引擎特定镜像对象的 FFI 仍归引擎无关驱动核心),backend 只消费 blob 做镜像。
-- **IkatBackend（引擎无关抽象契约，`Runtime/Host/`）**：契约 = 2 个 abstract 方法——`CollectInput(stage)` / `SyncFrame(stage, framePtr, frameLen)`。`set_input` FFI 在 backend（采集引擎特定但 FFI 引擎中立，省一次交互）。资源对象上传（如 Texture2D 上传 atlas 页）是引擎特定实现细节，不进入抽象契约（由 `UnityIkatBackend` 内部方法如 `InitSprites`/`SyncFontAtlas` 承担）。
-- **UnityIkatBackend : IkatBackend**：持 MirrorPool + MaterialManager + NativeHostManager + SpriteResolver + InputCollector（零改复用，从退役的 IkatStage 搬过来）。NativeHost（GameObject 绑定 3D 模型）作为 UnityIkatBackend 额外方法，不进通用契约（Unity 专属概念）。
-- **IkatStageDriver（Unity MonoBehaviour，瘦宿主）**：Awake 创建 UnityIkatBackend（注入 Unity 组件）→ `new IkatHost(designSize, backend)` → 读 .ttf/atlas 喂 `host.RegisterFont`/资源 → `ctx.LoadPackage`。Update 调 `host.Step(Time.unscaledDeltaTime)`。保留 Unity 特定（相机 / safeArea / 输入钩子 / 设计分辨率 / NativeHost 根 transform）。
+- **YioHost(引擎无关,`Runtime/Host/`)**:持 stage handle (IntPtr) + UIContext + YioBackend。零 `using UnityEngine`。每帧驱动 `Step(dt)` 严格按 §16 五步序:(1) `backend.CollectInput(stage)` → set_input;(2) `UIContext.FlushPendingWrites()` 攒批过桥脏属性（StyleMirror + NodeTransform，标脏不即时）；(2.5) `ctx.DrainPendingBinds()` ListView bind 排空；(3) `yio_stage_tick` FFI;(4) `borrow_frame` FFI → `backend.SyncFrame(stage, framePtr, frameLen)`;(5) `borrow_events` FFI → EventDemuxer → EventBus typed `On<T>` 路由。资源 FFI 引擎中立(RegisterFont / SetImageSizes / SetFallbackFamilies)放此层。`borrow_frame` 的 FFI 调用归 YioHost(产生引擎特定镜像对象的 FFI 仍归引擎无关驱动核心),backend 只消费 blob 做镜像。
+- **YioBackend（引擎无关抽象契约，`Runtime/Host/`）**：契约 = 2 个 abstract 方法——`CollectInput(stage)` / `SyncFrame(stage, framePtr, frameLen)`。`set_input` FFI 在 backend（采集引擎特定但 FFI 引擎中立，省一次交互）。资源对象上传（如 Texture2D 上传 atlas 页）是引擎特定实现细节，不进入抽象契约（由 `UnityYioBackend` 内部方法如 `InitSprites`/`SyncFontAtlas` 承担）。
+- **UnityYioBackend : YioBackend**：持 MirrorPool + MaterialManager + NativeHostManager + SpriteResolver + InputCollector（零改复用，从退役的 YioStage 搬过来）。NativeHost（GameObject 绑定 3D 模型）作为 UnityYioBackend 额外方法，不进通用契约（Unity 专属概念）。
+- **YioStageDriver（Unity MonoBehaviour，瘦宿主）**：Awake 创建 UnityYioBackend（注入 Unity 组件）→ `new YioHost(designSize, backend)` → 读 .ttf/atlas 喂 `host.RegisterFont`/资源 → `ctx.LoadPackage`。Update 调 `host.Step(Time.unscaledDeltaTime)`。保留 Unity 特定（相机 / safeArea / 输入钩子 / 设计分辨率 / NativeHost 根 transform）。
 
-> **IkatStage 退役**：v1 的 `IkatStage`（业务 API 透传层）在 Spec-4b clean break 整层删，无双壳——业务 API 透传已被 4a UIContext 取代，driver 的 ~10 个生命周期/后端编排调用按上述分层迁移。终态契约里只有 IkatHost/IkatBackend/UnityIkatBackend，无 IkatStage。
+> **YioStage 退役**：v1 的 `YioStage`（业务 API 透传层）在 Spec-4b clean break 整层删，无双壳——业务 API 透传已被 4a UIContext 取代，driver 的 ~10 个生命周期/后端编排调用按上述分层迁移。终态契约里只有 YioHost/YioBackend/UnityYioBackend，无 YioStage。
 
-- **Godot 后端**：镜像成 Node2D + RenderingServer canvas_item 自绘。否决 Control 路线（与核心布局双系统冲突）。遮罩用 canvas_group/clip。复用 IkatHost + 整个 Projection + Public，只写 `GodotIkatBackend : IkatBackend`。
+- **Godot 后端**：镜像成 Node2D + RenderingServer canvas_item 自绘。否决 Control 路线（与核心布局双系统冲突）。遮罩用 canvas_group/clip。复用 YioHost + 整个 Projection + Public，只写 `GodotYioBackend : YioBackend`。
 - **SRP 混合渲染**（Unity 增强）：自绘节点用自定义 SRP RendererFeature 批合绘制。
 - 新后端只需实现：消费 `Vec<RenderNode>` + 输入注入 + 资源加载。契约引擎中立。

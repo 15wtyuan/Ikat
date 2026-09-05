@@ -5,8 +5,8 @@
 //! flag：② 行数 ≠ ① 行数 → render 二次测量换行（回归现场）。
 //! 用 CJK 字体（showcase 含中文标题），与 Unity 实际字体族接近。
 
-use ikat_core::text::atlas::{GlyphAtlas, GlyphKey};
-use ikat_core::text::layout::{Font, FontTable};
+use yio_core::text::atlas::{GlyphAtlas, GlyphKey};
+use yio_core::text::layout::{Font, FontTable};
 
 fn main() {
     // 直接用测试字体文件构造 Font，独立 exercise atlas API，确保 atlas 模块自身健康。
@@ -126,9 +126,9 @@ fn main() {
 }
 
 fn run_text_dump(font_path: &str) {
-    use ikat_core::scene::node::NodeKind;
-    use ikat_core::stage::Stage;
-    use ikat_core::text::layout::measure_text;
+    use yio_core::scene::node::NodeKind;
+    use yio_core::stage::Stage;
+    use yio_core::text::layout::measure_text;
 
     let pkg_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -185,7 +185,7 @@ fn run_text_dump(font_path: &str) {
             None,
             &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
-            ikat_core::text::rich::weight_from_font_weight(st.font_weight),
+            yio_core::text::rich::weight_from_font_weight(st.font_weight),
         );
         let before = measure_text(
             &content,
@@ -197,7 +197,7 @@ fn run_text_dump(font_path: &str) {
             Some(rect_w),
             &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
-            ikat_core::text::rich::weight_from_font_weight(st.font_weight),
+            yio_core::text::rich::weight_from_font_weight(st.font_weight),
         )
         .lines
         .len();

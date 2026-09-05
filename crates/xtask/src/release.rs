@@ -28,11 +28,11 @@ const OWNED_PATHS: [&str; 9] = [
     "crates/packer/pkg/Cargo.toml",
     "Cargo.lock",
     "unity/package/CHANGELOG.md",
-    "unity/package/Plugins/Ikat/ikat_ffi_c.dll",
-    "unity/package/Editor/Tools/ikat.exe",
-    "unity/package/Editor/Tools/ikat_gui.exe",
+    "unity/package/Plugins/Yio/yio_ffi_c.dll",
+    "unity/package/Editor/Tools/yio.exe",
+    "unity/package/Editor/Tools/yio_gui.exe",
     "unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin",
-    "unity/showcase-unity/Assets/Bundles/ikat.runtime.json",
+    "unity/showcase-unity/Assets/Bundles/yio.runtime.json",
 ];
 
 pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -65,10 +65,10 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
     }
 
     // Unity 锁预检：dll 被编辑器持有时拷贝必败，提前报（而不是流程走到一半断）。
-    let dll_path = root.join("unity/package/Plugins/Ikat/ikat_ffi_c.dll");
+    let dll_path = root.join("unity/package/Plugins/Yio/yio_ffi_c.dll");
     if unity_dll_locked(&dll_path) {
         return Err(
-            "ikat_ffi_c.dll is locked (Unity Editor open with the project?) — \
+            "yio_ffi_c.dll is locked (Unity Editor open with the project?) — \
                     close Unity and re-run"
                 .into(),
         );
@@ -125,7 +125,7 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
         println!("  3. commit bump (pathspec-limited)");
         println!("  4. temp worktree at bump commit -> build exe/dll/gui + showcase bundle");
         println!("     (CARGO_TARGET_DIR reuses main target cache)");
-        println!("  5. verify artifacts (ikat version output + pkg.bin header) -> copy back");
+        println!("  5. verify artifacts (yio version output + pkg.bin header) -> copy back");
         println!("  6. commit artifacts -> release-check -> tag {tag}");
         println!("  7. push origin main; push origin {tag}; ls-remote cross-check");
         return Ok(());
@@ -149,7 +149,7 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
         run_cargo(&root, &["metadata", "--format-version", "1"], true)?;
         commit_paths(
             &format!(
-                "chore(release): v{ver} — bump unity package + ikat_pkg crate versions, fold changelog"
+                "chore(release): v{ver} — bump unity package + yio_pkg crate versions, fold changelog"
             ),
             &[
                 "unity/package/package.json",
@@ -163,7 +163,7 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
     }
 
     // ---- 干净树构建（tag 提交快照 = 唯一产物来源）----
-    let wt = root.parent().unwrap().join(".ikat-release-wt");
+    let wt = root.parent().unwrap().join(".yio-release-wt");
     if wt.exists() {
         let _ = git(&["worktree", "remove", "--force", wt.to_str().unwrap()]);
     }
@@ -191,11 +191,11 @@ pub fn run_release(ver: &str, dry_run: bool) -> Result<(), Box<dyn std::error::E
 
     // ---- 产物提交（只提交实际有差异的路径）----
     let artifact_paths = [
-        "unity/package/Plugins/Ikat/ikat_ffi_c.dll",
-        "unity/package/Editor/Tools/ikat.exe",
-        "unity/package/Editor/Tools/ikat_gui.exe",
+        "unity/package/Plugins/Yio/yio_ffi_c.dll",
+        "unity/package/Editor/Tools/yio.exe",
+        "unity/package/Editor/Tools/yio_gui.exe",
         "unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin",
-        "unity/showcase-unity/Assets/Bundles/ikat.runtime.json",
+        "unity/showcase-unity/Assets/Bundles/yio.runtime.json",
     ];
     let changed: Vec<&str> = artifact_paths
         .iter()
@@ -263,49 +263,49 @@ fn build_artifacts_in(wt: &Path, root: &Path, ver: &str) -> Result<(), Box<dyn s
     // 离线优先，失败回退在线（lock 已随 bump 提交，被写坏可 checkout 恢复）。
     run_cargo(
         wt,
-        &["build", "-p", "ikat_pkg", "-p", "ikat_ffi_c", "--release"],
+        &["build", "-p", "yio_pkg", "-p", "yio_ffi_c", "--release"],
         true,
     )
     .or_else(|e| {
         eprintln!("[build] offline failed ({e}); retrying online");
         run_cargo(
             wt,
-            &["build", "-p", "ikat_pkg", "-p", "ikat_ffi_c", "--release"],
+            &["build", "-p", "yio_pkg", "-p", "yio_ffi_c", "--release"],
             false,
         )
     })?;
     let target_dir = root.join("target/release");
-    let ikat_exe = target_dir.join("ikat.exe");
+    let yio_exe = target_dir.join("yio.exe");
 
     // 产物验证 ①：exe 内嵌版本实跑（旧坑 100：本地缓存会骗过进程，「文件变了」不算数）。
-    let ver_out = Command::new(&ikat_exe)
+    let ver_out = Command::new(&yio_exe)
         .arg("version")
         .output()
-        .map_err(|e| format!("run ikat version: {e}"))?;
+        .map_err(|e| format!("run yio version: {e}"))?;
     let ver_txt = String::from_utf8_lossy(&ver_out.stdout).to_string();
     if !ver_txt.contains(&format!("unity {ver}")) {
         return Err(format!(
-            "built ikat.exe reports wrong version: {ver_txt:?} (expect `unity {ver}`)"
+            "built yio.exe reports wrong version: {ver_txt:?} (expect `unity {ver}`)"
         )
         .into());
     }
-    println!("[build] ikat version: {}", ver_txt.trim());
+    println!("[build] yio version: {}", ver_txt.trim());
 
     // bundle 重打（parse-time 逻辑可能变化，无条件重打 + 字节对比幂等——旧坑 66 精神）。
-    let bundle_status = Command::new(&ikat_exe)
+    let bundle_status = Command::new(&yio_exe)
         .args(["build", wt.join("showcase").to_str().unwrap()])
         .current_dir(wt)
         .output()
-        .map_err(|e| format!("run ikat build showcase: {e}"))?;
+        .map_err(|e| format!("run yio build showcase: {e}"))?;
     if !bundle_status.status.success() {
         return Err(format!(
-            "ikat build showcase failed: {}",
+            "yio build showcase failed: {}",
             String::from_utf8_lossy(&bundle_status.stderr)
         )
         .into());
     }
 
-    // 产物验证 ②：bundle 头 8 字节 = magic "LPKG" + u32 LE 格式版本，须等于源码常量
+    // 产物验证 ②：bundle 头 8 字节 = magic "YPKG" + u32 LE 格式版本，须等于源码常量
     //（旧坑 135：worktree 用旧 crate 重打漏 → 入库版本号字段旧值，hexdump 才现形）。
     let wt_bundle = wt.join("unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin");
     let want =
@@ -322,31 +322,28 @@ fn build_artifacts_in(wt: &Path, root: &Path, ver: &str) -> Result<(), Box<dyn s
         }
     }
 
-    // GUI exe 同批重出（直链 ikat_pkg/ikat_fence 的内嵌代码路径随源码走；无判据）。
+    // GUI exe 同批重出（直链 yio_pkg/yio_fence 的内嵌代码路径随源码走；无判据）。
     let gui_exe = crate::gui::build_gui(wt, &root.join("target"))?;
     println!("[build] {}", gui_exe.display());
 
     // 拷回主工作树（字节相同则跳过，免伪脏提交）。
     let pairs = [
         (
-            target_dir.join("ikat_ffi_c.dll"),
-            root.join("unity/package/Plugins/Ikat/ikat_ffi_c.dll"),
+            target_dir.join("yio_ffi_c.dll"),
+            root.join("unity/package/Plugins/Yio/yio_ffi_c.dll"),
         ),
         (
-            ikat_exe.clone(),
-            root.join("unity/package/Editor/Tools/ikat.exe"),
+            yio_exe.clone(),
+            root.join("unity/package/Editor/Tools/yio.exe"),
         ),
-        (
-            gui_exe,
-            root.join("unity/package/Editor/Tools/ikat_gui.exe"),
-        ),
+        (gui_exe, root.join("unity/package/Editor/Tools/yio_gui.exe")),
         (
             wt_bundle.clone(),
             root.join("unity/showcase-unity/Assets/Bundles/ui/showcase.pkg.bin"),
         ),
         (
-            wt.join("unity/showcase-unity/Assets/Bundles/ikat.runtime.json"),
-            root.join("unity/showcase-unity/Assets/Bundles/ikat.runtime.json"),
+            wt.join("unity/showcase-unity/Assets/Bundles/yio.runtime.json"),
+            root.join("unity/showcase-unity/Assets/Bundles/yio.runtime.json"),
         ),
     ];
     for (src, dst) in &pairs {
@@ -454,9 +451,9 @@ pub fn parse_pkg_format_version(src: &str) -> Result<u32, String> {
     Err("PKG_FORMAT_VERSION const not found in asset/mod.rs".into())
 }
 
-/// pkg.bin 头：magic `LPKG` + u32 LE 格式版本。非 magic / 过短 → None。
+/// pkg.bin 头：magic `YPKG` + u32 LE 格式版本。非 magic / 过短 → None。
 pub fn pkg_header_version(bytes: &[u8]) -> Option<u32> {
-    if bytes.len() < 8 || &bytes[0..4] != b"LPKG" {
+    if bytes.len() < 8 || &bytes[0..4] != b"YPKG" {
         return None;
     }
     Some(u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]))
@@ -554,7 +551,7 @@ mod tests {
 
     #[test]
     fn json_version_single_site_replace() {
-        let j = "{\n  \"name\": \"com.ikat.unity\",\n  \"version\": \"0.0.13\",\n  \"unity\": \"6000.0\"\n}";
+        let j = "{\n  \"name\": \"com.yio.unity\",\n  \"version\": \"0.0.13\",\n  \"unity\": \"6000.0\"\n}";
         let out = replace_version_json(j, "0.0.14").unwrap();
         assert!(out.contains("\"version\": \"0.0.14\""));
         assert!(!out.contains("0.0.13"));
@@ -565,10 +562,9 @@ mod tests {
 
     #[test]
     fn toml_version_single_site_replace() {
-        let t =
-            "[package]\nname = \"ikat_pkg\"\nversion = \"0.0.13\"\n\n[[bin]]\nname = \"ikat\"\n";
+        let t = "[package]\nname = \"yio_pkg\"\nversion = \"0.0.13\"\n\n[[bin]]\nname = \"yio\"\n";
         let out = replace_version_toml(t, "0.0.14").unwrap();
-        assert!(out.starts_with("[package]\nname = \"ikat_pkg\"\nversion = \"0.0.14\""));
+        assert!(out.starts_with("[package]\nname = \"yio_pkg\"\nversion = \"0.0.14\""));
         // 段外同名值不参与计数（parse_crate_version 只认 [package] 段——此处验替换唯一性）。
         assert_eq!(out.matches("version =").count(), 1);
     }
@@ -582,7 +578,7 @@ mod tests {
 
     #[test]
     fn pkg_header_roundtrip() {
-        let mut b = vec![b'L', b'P', b'K', b'G'];
+        let mut b = vec![b'Y', b'P', b'K', b'G'];
         b.extend_from_slice(&47u32.to_le_bytes());
         assert_eq!(pkg_header_version(&b), Some(47));
         assert_eq!(pkg_header_version(&b[..6]), None);

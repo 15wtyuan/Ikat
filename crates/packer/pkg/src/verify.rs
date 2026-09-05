@@ -1,7 +1,7 @@
-//! `ikat verify`：Unity batchmode 导入冒烟（#99）。
+//! `yio verify`：Unity batchmode 导入冒烟（#99）。
 //!
 //! 发版前的本地自动化验收面：build 重打产物（直落 `<unity_root>/Assets/...`）
-//! → 拉起 Unity batchmode 跑包内 `Ikat.Editor.IkatVerifySmoke.Run`（Refresh +
+//! → 拉起 Unity batchmode 跑包内 `Yio.Editor.YioVerifySmoke.Run`（Refresh +
 //! 逐文件正向加载）→ 解析报告。把「产物可导入」从人肉开 Unity 变成一条命令。
 //!
 //! 分层边界（与 unity-smoke CI 分工，不重复）：verify = 本地导入冒烟（发版门，
@@ -12,7 +12,7 @@
 //! FAIL 行）；2 = 工具性失败（无 unity_root 的本地模式 / 找不到编辑器 / 超时 /
 //! executeMethod 未运行）。编辑器查找三层：`--unity-editor` 显式参数 → 读
 //! `ProjectVersion.txt` 匹配 Unity Hub 标准安装目录 → 都没有 exit 2 教用法。
-//! 编辑器绝对路径**不进** `.ikat/config.json`——那文件入库共享，机器相关路径
+//! 编辑器绝对路径**不进** `.yio/config.json`——那文件入库共享，机器相关路径
 //! 属于命令行参数层。
 
 use crate::build;
@@ -41,9 +41,9 @@ pub fn run(ui: &Path, unity_editor: Option<&Path>) -> Result<VerifyOutcome, Buil
     // unity 模式是硬前置：本地输出模式没有可冒烟的 Unity 工程。
     let Some(unity_root) = config::resolve_output_base(ui)? else {
         return Err(BuildFailure::config(
-            "verify 需要产物直落 Unity 工程的工作区形态（.ikat/config.json 带 \
+            "verify 需要产物直落 Unity 工程的工作区形态（.yio/config.json 带 \
              unity_root）；本地输出模式没有可冒烟的 Unity 工程。用 GUI 打包器重建\
-             工作区绑定 Unity 工程，或 `ikat init --unity-root <path>`",
+             工作区绑定 Unity 工程，或 `yio init --unity-root <path>`",
         ));
     };
     // Assets 前置检查先于重打：落点不对时白打一轮。
@@ -60,7 +60,7 @@ pub fn run(ui: &Path, unity_editor: Option<&Path>) -> Result<VerifyOutcome, Buil
 
     let editor = find_unity_editor(&unity_root, unity_editor).map_err(BuildFailure::config)?;
 
-    let tmp = std::env::temp_dir().join(format!("ikat-verify-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("yio-verify-{}", std::process::id()));
     std::fs::create_dir_all(&tmp)
         .map_err(|e| BuildFailure::config(format!("create {}: {e}", tmp.display())))?;
     let report_path = tmp.join("report.txt");
@@ -78,11 +78,11 @@ pub fn run(ui: &Path, unity_editor: Option<&Path>) -> Result<VerifyOutcome, Buil
         .arg("-projectPath")
         .arg(&unity_root)
         .arg("-executeMethod")
-        .arg("Ikat.Editor.IkatVerifySmoke.Run")
+        .arg("Yio.Editor.YioVerifySmoke.Run")
         .arg("-logFile")
         .arg(&log_path)
-        .arg(format!("-ikatVerifyDir={out_dir}"))
-        .arg(format!("-ikatVerifyReport={}", report_path.display()))
+        .arg(format!("-yioVerifyDir={out_dir}"))
+        .arg(format!("-yioVerifyReport={}", report_path.display()))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -281,7 +281,7 @@ mod tests {
     /// verify 的 unity 模式硬前置：本地模式工作区 → 工具性失败（exit 2 语义）。
     #[test]
     fn local_mode_workspace_rejected() {
-        let tmp = std::env::temp_dir().join("ikat_verify_localmode_test");
+        let tmp = std::env::temp_dir().join("yio_verify_localmode_test");
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join(crate::workspace::WORKSPACE_FILE), "{}").unwrap();

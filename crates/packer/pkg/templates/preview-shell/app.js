@@ -1,19 +1,19 @@
-// ikat preview shell 逻辑（ESM，无构建）。
+// yio preview shell 逻辑（ESM，无构建）。
 // 保真语义（grilling 定案）：iframe 永远按工作区设计分辨率渲染，外壳只按
 // match_mode 缩放——切设备框不触发 reflow，预览必须预测运行时。
 "use strict";
 
 const LS = {
-  preset: "ikatPreview.preset",
-  match: "ikatPreview.matchMode",
-  safe: "ikatPreview.safeArea",
-  fit: "ikatPreview.fitWindow",
-  custom: "ikatPreview.customResolutions",
+  preset: "yioPreview.preset",
+  match: "yioPreview.matchMode",
+  safe: "yioPreview.safeArea",
+  fit: "yioPreview.fitWindow",
+  custom: "yioPreview.customResolutions",
 };
 
 // 内置设备清单：W/H + 安全区四边（px；0 = 无）。safe 值与 env(safe-area-inset-*)
 // 模拟同源（layoutDevice 换算成 design px 注进 iframe CSS 变量），参考线可视化
-// 同一份数据——预览与运行时同公式（core ikat_stage_set_safe_area）。
+// 同一份数据——预览与运行时同公式（core yio_stage_set_safe_area）。
 const BUILTIN_PRESETS = [
   { id: "design",     name: "设计分辨率", w: 0,  h: 0,  safe: { top: 0, bottom: 0, left: 0, right: 0 } },
   { id: "iphone-se",  name: "iPhone SE",  w: 375,  h: 664,  safe: { top: 0, bottom: 0, left: 0, right: 0 } },
@@ -219,10 +219,10 @@ function layoutDevice() {
   $("safe-left").classList.toggle("has", safeOn && safe.left > 0);
   $("safe-right").classList.toggle("has", safeOn && safe.right > 0);
 
-  // env(safe-area-inset-*) 模拟：与 core ikat_stage_set_safe_area 同公式——
+  // env(safe-area-inset-*) 模拟：与 core yio_stage_set_safe_area 同公式——
   // root（iframe 映射进设备框的矩形）伸进 unsafe 区的深度 / scale = design px。
   // letterbox root 在 safe 框内 → 恒 0（黑边已让位）；fit 贴物理边 → 真实 inset。
-  // server 已把 env() 改写成 var(--ikat-safe-*)，这里注值即生效（与参考线同源）。
+  // server 已把 env() 改写成 var(--yio-safe-*)，这里注值即生效（与参考线同源）。
   const ins = {
     top: Math.max(0, safe.top - rootT) / scale,
     right: Math.max(0, (rootL + rx) - (dw - safe.right)) / scale,
@@ -232,10 +232,10 @@ function layoutDevice() {
   const doc = frame.contentDocument;
   if (doc && doc.documentElement) {
     const rs = doc.documentElement.style;
-    rs.setProperty("--ikat-safe-top", ins.top + "px");
-    rs.setProperty("--ikat-safe-right", ins.right + "px");
-    rs.setProperty("--ikat-safe-bottom", ins.bottom + "px");
-    rs.setProperty("--ikat-safe-left", ins.left + "px");
+    rs.setProperty("--yio-safe-top", ins.top + "px");
+    rs.setProperty("--yio-safe-right", ins.right + "px");
+    rs.setProperty("--yio-safe-bottom", ins.bottom + "px");
+    rs.setProperty("--yio-safe-left", ins.left + "px");
   }
 }
 

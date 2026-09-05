@@ -1,7 +1,7 @@
 //! Stage 6.6b：画序声明完整性检查（#101）。两条规则同属「画序意图显式化」：
 //!
 //! - **E1**（error）：z-index 声明在非定位、非 flex item 的元素上。浏览器对该
-//!   声明视而不见（元素留在 static 绘制层），Ikat 运行时却恒生效（fgui 血统：
+//!   声明视而不见（元素留在 static 绘制层），Yio 运行时却恒生效（fgui 血统：
 //!   运行时直改 z 的语义通道）——同一份 HTML，浏览器预览与运行时画序不同，
 //!   预览在说谎。围栏硬拒：围栏里写不出来的分歧，preview/运行时就够不着。
 //!   运行时 API 直改 z（`set_z`）不受影响——那是 API 层，不是围栏层。
@@ -21,8 +21,8 @@
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
-use ikat_core::style::dynamic::DynamicRule;
-use ikat_core::style::resolved::{PositionDeclared, ResolvedStyle};
+use yio_core::style::dynamic::DynamicRule;
+use yio_core::style::resolved::{PositionDeclared, ResolvedStyle};
 
 /// 一个元素的静态可见画序事实（inline resolve + 结构匹配 class 规则合并）。
 #[derive(Debug, Clone, Copy)]
@@ -76,7 +76,7 @@ fn stacking_flags(
 
 /// 元素是否 flex item：父存在且父的静态可见 display 为 Flex（显式
 /// `display:flex`，inline 或 class 规则——浏览器对 flex item 的 z-index 恒
-/// 生效，与 Ikat 一致，无需拦）。
+/// 生效，与 Yio 一致，无需拦）。
 fn is_flex_item(
     tree: &IrTree,
     styles: &[ResolvedStyle],
@@ -140,7 +140,7 @@ pub fn check_paint_order(
                     DiagnosticCode::FenceZIndexOnStatic,
                     "z-index declared on a non-positioned element outside a flex \
                      container — browsers ignore z-index there (the element stays \
-                     in the static paint layer), but the Ikat runtime honors it, \
+                     in the static paint layer), but the Yio runtime honors it, \
                      so the browser preview will not match the runtime paint \
                      order. Add `position:relative` (or `absolute`), or declare \
                      z-index on a child of a `display:flex` container."

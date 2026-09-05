@@ -1,4 +1,4 @@
-// Ikat Packer — Main Editor
+// Yio Packer — Main Editor
 // Tab layout: general / packages / atlases / fonts. Build log in modal.
 // Drag-to-create via Tauri 2 onDragDropEvent; directory re-pick via dialog plugin.
 (function () {
@@ -128,7 +128,7 @@
 
     var row = el("div", "form-row");
     row.appendChild(el("span", "form-label", "输出目录"));
-    var inp = inputEl("text", ws.output_dir || "", "form-input", "例如 ../ikat_unity/Assets/Bundles");
+    var inp = inputEl("text", ws.output_dir || "", "form-input", "例如 ../yio_unity/Assets/Bundles");
     inp.id = "ws-output-dir";
     inp.addEventListener("input", function () { saveIfLoaded(); });
     inp.addEventListener("keydown", function (e) { if (e.key === "Enter") inp.blur(); });
@@ -716,5 +716,5 @@
     });
   }
 
-  window.IkatEditor = { renderMain: renderMain, flushSave: flushSave };
+  window.YioEditor = { renderMain: renderMain, flushSave: flushSave };
 })();

@@ -1,7 +1,7 @@
 //! 验证：读 showcase.pkg.bin 回读，打印组件名。
-//! 用法：cargo run -p ikat_core --example verify_showcase_pkg -- <path-to-pkg.bin>
-use ikat_core::asset::read_package;
+//! 用法：cargo run -p yio_core --example verify_showcase_pkg -- <path-to-pkg.bin>
 use std::env;
+use yio_core::asset::read_package;
 
 fn main() {
     let path = env::args()

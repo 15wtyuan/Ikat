@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace Ikat.Tests
+namespace Yio.Tests
 {
     /// MirrorPool reuse_key 按 reuse_key 复用 GO 的 EditMode 测试。
     /// 手搓 v14 1 节点 mesh blob（23 列含 reuse_key） → 验 slot 换绑 GO 复用。
@@ -121,7 +121,7 @@ namespace Ikat.Tests
         public void SlotReuseKeyRecyclesGoAcrossNodeChange()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
@@ -195,7 +195,7 @@ namespace Ikat.Tests
                                 Vector2 expectCenter, Vector2 expectExtents)
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
@@ -359,7 +359,7 @@ namespace Ikat.Tests
         public void RemapMeshUvMapsCoreUnitUvIntoSpriteSubRect()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
 
@@ -603,7 +603,7 @@ namespace Ikat.Tests
         public void ParkedKeepalive_KeepsGo_Inactive()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
@@ -650,7 +650,7 @@ namespace Ikat.Tests
         public void Reactivate_SetsActive_AfterParked()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
@@ -698,7 +698,7 @@ namespace Ikat.Tests
         public void ParkedNoPriorGo_DoesNotCreate()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;
@@ -726,7 +726,7 @@ namespace Ikat.Tests
         public void SteadyState_ZeroChurn()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;

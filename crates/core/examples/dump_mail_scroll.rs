@@ -1,9 +1,9 @@
 //! 诊断 mail 虚拟列表覆盖缺口：set_scroll_pos 驱动滚动，测视口顶部是否被 slot 覆盖。
 //! gap_top = (视口内首个 active slot 的 world Y) − 视口顶 world Y。> 一行高(~87) 即顶部空白。
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{NodeKind, Scene};
-use ikat_core::stage::Stage;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{NodeKind, Scene};
+use yio_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -51,8 +51,8 @@ fn main() {
             .expect("col-list")
             .id
     };
-    ikat_core::list::enter_data_driven(&mut s, mail_list, 1).expect("enter");
-    ikat_core::list::set_item_count(&mut s, mail_list, 100);
+    yio_core::list::enter_data_driven(&mut s, mail_list, 1).expect("enter");
+    yio_core::list::set_item_count(&mut s, mail_list, 100);
     for _ in 0..6 {
         let _ = s.tick_and_render();
     } // 让初始 slot 测高度

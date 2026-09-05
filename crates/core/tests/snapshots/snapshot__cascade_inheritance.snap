@@ -1,5 +1,5 @@
 ---
-source: ikat_core/tests/snapshot.rs
+source: yio_core/tests/snapshot.rs
 expression: json
 ---
 [
@@ -388,7 +388,7 @@ expression: json
           6,
           7
         ],
-        "image_path": "ikat://font-atlas/p0",
+        "image_path": "yio://font-atlas/p0",
         "program": 1,
         "color_matrix": [
           0.0,

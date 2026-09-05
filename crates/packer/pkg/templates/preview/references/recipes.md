@@ -2,7 +2,7 @@
 
 Consumer-layer (B) starting points. The behavior layer (component
 expansion, control wiring, structural polyfill) is served by the preview
-server itself from the running binary (`/ikat-preview/lib/*`, auto-injected
+server itself from the running binary (`/yio-preview/lib/*`, auto-injected
 boot entry — see SKILL.md). Everything below is what a workspace still
 owns: demo data, fonts/theming, page navigation.
 
@@ -10,8 +10,8 @@ owns: demo data, fonts/theming, page navigation.
 
 ```js
 // preview/pages/inventory.js — injected only into inventory.html.
-import { ready } from '/ikat-preview/lib/boot.js';
-import { fillList, pageDir } from '/ikat-preview/lib/fill.js';
+import { ready } from '/yio-preview/lib/boot.js';
+import { fillList, pageDir } from '/yio-preview/lib/fill.js';
 
 const ICONS = ['item-potion', 'item-chest', 'item-gem'];
 ready.then(() => {
@@ -31,7 +31,7 @@ ready.then(() => {
 removes these clones before measuring (core's static dump has no driver),
 so fill freely — it never breaks the alignment gate.
 
-Import both modules by absolute URL (`/ikat-preview/lib/...`) — they are
+Import both modules by absolute URL (`/yio-preview/lib/...`) — they are
 version-matched to the running CLI, never copied into the workspace.
 
 ## main.js (optional) — fonts, theming, shared page glue
@@ -47,11 +47,11 @@ document.head.insertBefore(link, document.head.firstChild);
 `preview-theme.css` (name it anything) holds workspace-owned styling:
 
 - Theme colors/backgrounds/decoration. Do **not** re-declare structural
-  resets already owned by `/ikat-preview/lib/base.css` (`box-sizing`,
+  resets already owned by `/yio-preview/lib/base.css` (`box-sizing`,
   button reset, placeholder line) — same-name rules here would fight the
   framework copy as a second truth.
 - Fonts need nothing here: the server auto-injects `@font-face` for every
-  font in `ikat.workspace.json` plus a default-family `body` rule
+  font in `yio.workspace.json` plus a default-family `body` rule
   (injected before your stylesheets, so your CSS wins). Hand-written
   `@font-face` is only for **overrides** — a different source file, or
   `font-display: swap` for a very large font (the injected rules use

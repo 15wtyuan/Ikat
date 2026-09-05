@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 
-namespace Ikat.Tests
+namespace Yio.Tests
 {
     /// FrameBlob v15 reader 单元测试（合成 blob：132B header + 21 lean 列 + skip 段）。
     /// 焦点：lean 行 Visible bit0；skip 条目 SkipParked bit1 / SkipNodeId / SkipReuseKey

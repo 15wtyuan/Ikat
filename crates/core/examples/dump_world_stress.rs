@@ -7,14 +7,14 @@
 //! 4. follow    —— 每帧 500 条 track set_user_transform（世界锚点投影跟随形态——
 //!    C# 侧 SetWorldAnchor→Transform.Position flush 的 core 落点同款）
 //!
-//! 运行：cargo run -p ikat_core --example dump_world_stress --release
+//! 运行：cargo run -p yio_core --example dump_world_stress --release
 
-use ikat_core::scene::dynamic::{
+use std::time::Instant;
+use yio_core::scene::dynamic::{
     append_child, set_inline_override, set_node_render_hidden, set_user_transform,
 };
-use ikat_core::stage::Stage;
-use ikat_core::transform::NodeTransform;
-use std::time::Instant;
+use yio_core::stage::Stage;
+use yio_core::transform::NodeTransform;
 
 const BARS: usize = 500;
 const COLS: usize = 25;
@@ -175,7 +175,7 @@ fn main() {
         let t = Instant::now();
         {
             let host = s.host.borrow();
-            ikat_core::layout::solve(
+            yio_core::layout::solve(
                 s.scene.as_mut().unwrap(),
                 &host.fonts,
                 s.root_size,
@@ -185,7 +185,7 @@ fn main() {
         }
         t_solve += t.elapsed().as_secs_f64() * 1000.0;
         let t = Instant::now();
-        ikat_core::scene::transform::compute_world_transforms(s.scene.as_mut().unwrap());
+        yio_core::scene::transform::compute_world_transforms(s.scene.as_mut().unwrap());
         t_world += t.elapsed().as_secs_f64() * 1000.0;
         let t = Instant::now();
         let _ = s.tick_and_render();

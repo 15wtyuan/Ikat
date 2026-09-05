@@ -4,9 +4,9 @@
 //!   - 每条 delay（应为 0.05s 的整数倍 stagger）
 //!   - card 在父级元素子里的 nth-child 位置（验 :nth-child(N) 匹配的 N 是否对得上）
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::NodeKind;
-use ikat_core::stage::Stage;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::NodeKind;
+use yio_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");

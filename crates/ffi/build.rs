@@ -20,10 +20,10 @@ fn main() {
         .input_extern_file("src/list.rs")
         .input_extern_file("src/resources.rs")
         .input_extern_file("src/style_sheet.rs")
-        .csharp_dll_name("ikat_ffi_c")
-        .csharp_namespace("Ikat.Bindings")
+        .csharp_dll_name("yio_ffi_c")
+        .csharp_namespace("Yio.Bindings")
         .csharp_class_name("Native")
         .csharp_use_function_pointer(false)
-        .generate_csharp_file(format!("{}/IkatBindings.cs", out_dir))
+        .generate_csharp_file(format!("{}/YioBindings.cs", out_dir))
         .expect("csbindgen csharp gen");
 }

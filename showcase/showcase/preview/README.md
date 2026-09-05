@@ -1,6 +1,6 @@
 # Showcase browser preview
 
-`ikat preview <workspace>`（在仓库 showcase/ 目录跑）起本地预览工作台：左侧包/页
+`yio preview <workspace>`（在仓库 showcase/ 目录跑）起本地预览工作台：左侧包/页
 树、右侧按 match_mode 缩放的设计分辨率预览、设备框 + 安全区参考线。file:// 双击
 已退役——预览脚本由 server 注入，HTML 源零 `<script>` 引用。
 
@@ -8,10 +8,10 @@
 
 | 层 | 归属 |
 |---|---|
-| 工作台外壳（树/缩放/设备框/设置） | ikat.exe 内嵌，版本随 CLI |
-| 注入（main.js / pages/<页>.js，存在才注入） | `ikat preview` server |
+| 工作台外壳（树/缩放/设备框/设置） | yio.exe 内嵌，版本随 CLI |
+| 注入（main.js / pages/<页>.js，存在才注入） | `yio preview` server |
 | 组件清单数据 | server `/api/workspace.json`（与打包同一套扫描口径） |
-| 模拟脚本本体 | **本目录，AI 手写**（约定见 ikat-preview skill） |
+| 模拟脚本本体 | **本目录，AI 手写**（约定见 yio-preview skill） |
 
 ```
 preview/
@@ -22,7 +22,7 @@ preview/
 ```
 
 **不进打包**：`preview/` 不在打包扫描面（包目录只扫顶层 `*.html`）；HTML 零引用。
-`ikat check` 对 `data-fill` 页缺 `pages/<页>.js` 会报 `PreviewDataFillWithoutSim`。
+`yio check` 对 `data-fill` 页缺 `pages/<页>.js` 会报 `PreviewDataFillWithoutSim`。
 
 ## 页面与经典场景
 | 页 | 经典场景 |
@@ -63,4 +63,4 @@ TweenManager 逐曲线 ease、虚拟列表 slot 复用/不等高补偿、NativeH
 - 改 showcase HTML / 模拟脚本：刷新浏览器（server 每请求现读源文件，无需重启）。
 - 改 `components/*.html`：无需任何再生步骤（组件清单由 server /api 实时吐）。
 - 新页导航入口：NAV 表在 `main.js` 顶部。
-- 改后跑 `coverage-check.py` + `ikat check` 确认 diagnostics 干净。
+- 改后跑 `coverage-check.py` + `yio check` 确认 diagnostics 干净。

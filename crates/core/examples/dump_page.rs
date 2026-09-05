@@ -1,16 +1,16 @@
 //! 诊断：实例化 showcase 任意页面，dump 全节点 layout_rect + display(flex/block/none)
 //! + touchable，定位「Unity 布局与 HTML 不一致」时 bug 在 core/packager 还是 Unity 后端。
 //!
-//! 用法：cargo run -p ikat_core --example dump_page -- <page-name>
+//! 用法：cargo run -p yio_core --example dump_page -- <page-name>
 //!   page-name ∈ home/settings/inventory/mail/shop/character/form/lab
 //!
 //! 重点取证：.root / .sidebar / .main 等关键容器的 display_mode 与 layout_rect，
 //! 对照 HTML 预期（settings 应左右布局、home 应纵向 flex 等）。
 
-use ikat_core::dump::kind_to_html_tag;
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{Node, NodeId, NodeKind, Scene};
-use ikat_core::stage::Stage;
+use yio_core::dump::kind_to_html_tag;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{Node, NodeId, NodeKind, Scene};
+use yio_core::stage::Stage;
 
 fn main() {
     let page = std::env::args()
@@ -34,17 +34,17 @@ fn main() {
     );
 
     let pkg = std::fs::read(&pkg_path).expect("read pkg");
-    // 适配取证（#110）：IKAT_ROOT=WxH 设 root 形状（fit 模式的重排 root，如
-    // 1920x1440 = fit-width@4:3 屏）；IKAT_SAFE=t,r,b,l 设 env(safe-area-inset-*)
+    // 适配取证（#110）：YIO_ROOT=WxH 设 root 形状（fit 模式的重排 root，如
+    // 1920x1440 = fit-width@4:3 屏）；YIO_SAFE=t,r,b,l 设 env(safe-area-inset-*)
     // design px（对拍 browser 侧 --safe）。缺省 = 设计分辨率 + 无 inset。
-    let root_size = std::env::var("IKAT_ROOT")
+    let root_size = std::env::var("YIO_ROOT")
         .ok()
         .and_then(|v| {
             let (w, h) = v.split_once('x')?;
             Some((w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?))
         })
         .unwrap_or((1920.0, 1080.0));
-    let safe_insets: [f32; 4] = std::env::var("IKAT_SAFE")
+    let safe_insets: [f32; 4] = std::env::var("YIO_SAFE")
         .ok()
         .map(|v| {
             let parts: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
@@ -202,7 +202,7 @@ fn main() {
     let mut grad_count = 0;
     for rn in &frame.nodes {
         // NodePayload 单一 Mesh 变体（v10 起文本也塌进 mesh），直接解构。
-        let ikat_core::render::node::NodePayload::Mesh { program, .. } = &rn.payload;
+        let yio_core::render::node::NodePayload::Mesh { program, .. } = &rn.payload;
         if *program == 6 || *program == 7 {
             grad_count += 1;
             let g = &rn.gradient;
@@ -262,7 +262,7 @@ fn main() {
             && rn.world_matrix[4].abs() < 0.5
             && rn.world_matrix[5].abs() < 0.5
         {
-            let ikat_core::render::node::NodePayload::Mesh { verts, .. } = &rn.payload;
+            let yio_core::render::node::NodePayload::Mesh { verts, .. } = &rn.payload;
             if !verts.is_empty() {
                 let v0 = verts[0];
                 let vmin = verts
@@ -302,7 +302,7 @@ fn main() {
                 let r = n.layout_rect;
                 // 渐变节点附带解析后参数（--json 侧取证；rect-diff 主流程不读此字段）。
                 let gradient_json = n.style.background_gradient.as_ref().map(|g| {
-                    let p = ikat_core::render::gradient::resolve_gradient(g, r.w, r.h);
+                    let p = yio_core::render::gradient::resolve_gradient(g, r.w, r.h);
                     serde_json::json!({
                         "kind": if p.kind == 1 { "radial" } else { "linear" },
                         "angleDeg": p.angle_deg,
@@ -371,7 +371,7 @@ fn disp_str(n: &Node) -> &'static str {
         taffy::style::Display::Flex => "flex",
         taffy::style::Display::Block => "block",
         taffy::style::Display::Grid => "grid",
-        // 0.14 新变体：ikat 不产出（围栏不放 flow-root），诊断输出兜底。
+        // 0.14 新变体：yio 不产出（围栏不放 flow-root），诊断输出兜底。
         taffy::style::Display::FlowRoot => "flow-root",
     }
 }

@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace Ikat.Tests.Core
+namespace Yio.Tests.Core
 {
     public class CoordMathTests
     {

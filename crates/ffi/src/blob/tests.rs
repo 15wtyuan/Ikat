@@ -1,6 +1,6 @@
 use super::*;
-use ikat_core::render::ClipEntry;
-use ikat_core::transform::Affine2Ext;
+use yio_core::render::ClipEntry;
+use yio_core::transform::Affine2Ext;
 
 /// 测试层 build_blob：多数用例不涉 list 池，用空 Scene（无 parked slot → 无 keepalive 段）。
 /// 本层名遮蔽 glob 导入的 `super::build_blob`；parked 用例直调 `super::build_blob(frame, scene)`。
@@ -33,7 +33,7 @@ fn mesh_node(id: u64, parent: Option<u64>, x: f32, y: f32, w: f32, h: f32) -> Re
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             // 父坐标系顶点：(x,y)(x+w,y)(x+w,y+h)(x,y+h)
             verts: vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]],
@@ -83,7 +83,7 @@ fn mesh_node_tinted(id: u64, tint: [f32; 4], alpha: f32, bg: [f32; 4]) -> Render
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
@@ -114,7 +114,7 @@ fn mesh_node_raw(verts: Vec<[f32; 2]>, indices: Vec<u32>, tx: f32, ty: f32) -> R
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts,
             uvs: vec![[0.0, 0.0]; n],
@@ -131,14 +131,14 @@ fn mesh_node_raw(verts: Vec<[f32; 2]>, indices: Vec<u32>, tx: f32, ty: f32) -> R
 fn rounded_rect_mesh_round_trips_n_verts() {
     // border-radius 产的 37 顶点圆角 mesh 经 build_blob 序列化 + TestView 反序列化：
     // vert_count / idx_count / 顶点坐标 re-base 全保真（验证变顶点 FFI 链）。
-    use ikat_core::scene::node::Rect;
+    use yio_core::scene::node::Rect;
     let rect = Rect {
         x: 10.0,
         y: 20.0,
         w: 80.0,
         h: 80.0,
     };
-    let (verts, _uvs, _colors, indices) = ikat_core::render::mesh::rounded_rect(
+    let (verts, _uvs, _colors, indices) = yio_core::render::mesh::rounded_rect(
         &rect,
         [1.0; 4],
         &[(8.0, 8.0); 4],
@@ -170,8 +170,8 @@ fn rounded_rect_mesh_round_trips_n_verts() {
 /// （bit1 置位、bit0 清）、reuse_key > 0（永久 ordinal）、mesh_len = 0（无 mesh）。
 #[test]
 fn blob_emits_parked_keepalive_entries() {
-    use ikat_core::list::{ListState, Slot};
-    use ikat_core::scene::dynamic;
+    use yio_core::list::{ListState, Slot};
+    use yio_core::scene::dynamic;
 
     // 场景：ul + 3 个 slot，其中 2 个 parked、1 个 active（active 不产 keepalive 条目）。
     let mut scene = Scene::default();
@@ -243,8 +243,8 @@ fn blob_emits_parked_keepalive_entries() {
 /// 后代 GO（文本 mesh 等）被后端 stale 销毁，reactivate 重建，每帧滚动 churn。
 #[test]
 fn blob_emits_parked_keepalive_for_slot_subtree() {
-    use ikat_core::list::{ListState, Slot};
-    use ikat_core::scene::dynamic;
+    use yio_core::list::{ListState, Slot};
+    use yio_core::scene::dynamic;
 
     // 场景：1 个 parked slot，子树含 2 个 div 后代（模拟 mail-item 的 dot + body）。
     let mut scene = Scene::default();
@@ -296,8 +296,8 @@ fn blob_emits_parked_keepalive_for_slot_subtree() {
 /// 无 parked slot 时零追加：全 active 的 list 不产 keepalive 条目（node_count 不胀）。
 #[test]
 fn blob_no_keepalive_when_all_slots_active() {
-    use ikat_core::list::{ListState, Slot};
-    use ikat_core::scene::dynamic;
+    use yio_core::list::{ListState, Slot};
+    use yio_core::scene::dynamic;
 
     let mut scene = Scene::default();
     let ul = dynamic::create_root(&mut scene, "div", "").unwrap();
@@ -343,7 +343,7 @@ fn build_blob_has_magic_and_count() {
 /// 全量保真，非渐变节点恒全零。
 #[test]
 fn grad_params_column_round_trips() {
-    let mut grad = ikat_core::render::gradient::GradientParams {
+    let mut grad = yio_core::render::gradient::GradientParams {
         kind: 1,
         angle_deg: 137.0,
         dir: [0.68, -0.73],
@@ -369,7 +369,7 @@ fn grad_params_column_round_trips() {
     assert!(view.fat_off(0) > 0, "渐变节点有 fat 引用");
     assert_eq!(view.fat_mask(0) & 0b1000, 0b1000, "fat mask 含 grad 位");
     let bytes = view.grad_bytes(0).expect("grad 块存在");
-    let back = ikat_core::render::gradient::GradientParams::from_bytes(bytes);
+    let back = yio_core::render::gradient::GradientParams::from_bytes(bytes);
     assert_eq!(back, grad, "grad_params 208B fat 块 round-trip");
     assert_eq!(view.fat_off(1), 0, "纯色节点无胖块（全零不写，省 208B）");
     assert!(view.grad_bytes(1).is_none(), "非渐变节点无 grad 块");
@@ -965,18 +965,18 @@ fn clip_table_round_trip_with_entries() {
             ClipEntry {
                 context_id: 1,
                 inv_frame: [1.0, 0.0, 0.0, 1.0, 10.0, 20.0],
-                rect: Some(ikat_core::render::ClipRectSpec {
+                rect: Some(yio_core::render::ClipRectSpec {
                     w: 100.0,
                     h: 100.0,
                     radii: None,
                 }),
-                shape: ikat_core::style::resolved::ClipShape::None,
+                shape: yio_core::style::resolved::ClipShape::None,
             },
             ClipEntry {
                 context_id: 2,
                 inv_frame: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
                 rect: None,
-                shape: ikat_core::style::resolved::ClipShape::Circle {
+                shape: yio_core::style::resolved::ClipShape::Circle {
                     cx: 50.0,
                     cy: 50.0,
                     r: 50.0,
@@ -1028,17 +1028,17 @@ fn clip_table_polygon_round_trip() {
         clips: vec![
             ClipEntry {
                 context_id: 1,
-                inv_frame: ikat_core::transform::IDENTITY,
+                inv_frame: yio_core::transform::IDENTITY,
                 rect: None,
-                shape: ikat_core::style::resolved::ClipShape::Polygon {
+                shape: yio_core::style::resolved::ClipShape::Polygon {
                     points: vec![(50.0, 0.0), (100.0, 50.0), (50.0, 100.0), (0.0, 50.0)],
                 },
             },
             ClipEntry {
                 context_id: 2,
-                inv_frame: ikat_core::transform::IDENTITY,
+                inv_frame: yio_core::transform::IDENTITY,
                 rect: None,
-                shape: ikat_core::style::resolved::ClipShape::Polygon {
+                shape: yio_core::style::resolved::ClipShape::Polygon {
                     points: vec![(10.0, 20.0), (30.0, 20.0), (30.0, 40.0)],
                 },
             },
@@ -1094,13 +1094,13 @@ fn clip_table_radii_round_trip() {
         nodes: vec![node],
         clips: vec![ClipEntry {
             context_id: 1,
-            inv_frame: ikat_core::transform::IDENTITY,
-            rect: Some(ikat_core::render::ClipRectSpec {
+            inv_frame: yio_core::transform::IDENTITY,
+            rect: Some(yio_core::render::ClipRectSpec {
                 w: 100.0,
                 h: 80.0,
                 radii: Some(radii),
             }),
-            shape: ikat_core::style::resolved::ClipShape::None,
+            shape: yio_core::style::resolved::ClipShape::None,
         }],
         warnings: Vec::new(),
     };
@@ -1147,7 +1147,7 @@ fn merged_mesh_blob_keeps_absolute_verts_and_no_double_alpha() {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             // 顶点已是绝对 design 坐标（merge 不 re-base）；re-base 减 transform(0) = 不变。
             verts: vec![
@@ -1223,7 +1223,7 @@ fn blob_world_matrix_roundtrip() {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0]; 4],
@@ -1297,7 +1297,7 @@ fn blob_color_matrix_column_round_trips() {
         reuse_key: 0,
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0]; 4],
@@ -1369,7 +1369,7 @@ fn blob_v9_round_trips_reuse_key() {
         reuse_key: 42, // v9 新字段
         effect: EffectBlock::default(),
         shadow_params: [0.0; 6],
-        gradient: ikat_core::render::gradient::GradientParams::default(),
+        gradient: yio_core::render::gradient::GradientParams::default(),
         payload: NodePayload::Mesh {
             verts: vec![[0.0, 0.0]; 4],
             uvs: vec![[0.0, 0.0]; 4],

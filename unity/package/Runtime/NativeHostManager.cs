@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using Ikat.Bindings;
+using Yio.Bindings;
 using UnityEngine;
 
-namespace Ikat
+namespace Yio
 {
     /// <summary>
     /// NativeHost：外部 GO 跟随 UI 节点 transform + 显隐 + 排序。两层结构：
@@ -10,11 +10,11 @@ namespace Ikat
     ///   - 用户 GO 挂 wrapper 下，自身 transform（含 scale 放大）完全用户控制，不被 Sync 覆盖。
     ///
     /// 渲染顺序：
-    ///   - GO + wrapper layer = IkatUILayer（UI 相机渲染）
+    ///   - GO + wrapper layer = YioUILayer（UI 相机渲染）
     ///   - GO（Mesh/SkinnedMesh/ParticleSystem Renderer）material renderQueue=3000（Transparent，跟 UI 同队列）
     ///   - GO sortingOrder = 节点 sort_key + HostSortOrderLift（盖过宿主上方的合并 UI 块，见常量注释）
 ///
-    /// Ikat root localScale=(sf,-sf,sf) 在 transform 做 y-flip。
+    /// Yio root localScale=(sf,-sf,sf) 在 transform 做 y-flip。
     /// GO 直挂 root → handedness flip → 3D mesh winding 反 → 被 Cull Back 剔除。
     /// 解法：_container 挂 root、localScale=(1,-1,1)，worldScale=(sf,sf,sf) positive → 子树 handedness 正常。
     /// </summary>
@@ -42,12 +42,12 @@ namespace Ikat
             _root = root;
             // _container：挂 root（继承 design→world position），localScale (1,-1,1) 抵消 root y-flip。
             // container.worldScale = root.scale × (1,-1,1) = (sf,sf,sf) positive → 子树 handedness 正常。
-            _container = new GameObject("IkatNativeHost") { hideFlags = HideFlags.DontSaveInEditor };
+            _container = new GameObject("YioNativeHost") { hideFlags = HideFlags.DontSaveInEditor };
             _container.transform.SetParent(root, false);
             _container.transform.localScale = new Vector3(1, -1, 1);
             _container.transform.localRotation = Quaternion.identity;
             _container.transform.localPosition = Vector3.zero;
-            _container.layer = root.gameObject.layer;  // IkatUILayer
+            _container.layer = root.gameObject.layer;  // YioUILayer
         }
 
         public void Bind(ulong nodeId, GameObject go)
@@ -55,7 +55,7 @@ namespace Ikat
             if (go == null) return;
             Unbind(nodeId);
             // per-node wrapper：Sync 设其 transform 跟随 UI 节点。
-            var wrapper = new GameObject("IkatNH_" + nodeId) { hideFlags = HideFlags.DontSaveInEditor };
+            var wrapper = new GameObject("YioNH_" + nodeId) { hideFlags = HideFlags.DontSaveInEditor };
             wrapper.transform.SetParent(_container.transform, false);
             wrapper.layer = _root.gameObject.layer;
             // 用户 GO 挂 wrapper。
@@ -75,7 +75,7 @@ namespace Ikat
         }
 
         /// clone 标记：Configure 给 clone 材质 name 追加此后缀，Unconfigure 据此识别销毁。
-        const string CLONE_SUFFIX = " (IkatNH)";
+        const string CLONE_SUFFIX = " (YioNH)";
 
         /// 遍历 go 子树 Mesh/SkinnedMesh/Particle Renderer：clone sharedMaterial + 设 URP Transparent
         /// （renderQueue=3000 + _Surface=1 + _SURFACE_TYPE_TRANSPARENT keyword + _ZWrite=0），
@@ -197,12 +197,12 @@ namespace Ikat
 
                 // visible（含 RemoveNode / display:none / 无效 NodeId → 0）
                 byte vis = 0;
-                Native.ikat_stage_get_node_visible(stage, id, &vis);
+                Native.yio_stage_get_node_visible(stage, id, &vis);
                 if (vis == 0) { if (go.activeSelf) go.SetActive(false); continue; }
 
                 // world_matrix：a,b,c,d,tx,ty（Affine2 列主序）
                 float a = 0, b = 0, c = 0, d = 0, tx = 0, ty = 0;
-                Native.ikat_stage_get_node_world_matrix(stage, id, &a, &b, &c, &d, &tx, &ty);
+                Native.yio_stage_get_node_world_matrix(stage, id, &a, &b, &c, &d, &tx, &ty);
 
                 if (!_wrappers.TryGetValue(id, out var wrapper) || wrapper == null) continue;
 
@@ -221,7 +221,7 @@ namespace Ikat
                 // sortingOrder = 宿主 sort_key + HostSortOrderLift：盖过 merge_meshes 重组后
                 // 编号在宿主之上的本地合并块（失效边界见常量注释）。
                 uint sk = 0;
-                Native.ikat_stage_get_node_sort_key(stage, id, &sk);
+                Native.yio_stage_get_node_sort_key(stage, id, &sk);
                 // includeInactive=true：刚恢复显示那帧 go.activeSelf 仍为 false（下一行才 SetActive(true)），
                 // 不含 inactive 子节点则其 Renderer sortingOrder 漏更新一帧。
                 foreach (var r in go.GetComponentsInChildren<Renderer>(true))

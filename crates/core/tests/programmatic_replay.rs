@@ -6,12 +6,12 @@
 //! Play 都叠加写同通道且 player 无限累积，最终值取决于 slotmap 槽序——第二次起视觉上
 //! "静默无效"。
 
-use ikat_core::scene::animation::{play_programmatic, play_programmatic_with_duration, update_all};
-use ikat_core::scene::{
+use yio_core::scene::animation::{play_programmatic, play_programmatic_with_duration, update_all};
+use yio_core::scene::{
     AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, Node, NodeId, NodeKind,
     PlayerPlayState, Scene, TransformAnim,
 };
-use ikat_core::transform::LenPct;
+use yio_core::transform::LenPct;
 
 /// 2-stop translate-only keyframes。
 fn lunge() -> KeyframesRule {

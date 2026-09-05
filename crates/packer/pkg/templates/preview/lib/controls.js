@@ -1,5 +1,5 @@
-// 控件/交互模拟（框架真相副本，嵌在 ikat 二进制里由 preview server 路由供给；
-// 消费侧经 `/ikat-preview/lib/controls.js` 导入，不拷贝、跟 CLI 版本走）。
+// 控件/交互模拟（框架真相副本，嵌在 yio 二进制里由 preview server 路由供给；
+// 消费侧经 `/yio-preview/lib/controls.js` 导入，不拷贝、跟 CLI 版本走）。
 // 镜像 core 的控件语义（sync_control_visuals 家族）：预览里控件要点得动、状态
 // 要长得对，人类预览才不骗人。作者在 HTML 里写好结构（fill/thumb/listbox/...），
 // 这里只负责驱动。

@@ -1,4 +1,4 @@
-# Ikat C# 投影层契约
+# Yio C# 投影层契约
 
 > **定位**：公共 API（[public-api.md](public-api.md)）的实现机制契约。跨摸黑+三束有效——不是用过即丢的 spec，是实现层的长期不变量。
 >
@@ -42,8 +42,8 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 ### 2.1 回写时序 = 混合（Q30）
 
 - **结构操作即时过桥**：`AddChild`/`InsertChild`/`RemoveChild`/`Instantiate`/`Dispose`。必须即时——要立刻拿到 Rust 分配的 NodeId 建立 C#↔Rust 映射；且低频，即时无所谓。
-- **属性写攒批**：`Style.X = v` / `Transform.X = v` 只改 C# 镜像 + 标脏，帧末一次性 flush。高频（拖拽/动画/批量改样式），攒批把 N 次过桥压成每帧每脏节点一次。StyleMirror setter 标脏不立即调 `set_inline_override`，NodeTransform.Store 标脏不立即调 `set_transform`；帧末（`IkatHost.Step` flush seam / `UIContext.FlushPendingWrites`）遍历 NodeRegistry dirty 集中过桥。
-- **flush 时机**：在 `IkatHost.Step(dt)` 中 tick **之前**——先 flush 脏属性 → tick（solve）→ borrow_frame 读回。与 tick 时序契合。
+- **属性写攒批**：`Style.X = v` / `Transform.X = v` 只改 C# 镜像 + 标脏，帧末一次性 flush。高频（拖拽/动画/批量改样式），攒批把 N 次过桥压成每帧每脏节点一次。StyleMirror setter 标脏不立即调 `set_inline_override`，NodeTransform.Store 标脏不立即调 `set_transform`；帧末（`YioHost.Step` flush seam / `UIContext.FlushPendingWrites`）遍历 NodeRegistry dirty 集中过桥。
+- **flush 时机**：在 `YioHost.Step(dt)` 中 tick **之前**——先 flush 脏属性 → tick（solve）→ borrow_frame 读回。与 tick 时序契合。
 
 ### 2.2 攒批编码（Q31）
 
@@ -92,7 +92,7 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 2. **NodeId→Node 缓存 + 生命周期** ✅ — `NodeRegistry` Dictionary\<uint,Node\> + `Dispose` 清缓存 + `IsDisposed` 守卫。NodeRegistry 同时持攒批 dirty 集合（§2.1）。
 3. **Geometry 直读 FFI** ✅ — `get_node_layout_rect` / `get_node_world_matrix` 即时 FFI（blob 缓存推后，YAGNI）。
 4. **`set_transform` FFI** ✅（Task 7）— 纯 f32 9-arg（tx,ty,sx,sy,rot,ox,oy），写 user_transform 不触发 solve。
-5. **攒批 flush seam** ✅（Task 9）— StyleMirror setter 标脏不立即过桥；NodeTransform.Store 标脏 + 帧末 `FlushTransform`。`IkatHost.Step()` 中 flush 位在 tick 前（`UIContext.FlushPendingWrites` 遍历 dirty 集）。
+5. **攒批 flush seam** ✅（Task 9）— StyleMirror setter 标脏不立即过桥；NodeTransform.Store 标脏 + 帧末 `FlushTransform`。`YioHost.Step()` 中 flush 位在 tick 前（`UIContext.FlushPendingWrites` 遍历 dirty 集）。
 
 ### 3.2 Link 投影（#74）
 
@@ -100,9 +100,9 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 - **kind 映射**：Rust `NodeKind::Link` 判别值 21，C# `NodeKind.Link = 21` 显式对应（Template=18 跳号先例）；NodeFactory switch 加臂派发 `new Link(ctx, id)`。
 - **类型面**：`Link : Container`（含 `TextContent`）——富文本行内链接的子树是用户内容（文本/嵌 span），走容器投影。
-- **Href 读通道**：getter → FFI `ikat_stage_get_link_href`，双调法（同 `get_node_id_attr`/`get_control_text` 家族：先探容量，-2 按所需扩容重调）。rc 语义：0 = ok；-2 = 扩容重调；-1 = 句柄/场景错误；**1 = 非 Link 节点 → 抛 `UIContractException`**（类型错配的调用方错误，区别于 -1 的内部错）。
-- **TextNode 文本 / Image src 读通道**：`TextNode.Text` → FFI `ikat_stage_get_node_text`、
-  `Image.Src` → FFI `ikat_stage_get_src`（双调法同上家族；无条目 rc=0 空串，死节点 rc=-1）。
+- **Href 读通道**：getter → FFI `yio_stage_get_link_href`，双调法（同 `get_node_id_attr`/`get_control_text` 家族：先探容量，-2 按所需扩容重调）。rc 语义：0 = ok；-2 = 扩容重调；-1 = 句柄/场景错误；**1 = 非 Link 节点 → 抛 `UIContractException`**（类型错配的调用方错误，区别于 -1 的内部错）。
+- **TextNode 文本 / Image src 读通道**：`TextNode.Text` → FFI `yio_stage_get_node_text`、
+  `Image.Src` → FFI `yio_stage_get_src`（双调法同上家族；无条目 rc=0 空串，死节点 rc=-1）。
   真值 = core `text_contents` / `image_srcs`——pkg 烙入的 HTML 值从不过 C# setter，读路径
   必须走 core（曾用 C# 镜像，读合法初值恒空串，tree 页读数实锤后按预案接通）。
   `Container.TextContent` 读侧递归累加即自动跟进。
@@ -111,8 +111,8 @@ C# 投影层引擎无关，Unity 和 Godot-C# 共享；UE-C++ / Godot-GDScript �
 
 ### 3.3 光标指针投影（#93）
 
-- **意图在核心，渲染在后端**：core 沿命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none），`IkatHost.CursorIntent` 属性 + `CursorIntentChanged` 事件暴露（host 去抖，仅变化帧 fire）。意图是引擎无关契约；怎么渲染是后端的事。
-- **Unity 后端（IkatStageDriver）不内置皮肤**：订阅意图变化驱动 `UnityEngine.Cursor.SetCursor`，intent 0/1 缺省均为系统箭头。`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供消费侧按意图注册贴图——null/已销毁 = 清除；注册/清除当前激活意图时立即重放；贴图所有权归消费者（driver 不销毁，激活时已销毁则静默回落默认）。intent 2 例外：cursor:none 是「藏指针」语义而非皮肤，内置 32×32 全透明载体即默认（4×4 非标准硬件光标尺寸，Windows 下 SetCursor 拒收）。Dispose 统一 `SetCursor(null)` 还原系统光标 + 销毁自建载体——SetCursor 贴图是进程级状态，不还原会把替换带出 UI 会话。
+- **意图在核心，渲染在后端**：core 沿命中链上溯宿主控件判定光标意图（0=箭头 / 1=手型 pointer / 2=隐藏 cursor:none），`YioHost.CursorIntent` 属性 + `CursorIntentChanged` 事件暴露（host 去抖，仅变化帧 fire）。意图是引擎无关契约；怎么渲染是后端的事。
+- **Unity 后端（YioStageDriver）不内置皮肤**：订阅意图变化驱动 `UnityEngine.Cursor.SetCursor`，intent 0/1 缺省均为系统箭头。`SetCursorTexture(uint intent, Texture2D texture, Vector2 hotspot)` 供消费侧按意图注册贴图——null/已销毁 = 清除；注册/清除当前激活意图时立即重放；贴图所有权归消费者（driver 不销毁，激活时已销毁则静默回落默认）。intent 2 例外：cursor:none 是「藏指针」语义而非皮肤，内置 32×32 全透明载体即默认（4×4 非标准硬件光标尺寸，Windows 下 SetCursor 拒收）。Dispose 统一 `SetCursor(null)` 还原系统光标 + 销毁自建载体——SetCursor 贴图是进程级状态，不还原会把替换带出 UI 会话。
 - **两个独立的坐标系约定（易混，混淆实录）**：`Texture2D.SetPixels32` 数组下标 0 = **左下角**像素（行序 bottom-up，按屏幕坐标 y=0=顶 生成的像素画写入要按 `(S-1-y)` 翻行）；`Cursor.SetCursor` 热点从纹理**左上角**量（Unity docs "offset from the top left"，直接用屏幕坐标不换算）。给两者套同一约定是这里的踩坑根因。
 
 ### 3.4 组件类绑定投影（#20）
@@ -121,8 +121,8 @@ API 面见 public-api.md §4.4。投影机制：
 
 - **注册表路由在 NodeFactory**：CustomElement arm 经 `CreateCustomRouted`——读 `get_custom_tag` → 查 `UIContext._componentFactories`（显式工厂委托，AOT/IL2CPP 零反射）→ 命中则工厂构造派生类 + `FireConnected()`（虚回调在工厂委托返回后 fire，不进 ctor 链——派生字段未初始化时调虚方法是未定义行为温床）；未命中/读 tag 失败回落基类。所有 wrapper 构造路径（instantiate 根 / eager 物化 / 懒物化 / 事件预物化）都过工厂——注册组件在任何路径被观测即得回调。
 - **eager 物化 = `MaterializeCustomElements`**：`Instantiate` 后 DFS 子树（get_child_count + get_children 容量协议），仅 CustomElement 节点 GetOrCreate（非组件节点不物化，保持懒物化内存画像）。`DoInstantiate` / `DoInstantiateSubtree` / driver `Instantiate` 三入口共用。
-- **死亡通知双路径单一出口**：`NodeRegistry.Remove` 对组件 wrapper fire `OnDisconnected` + 标 `_disposed`。两条 evict 路径汇入：用户 `Dispose`（同步——DisposeDescendantsInRegistry 递归 evict，后代先于自身）与 `PumpRemovedNodes` 帧泵（FFI `ikat_stage_drain_removed_nodes`，take 语义快照缓存于 StageHandle；core 队列挂在 `Scene::free_node_slot` 单一漏斗，任何删除路径都入队，释放序 = 叶先于祖先）。C# Dispose 先 evict → 泵后查无 wrapper = 天然去重；无 wrapper 的死亡（list 换绑 churn 的克隆 id）静默跳过，非组件滞留 wrapper 顺带 evict（死亡显式化：后续读抛 ObjectDisposedException 而非死 id 静默打 FFI）。
-- **IkatHost.Step 泵位**：CollectInput 后、PumpLogic 前——已断开的组件本帧不再跑 OnUpdate。
+- **死亡通知双路径单一出口**：`NodeRegistry.Remove` 对组件 wrapper fire `OnDisconnected` + 标 `_disposed`。两条 evict 路径汇入：用户 `Dispose`（同步——DisposeDescendantsInRegistry 递归 evict，后代先于自身）与 `PumpRemovedNodes` 帧泵（FFI `yio_stage_drain_removed_nodes`，take 语义快照缓存于 StageHandle；core 队列挂在 `Scene::free_node_slot` 单一漏斗，任何删除路径都入队，释放序 = 叶先于祖先）。C# Dispose 先 evict → 泵后查无 wrapper = 天然去重；无 wrapper 的死亡（list 换绑 churn 的克隆 id）静默跳过，非组件滞留 wrapper 顺带 evict（死亡显式化：后续读抛 ObjectDisposedException 而非死 id 静默打 FFI）。
+- **YioHost.Step 泵位**：CollectInput 后、PumpLogic 前——已断开的组件本帧不再跑 OnUpdate。
 
 ### 3.5 待办（按优先级）
 

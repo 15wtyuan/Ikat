@@ -1,7 +1,7 @@
 {
   "name": "rect-diff",
   "version": "1.0.0",
-  "description": "Browser rect exporter for layout regression diffs against Ikat core",
+  "description": "Browser rect exporter for layout regression diffs against Yio core",
   "type": "module",
   "private": true,
   "scripts": {

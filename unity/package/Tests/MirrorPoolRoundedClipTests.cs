@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace Ikat
+namespace Yio
 {
     /// 圆角 clip 端到端（#52 多 entry 布局）：blob clip 表带 radii entry → MirrorPool
     /// 应建 CLIPPED 材质并写 clip 链数组（rectKind=2 圆角，stat-bar 链路的 Unity 半场守卫）。
@@ -115,7 +115,7 @@ namespace Ikat
         public void RoundedClipEntryEnablesClippedRoundedMaterial()
         {
             var root = new GameObject("root");
-            var shader = Shader.Find("Ikat/Unlit");
+            var shader = Shader.Find("Yio/Unlit");
             var mm = new MaterialManager(shader);
             var pool = new MirrorPool();
             var fallback = Texture2D.whiteTexture;

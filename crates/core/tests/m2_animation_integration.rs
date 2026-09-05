@@ -4,12 +4,12 @@
 //! cover the timeline algorithm in isolation; this file locks the cross-layer wiring that makes
 //! CSS declarations and packaged keyframes reach runtime NodeAnim and events.
 
-use ikat_core::asset::read_package;
-use ikat_core::event::{EVT_ANIMATION_END, EVT_ANIMATION_START};
-use ikat_core::render::node::RenderNode;
-use ikat_core::scene::node::NodeId;
-use ikat_core::stage::Stage;
-use ikat_pkg::build::{pack_components, Component};
+use yio_core::asset::read_package;
+use yio_core::event::{EVT_ANIMATION_END, EVT_ANIMATION_START};
+use yio_core::render::node::RenderNode;
+use yio_core::scene::node::NodeId;
+use yio_core::stage::Stage;
+use yio_pkg::build::{pack_components, Component};
 
 const EPS: f32 = 1e-4;
 
@@ -60,12 +60,12 @@ fn stage_from_html(html: &str) -> (Stage, NodeId) {
     (stage, root)
 }
 
-fn tick(stage: &mut Stage, dt: f32) -> ikat_core::render::FrameData {
+fn tick(stage: &mut Stage, dt: f32) -> yio_core::render::FrameData {
     stage.advance_time(dt);
     stage.tick_and_render()
 }
 
-fn node_anim(stage: &Stage, id: NodeId) -> &ikat_core::scene::node::NodeAnim {
+fn node_anim(stage: &Stage, id: NodeId) -> &yio_core::scene::node::NodeAnim {
     stage
         .scene
         .as_ref()
@@ -97,7 +97,7 @@ fn child(stage: &Stage, parent: NodeId, index: usize) -> NodeId {
         .expect("child index")
 }
 
-fn render_node(frame: &ikat_core::render::FrameData, id: NodeId) -> &RenderNode {
+fn render_node(frame: &yio_core::render::FrameData, id: NodeId) -> &RenderNode {
     frame
         .nodes
         .iter()

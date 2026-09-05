@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 pub(crate) fn warn_projected_only_rules(
     tree: &IrTree,
-    dynamic_rules: &[ikat_core::style::dynamic::DynamicRule],
+    dynamic_rules: &[yio_core::style::dynamic::DynamicRule],
     file: &str,
     line_map: &LineMap,
     diagnostics: &mut Vec<Diagnostic>,

@@ -1,8 +1,8 @@
 //! 读 pkg.bin 全部 TemplateNode，打印 kind/class/id/rich_text_block，
 //! 定位 rich 折叠 flag 的打包期来源。
 
-use ikat_core::asset::read_package;
-use ikat_core::scene::NodeKind;
+use yio_core::asset::read_package;
+use yio_core::scene::NodeKind;
 
 fn main() {
     let pkg_path = std::env::args()

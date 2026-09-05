@@ -10,7 +10,7 @@
 //! FNV-1a 64 手写实现（标准库 hasher 无跨版本稳定性承诺，自实现保证任意工具链下
 //! 同字节同哈希）。fixture 见 `fixtures/schema-lock.html`。
 
-use ikat_pkg::build::{pack_components, Component, PackResult};
+use yio_pkg::build::{pack_components, Component, PackResult};
 
 const HTML: &str = include_str!("fixtures/schema-lock.html");
 
@@ -22,7 +22,7 @@ const HTML: &str = include_str!("fixtures/schema-lock.html");
 /// v52 ControlInit::TabList 加 manual（#13 手动激活模型）；v50 taffy 0.14（#82：taffy Style
 /// serde 格式变，min/max_size 分型 LPA 等）；v49 progress min（#97 ARIA 填充域）；
 /// #101 后夹具 #root 补 position:relative（E1 门下 static+z 非法），内容变更非布局变更，哈希随之更新。
-const LOCKED_HASH: u64 = 0xfa37ea0e9340b232; // c30b9945 box-sizing 钉 content-box（ResolvedStyle.taffy_style 布局语义修正，pkg v57 内哈希重登）；前值 0xdbf06699faf4883 = v57 并行撞号合并批（#52 clip_path + #57 Compound::part）
+const LOCKED_HASH: u64 = 0x7a14361301283f54; // v58 项目更名 Ikat→Yio（pkg 磁盘魔数 LPKG→YPKG，格式身份换血，版本随 bump）；前值 0xfa37ea0e9340b232 = c30b9945 box-sizing 钉 content-box（ResolvedStyle.taffy_style 布局语义修正，pkg v57 内哈希重登）；前前值 0xdbf06699faf4883 = v57 并行撞号合并批（#52 clip_path + #57 Compound::part）
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

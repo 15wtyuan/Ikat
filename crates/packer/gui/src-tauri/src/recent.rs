@@ -1,5 +1,5 @@
 //! 最近打开的工作区列表。存储跟随拉起方传入的 `--state-dir`（引擎集成侧
-//! 按各自工程惯例决定目录，如 Unity 传 <Project>/UserSettings/Ikat），
+//! 按各自工程惯例决定目录，如 Unity 传 <Project>/UserSettings/Yio），
 //! 双击 exe 等无参启动不落盘。
 
 use serde::{Deserialize, Serialize};
@@ -107,8 +107,8 @@ mod tests {
     fn parse_state_dir_arg() {
         let f = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            state_dir_from_args(&f(&["exe", "--state-dir", "C:/proj/UserSettings/Ikat"])),
-            Some(PathBuf::from("C:/proj/UserSettings/Ikat"))
+            state_dir_from_args(&f(&["exe", "--state-dir", "C:/proj/UserSettings/Yio"])),
+            Some(PathBuf::from("C:/proj/UserSettings/Yio"))
         );
         assert_eq!(state_dir_from_args(&f(&["exe"])), None);
         assert_eq!(
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn disk_roundtrip_push_load_remove() {
-        let dir = std::env::temp_dir().join(format!("ikat_recent_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("yio_recent_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let dir = dir.as_path();
 

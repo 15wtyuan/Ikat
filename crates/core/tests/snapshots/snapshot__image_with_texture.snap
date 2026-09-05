@@ -1,5 +1,5 @@
 ---
-source: ikat_core/tests/snapshot.rs
+source: yio_core/tests/snapshot.rs
 expression: json
 ---
 [

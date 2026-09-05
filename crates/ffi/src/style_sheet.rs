@@ -7,14 +7,14 @@
 //! 缓存模式。
 
 use crate::{ffi_guard, StageHandle};
-use ikat_core::scene::node::NodeId;
+use yio_core::scene::node::NodeId;
 
 /// 注入一段运行时 CSS（UIContext.StyleSheet.Add）。css = UTF-8 字节。
 ///
-/// 返回：0 = ok（\*out_set_id 写入撤销句柄）；1 = 解析失败（ikat_stage_style_sheet_last_error
+/// 返回：0 = ok（\*out_set_id 写入撤销句柄）；1 = 解析失败（yio_stage_style_sheet_last_error
 /// 读消息/行列，句柄无效）；-1 = 基础设施错（null 句柄/无 scene/非 UTF-8）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_style_sheet_add(
+pub extern "C" fn yio_stage_style_sheet_add(
     h: *mut StageHandle,
     css: *const u8,
     css_len: usize,
@@ -29,7 +29,7 @@ pub extern "C" fn ikat_stage_style_sheet_add(
             Ok(s) => s,
             Err(_) => return -1,
         };
-        match ikat_fence::css_rules::parse_runtime_css(css) {
+        match yio_fence::css_rules::parse_runtime_css(css) {
             Ok(rules) => match sh.stage.style_sheet_add_rules(rules) {
                 Ok(id) => {
                     unsafe { *out_set_id = id };
@@ -53,7 +53,7 @@ pub extern "C" fn ikat_stage_style_sheet_add(
 
 /// 撤销一批注入规则（Add 返回句柄的 Dispose）。set_id 无效 / 基础设施错 → -1；ok → 0。
 #[no_mangle]
-pub extern "C" fn ikat_stage_style_sheet_remove(h: *mut StageHandle, set_id: u64) -> i32 {
+pub extern "C" fn yio_stage_style_sheet_remove(h: *mut StageHandle, set_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -68,7 +68,7 @@ pub extern "C" fn ikat_stage_style_sheet_remove(h: *mut StageHandle, set_id: u64
 
 /// 清空全部运行时注入规则（StyleSheet.Clear；pkg 规则不动）。ok → 0；基础设施错 → -1。
 #[no_mangle]
-pub extern "C" fn ikat_stage_style_sheet_clear(h: *mut StageHandle) -> i32 {
+pub extern "C" fn yio_stage_style_sheet_clear(h: *mut StageHandle) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -81,7 +81,7 @@ pub extern "C" fn ikat_stage_style_sheet_clear(h: *mut StageHandle) -> i32 {
 /// 读最近一次 Add 解析失败的信息（NUL 结尾 UTF-8；无失败记录返空串）。
 /// out_line/out_col 可为 null（只取消息）。返回指针由 StageHandle 拥有，下次 Add 失败前有效。
 #[no_mangle]
-pub extern "C" fn ikat_stage_style_sheet_last_error(
+pub extern "C" fn yio_stage_style_sheet_last_error(
     h: *mut StageHandle,
     out_line: *mut u32,
     out_col: *mut u32,
@@ -104,7 +104,7 @@ pub extern "C" fn ikat_stage_style_sheet_last_error(
 /// 运行时 SetVar（#11）。name/value = UTF-8 字节。name 须 `--` 前缀（custom prop 命名域）。
 /// 0 = ok；-1 = 基础设施错 / 名字非法 / 节点不 live。
 #[no_mangle]
-pub extern "C" fn ikat_stage_node_set_var(
+pub extern "C" fn yio_stage_node_set_var(
     h: *mut StageHandle,
     node: u64,
     name: *const u8,
@@ -137,7 +137,7 @@ pub extern "C" fn ikat_stage_node_set_var(
 /// 运行时 RemoveVar（#11，撤销 SetVar 条目回落 CSS 声明值）。name = UTF-8 字节。
 /// 0 = ok（含未设过 no-op）；-1 = 基础设施错 / 节点不 live。
 #[no_mangle]
-pub extern "C" fn ikat_stage_node_remove_var(
+pub extern "C" fn yio_stage_node_remove_var(
     h: *mut StageHandle,
     node: u64,
     name: *const u8,

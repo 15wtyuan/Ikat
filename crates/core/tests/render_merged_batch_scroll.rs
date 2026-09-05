@@ -6,11 +6,11 @@
 //! - 批持 anchor 平移矩阵 → 同质批（全员随 anchor 平移）滚动走 Header（只挪 GO）；
 //! - 混合批（静态 anchor + 移动成员）整批 payload hash 必变 → Full（重传 mesh）。
 
-use ikat_core::render::node::{ChangeLevel, NodePayload};
-use ikat_core::scene::dynamic::{set_node_render_hidden, set_user_transform};
-use ikat_core::scene::node::NodeId;
-use ikat_core::stage::Stage;
-use ikat_core::transform::NodeTransform;
+use yio_core::render::node::{ChangeLevel, NodePayload};
+use yio_core::scene::dynamic::{set_node_render_hidden, set_user_transform};
+use yio_core::scene::node::NodeId;
+use yio_core::stage::Stage;
+use yio_core::transform::NodeTransform;
 
 fn font_bytes() -> Vec<u8> {
     std::fs::read(format!(
@@ -61,9 +61,9 @@ fn make_stage() -> (Stage, u64, Vec<u64>) {
 
 /// 帧内找 merged 批行（≥2 quad 且 node_id ∈ 候选集——anchor 可能是 scroller 自身）。
 fn merged_row<'a>(
-    frame: &'a ikat_core::render::FrameData,
+    frame: &'a yio_core::render::FrameData,
     candidates: &[u64],
-) -> &'a ikat_core::render::node::RenderNode {
+) -> &'a yio_core::render::node::RenderNode {
     frame
         .nodes
         .iter()
@@ -233,13 +233,13 @@ fn stage_document_root_is_not_hit_target() {
     let scene = s.scene.as_ref().unwrap();
     // 内容命中：子节点区域 → 子。
     assert_eq!(
-        ikat_core::hit::hit_test(scene, (140.0, 130.0)),
+        yio_core::hit::hit_test(scene, (140.0, 130.0)),
         Some(NodeId(child.0)),
         "内容区域命中子节点"
     );
     // 空白区域：不得命中文档根（返 None）。
     assert_eq!(
-        ikat_core::hit::hit_test(scene, (400.0, 300.0)),
+        yio_core::hit::hit_test(scene, (400.0, 300.0)),
         None,
         "空白区域命中必须是 None（文档根不可命中）"
     );
@@ -251,8 +251,8 @@ fn class_rule_pointer_events_reaches_hit_test() {
     // 走 dynamic_rules → 运行时 rematch）必须落到 interaction.touchable（hit_test
     // 判据）。断链症状：规则只改 style 层，全画布根照样吞命中——多 Stage 输入路由
     // 把底层 Stage 饿死（mini-hud 实锤）。
-    use ikat_core::scene::node::NodeId;
-    use ikat_core::style::dynamic::{
+    use yio_core::scene::node::NodeId;
+    use yio_core::style::dynamic::{
         Combinator, Compound, Declaration, DynamicRule, ParsedSelector, ScopedRule, Specificity,
     };
     let mut s = Stage::new((800.0, 600.0)).unwrap();
@@ -299,12 +299,12 @@ fn class_rule_pointer_events_reaches_hit_test() {
     s.append_child(root, child).unwrap();
     {
         let sc = s.scene.as_mut().unwrap();
-        ikat_core::scene::dynamic::add_class(sc, child, "no-hit").unwrap();
+        yio_core::scene::dynamic::add_class(sc, child, "no-hit").unwrap();
     }
     let _ = s.tick_and_render(); // rematch 跑一轮：pointer-events → style → interaction
     let scene = s.scene.as_ref().unwrap();
     assert_eq!(
-        ikat_core::hit::hit_test(scene, (400.0, 300.0)),
+        yio_core::hit::hit_test(scene, (400.0, 300.0)),
         None,
         "类规则 pointer-events:none 必须让该节点退出命中（rematch 回写 interaction）"
     );

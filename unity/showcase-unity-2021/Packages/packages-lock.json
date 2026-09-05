@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.ikat.unity": {
+    "com.yio.unity": {
       "version": "file:../../package",
       "depth": 0,
       "source": "local",

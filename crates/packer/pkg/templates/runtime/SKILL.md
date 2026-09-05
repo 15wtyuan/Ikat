@@ -1,38 +1,38 @@
 ---
-name: ikat-runtime
+name: yio-runtime
 description: |
-  Integrate Ikat UI into Unity game code — mount the stage driver,
+  Integrate Yio UI into Unity game code — mount the stage driver,
   load build artifacts, instantiate pages, look up typed nodes by id,
   wire control events, drive UI from gameplay, gate 3D input on the UI,
   embed 3D content in UI, pin UI to the 3D world (world anchors for
   damage numbers / health bars, world-space mounts for panels attached
   to 3D transforms), and run multiple UI stages in one scene. Use for
-  ANY C#/Unity task that touches IkatStageDriver, pages, nodes, or UI
+  ANY C#/Unity task that touches YioStageDriver, pages, nodes, or UI
   events; also when adding or renaming element ids in HTML (ids are the
   C# API surface).
 ---
 
-# Ikat Runtime Integration (Unity)
+# Yio Runtime Integration (Unity)
 
 Wire the built UI into the game: mount, instantiate, program, interop
 with 3D. The design side (HTML/CSS fence authoring) is the
-`ikat-editor` skill; workspace/build operations are the `ikat` skill.
+`yio-editor` skill; workspace/build operations are the `yio` skill.
 
 ## Prerequisites
 
-- The Ikat Unity package is installed, version-matched to the `ikat`
+- The Yio Unity package is installed, version-matched to the `yio`
   CLI that built the artifacts (both come from the same release).
-- Build artifacts exist and are current: read `.ikat/config.json` at the
+- Build artifacts exist and are current: read `.yio/config.json` at the
   session root — `ui_root` locates the workspace, `unity_root` (if
-  present) is where `ikat build` delivered `Assets/Bundles` (package
-  picker: `ikat.runtime.json`, `ui/*.pkg.bin`, `atlas/*`, `fonts/*`).
+  present) is where `yio build` delivered `Assets/Bundles` (package
+  picker: `yio.runtime.json`, `ui/*.pkg.bin`, `atlas/*`, `fonts/*`).
   Sources changed → rebuild before debugging C#.
 - A default font was registered in the workspace, or all text renders
   blank.
 
 ## Mental model
 
-- Ikat UI is its own fullscreen camera-space layer: a dedicated
+- Yio UI is its own fullscreen camera-space layer: a dedicated
   orthographic UI camera composites with your 3D camera by depth. No uGUI
   Canvas, no URP overlay stack, no EventSystem. (World-attached UI —
   anchors and mounts — builds on top of this layer; see UI ↔ 3D
@@ -40,27 +40,27 @@ with 3D. The design side (HTML/CSS fence authoring) is the
 - The UI scene is a typed C# object tree (`Container`, `Button`,
   `Slider`, `ListView`, ...). Game code reads and drives that tree; it
   never touches meshes or materials.
-- One MonoBehaviour (`IkatStageDriver`) owns the frame pipeline — input →
+- One MonoBehaviour (`YioStageDriver`) owns the frame pipeline — input →
   UI logic → layout/render → mesh mirror → events. You never call a
   per-frame update yourself.
 
 ## Required workflow
 
-1. **Mount.** Create a GameObject with `IkatStageDriver` +
-   `IkatInputCollector`. Design resolution and adaptation mode come from
-   `ikat.runtime.json` (`design` + `match_mode`, set in the workspace via
-   `ikat design`); the Inspector Design Size / Adapt Mode fields are only
+1. **Mount.** Create a GameObject with `YioStageDriver` +
+   `YioInputCollector`. Design resolution and adaptation mode come from
+   `yio.runtime.json` (`design` + `match_mode`, set in the workspace via
+   `yio design`); the Inspector Design Size / Adapt Mode fields are only
    the fallback when the manifest omits them. UI Camera empty (driver
-   creates `IkatUICamera`) or your own; Safe Area for notch-safe
+   creates `YioUICamera`) or your own; Safe Area for notch-safe
    letterboxing. Your main 3D camera renders first; the UI camera after
-   (higher depth, clear flags = Depth only). Ikat renders on Unity's
+   (higher depth, clear flags = Depth only). Yio renders on Unity's
    **built-in `UI` layer (5)** — a fixed, non-renameable layer, so it can
    never collide with your project's user layers (layers 6–31 are
    user-definable; a framework squatting on one of those is a design
    bug). Standard Unity practice applies: exclude
    the `UI` layer from your 3D cameras' culling masks, or UI quads get
    drawn twice.
-2. **Verify loading.** On startup the driver reads `ikat.runtime.json`
+2. **Verify loading.** On startup the driver reads `yio.runtime.json`
    from the product root and loads everything it lists; missing pieces
    log Console warnings naming the file. Product root: Inspector value →
    in Editor `Assets/Bundles` → in players `Application.streamingAssetsPath`
@@ -69,14 +69,14 @@ with 3D. The design side (HTML/CSS fence authoring) is the
    `driver.Instantiate("<package>", "<page-stem>")` — page stem = HTML
    filename without `.html` (`"game", "main"` ← `ui/game/main.html`).
    Returns the page root `Container`; `null` + console error = package
-   not in `ikat.runtime.json` or wrong stem.
+   not in `yio.runtime.json` or wrong stem.
 4. **Look up nodes by id and wire events.**
 5. **Drive UI from gameplay** where the game state leads.
 6. **Gate 3D input on the UI** (`IsPointerOnUI`); embed 3D in UI via
    `BindNativeHost` where needed.
 7. **Verify in Play Mode** (unity-cli-loop skills: screenshot, simulated
    input). F8 during Play dumps core + mirror state to the Console and a
-   `ikat-dump-*.txt` next to `Assets/` — the first evidence when a page
+   `yio-dump-*.txt` next to `Assets/` — the first evidence when a page
    looks wrong (it separates "core computed wrong layout" from "Unity
    rendered it wrong").
 
@@ -85,18 +85,18 @@ The driver is `[ExecuteAlways]` — pages also render in Edit Mode.
 ## Programming the tree
 
 ```csharp
-using Ikat;
+using Yio;
 
 public class GameUI : MonoBehaviour
 {
-    IkatStageDriver _driver;
+    YioStageDriver _driver;
     Container _page;
 
     void Start()
     {
-        _driver = GetComponent<IkatStageDriver>();
+        _driver = GetComponent<YioStageDriver>();
         _page = _driver.Instantiate("game", "main");
-        if (_page == null) { Debug.LogError("page failed to mount (package not in ikat.runtime.json? wrong stem?)"); return; }
+        if (_page == null) { Debug.LogError("page failed to mount (package not in yio.runtime.json? wrong stem?)"); return; }
 
         _page.Get<Button>("btn-start").Clicked += OnStart;
     }
@@ -108,7 +108,7 @@ public class GameUI : MonoBehaviour
 
 - **The id contract.** `id` attributes in the workspace HTML are the API
   surface game code programs against — adding/renaming an id is a
-  cross-side change (tell the `ikat-editor` side). `Get<T>(id)` throws
+  cross-side change (tell the `yio-editor` side). `Get<T>(id)` throws
   `UIContractException` on miss; `TryGet<T>(id, out var n)` for optional
   elements. Lookup is scoped to the current component instance — it does
   not cross nested custom-component or list-item boundaries; reach into
@@ -207,8 +207,8 @@ line.
 ## Resolution adaptation
 
 Design resolution and adaptation mode are workspace-level config
-(`ikat design 1920x1080 --match fit-width` in the UI workspace; `ikat
-build` bakes both into `ikat.runtime.json`, the driver reads them at
+(`yio design 1920x1080 --match fit-width` in the UI workspace; `yio
+build` bakes both into `yio.runtime.json`, the driver reads them at
 startup). Three modes:
 
 - `letterbox` (default) — contain: the canvas stays at the design
@@ -225,12 +225,12 @@ startup). Three modes:
 
 Runtime resolution/rotation changes are handled automatically (the
 driver recomputes on screen or safe-area change and calls
-`IkatHost.SetRootSize`). Safe area: fit modes size the canvas from the
+`YioHost.SetRootSize`). Safe area: fit modes size the canvas from the
 safe rect (content never flows into a notch); letterbox fits inside it.
 
 ## UI ↔ 3D interop
 
-- **Input gating.** Ikat never consumes or blocks input — your 3D
+- **Input gating.** Yio never consumes or blocks input — your 3D
   picking must gate itself:
 
   ```csharp
@@ -271,12 +271,12 @@ safe rect (content never flows into a notch); letterbox fits inside it.
 
 ## Serving artifacts from AssetBundles / Addressables
 
-Subclass `IkatStageDriver` and override the virtual loading hooks
+Subclass `YioStageDriver` and override the virtual loading hooks
 (defaults read plain files under the product root):
 
 | Hook | Loads | Example argument |
 |---|---|---|
-| `LoadTextFile(relPath)` | manifests (text) | `ikat.runtime.json`, `atlas/ui.atlas.json` |
+| `LoadTextFile(relPath)` | manifests (text) | `yio.runtime.json`, `atlas/ui.atlas.json` |
 | `LoadBytes(relPath)` | raw bytes | `ui/game.pkg.bin` |
 | `LoadPackageBytes(name)` | a package (default: `LoadBytes("ui/{name}.pkg.bin")`) | `game` |
 | `LoadTexture(relPath)` | atlas page PNG | `atlas/ui.png` |
@@ -312,22 +312,22 @@ _driver.SetCursorTexture(1u, handTexture, new Vector2(12f, 1f));
 
 | Symptom | Cause → fix |
 |---|---|
-| `Instantiate` returns null | package not listed in `ikat.runtime.json` or wrong stem → rebuild workspace; check package name |
-| Page blank | artifacts stale or font missing → `ikat build`; register a default font |
+| `Instantiate` returns null | package not listed in `yio.runtime.json` or wrong stem → rebuild workspace; check package name |
+| Page blank | artifacts stale or font missing → `yio build`; register a default font |
 | `Get<T>` throws `UIContractException` | id missing/renamed in HTML, or lookup crossing a component boundary → fix the contract (both sides), or go through the host node |
 | Text renders but looks wrong | font fallback missing glyphs → register a `--fallback` font |
-| Tofu boxes (□) in text | the Console logs every missing glyph as `[Ikat] missing glyphs (tofu): font-family "X" has no glyph for 'c' (U+....)` — fix by registering a font containing it with `--fallback`, or change the text |
-| Clicks pass through UI to 3D | expected — Ikat never blocks input → gate your raycasts on `IsPointerOnUI` |
-| Page looks wrong at runtime | press F8, read the `[Scene tree]` section first (one line per node with rect, text `font/lh/lines`, scroll `viewport/content/overlap`) → `lh=NN.00x` with a big NN means a unitless line-height multiplier; `ov 0x0` on a scroll container means it has nothing to scroll. If core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue. `IkatHost.DumpSceneTree("id-or-class")` prints just the matching subtrees |
-| `[Ikat] wheel ignored: node N ... no overflow to scroll` | the wheel landed on a container whose content does not overflow (`overlap=0`) — fix content sizing or remove `overflow:auto` (editor/development builds only) |
+| Tofu boxes (□) in text | the Console logs every missing glyph as `[Yio] missing glyphs (tofu): font-family "X" has no glyph for 'c' (U+....)` — fix by registering a font containing it with `--fallback`, or change the text |
+| Clicks pass through UI to 3D | expected — Yio never blocks input → gate your raycasts on `IsPointerOnUI` |
+| Page looks wrong at runtime | press F8, read the `[Scene tree]` section first (one line per node with rect, text `font/lh/lines`, scroll `viewport/content/overlap`) → `lh=NN.00x` with a big NN means a unitless line-height multiplier; `ov 0x0` on a scroll container means it has nothing to scroll. If core dump is wrong it's a workspace/layout issue, if only Unity differs it's a backend issue. `YioHost.DumpSceneTree("id-or-class")` prints just the matching subtrees |
+| `[Yio] wheel ignored: node N ... no overflow to scroll` | the wheel landed on a container whose content does not overflow (`overlap=0`) — fix content sizing or remove `overflow:auto` (editor/development builds only) |
 
 ## Reference consumer
 
 - **Full API contract** (every node/control/event/list/animation
   signature and invariant): read `references/api-reference.md` next to
   this file — it mirrors the shipped C# signatures, so you never need
-  the Ikat repository.
-- **Complete working example**: `unity/showcase-unity/` in the Ikat
+  the Yio repository.
+- **Complete working example**: `unity/showcase-unity/` in the Yio
   repository (driver mounted, every showcase page wired from
   `ShowcaseRunner.cs` — including the world-anchor / mount / multi-stage
   / stress demo pages). Optional copy-paste source, not required

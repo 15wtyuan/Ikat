@@ -1,8 +1,8 @@
 // Normalize a Unity PlayMode DumpSceneJson export into the flat rect shape
 // diff.mjs consumes ({domIndex, tag, id, classes[], x, y, w, h}).
 //
-// Source shape (core dump_scene_json, via IkatHost.DumpSceneJson /
-// IkatBridge.DumpScene() on the Unity machine):
+// Source shape (core dump_scene_json, via YioHost.DumpSceneJson /
+// YioBridge.DumpScene() on the Unity machine):
 //   {node_id, parent, tag, id, classes: "a b" (space-joined string),
 //    kind, layout: {x,y,w,h}, world_matrix[6], anim_tr, anim_op, visible}
 //
@@ -23,7 +23,7 @@ if (!inPath || !outPath) {
   process.exit(2);
 }
 
-// kind→tag 表来自 Rust 单源导出（semantic-tags.json，ikat_pkg 测试钉新鲜度，
+// kind→tag 表来自 Rust 单源导出（semantic-tags.json，yio_pkg 测试钉新鲜度，
 // 真相源 = core kind_to_html_tag / ALL_NODE_KINDS）。
 const KIND_TAG = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'semantic-tags.json'), 'utf8'),

@@ -6,7 +6,7 @@
 //! 类型模型（\ParsedSelector\/\Compound\/\Combinator\/\Specificity\）+ \Declaration\（CSS 声明）+
 //! \compound_matches_node\（运行时 compound 匹配）+ 动态规则匹配全部无条件编译——
 //! bincode 反序列化的 \.pkg.bin\ 就是这些结构，runtime 不再 parse 选择器，直接用反序列化结构。
-//! 字符串 → 这些结构的解析器在 fence crate（\ikat_fence\）。
+//! 字符串 → 这些结构的解析器在 fence crate（\yio_fence\）。
 
 use serde::{Deserialize, Serialize};
 

@@ -1,5 +1,5 @@
 //! FFI 导出层（§14.1 csbindgen）：extern "C" 薄包装，opaque Stage 句柄。
-//! 命名前缀 `ikat_`。按职责拆成子模块（stage/frame/events/node_getters/
+//! 命名前缀 `yio_`。按职责拆成子模块（stage/frame/events/node_getters/
 //! node_setters/controls/text/scroll/animation/list/resources/style_sheet），csbindgen 扫描
 //! lib.rs + 各含 extern fn 的模块文件生成 C# 绑定（文件清单见 build.rs，与
 //! crates/xtask/src/bindings.rs 的清单互为镜像，改清单两处同步）。
@@ -49,10 +49,10 @@ pub use stage::*;
 pub use style_sheet::*;
 pub use text::*;
 
-use ikat_core::stage::Stage;
 use std::ffi::CString;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU32, Ordering};
+use yio_core::stage::Stage;
 
 /// FFI panic 兜底计数：guard 捕获的 panic 累计（0 = 从未）。
 static FFI_PANIC_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -61,7 +61,7 @@ static FFI_PANIC_COUNT: AtomicU32 = AtomicU32::new(0);
 /// abort 宿主进程——本库的宿主是 Unity 编辑器/玩家，不可接受），因此在函数体内
 /// 捕获：计数、返回调用方约定的错误哨兵。panic 消息由默认 panic hook 先行打到
 /// stderr。取舍：panic 点之后 Stage 可能处于半修改状态，继续运行不保证一致——
-/// 但比崩宿主可诊断；后端每帧读 `ikat_ffi_panic_count`，变化即告警。
+/// 但比崩宿主可诊断；后端每帧读 `yio_ffi_panic_count`，变化即告警。
 fn ffi_guard<R>(fallback: R, f: impl FnOnce() -> R) -> R {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => v,
@@ -74,7 +74,7 @@ fn ffi_guard<R>(fallback: R, f: impl FnOnce() -> R) -> R {
 
 /// 读 FFI panic 兜底累计计数（后端每帧轮询，变化即有 Rust panic 被吞）。
 #[no_mangle]
-pub extern "C" fn ikat_ffi_panic_count() -> u32 {
+pub extern "C" fn yio_ffi_panic_count() -> u32 {
     FFI_PANIC_COUNT.load(Ordering::Relaxed)
 }
 
@@ -83,7 +83,7 @@ pub extern "C" fn ikat_ffi_panic_count() -> u32 {
 /// 返回 `*const u8`（csbindgen 映射为 C# `byte*`）；CString::as_ptr 给的是
 /// `*const c_char`（i8），这里 cast 对齐签名。OnceLock 缓存，避免每次分配+泄漏。
 #[no_mangle]
-pub extern "C" fn ikat_version() -> *const u8 {
+pub extern "C" fn yio_version() -> *const u8 {
     ffi_guard(std::ptr::null(), || {
         static VERSION: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
         VERSION

@@ -494,7 +494,7 @@ impl FontTable {
             .map(|(family, ch)| {
                 format!(
                     "font-family \"{family}\" has no glyph for '{ch}' (U+{:04X}); \
-fallback chain exhausted, drawn as tofu box. Fix: `ikat font add` a font \
+fallback chain exhausted, drawn as tofu box. Fix: `yio font add` a font \
 containing it with --fallback, or replace the character.",
                     ch as u32
                 )

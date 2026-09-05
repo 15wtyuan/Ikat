@@ -18,16 +18,15 @@
 
 #[allow(unused_imports)]
 // BlendMode/MaskContext/NodePayload/EffectBlock 仅测试 helper 经 super::* 用。
-use ikat_core::render::node::{
+use yio_core::render::node::{
     BlendMode, ChangeLevel, EffectBlock, MaskContext, NodePayload, RenderNode,
 };
-use ikat_core::render::FrameData;
-use ikat_core::scene::node::Scene;
-use ikat_core::transform;
+use yio_core::render::FrameData;
+use yio_core::scene::node::Scene;
+use yio_core::transform;
 
-/// magic = "LOOM" little-endian。LoomGUI 时代烙印的磁盘字节，非品牌面——不动它，
-/// 改名只换代码符号不换 ABI 兼容的魔数与 pkg 格式身份。
-const MAGIC: u32 = 0x4D4F4F4C;
+/// magic = "YIO1" little-endian（0x59 0x49 0x4F 0x31）。
+const MAGIC: u32 = 0x314F4959;
 pub(crate) const VERSION: u32 = 15; // v15：列级增量（Skip 段 + fat arena + mount_id 列）
 
 /// lean 列名 + 每元素字节数（21 列，Skip 之外的全部行；顺序 = header col_offset 序）。
@@ -184,12 +183,12 @@ pub fn build_blob(frame: &FrameData, scene: &Scene) -> Vec<u8> {
             None => (0.0, 0.0, [(0.0, 0.0); 4]),
         };
         let (kind, cx, cy, r, poly_count, poly_off) = match &c.shape {
-            ikat_core::style::resolved::ClipShape::None => (0u32, 0.0, 0.0, 0.0, 0u32, 0u32),
-            ikat_core::style::resolved::ClipShape::Circle { cx, cy, r } => {
+            yio_core::style::resolved::ClipShape::None => (0u32, 0.0, 0.0, 0.0, 0u32, 0u32),
+            yio_core::style::resolved::ClipShape::Circle { cx, cy, r } => {
                 flags |= 0b100;
                 (0u32, *cx, *cy, *r, 0u32, 0u32)
             }
-            ikat_core::style::resolved::ClipShape::Polygon { points } => {
+            yio_core::style::resolved::ClipShape::Polygon { points } => {
                 flags |= 0b100;
                 let off = poly_arena.len() as u32;
                 for &(x, y) in points {

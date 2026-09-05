@@ -18,14 +18,14 @@ use crate::bridge::{
     validate_template_children,
 };
 use crate::diag::BuildFailure;
-use ikat_core::asset::TemplateNode;
-use ikat_core::scene::{KeyframesRule, NodeKind};
-use ikat_core::style::dynamic::DynamicRuleTable;
-use ikat_fence::ir::{IrNodeKind, IrTree};
-use ikat_fence::schema::tag::SemanticKind;
-use ikat_fence::ParsedTemplate;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use yio_core::asset::TemplateNode;
+use yio_core::scene::{KeyframesRule, NodeKind};
+use yio_core::style::dynamic::DynamicRuleTable;
+use yio_fence::ir::{IrNodeKind, IrTree};
+use yio_fence::schema::tag::SemanticKind;
+use yio_fence::ParsedTemplate;
 
 /// 一个注册组件：fence 已解析的模板 + 规则/动画 + 归一化 sprite 引用。
 pub struct ComponentDef {
@@ -131,11 +131,11 @@ impl ComponentRegistry {
             ));
             return;
         }
-        let parsed = ikat_fence::parse_template_with_css(src, html_rel, load_css);
+        let parsed = yio_fence::parse_template_with_css(src, html_rel, load_css);
         let has_error = parsed
             .diagnostics
             .iter()
-            .any(|d| d.severity == ikat_fence::diagnostic::Severity::Error);
+            .any(|d| d.severity == yio_fence::diagnostic::Severity::Error);
         diagnostics.extend(
             parsed
                 .diagnostics
@@ -265,7 +265,7 @@ pub struct ExpansionOutput {
 }
 
 /// slot 分配表：slot 名（None = 默认 slot）→ host light 子的 IrNodeId 列表（文档序）。
-type SlotAssignment = HashMap<Option<String>, Vec<ikat_fence::ir::IrNodeId>>;
+type SlotAssignment = HashMap<Option<String>, Vec<yio_fence::ir::IrNodeId>>;
 
 struct Walker<'a> {
     registry: &'a ComponentRegistry,
@@ -356,7 +356,7 @@ impl<'a> Walker<'a> {
         &mut self,
         parsed: &ParsedTemplate,
         html_rel: &str,
-        nid: ikat_fence::ir::IrNodeId,
+        nid: yio_fence::ir::IrNodeId,
         parent_tpl: Option<usize>,
         in_projection: bool,
     ) -> Result<(), String> {
@@ -422,7 +422,7 @@ impl<'a> Walker<'a> {
         comp_rel: &str,
         host_parsed: &ParsedTemplate,
         host_rel: &str,
-        nid: ikat_fence::ir::IrNodeId,
+        nid: yio_fence::ir::IrNodeId,
         parent_tpl: Option<usize>,
         assignment: &mut SlotAssignment,
         in_slot_fallback: bool,
@@ -494,7 +494,7 @@ impl<'a> Walker<'a> {
         &mut self,
         page: &ParsedTemplate,
         page_rel: &str,
-        nid: ikat_fence::ir::IrNodeId,
+        nid: yio_fence::ir::IrNodeId,
         parent_tpl: Option<usize>,
     ) -> Result<(), String> {
         let node = &page.tree.nodes[nid.0];
@@ -610,7 +610,7 @@ impl<'a> Walker<'a> {
         &mut self,
         parsed: &ParsedTemplate,
         html_rel: &str,
-        nid: ikat_fence::ir::IrNodeId,
+        nid: yio_fence::ir::IrNodeId,
         parent_tpl: Option<usize>,
         in_scope_frame: bool,
     ) -> Result<usize, String> {
@@ -687,7 +687,7 @@ impl<'a> Walker<'a> {
     fn emit_text(
         &mut self,
         parsed: &ParsedTemplate,
-        nid: ikat_fence::ir::IrNodeId,
+        nid: yio_fence::ir::IrNodeId,
         text: String,
         parent_tpl: Option<usize>,
     ) {
@@ -717,12 +717,12 @@ impl<'a> Walker<'a> {
 
 /// 扫组件模板里的 slot 元素：名字（None = 默认 slot）→ 任意一个 IrNodeId（校验存在性用，
 /// 拼接由 walk 驱动）。不支持嵌套 slot（fallback 里的 slot 由 walk 阶段报错）。
-fn scan_slots(tree: &IrTree) -> Result<HashMap<Option<String>, ikat_fence::ir::IrNodeId>, String> {
+fn scan_slots(tree: &IrTree) -> Result<HashMap<Option<String>, yio_fence::ir::IrNodeId>, String> {
     let mut out = HashMap::new();
     fn rec(
         tree: &IrTree,
-        nid: ikat_fence::ir::IrNodeId,
-        out: &mut HashMap<Option<String>, ikat_fence::ir::IrNodeId>,
+        nid: yio_fence::ir::IrNodeId,
+        out: &mut HashMap<Option<String>, yio_fence::ir::IrNodeId>,
     ) -> Result<(), String> {
         let node = &tree.nodes[nid.0];
         if let IrNodeKind::Element(el) = &node.kind {
@@ -847,7 +847,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card id="c1"><button slot="action" style="display:block">装备</button></game-item-card></div>"#,
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        let pkg = yio_core::asset::read_package(&pr.bytes).unwrap();
         let comp = pkg.components.get("page").unwrap();
         // host = root 的第一个子
         let host = &comp.nodes[1];
@@ -885,7 +885,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card></game-item-card></div>"#,
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        let pkg = yio_core::asset::read_package(&pr.bytes).unwrap();
         let comp = pkg.components.get("page").unwrap();
         let has_fallback = comp
             .nodes
@@ -898,7 +898,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card><span slot="title">我的卡</span></game-item-card></div>"#,
         );
-        let pkg2 = ikat_core::asset::read_package(&pr2.bytes).unwrap();
+        let pkg2 = yio_core::asset::read_package(&pr2.bytes).unwrap();
         let comp2 = pkg2.components.get("page").unwrap();
         assert!(
             !comp2
@@ -922,7 +922,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><plain-box><span>内容A</span></plain-box></div>"#,
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        let pkg = yio_core::asset::read_package(&pr.bytes).unwrap();
         let comp = pkg.components.get("page").unwrap();
         assert!(
             comp.nodes.iter().any(|n| n.kind == NodeKind::TextElement),
@@ -1014,7 +1014,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><card-row></card-row></div>"#,
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        let pkg = yio_core::asset::read_package(&pr.bytes).unwrap();
         let comp = pkg.components.get("page").unwrap();
         let hosts = comp
             .nodes
@@ -1170,7 +1170,7 @@ mod tests {
             "内容一致的重复 keyframes 不应告警: {:?}",
             pr.warnings
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        let pkg = yio_core::asset::read_package(&pr.bytes).unwrap();
         let comp = pkg.components.get("page").unwrap();
         assert_eq!(
             comp.keyframes.iter().filter(|k| k.name == "fade").count(),
@@ -1196,7 +1196,7 @@ mod tests {
             r#"<style>@keyframes fade { from { opacity: 1 } to { opacity: 0 } }</style>
 <div style="display:flex"><anim-card><span>hi</span></anim-card></div>"#,
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).unwrap();
+        let pkg = yio_core::asset::read_package(&pr.bytes).unwrap();
         let comp = pkg.components.get("page").unwrap();
         let names: Vec<&str> = comp.keyframes.iter().map(|k| k.name.as_str()).collect();
         assert!(names.contains(&"fade") && names.contains(&"pulse"));
@@ -1210,7 +1210,7 @@ mod tests {
         let to_opacity = fade
             .stops
             .iter()
-            .find(|s| matches!(s.selector, ikat_core::scene::KeyframeStopSelector::To))
+            .find(|s| matches!(s.selector, yio_core::scene::KeyframeStopSelector::To))
             .and_then(|s| s.props.opacity);
         assert_eq!(to_opacity, Some(0.0), "host fade wins (to opacity 0)");
         // 同名碰撞 warning
@@ -1238,7 +1238,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><game-item-card id="card"><span slot="title">标题</span></game-item-card></div>"#,
         );
-        let mut stage = ikat_core::stage::Stage::new((1920.0, 1080.0)).unwrap();
+        let mut stage = yio_core::stage::Stage::new((1920.0, 1080.0)).unwrap();
         stage.create_root("div", "").unwrap();
         stage.load_package("bag", &pr.bytes).unwrap();
         let root = stage.instantiate("bag", "page").unwrap();
@@ -1276,7 +1276,7 @@ mod tests {
             &reg,
             r#"<div style="display:flex"><tip-panel><div slot="desc" id="row-atk">攻 13</div><div slot="desc" id="row-def">防 7</div></tip-panel></div>"#,
         );
-        let mut stage = ikat_core::stage::Stage::new((1920.0, 1080.0)).unwrap();
+        let mut stage = yio_core::stage::Stage::new((1920.0, 1080.0)).unwrap();
         let font_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../core/tests/fixtures/DejaVuSans.ttf"
@@ -1289,7 +1289,7 @@ mod tests {
         let inst = stage.instantiate("bag", "page").unwrap();
         {
             let scene = stage.scene.as_mut().unwrap();
-            ikat_core::scene::dynamic::append_child(scene, root, inst).unwrap();
+            yio_core::scene::dynamic::append_child(scene, root, inst).unwrap();
         }
         let _frame = stage.tick_and_render();
         let scene = stage.scene.as_ref().unwrap();
@@ -1330,7 +1330,7 @@ mod tests {
   <game-item-card draggable="true" id="host-drag"></game-item-card>
 </div>"#,
         );
-        let pkg = ikat_core::asset::read_package(&pr.bytes).expect("read back");
+        let pkg = yio_core::asset::read_package(&pr.bytes).expect("read back");
         let find = |id: &str| -> Option<bool> {
             pkg.components.values().find_map(|c| {
                 c.nodes

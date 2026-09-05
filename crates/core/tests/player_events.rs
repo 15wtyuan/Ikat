@@ -2,25 +2,25 @@
 //!
 //! 覆盖：START（首帧一次）/ END（完成转变帧一次）/ ITERATION（迭代边界；count=1 完成
 //! 只发 END）/ KEY（OnKey 百分比跨越，同 iteration 防重，下一 iteration 重新可发）/
-//! HOOK（@ikat-hook stop 跨越）；reverse/delay 首帧不误发；OnKey 与同百分点 hook 独立触发；
+//! HOOK（@yio-hook stop 跨越）；reverse/delay 首帧不误发；OnKey 与同百分点 hook 独立触发；
 //! 事件 payload 的 player_key 编码可还原。
 
-use ikat_core::event::{
+use yio_core::event::{
     EVT_ANIMATION_END, EVT_ANIMATION_HOOK, EVT_ANIMATION_ITERATION, EVT_ANIMATION_KEY,
     EVT_ANIMATION_START,
 };
-use ikat_core::input::EventRecord;
-use ikat_core::scene::animation::{
+use yio_core::input::EventRecord;
+use yio_core::scene::animation::{
     player_key_from_u64, register_on_key, update_all, KeyframePlayer, PlayerKey,
 };
-use ikat_core::scene::{
+use yio_core::scene::{
     AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, Node, NodeId, NodeKind,
     PlayerPlayState, Scene,
 };
-use ikat_core::style::resolved::{
+use yio_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
-use ikat_core::tween::Ease;
+use yio_core::tween::Ease;
 
 /// 默认 spec：fadeIn .4s 单次迭代 Normal None Linear Running。
 fn spec() -> AnimationSpec {
@@ -74,7 +74,7 @@ fn opacity_fade() -> KeyframesRule {
     }
 }
 
-/// 3-stop keyframes，50% stop 带 @ikat-hook "half"。
+/// 3-stop keyframes，50% stop 带 @yio-hook "half"。
 fn hook_fade() -> KeyframesRule {
     KeyframesRule {
         name: "fadeIn".into(),
@@ -242,7 +242,7 @@ fn key_event_on_percent_crossing() {
     assert_eq!(name_of(&scene, keys[0]), "fadeIn");
 }
 
-/// 测 5：@ikat-hook "half" 在 50% stop——跨越 0.5 时 emit HOOK{name:"half"}。
+/// 测 5：@yio-hook "half" 在 50% stop——跨越 0.5 时 emit HOOK{name:"half"}。
 #[test]
 fn hook_event_on_stop_crossing() {
     let (mut scene, node) = scene_with_1_node();

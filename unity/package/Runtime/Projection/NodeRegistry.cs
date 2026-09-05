@@ -5,7 +5,7 @@
 // 兑现本不变量，且防 GC 回收（订阅委托目标强引用节点，节点再被业务持有很常见）。
 //
 // 攒批 flush：StyleMirror setter / NodeTransform.Store 标脏后把自己注册进本 registry
-// 的 dirty 集合；帧末（IkatHost.Step 的 flush seam，或显式 UIContext.FlushPendingWrites）
+// 的 dirty 集合；帧末（YioHost.Step 的 flush seam，或显式 UIContext.FlushPendingWrites）
 // 一次性遍历 dirty 集合调 FlushInline / FlushTransform，清脏 + 清集合。避免每帧扫全部节点找脏。
 //
 // 生命周期：GetOrCreate 造 + 缓存；Dispose 时主动 Remove（含 dirty 集合 evict，防悬挂引用）。
@@ -13,7 +13,7 @@
 
 using System.Collections.Generic;
 
-namespace Ikat
+namespace Yio
 {
     /// <summary>
     /// 投影层内部：NodeId(u32) → typed Node 的强引用身份缓存 + 攒批 dirty 集合。
@@ -62,7 +62,7 @@ namespace Ikat
 
         /// <summary>
         /// 帧末 flush 所有脏 StyleMirror：遍历 dirty 集合调 FlushInline（重建 CSS 串送 set_inline_override），
-        /// 清 StyleMirror._dirty + 清集合。IkatHost.Step flush seam 调，或显式 UIContext.FlushPendingWrites。
+        /// 清 StyleMirror._dirty + 清集合。YioHost.Step flush seam 调，或显式 UIContext.FlushPendingWrites。
         /// </summary>
         internal void FlushDirtyStyles()
         {

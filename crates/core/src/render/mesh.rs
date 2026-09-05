@@ -389,7 +389,7 @@ pub fn nine_slice(
     (verts, uvs, colors, indices)
 }
 
-/// 九宫格 + 圆角共存 mesh（fgui 无现成，Ikat 自设计）。
+/// 九宫格 + 圆角共存 mesh（fgui 无现成，Yio 自设计）。
 ///
 /// - radius 全 0 → 退化 nine_slice（方角）。
 /// - 有 radius → 四角圆弧扇（**纯几何圆角，无外角顶点 / 无边三角**，照 rounded_rect 语义：

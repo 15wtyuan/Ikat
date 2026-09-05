@@ -1,17 +1,17 @@
 //! IrTree → core TemplateNode 桥。
 //! fence parse_template 停在 IrTree；本模块是第一处把 IrTree 翻译成 core 打包结构的代码。
 
-use ikat_core::asset::{ControlInit, EditInit, TemplateNode};
-use ikat_core::scene::{
+use yio_core::asset::{ControlInit, EditInit, TemplateNode};
+use yio_core::scene::{
     AnimLen, AnimatableProps, KeyframeStopSelector, KeyframesRule, LenDomain, NodeKind,
 };
-use ikat_core::style::mapping::{parse_box_shadow, parse_color, parse_ease, parse_transform_trs};
-use ikat_fence::css_rules::{
+use yio_core::style::mapping::{parse_box_shadow, parse_color, parse_ease, parse_transform_trs};
+use yio_fence::css_rules::{
     KeyframeStopSelector as FenceKeyframeStopSelector, KeyframesRule as FenceKeyframesRule,
 };
-use ikat_fence::ir::{IrElement, IrNodeKind, IrTree};
-use ikat_fence::schema::tag::SemanticKind;
-use ikat_fence::ParsedTemplate;
+use yio_fence::ir::{IrElement, IrNodeKind, IrTree};
+use yio_fence::schema::tag::SemanticKind;
+use yio_fence::ParsedTemplate;
 
 /// 把一个组件 HTML 的 ParsedTemplate 翻译成 TemplateNode 树。
 ///
@@ -172,7 +172,7 @@ pub fn translate_keyframes(fence_kfs: &[FenceKeyframesRule]) -> Vec<KeyframesRul
                             _ => {}
                         }
                     }
-                    ikat_core::scene::KeyframeStop {
+                    yio_core::scene::KeyframeStop {
                         selector: match fence_stop.selector {
                             FenceKeyframeStopSelector::From => KeyframeStopSelector::From,
                             FenceKeyframeStopSelector::To => KeyframeStopSelector::To,
@@ -598,7 +598,7 @@ mod tests {
     use super::*;
 
     fn bridged(html: &str) -> Vec<TemplateNode> {
-        let parsed = ikat_fence::parse_template(html, "test.html");
+        let parsed = yio_fence::parse_template(html, "test.html");
         assert!(
             parsed.diagnostics.is_empty(),
             "diags: {:?}",
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn template_root_not_listitem_errors() {
-        let parsed = ikat_fence::parse_template(
+        let parsed = yio_fence::parse_template(
             r#"<div role="list"><template><div>x</div></template></div>"#,
             "test.html",
         );
@@ -655,7 +655,7 @@ mod tests {
     fn template_root_role_listitem_ok() {
         // role 驱动 ListView：作者写 <div role=list> > template > <div role=listitem>。
         // validate_template_children 按 semantic（ListItem）判定，不挑字面 tag。
-        let parsed = ikat_fence::parse_template(
+        let parsed = yio_fence::parse_template(
             r#"<style>[role="listitem"]{background:#ccc}</style><div role="list" data-fill="3"><template><div role="listitem" class="item"><span>x</span></div></template></div>"#,
             "test.html",
         );
@@ -679,7 +679,7 @@ mod tests {
     #[test]
     fn template_with_two_listitem_errors() {
         // template 根必须恰好一个 ListItem，两个是契约违反。
-        let parsed = ikat_fence::parse_template(
+        let parsed = yio_fence::parse_template(
             r#"<div role="list"><template><div role="listitem">a</div><div role="listitem">b</div></template></div>"#,
             "test.html",
         );
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn template_with_only_text_errors() {
         // 零元素（纯文本）也拒：根必须是 ListItem。
-        let parsed = ikat_fence::parse_template(
+        let parsed = yio_fence::parse_template(
             r#"<div role="list"><template>just text</template></div>"#,
             "test.html",
         );
@@ -723,7 +723,7 @@ mod tests {
 
     #[test]
     fn multi_root_errors() {
-        let parsed = ikat_fence::parse_template(r#"<div>a</div><div>b</div>"#, "t.html");
+        let parsed = yio_fence::parse_template(r#"<div>a</div><div>b</div>"#, "t.html");
         assert!(bridge(&parsed).is_err(), "multi-root should error");
     }
 
@@ -739,7 +739,7 @@ mod tests {
         // display:none 由 fence tag schema 铺底 → render/layout 自动剪整子树。
         assert_eq!(
             nodes[1].style.display_mode,
-            ikat_core::style::resolved::DisplayMode::None
+            yio_core::style::resolved::DisplayMode::None
         );
         // 这才是真正驱动剪枝的字段：collect_display_none_subtree / taffy layout cut
         // / hit-test 全都看 taffy_style.display。display_mode 是旁路标记，无消费者。
@@ -829,7 +829,7 @@ mod tests {
             })
         );
         // 每个 tab 的 aria-controls 落到 attrs 仓（按值定位 tab，避免 DFS 序硬编码）。
-        fn attr_of<'a>(n: &'a ikat_core::asset::TemplateNode, name: &str) -> Option<&'a str> {
+        fn attr_of<'a>(n: &'a yio_core::asset::TemplateNode, name: &str) -> Option<&'a str> {
             n.attrs
                 .iter()
                 .find(|(k, _)| k == name)
@@ -882,7 +882,7 @@ mod tests {
         // treeitem 子（label 在 wrapper div 里不影响），展开态取 aria-expanded
         //（武器 true / 防具缺省 false）；leaf 恒 expanded=false（持态供指针激活
         // 目标解析——find_control_at 按控件态上溯，无态叶子会落到父 branch）。
-        let inits: Vec<&ikat_core::asset::TemplateNode> = nodes
+        let inits: Vec<&yio_core::asset::TemplateNode> = nodes
             .iter()
             .filter(|n| matches!(n.control_init, Some(ControlInit::TreeItem { .. })))
             .collect();

@@ -1,0 +1,20 @@
+{
+    "name": "Yio.Tests.PlayMode",
+    "rootNamespace": "Yio.Tests",
+    "references": [
+        "Yio.Runtime",
+        "Yio.Bindings",
+        "UnityEngine.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "autoReferenced": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ]
+}

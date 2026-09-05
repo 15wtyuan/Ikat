@@ -1,19 +1,19 @@
 using NUnit.Framework;
-using Ikat;
+using Yio;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
 
-namespace Ikat.Tests
+namespace Yio.Tests
 {
-    /// CollectKeys 新旧路径的平行键表对齐校验：KeyList（IkatKeyCode）与 NewKeyList
+    /// CollectKeys 新旧路径的平行键表对齐校验：KeyList（YioKeyCode）与 NewKeyList
     /// （InputSystem.Key）按同下标一一配对，CollectKeys 新路径轮询 NewKeyList、发码取
     /// KeyList 数值（core key_code 契约）。两表错位 = 静默发错键码（按 A 出 Tab），
     /// 编译器不查数组内容，必须有此运行时校验兜底。
     public class KeyListAlignmentTests
     {
 #if ENABLE_INPUT_SYSTEM
-        /// IkatKeyCode 名 → Key 名的仅有差异：Alpha0-9↔Digit0-9、Return↔Enter。
+        /// YioKeyCode 名 → Key 名的仅有差异：Alpha0-9↔Digit0-9、Return↔Enter。
         /// 其余白名单键两枚举同名（A..Z、Space、Escape、方向、Home/End、Backspace、
         /// Delete、Tab）。出现其它名字差异时本测试失败，逼着同步两张表。
         static string ExpectedKeyName(string keyCodeName)
@@ -28,14 +28,14 @@ namespace Ikat.Tests
         public void ParallelKeyTablesAligned()
         {
             Assert.AreEqual(
-                IkatInputCollector.KeyList.Length, IkatInputCollector.NewKeyList.Length,
+                YioInputCollector.KeyList.Length, YioInputCollector.NewKeyList.Length,
                 "KeyList 与 NewKeyList 长度不一致——两表必须同下标一一配对");
-            for (int i = 0; i < IkatInputCollector.KeyList.Length; i++)
+            for (int i = 0; i < YioInputCollector.KeyList.Length; i++)
             {
-                string expected = ExpectedKeyName(IkatInputCollector.KeyList[i].ToString());
+                string expected = ExpectedKeyName(YioInputCollector.KeyList[i].ToString());
                 Assert.AreEqual(
-                    expected, IkatInputCollector.NewKeyList[i].ToString(),
-                    $"下标 {i}：IkatKeyCode.{IkatInputCollector.KeyList[i]} 应配 Key.{expected}");
+                    expected, YioInputCollector.NewKeyList[i].ToString(),
+                    $"下标 {i}：YioKeyCode.{YioInputCollector.KeyList[i]} 应配 Key.{expected}");
             }
         }
 #endif

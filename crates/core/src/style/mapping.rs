@@ -1874,7 +1874,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             }
             true
         }
-        // Ikat 私有属性（CSS 用 ::selection 伪元素，围栏无伪元素选择器，故平铺 prop）。
+        // Yio 私有属性（CSS 用 ::selection 伪元素，围栏无伪元素选择器，故平铺 prop）。
         // None = render 回退到缺省色（selection-background 蓝半透 / selection-color 白）。
         // 不可解析色静默落 None（与 background-color 同口径，不报错）。
         "selection-background" => {
@@ -1885,7 +1885,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             style.selection_color = parse_color(value);
             true
         }
-        // Ikat 私有属性（CSS 用 ::placeholder 伪元素，围栏无伪元素选择器，故平铺 prop）。
+        // Yio 私有属性（CSS 用 ::placeholder 伪元素，围栏无伪元素选择器，故平铺 prop）。
         // None = render/layout 回退到 color 折半（对齐浏览器 ::placeholder UA 默认）。
         // 不可解析色静默落 None（与 selection-color 同口径，不报错）。
         "placeholder-color" => {
@@ -2212,7 +2212,7 @@ pub fn apply_decl(style: &mut ResolvedStyle, prop: &str, value: &str) -> bool {
             true
         }
         "font-effect" => {
-            // Ikat 私有 CSS：font-effect: glow(w color), blur(w)（逗号分隔多 effect）。
+            // Yio 私有 CSS：font-effect: glow(w color), blur(w)（逗号分隔多 effect）。
             // glow = dilate + gaussian_blur Back layer（发光晕开），无偏移（居中）。
             // blur = gaussian_blur（可分离高斯两 pass）。
             // 未知 type（非 glow/blur）→ parse_font_effect 返 None → 不 push（静默忽略）。
@@ -2541,7 +2541,7 @@ pub fn css_ease_keyword(kw: &str) -> Option<crate::tween::Ease> {
         "ease-in-out" => b(EASE_IN_OUT_BEZIER),
         "step-start" => Ease::Step { start: true },
         "step-end" => Ease::Step { start: false },
-        // ikat 超集 keyword（非标，游戏 UI 刚需；fence.md 登记）。命名照 CSS keyword 惯例
+        // yio 超集 keyword（非标，游戏 UI 刚需；fence.md 登记）。命名照 CSS keyword 惯例
         // （ease-in-back），GSAP/Unity 先验同族。
         "ease-in-back" => Ease::BackIn,
         "ease-out-back" => Ease::BackOut,
@@ -2740,7 +2740,7 @@ fn parse_one_box_shadow(s: &str) -> Option<BoxShadow> {
     })
 }
 
-/// 解析单个 Ikat 私有 font-effect：`glow(w color)` / `blur(w)`。
+/// 解析单个 Yio 私有 font-effect：`glow(w color)` / `blur(w)`。
 ///
 /// - `glow`：dilate 膨胀 + gaussian_blur 晕开，Back layer（居中），颜色可选（默认白）。
 /// - `blur`：可分离高斯两 pass。

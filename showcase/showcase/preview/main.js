@@ -1,7 +1,7 @@
-// showcase 预览模拟入口（B 层，ikat preview server 自动注入；HTML 源零引用、
+// showcase 预览模拟入口（B 层，yio preview server 自动注入；HTML 源零引用、
 // 不进打包）。
 //
-// 分层契约（#92，A 层 = /ikat-preview/lib/boot.js 由 server 恒注入先行）：
+// 分层契约（#92，A 层 = /yio-preview/lib/boot.js 由 server 恒注入先行）：
 // 组件展开、控件语义、结构性 polyfill 全在 A 层——本文件只写「showcase 专属」的
 // B 层：主题样式注入、导航接线、动画重播。演示数据归 pages/<页名>.js。
 
@@ -61,7 +61,7 @@ function replayAnimations() {
 // 手法：内联 animation:none → 强制 reflow → 移除内联，浏览器按原声明重新起播。
 function installAnimReplay() {
   const btn = document.createElement('button');
-  btn.id = 'ikat-anim-replay';
+  btn.id = 'yio-anim-replay';
   btn.textContent = '↻ 重播动画';
   btn.addEventListener('click', replayAnimations);
   document.body.appendChild(btn);

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Ikat
+namespace Yio
 {
     /// <summary>
     /// Sprite lookup result from self-drawn atlas. Texture + UV rect (in atlas) + original pixel size.
@@ -23,7 +23,7 @@ namespace Ikat
     /// </summary>
     public static class FontAtlasPath
     {
-        public static string Format(uint page) => $"ikat://font-atlas/p{page}";
+        public static string Format(uint page) => $"yio://font-atlas/p{page}";
     }
 
     /// <summary>
@@ -133,7 +133,7 @@ namespace Ikat
         }
 
         /// <summary>
-        /// Register a font atlas page. Text mesh image_path="ikat://font-atlas/p{n}"
+        /// Register a font atlas page. Text mesh image_path="yio://font-atlas/p{n}"
         /// hits this cache via GetSprite, returning a full-region (0,0,1,1) SpriteLookup.
         /// Re-registering the same path replaces the old entry (font atlas pages are immutable
         /// per-session; old Texture2D is GC'd).

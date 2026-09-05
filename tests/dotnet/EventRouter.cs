@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-namespace Ikat
+namespace Yio
 {
     /// 纯事件路由算法——不依赖 Unity、不依赖 FFI、不自建字典。
-    /// 历史用途：曾被生产侧 IkatEventHandler 委托跑路由（Spec-4b P1 已退役 IkatEventHandler）。
+    /// 历史用途：曾被生产侧 YioEventHandler 委托跑路由（Spec-4b P1 已退役 YioEventHandler）。
     /// 现仅作算法参考实现，headless 测试 EventRouterTests 直接消费——非生产依赖。
 
     public static class EventRouter

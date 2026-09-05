@@ -2,9 +2,9 @@
 //! 是否各占一行（flex item）还是被折成 inline 流。dump 全节点 layout_rect +
 //! 父子关系 + taffy display，复刻 dump_shop 的打印口径。
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{Node, NodeKind};
-use ikat_core::stage::Stage;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{Node, NodeKind};
+use yio_core::stage::Stage;
 
 fn main() {
     let pkg_path = std::env::args()

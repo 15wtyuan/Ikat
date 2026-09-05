@@ -1,8 +1,8 @@
 //! 控件状态面：ProgressBar/Slider 的 value/max/step、Toggle/Radio 的 checked、
 //! Dropdown/TabList 的选中态、NumberField 数值读写（含派生字符串读的公共骨架）。
 
-use ikat_core::scene::node::{ControlState, EditState};
-use ikat_core::scene::NodeId;
+use yio_core::scene::node::{ControlState, EditState};
+use yio_core::scene::NodeId;
 
 use crate::{ffi_guard, StageHandle};
 
@@ -19,7 +19,7 @@ use crate::{ffi_guard, StageHandle};
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_control_value(
+pub extern "C" fn yio_stage_set_control_value(
     h: *mut StageHandle,
     node_id: u64,
     value: f32,
@@ -94,7 +94,7 @@ pub extern "C" fn ikat_stage_set_control_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_control_value(
+pub extern "C" fn yio_stage_get_control_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -121,7 +121,7 @@ pub extern "C" fn ikat_stage_get_control_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_control_checked(
+pub extern "C" fn yio_stage_set_control_checked(
     h: *mut StageHandle,
     node_id: u64,
     checked: bool,
@@ -154,7 +154,7 @@ pub extern "C" fn ikat_stage_set_control_checked(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_control_checked(
+pub extern "C" fn yio_stage_get_control_checked(
     h: *const StageHandle,
     node_id: u64,
     out: *mut bool,
@@ -181,7 +181,7 @@ pub extern "C" fn ikat_stage_get_control_checked(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_control_max(h: *mut StageHandle, node_id: u64, max: f32) -> i32 {
+pub extern "C" fn yio_stage_set_control_max(h: *mut StageHandle, node_id: u64, max: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -262,7 +262,7 @@ pub extern "C" fn ikat_stage_set_control_max(h: *mut StageHandle, node_id: u64, 
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_control_max(
+pub extern "C" fn yio_stage_get_control_max(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -294,7 +294,7 @@ pub extern "C" fn ikat_stage_get_control_max(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_control_min(h: *mut StageHandle, node_id: u64, min: f32) -> i32 {
+pub extern "C" fn yio_stage_set_control_min(h: *mut StageHandle, node_id: u64, min: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -365,7 +365,7 @@ pub extern "C" fn ikat_stage_set_control_min(h: *mut StageHandle, node_id: u64, 
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_control_min(
+pub extern "C" fn yio_stage_get_control_min(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -398,7 +398,7 @@ pub extern "C" fn ikat_stage_get_control_min(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_control_step(h: *mut StageHandle, node_id: u64, step: f32) -> i32 {
+pub extern "C" fn yio_stage_set_control_step(h: *mut StageHandle, node_id: u64, step: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -476,7 +476,7 @@ fn renumber_edit_value(edit: &mut EditState, min: f32, max: f32, step: f32) {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_control_step(
+pub extern "C" fn yio_stage_get_control_step(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -504,7 +504,7 @@ pub extern "C" fn ikat_stage_get_control_step(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_control_indeterminate(
+pub extern "C" fn yio_stage_get_control_indeterminate(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -532,7 +532,7 @@ pub extern "C" fn ikat_stage_get_control_indeterminate(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_control_indeterminate(
+pub extern "C" fn yio_stage_set_control_indeterminate(
     h: *mut StageHandle,
     node_id: u64,
     v: u8,
@@ -562,7 +562,7 @@ pub extern "C" fn ikat_stage_set_control_indeterminate(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_radio_name(
+pub extern "C" fn yio_stage_get_radio_name(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -605,7 +605,7 @@ pub extern "C" fn ikat_stage_get_radio_name(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_dropdown_selected_value(
+pub extern "C" fn yio_stage_get_dropdown_selected_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -614,7 +614,7 @@ pub extern "C" fn ikat_stage_get_dropdown_selected_value(
 ) -> i32 {
     ffi_guard(-1, || {
         let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
-            ikat_core::scene::control::dropdown_selected_value(scene, id)
+            yio_core::scene::control::dropdown_selected_value(scene, id)
         }) {
             Ok(v) => v,
             Err(rc) => return rc,
@@ -634,7 +634,7 @@ pub extern "C" fn ikat_stage_get_dropdown_selected_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_option_value(
+pub extern "C" fn yio_stage_get_option_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -643,7 +643,7 @@ pub extern "C" fn ikat_stage_get_option_value(
 ) -> i32 {
     ffi_guard(-1, || {
         let value = match read_control_string(h, node_id, out, buf_cap, out_len, |scene, id| {
-            ikat_core::scene::control::option_value(scene, id)
+            yio_core::scene::control::option_value(scene, id)
         }) {
             Ok(v) => v,
             Err(rc) => return rc,
@@ -660,7 +660,7 @@ pub extern "C" fn ikat_stage_get_option_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_is_option_selected(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn yio_stage_is_option_selected(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -669,7 +669,7 @@ pub extern "C" fn ikat_stage_is_option_selected(h: *const StageHandle, node_id: 
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match ikat_core::scene::control::option_selected(scene, NodeId(node_id)) {
+        match yio_core::scene::control::option_selected(scene, NodeId(node_id)) {
             Some(true) => 1,
             Some(false) => 0,
             None => -1,
@@ -682,7 +682,7 @@ pub extern "C" fn ikat_stage_is_option_selected(h: *const StageHandle, node_id: 
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_option_index(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn yio_stage_get_option_index(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -691,7 +691,7 @@ pub extern "C" fn ikat_stage_get_option_index(h: *const StageHandle, node_id: u6
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match ikat_core::scene::control::option_index(scene, NodeId(node_id)) {
+        match yio_core::scene::control::option_index(scene, NodeId(node_id)) {
             Some((_, idx)) => idx as i32,
             None => -1,
         }
@@ -703,7 +703,7 @@ pub extern "C" fn ikat_stage_get_option_index(h: *const StageHandle, node_id: u6
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_is_tab_selected(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn yio_stage_is_tab_selected(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -712,7 +712,7 @@ pub extern "C" fn ikat_stage_is_tab_selected(h: *const StageHandle, node_id: u64
         let Some(scene) = sh.stage.scene.as_ref() else {
             return -1;
         };
-        match ikat_core::scene::control::tab_selected(scene, NodeId(node_id)) {
+        match yio_core::scene::control::tab_selected(scene, NodeId(node_id)) {
             Some(true) => 1,
             Some(false) => 0,
             None => -1,
@@ -728,7 +728,7 @@ fn read_control_string(
     _out: *mut u8,
     _buf_cap: usize,
     out_len: *mut usize,
-    f: impl Fn(&ikat_core::scene::Scene, NodeId) -> Option<String>,
+    f: impl Fn(&yio_core::scene::Scene, NodeId) -> Option<String>,
 ) -> Result<Option<String>, i32> {
     if h.is_null() || out_len.is_null() {
         return Err(-1);
@@ -764,7 +764,7 @@ fn write_out_string(v: &str, out: *mut u8, buf_cap: usize, out_len: *mut usize) 
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_dropdown_selected_index(
+pub extern "C" fn yio_stage_get_dropdown_selected_index(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u32,
@@ -793,7 +793,7 @@ pub extern "C" fn ikat_stage_get_dropdown_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_dropdown_selected_index(
+pub extern "C" fn yio_stage_set_dropdown_selected_index(
     h: *mut StageHandle,
     node_id: u64,
     index: u32,
@@ -826,7 +826,7 @@ pub extern "C" fn ikat_stage_set_dropdown_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_tablist_selected_index(
+pub extern "C" fn yio_stage_get_tablist_selected_index(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u32,
@@ -855,7 +855,7 @@ pub extern "C" fn ikat_stage_get_tablist_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_tablist_selected_index(
+pub extern "C" fn yio_stage_set_tablist_selected_index(
     h: *mut StageHandle,
     node_id: u64,
     index: u32,
@@ -884,7 +884,7 @@ pub extern "C" fn ikat_stage_set_tablist_selected_index(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_dropdown_open(
+pub extern "C" fn yio_stage_get_dropdown_open(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -911,7 +911,7 @@ pub extern "C" fn ikat_stage_get_dropdown_open(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_dropdown_open(h: *mut StageHandle, node_id: u64, open: u8) -> i32 {
+pub extern "C" fn yio_stage_set_dropdown_open(h: *mut StageHandle, node_id: u64, open: u8) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -936,7 +936,7 @@ pub extern "C" fn ikat_stage_set_dropdown_open(h: *mut StageHandle, node_id: u64
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_number_value(
+pub extern "C" fn yio_stage_get_number_value(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -970,11 +970,7 @@ pub extern "C" fn ikat_stage_get_number_value(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_number_value(
-    h: *mut StageHandle,
-    node_id: u64,
-    value: f32,
-) -> i32 {
+pub extern "C" fn yio_stage_set_number_value(h: *mut StageHandle, node_id: u64, value: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -1031,7 +1027,7 @@ fn format_number(v: f32) -> String {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_tab_activation(
+pub extern "C" fn yio_stage_get_tab_activation(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -1057,7 +1053,7 @@ pub extern "C" fn ikat_stage_get_tab_activation(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_tab_activation(
+pub extern "C" fn yio_stage_set_tab_activation(
     h: *mut StageHandle,
     node_id: u64,
     manual: bool,
@@ -1078,14 +1074,14 @@ pub extern "C" fn ikat_stage_set_tab_activation(
 // ===== Tree（role=tree/treeitem，#8）=====
 // 程序化读写面。事件（SelectionChanged/ExpandChanged）在 tick 交互路径发射
 //（on_pointer_down / on_tree_key），本组 setter 是 host 驱动改态不发事件——
-// 与 TabList setter 同哲学（见 ikat_stage_set_tablist_selected_index 注释）。
+// 与 TabList setter 同哲学（见 yio_stage_set_tablist_selected_index 注释）。
 
 /// 读 Tree 当前选中项节点 id。out 恒写（0 = 无选中）。rc：0=有选中、1=无选中、
 /// -1=非 Tree / null 句柄 / 节点缺失 / null out。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_tree_selected(
+pub extern "C" fn yio_stage_get_tree_selected(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u64,
@@ -1117,7 +1113,7 @@ pub extern "C" fn ikat_stage_get_tree_selected(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_tree_selected(
+pub extern "C" fn yio_stage_set_tree_selected(
     h: *mut StageHandle,
     node_id: u64,
     item_id: u64,
@@ -1137,7 +1133,7 @@ pub extern "C" fn ikat_stage_set_tree_selected(
             return -1;
         }
         let item = NodeId(item_id);
-        let in_tree = ikat_core::scene::control::tree_items_document_order(scene, NodeId(node_id))
+        let in_tree = yio_core::scene::control::tree_items_document_order(scene, NodeId(node_id))
             .contains(&item);
         if !in_tree {
             return -1;
@@ -1157,7 +1153,7 @@ pub extern "C" fn ikat_stage_set_tree_selected(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_treeitem_expanded(
+pub extern "C" fn yio_stage_get_treeitem_expanded(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -1173,7 +1169,7 @@ pub extern "C" fn ikat_stage_get_treeitem_expanded(
         let id = NodeId(node_id);
         match scene.controls.get(id) {
             Some(ControlState::TreeItem { expanded })
-                if ikat_core::scene::control::is_branch(scene, id) =>
+                if yio_core::scene::control::is_branch(scene, id) =>
             {
                 unsafe { *out = *expanded as u8 };
                 0
@@ -1188,7 +1184,7 @@ pub extern "C" fn ikat_stage_get_treeitem_expanded(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_treeitem_expanded(
+pub extern "C" fn yio_stage_set_treeitem_expanded(
     h: *mut StageHandle,
     node_id: u64,
     expanded: u8,
@@ -1202,7 +1198,7 @@ pub extern "C" fn ikat_stage_set_treeitem_expanded(
             return -1;
         };
         let id = NodeId(node_id);
-        if !ikat_core::scene::control::is_branch(scene, id) {
+        if !yio_core::scene::control::is_branch(scene, id) {
             return -1;
         }
         if let Some(ControlState::TreeItem { expanded: e }) = scene.controls.get_mut(id) {
@@ -1219,7 +1215,7 @@ pub extern "C" fn ikat_stage_set_treeitem_expanded(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_tree_set_all_expanded(
+pub extern "C" fn yio_stage_tree_set_all_expanded(
     h: *mut StageHandle,
     node_id: u64,
     expanded: u8,
@@ -1238,7 +1234,7 @@ pub extern "C" fn ikat_stage_tree_set_all_expanded(
         ) {
             return -1;
         }
-        for item in ikat_core::scene::control::tree_items_document_order(scene, NodeId(node_id)) {
+        for item in yio_core::scene::control::tree_items_document_order(scene, NodeId(node_id)) {
             if let Some(ControlState::TreeItem { expanded: e }) = scene.controls.get_mut(item) {
                 *e = expanded != 0;
             }

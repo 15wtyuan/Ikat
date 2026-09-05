@@ -4224,8 +4224,8 @@ fn grip_no_hit_on_non_thumb_area() {
 
 // 这些测试直接调 process_keys（隔离 PointerState/Stage）。focused 节点带正确的 NodeKind
 // + 注入 ControlState（TextField/TextArea）。常量 KEY_* / EVT_SUBMITTED 在 input.rs 定义。
-// KeyCode 数值取 Unity KeyCode 枚举（与 unity/package/.../Ikat.Types.cs 的 KeyCode enum 对齐——
-// IkatInputCollector 用 (uint)UnityEngine.KeyCode 直传，core 须匹配同值）。
+// KeyCode 数值取 Unity KeyCode 枚举（与 unity/package/.../Yio.Types.cs 的 KeyCode enum 对齐——
+// YioInputCollector 用 (uint)UnityEngine.KeyCode 直传，core 须匹配同值）。
 
 /// root + focused TextField(value)。kind 设 NodeKind::TextField（路由按 kind 分派单行/多行）。
 fn focused_textfield_scene(value: &str) -> (Scene, NodeId) {
@@ -4658,10 +4658,10 @@ fn non_text_focused_node_not_routed() {
 }
 
 // open Dropdown：pointer-down 命中不在其 select 子树内 → 收起（open=false）。
-// select 子树 = select 本身 + .ikat-value/.ikat-popup（含 option）后代。
+// select 子树 = select 本身 + .yio-value/.yio-popup（含 option）后代。
 
 /// 建 open Dropdown 场景：root > select(Dropdown,open,120x30 @(10,10))，
-/// select 的 .ikat-popup(80x60 @(10,40)) 内含两个 option。
+/// select 的 .yio-popup(80x60 @(10,40)) 内含两个 option。
 /// 另 root 有一个独立 button(50x50 @(200,200)) 作「outside」点击靶。
 /// 返回 (select_id, popup_id, opt0_id, button_id)。
 fn open_dropdown_with_outside_button_scene() -> (Scene, NodeId, NodeId, NodeId, NodeId) {
@@ -5288,7 +5288,7 @@ fn outside_click_after_keyboard_nav_reverts_selection() {
     process_keys(&mut s, &[key_down(KEY_DOWN)], &mut out); // 高亮到 B
     assert_eq!(dropdown_selected(&s, select), 1, "Down 移高亮到 B");
     out.clear();
-    // 点 select 子树外（root 区域，不在 select/.ikat-popup 内）。
+    // 点 select 子树外（root 区域，不在 select/.yio-popup 内）。
     let mut ps = PointerState::new();
     ps.process(
         &mut s,

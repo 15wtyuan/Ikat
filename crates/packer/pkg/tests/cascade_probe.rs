@@ -6,10 +6,10 @@
 //! rect/visible (geometry + display pruning), `get_node_computed_style`
 //! (inheritance, specificity, class matching), and `get_node_kind` (control
 //! kinds do not collapse to Container).
-use ikat_core::scene::node::NodeKind;
-use ikat_core::scene::NodeId;
-use ikat_core::stage::Stage;
-use ikat_pkg::build::{pack_components, Component, PackResult};
+use yio_core::scene::node::NodeKind;
+use yio_core::scene::NodeId;
+use yio_core::stage::Stage;
+use yio_pkg::build::{pack_components, Component, PackResult};
 
 const HTML: &str = include_str!("fixtures/cascade-probe.html");
 

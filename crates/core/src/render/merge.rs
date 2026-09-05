@@ -333,23 +333,23 @@ mod tests {
     fn two_same_atlas_text_nodes_merge() {
         // text 现产 Mesh(program=1)，同 atlas path 允合批。
         // 两 text 节点同 program=1 同 image_path → merge 成 1 个 8-vert Mesh。
-        let mut t1 = mesh_node(1, Some("ikat://font-atlas/p0"), 0, 1.0, 0.0);
+        let mut t1 = mesh_node(1, Some("yio://font-atlas/p0"), 0, 1.0, 0.0);
         t1.payload = NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("ikat://font-atlas/p0".into()),
+            image_path: Some("yio://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };
-        let mut t2 = mesh_node(2, Some("ikat://font-atlas/p0"), 1, 1.0, 100.0);
+        let mut t2 = mesh_node(2, Some("yio://font-atlas/p0"), 1, 1.0, 100.0);
         t2.payload = NodePayload::Mesh {
             verts: vec![[100.0, 0.0], [110.0, 0.0], [110.0, 10.0], [100.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("ikat://font-atlas/p0".into()),
+            image_path: Some("yio://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };
@@ -369,23 +369,23 @@ mod tests {
     /// 填满顶点色 = 实心方块（字看不清）。core 侧根因。
     #[test]
     fn merged_text_mesh_preserves_program_one() {
-        let mut t1 = mesh_node(1, Some("ikat://font-atlas/p0"), 0, 1.0, 0.0);
+        let mut t1 = mesh_node(1, Some("yio://font-atlas/p0"), 0, 1.0, 0.0);
         t1.payload = NodePayload::Mesh {
             verts: vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("ikat://font-atlas/p0".into()),
+            image_path: Some("yio://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };
-        let mut t2 = mesh_node(2, Some("ikat://font-atlas/p0"), 1, 1.0, 100.0);
+        let mut t2 = mesh_node(2, Some("yio://font-atlas/p0"), 1, 1.0, 100.0);
         t2.payload = NodePayload::Mesh {
             verts: vec![[100.0, 0.0], [110.0, 0.0], [110.0, 10.0], [100.0, 10.0]],
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("ikat://font-atlas/p0".into()),
+            image_path: Some("yio://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };
@@ -400,7 +400,7 @@ mod tests {
                 assert_eq!(*program, 1, "merged text 必须保留 program=1（text shader）");
                 assert_eq!(
                     *image_path,
-                    Some("ikat://font-atlas/p0".to_string()),
+                    Some("yio://font-atlas/p0".to_string()),
                     "merged text 保留 atlas path"
                 );
             }

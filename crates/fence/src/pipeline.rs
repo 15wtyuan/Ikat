@@ -9,9 +9,9 @@ use crate::ir::{IrNodeKind, IrTree};
 use crate::rich_text_classify::classify_rich_text;
 use crate::structural::run_structural;
 use crate::tree_builder::parse_html_to_ir_named;
-use ikat_core::style::dynamic::DynamicRule;
-use ikat_core::style::mapping::parse_url;
-use ikat_core::style::resolved::ResolvedStyle;
+use yio_core::style::dynamic::DynamicRule;
+use yio_core::style::mapping::parse_url;
+use yio_core::style::resolved::ResolvedStyle;
 
 /// Final output of the R1 parsing pipeline.
 pub struct ParsedTemplate {
@@ -129,7 +129,7 @@ pub fn parse_template_with_css(
         &mut diagnostics,
     );
 
-    // Stage 6.5: inline 元素布局上下文检查。Ikat 没有 flex 之外的 inline flow——
+    // Stage 6.5: inline 元素布局上下文检查。Yio 没有 flex 之外的 inline flow——
     // block 容器里的裸 inline 元素会被当 block-level（撑满+竖排），和浏览器不一致。
     // 必须在 Annotate 之后（需 TextBlock 语义判定豁免）+ Stage 4（inline style display）
     // + Stage 4.5（class 规则 display）+ Stage 6.4（rich_text_blocks img 豁免）之后。
@@ -152,7 +152,7 @@ pub fn parse_template_with_css(
     );
 
     // Stage 6.6: 围栏内属性一致性 warning。属性本身围栏合法，但漏写/默认值冲突致
-    // HTML 预览（浏览器按 CSS initial 值）≠ 运行时（Ikat 默认值）——不阻断打包，
+    // HTML 预览（浏览器按 CSS initial 值）≠ 运行时（Yio 默认值）——不阻断打包，
     // 只提醒作者补全声明。必须在 Stage 4（styles 已 cascade）之后。
     diagnostics.extend(check_consistency(&tree, &styles, file, &line_map));
 
@@ -169,7 +169,7 @@ pub fn parse_template_with_css(
         &line_map,
     ));
 
-    // Stage 6.7: 控件必须被 CSS 命中。Ikat 控件不带 UA 默认样式——写了控件标签却
+    // Stage 6.7: 控件必须被 CSS 命中。Yio 控件不带 UA 默认样式——写了控件标签却
     // 无匹配 CSS 规则 = 运行时空白（浏览器预览却看着正常，因为浏览器套自己的 UA 表）。
     // 必须在 Annotate 之后（需 IrElement.semantic）+ Stage 4.5 之后（需 dynamic_rules）。
     diagnostics.extend(crate::control_css_check::check_control_css(

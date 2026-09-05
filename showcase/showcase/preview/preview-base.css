@@ -1,7 +1,7 @@
 /* showcase 预览主题面（消费侧 B 层资产——#92 分层后结构性 polyfill 在
-   /ikat-preview/lib/base.css 由 boot.js 注入；@font-face 由 preview server
+   /yio-preview/lib/base.css 由 boot.js 注入；@font-face 由 preview server
    按工作区 fonts 段自动注入（#104），本文件只剩配色。family 名须与
-   ikat.workspace.json 注册名一致：'LXGWWenKai'，不是展示用的 'LXGW WenKai'）。
+   yio.workspace.json 注册名一致：'LXGWWenKai'，不是展示用的 'LXGW WenKai'）。
    preview-only：打包器只消费 body，head 不进 pkg.bin。 */
 body {
   color: #e0e6ec;
@@ -18,11 +18,11 @@ body {
 select option { color: #e0e6ec; background-color: #152433; }
 
 /* 「重播动画」按钮（showcase main.js 注入，preview-only） */
-#ikat-anim-replay {
+#yio-anim-replay {
   position: fixed; right: 18px; bottom: 16px; z-index: 9999;
   padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer;
   background: rgba(21, 36, 51, 0.85); color: #8ec5d8;
   font-size: 13px; font-weight: 600; letter-spacing: 0.02em;
   box-shadow: inset 0 0 0 1px rgba(95, 180, 212, 0.22);
 }
-#ikat-anim-replay:hover { background: rgba(26, 47, 69, 0.95); color: #cfe8f2; }
+#yio-anim-replay:hover { background: rgba(26, 47, 69, 0.95); color: #cfe8f2; }

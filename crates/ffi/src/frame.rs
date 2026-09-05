@@ -7,7 +7,7 @@ use crate::{blob, ffi_guard, StageHandle};
 
 /// 跑一帧 tick_and_render → build_blob 写入缓存。dt 累积进 time_s（双击窗口，C# 传 unscaledDeltaTime）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_tick(h: *mut StageHandle, dt: f32) {
+pub extern "C" fn yio_stage_tick(h: *mut StageHandle, dt: f32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -21,7 +21,7 @@ pub extern "C" fn ikat_stage_tick(h: *mut StageHandle, dt: f32) {
         let scene = match sh.stage.scene.as_ref() {
             Some(s) => s,
             None => {
-                empty = ikat_core::scene::node::Scene::default();
+                empty = yio_core::scene::node::Scene::default();
                 &empty
             }
         };
@@ -32,7 +32,7 @@ pub extern "C" fn ikat_stage_tick(h: *mut StageHandle, dt: f32) {
 /// 借出最近一帧 blob：写 len 到 out_len，返回 Rust 拥有缓存指针（下 tick 失效）。
 /// null 句柄或未 tick 过返回 null + len=0。
 #[no_mangle]
-pub extern "C" fn ikat_stage_borrow_frame(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
+pub extern "C" fn yio_stage_borrow_frame(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
     ffi_guard(std::ptr::null(), || {
         if h.is_null() {
             if !out_len.is_null() {
@@ -58,14 +58,14 @@ pub extern "C" fn ikat_stage_borrow_frame(h: *mut StageHandle, out_len: *mut usi
 
 /// dump 整树 JSON（调试）。返 Rust 拥有的 UTF-8 C 串 + len；下 tick 失效。
 #[no_mangle]
-pub extern "C" fn ikat_stage_dump_scene(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
+pub extern "C" fn yio_stage_dump_scene(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
     ffi_guard(std::ptr::null(), || {
         if h.is_null() || out_len.is_null() {
             return std::ptr::null();
         }
         let handle = unsafe { &mut *h };
         let json = match &handle.stage.scene {
-            Some(scene) => ikat_core::dump::dump_scene_json(scene),
+            Some(scene) => yio_core::dump::dump_scene_json(scene),
             None => String::from("[]"),
         };
         handle.dump_blob = CString::new(json).unwrap_or_else(|_| CString::new("[]").unwrap());
@@ -84,7 +84,7 @@ pub extern "C" fn ikat_stage_dump_scene(h: *mut StageHandle, out_len: *mut usize
 ///
 /// **常驻（不 gate）：**运行时诊断出口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
-pub extern "C" fn ikat_stage_take_warnings(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
+pub extern "C" fn yio_stage_take_warnings(h: *mut StageHandle, out_len: *mut usize) -> *const u8 {
     ffi_guard(std::ptr::null(), || {
         if h.is_null() || out_len.is_null() {
             return std::ptr::null();
@@ -115,19 +115,19 @@ pub extern "C" fn ikat_stage_take_warnings(h: *mut StageHandle, out_len: *mut us
 /// 构造最小测试包（headless test fixture helper）。
 /// 组件名=comp_spec UTF-8 前缀（取 comp_len 长度），含两个 Container 节点：根容器 + 子容器 id="badge"（2-node，配合 self-exclusive 子树查找）。
 /// 返 pkg bytes 指针+长度；失败返 null（空字符串/格式错）。
-/// 调用方用完后调 ikat_bytes_free 释放。
+/// 调用方用完后调 yio_bytes_free 释放。
 ///
 /// **测试 helper（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_make_test_pkg(
+pub extern "C" fn yio_make_test_pkg(
     comp: *const u8,
     comp_len: usize,
     out_len: *mut usize,
 ) -> *mut u8 {
     ffi_guard(std::ptr::null_mut(), || {
-        use ikat_core::asset::{write_package, PackageInput, TemplateNode};
-        use ikat_core::scene::NodeKind;
-        use ikat_core::style::resolved::ResolvedStyle;
+        use yio_core::asset::{write_package, PackageInput, TemplateNode};
+        use yio_core::scene::NodeKind;
+        use yio_core::style::resolved::ResolvedStyle;
         if comp.is_null() || out_len.is_null() {
             return std::ptr::null_mut();
         }
@@ -181,7 +181,7 @@ pub extern "C" fn ikat_make_test_pkg(
                 component_scope: false,
             },
         ];
-        let rules = ikat_core::style::dynamic::DynamicRuleTable::default();
+        let rules = yio_core::style::dynamic::DynamicRuleTable::default();
         let pkg = write_package(&PackageInput {
             components: vec![(comp_name, nodes.as_slice(), &rules, &[])],
         });
@@ -197,10 +197,10 @@ pub extern "C" fn ikat_make_test_pkg(
 
 /// 取走缺字诊断报告（tofu 取证）：shaping 全链（主字体+回退）缺字记录，每行一条
 /// （family + 字符 + 码位 + 修法）。返回堆分配 UTF-8 buffer（含尾部 NUL），调用方用
-/// `ikat_bytes_free` 释放；无新记录 → null（*out_len=0）。会话级去重（同 family+char
+/// `yio_bytes_free` 释放；无新记录 → null（*out_len=0）。会话级去重（同 family+char
 /// 只报一次），pending 累积不丢。宿主每帧 tick 后调。
 #[no_mangle]
-pub extern "C" fn ikat_stage_take_missing_glyphs(
+pub extern "C" fn yio_stage_take_missing_glyphs(
     h: *mut StageHandle,
     out_len: *mut usize,
 ) -> *mut u8 {
@@ -224,9 +224,9 @@ pub extern "C" fn ikat_stage_take_missing_glyphs(
     })
 }
 
-/// 释放 ikat_make_test_pkg 返回的 bytes。
+/// 释放 yio_make_test_pkg 返回的 bytes。
 #[no_mangle]
-pub extern "C" fn ikat_bytes_free(ptr: *mut u8, len: usize) {
+pub extern "C" fn yio_bytes_free(ptr: *mut u8, len: usize) {
     ffi_guard((), || {
         if !ptr.is_null() {
             unsafe {
@@ -242,7 +242,7 @@ pub extern "C" fn ikat_bytes_free(ptr: *mut u8, len: usize) {
 /// filter = UTF-8 子串（指针+len），null/len=0 = 全量；只出 id/class 命中的子树。
 /// 返 Rust 拥有的 UTF-8 C 串 + len（StageHandle 持有，下次调用覆盖）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_dump_tree(
+pub extern "C" fn yio_stage_dump_tree(
     h: *mut StageHandle,
     filter: *const u8,
     filter_len: usize,
@@ -262,7 +262,7 @@ pub extern "C" fn ikat_stage_dump_tree(
             }
         };
         let tree = match &handle.stage.scene {
-            Some(scene) => ikat_core::dump::dump_scene_tree(scene, filter),
+            Some(scene) => yio_core::dump::dump_scene_tree(scene, filter),
             None => String::from("(no scene)"),
         };
         handle.tree_blob = CString::new(tree).unwrap_or_else(|_| CString::new("").unwrap());

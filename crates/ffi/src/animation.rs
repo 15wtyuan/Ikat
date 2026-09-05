@@ -1,23 +1,23 @@
 //! 动画面：tween 注册（spec-struct 形态）/停止/通道清理、@keyframes player 的程序化
 //! 播放与暂停/恢复/停止/seek/状态查询/OnKey 阈值（PlayerKey 以 u64 跨 FFI）。
 
-use ikat_core::scene::animation::{
+use yio_core::scene::animation::{
     player_key_as_u64, player_key_from_u64, register_on_key, PlayerPlayState,
 };
-use ikat_core::scene::NodeId;
-use ikat_core::style::resolved::BoxShadow;
-use ikat_core::tween::{ease_from_ffi, prop_value_size, ShadowPair, TweenProp, TweenSpec};
+use yio_core::scene::NodeId;
+use yio_core::style::resolved::BoxShadow;
+use yio_core::tween::{ease_from_ffi, prop_value_size, ShadowPair, TweenProp, TweenSpec};
 
 use crate::{ffi_guard, StageHandle};
 
-/// tween 提交 spec（#9 builder 契约的 FFI 形态；旧位置参 `ikat_stage_tween` 已删——
+/// tween 提交 spec（#9 builder 契约的 FFI 形态；旧位置参 `yio_stage_tween` 已删——
 /// pre-1.0 无外部消费者，C# 同 commit 切 fluent wrapper）。
 ///
 /// `ease_kind`/`ease_params` 值域见 core `tween::ease_ffi`（与 pkg 手编 ease tag 同一
 /// 数值契约）。`repeat` = 额外重播次数；`yoyo` != 0 = 奇数轮反向。
 /// C# 镜像由 csbindgen 生成（LayoutKind.Sequential，44B = 本 struct 的 ABI 断言）。
 #[repr(C)]
-pub struct IkatTweenSpec {
+pub struct YioTweenSpec {
     pub prop: u32,
     pub ease_kind: u32,
     pub ease_params: [f32; 4],
@@ -29,19 +29,19 @@ pub struct IkatTweenSpec {
 }
 
 /// ABI 布局锁：字段增删/重排会先炸这里（C# 镜像同尺寸断言在 headless 测试）。
-const _: () = assert!(std::mem::size_of::<IkatTweenSpec>() == 44);
+const _: () = assert!(std::mem::size_of::<YioTweenSpec>() == 44);
 
 /// 注册 tween（spec 形态）。start/end 指向 ≥value_size 个 f32（value_size 由 prop
 /// 隐含）。null 句柄/spec/null 指针 / 越界 prop/ease → no-op。
 /// Width/Height 载荷第 2 槽是域码（LenDomain 判别值，双端必须同域）——不一致 → no-op
 /// （C# builder 侧前置拦并抛契约异常，这里是防御底线）。
-/// BoxShadow 通道不走此入口（列表载荷）——走 `ikat_stage_tween_shadow`。
+/// BoxShadow 通道不走此入口（列表载荷）——走 `yio_stage_tween_shadow`。
 /// 越界 node / duration<=0 由 core update 处理（跳过/立即 complete）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_tween_spec(
+pub extern "C" fn yio_stage_tween_spec(
     h: *mut StageHandle,
     node_id: u64,
-    spec: *const IkatTweenSpec,
+    spec: *const YioTweenSpec,
     start: *const f32,
     end: *const f32,
 ) {
@@ -70,7 +70,7 @@ pub extern "C" fn ikat_stage_tween_spec(
         // Width/Height 域码槽：双端同域且为合法 LenDomain 判别值。
         if matches!(prop, TweenProp::Width | TweenProp::Height) {
             let (a, b) = (s[1] as i32, e[1] as i32);
-            if a != b || ikat_core::scene::LenDomain::try_from_code(a as u32).is_none() {
+            if a != b || yio_core::scene::LenDomain::try_from_code(a as u32).is_none() {
                 return;
             }
         }
@@ -96,10 +96,10 @@ pub extern "C" fn ikat_stage_tween_spec(
 /// [ox, oy, spread, blur, r, g, b, a, inset_flag]，inset_flag ≠ 0 = inset。
 /// 层数上限 12（core MAX 层限制内）。null 指针 / 层数越界 / prop 载荷缺失 → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_tween_shadow(
+pub extern "C" fn yio_stage_tween_shadow(
     h: *mut StageHandle,
     node_id: u64,
-    spec: *const IkatTweenSpec,
+    spec: *const YioTweenSpec,
     start: *const f32,
     start_layers: u32,
     end: *const f32,
@@ -170,13 +170,13 @@ pub extern "C" fn ikat_stage_tween_shadow(
 
 /// 停该节点该 prop 的 tween（override 保留末值）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_kill_tween(h: *mut StageHandle, node_id: u64, prop: u32) {
+pub extern "C" fn yio_stage_kill_tween(h: *mut StageHandle, node_id: u64, prop: u32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
         }
         let sh = unsafe { &mut *h };
-        if let Some(prop) = ikat_core::tween::TweenProp::try_from(prop) {
+        if let Some(prop) = yio_core::tween::TweenProp::try_from(prop) {
             sh.stage.kill_tween(NodeId(node_id), prop);
         }
     })
@@ -184,7 +184,7 @@ pub extern "C" fn ikat_stage_kill_tween(h: *mut StageHandle, node_id: u64, prop:
 
 /// 清该节点所有动画 override（回 CSS）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_clear_anim(h: *mut StageHandle, node_id: u64) {
+pub extern "C" fn yio_stage_clear_anim(h: *mut StageHandle, node_id: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -196,13 +196,13 @@ pub extern "C" fn ikat_stage_clear_anim(h: *mut StageHandle, node_id: u64) {
 
 /// 清该节点某 prop 对应通道（回 CSS）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_clear_anim_prop(h: *mut StageHandle, node_id: u64, prop: u32) {
+pub extern "C" fn yio_stage_clear_anim_prop(h: *mut StageHandle, node_id: u64, prop: u32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
         }
         let sh = unsafe { &mut *h };
-        if let Some(prop) = ikat_core::tween::TweenProp::try_from(prop) {
+        if let Some(prop) = yio_core::tween::TweenProp::try_from(prop) {
             sh.stage.clear_anim_prop(NodeId(node_id), prop);
         }
     })
@@ -210,7 +210,7 @@ pub extern "C" fn ikat_stage_clear_anim_prop(h: *mut StageHandle, node_id: u64, 
 
 // C# `node.Play(name)` → Animation 句柄。PlayerKey 以 u64 跨 FFI
 // （slotmap `KeyData::as_ffi`，player_key_as_u64/from_u64 转换，0 = 恒无效 key）。
-// 句柄控制直接操作 scene.players（既有 `ikat_node_parent` 同款 scene 直取模式，
+// 句柄控制直接操作 scene.players（既有 `yio_node_parent` 同款 scene 直取模式，
 // 控制语义在 core 的 update_all/PlayerPlayState 层，FFI 保持薄包装）。
 
 /// 程序化启动 @keyframes 动画（spec §7.3 `play_animation`）。
@@ -222,7 +222,7 @@ pub extern "C" fn ikat_stage_clear_anim_prop(h: *mut StageHandle, node_id: u64, 
 /// （C# `Play(name)` 无时长参数，默认由 core `play_programmatic` 定）。
 /// 立即写首帧（spec §5.2：不等下帧 step b，防 delay 期闪 base）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_play_animation(
+pub extern "C" fn yio_stage_play_animation(
     h: *mut StageHandle,
     node: u64,
     name: *const u8,
@@ -246,18 +246,18 @@ pub extern "C" fn ikat_stage_play_animation(
         let Some(scene) = sh.stage.scene.as_mut() else {
             return INVALID;
         };
-        match ikat_core::scene::animation::play_programmatic(scene, NodeId(node), name) {
+        match yio_core::scene::animation::play_programmatic(scene, NodeId(node), name) {
             Some(k) => player_key_as_u64(k),
             None => INVALID,
         }
     })
 }
 
-/// 同 `ikat_stage_play_animation`，显式指定时长（秒）。duration_s ≤ 0 / NaN 按 1s
+/// 同 `yio_stage_play_animation`，显式指定时长（秒）。duration_s ≤ 0 / NaN 按 1s
 /// 默认。C# `Play(name, durationSeconds)` 重载走此入口——无 `animation:` 声明绑定的
 /// keyframes 无声明层时长，程序化播放节奏由调用方给。
 #[no_mangle]
-pub extern "C" fn ikat_stage_play_animation_dur(
+pub extern "C" fn yio_stage_play_animation_dur(
     h: *mut StageHandle,
     node: u64,
     name: *const u8,
@@ -281,7 +281,7 @@ pub extern "C" fn ikat_stage_play_animation_dur(
         let Some(scene) = sh.stage.scene.as_mut() else {
             return INVALID;
         };
-        match ikat_core::scene::animation::play_programmatic_with_duration(
+        match yio_core::scene::animation::play_programmatic_with_duration(
             scene,
             NodeId(node),
             name,
@@ -295,7 +295,7 @@ pub extern "C" fn ikat_stage_play_animation_dur(
 
 /// 暂停 player（Playing → Paused，elapsed 冻结位置保持）。key 无效 / 非 Playing → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_pause_animation(h: *mut StageHandle, key: u64) {
+pub extern "C" fn yio_stage_pause_animation(h: *mut StageHandle, key: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -315,7 +315,7 @@ pub extern "C" fn ikat_stage_pause_animation(h: *mut StageHandle, key: u64) {
 /// 恢复播放（Paused → Playing）。key 无效 / 非 Paused → no-op
 /// （Completed 是粘性完成态、Stopped 是终态，均不可恢复）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_resume_animation(h: *mut StageHandle, key: u64) {
+pub extern "C" fn yio_stage_resume_animation(h: *mut StageHandle, key: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -336,7 +336,7 @@ pub extern "C" fn ikat_stage_resume_animation(h: *mut StageHandle, key: u64) {
 /// 只标记 Stopped：下帧 update_all 清本 player 通道 + 从 players 表移除，PlayerKey 失效。
 /// 此后 get_animation_state 恒 255（无效）。key 无效 → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_stop_animation(h: *mut StageHandle, key: u64) {
+pub extern "C" fn yio_stage_stop_animation(h: *mut StageHandle, key: u64) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -354,7 +354,7 @@ pub extern "C" fn ikat_stage_stop_animation(h: *mut StageHandle, key: u64) {
 /// 读 player 时间轴位置（elapsed——含 delay 计时的唯一时间源头，spec §5.3）。
 /// key 无效 / 无 scene → 0.0（不 panic）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_animation_time(h: *const StageHandle, key: u64) -> f32 {
+pub extern "C" fn yio_stage_get_animation_time(h: *const StageHandle, key: u64) -> f32 {
     ffi_guard(f32::NAN, || {
         if h.is_null() {
             return 0.0;
@@ -374,7 +374,7 @@ pub extern "C" fn ikat_stage_get_animation_time(h: *const StageHandle, key: u64)
 /// seek：设 player.elapsed，下一帧 step b 按新位置采样（C# `Animation.Time` setter）。
 /// 时间源头单一是 elapsed，不校验范围（负值 = 仍在 delay 阶段之前）。key 无效 → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_animation_time(h: *mut StageHandle, key: u64, time: f32) {
+pub extern "C" fn yio_stage_set_animation_time(h: *mut StageHandle, key: u64, time: f32) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -392,7 +392,7 @@ pub extern "C" fn ikat_stage_set_animation_time(h: *mut StageHandle, key: u64, t
 /// 读 player 运行状态。Playing=0 / Paused=1 / Completed=2；Invalid=255（key 不存在 /
 /// 无 scene / Stopped——Stopped 是终态，下帧即回收，语义等同无效）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_animation_state(h: *const StageHandle, key: u64) -> u8 {
+pub extern "C" fn yio_stage_get_animation_state(h: *const StageHandle, key: u64) -> u8 {
     ffi_guard(u8::MAX, || {
         const INVALID: u8 = 255;
         if h.is_null() {
@@ -418,7 +418,7 @@ pub extern "C" fn ikat_stage_get_animation_state(h: *const StageHandle, key: u64
 /// 回调本身留 C# 按 playerKey 匹配触发）。pct 应 ∈ [0,1]（progress 域外永不触发，注册无害）。
 /// 重复注册同 pct 去重（register_on_key）。key 无效 → no-op。
 #[no_mangle]
-pub extern "C" fn ikat_stage_animation_on_key(h: *mut StageHandle, key: u64, pct: f32) {
+pub extern "C" fn yio_stage_animation_on_key(h: *mut StageHandle, key: u64, pct: f32) {
     ffi_guard((), || {
         if h.is_null() {
             return;

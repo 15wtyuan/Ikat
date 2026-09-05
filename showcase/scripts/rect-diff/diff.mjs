@@ -133,7 +133,7 @@ function comparePair(bEl, cEl) {
   }
   // Text elements (span = TextElement, the visible-text container; #text is
   // pre-filtered but kept here defensively) get the wider text tolerance to
-  // absorb font-metric drift between browser fonts and Ikat runtime shaping.
+  // absorb font-metric drift between browser fonts and Yio runtime shaping.
   const isText = cEl.tag === 'span' || cEl.tag === '#text';
   const tol = isText ? textTol : boxTol;
   const tag = label(bEl, 'b');

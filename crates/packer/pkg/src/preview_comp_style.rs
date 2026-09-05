@@ -4,19 +4,19 @@
 //! **含模板根**、host 本体不吃组件规则（shadow :host 语义）。浏览器没有等价物，
 //! 旧实现是 expand.js 里的正则前缀器——只会拼后代选择器，根类规则整条死（#95），
 //! 且 @media 放行、@keyframes 同名碰撞优先级反转（#95 审计批）。本模块把改写
-//! 收编进 Rust，经 `/ikat-preview/comp-style/<name>.css` 路由供给，客户端只注入
+//! 收编进 Rust，经 `/yio-preview/comp-style/<name>.css` 路由供给，客户端只注入
 //! 链接。改写口径与 core/打包器逐条对齐：
 //!
-//! - **双分支**：每条规则输出后代分支 `[data-ikat-comp="n"] sel`（子树内命中，
+//! - **双分支**：每条规则输出后代分支 `[data-yio-comp="n"] sel`（子树内命中，
 //!   含 slot 投射内容——它们物理上已在标记子树内）+ 根分支（属性插进首复合段，
-//!   `div…` → `div[data-ikat-comp="n"]…`、`.tip` → `[data-ikat-comp="n"].tip`），
+//!   `div…` → `div[data-yio-comp="n"]…`、`.tip` → `[data-yio-comp="n"].tip`），
 //!   与 core「子树含根、选择器原样」全等。
 //! - **host 链剥标签**：`tip-panel.is-press .slot` 剥链首标签后按普通规则改写
 //!   （浏览器近似里 host 的类已镜像到模板根上）。
 //! - **fail-closed 对齐**：越界选择器（`>`/`+`/`~`/`*`/未知伪类等，判定复用
 //!   fence `parse_selector`——与打包同一份选择器真相）与非 @keyframes at-rule
 //!   （@media 等）整段丢弃 + 注释——preview 只显示可构建的真相，放行就是
-//!   「预览能看、`ikat build` 报错」的假象。
+//!   「预览能看、`yio build` 报错」的假象。
 //! - **@keyframes 原文透传**；同名 keyframes 宿主优先由客户端注入次序实现
 //!   （组件样式插在页面样式之前）。
 //! - **声明块原文透传**（不经内部结构往返，浏览器所见即作者所写）；`url(相对
@@ -43,7 +43,7 @@ pub(crate) fn rewrite_component_css(name: &str, css: &str, comp_rel: &str) -> St
                         // 留注释，与构建口径一致。
                         out.push_str(&format!(
                             "/* preview: at-rule `{at}` dropped — the fence only supports \
-                             @keyframes; `ikat build` errors on it */\n"
+                             @keyframes; `yio build` errors on it */\n"
                         ));
                     }
                     continue;
@@ -69,7 +69,7 @@ enum Segment {
 }
 
 /// 顶层段扫描：字符串/注释/括号感知。`(` 内的 `{`/`}`/`;` 不终结段（:nth-child
-/// 参数等）；注释内容对 prelude 不可见（剥除）、对块原样保留（@ikat-hook 锚点）。
+/// 参数等）；注释内容对 prelude 不可见（剥除）、对块原样保留（@yio-hook 锚点）。
 fn scan_segments(css: &str) -> Vec<Segment> {
     let chars: Vec<char> = css.chars().collect();
     let mut segs = Vec::new();
@@ -214,7 +214,7 @@ fn at_keyword(prelude: &str) -> Option<String> {
 
 /// 一条元素规则 → 双分支输出。分支为空（全部段被丢弃）时只留注释。
 fn rewrite_rule(name: &str, prelude: &str, block: &str, base_dir: &str, out: &mut String) {
-    let attr = format!("[data-ikat-comp=\"{name}\"]");
+    let attr = format!("[data-yio-comp=\"{name}\"]");
     let mut branches: Vec<String> = Vec::new();
     let mut dropped: Vec<String> = Vec::new();
     for part in split_commas(prelude) {
@@ -230,7 +230,7 @@ fn rewrite_rule(name: &str, prelude: &str, block: &str, base_dir: &str, out: &mu
             continue;
         }
         // fence 校验 = 与打包同一份选择器真相；越界构造 preview 同步拒绝。
-        if ikat_fence::css_rules::parse_selector(stripped).is_none() {
+        if yio_fence::css_rules::parse_selector(stripped).is_none() {
             dropped.push(part.to_string());
             continue;
         }
@@ -247,7 +247,7 @@ fn rewrite_rule(name: &str, prelude: &str, block: &str, base_dir: &str, out: &mu
     }
     for d in &dropped {
         out.push_str(&format!(
-            "/* preview: selector `{d}` dropped — outside the fence; `ikat build` errors on it */\n"
+            "/* preview: selector `{d}` dropped — outside the fence; `yio build` errors on it */\n"
         ));
     }
     if branches.is_empty() {
@@ -451,7 +451,7 @@ mod tests {
 
     const NAME: &str = "tip-panel";
     const REL: &str = "showcase/components/tip-panel.html";
-    const ATTR: &str = "[data-ikat-comp=\"tip-panel\"]";
+    const ATTR: &str = "[data-yio-comp=\"tip-panel\"]";
 
     fn rw(css: &str) -> String {
         rewrite_component_css(NAME, css, REL)

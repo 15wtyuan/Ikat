@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Ikat
+namespace Yio
 {
     /// 渲染树 → GameObject 镜像 diff。每帧 O(n)：标 stale → 遍历命中清 stale/更新 → 余销毁。
     /// flatten：所有 GO 挂 root；纯平移节点 localPosition=(Mtx,Mty) 绝对 design；非纯平移节点
@@ -168,7 +168,7 @@ namespace Ikat
                 if (kind != 1) continue;
 
                 // 解决图资源（path_idx → path → SpriteResolver.GetSprite）。
-                // 文本节点的 font-atlas path（ikat://font-atlas/...）由 RegisterFontAtlasPage 注册
+                // 文本节点的 font-atlas path（yio://font-atlas/...）由 RegisterFontAtlasPage 注册
                 // 进 SpriteResolver，GetSprite 命中返 SpriteLookup——tex 回落 fallback whiteTexture，
                 // 由 SyncFontAtlas 换贴真实 atlas。
                 SpriteLookup look = default; Texture tex = fallback;
@@ -389,12 +389,12 @@ namespace Ikat
 
         static RenderObj NewRenderObj(Transform root)
         {
-            var go = new GameObject("ikat_node");
+            var go = new GameObject("yio_node");
             // ExecuteAlways 下镜像 GO 是运行时派生产物，标 DontSaveInEditor 防被存进场景
             // （否则 EditMode Sync 产出的 GO 会 dirty 场景、Play/Stop 与 domain reload 累积残留）。
             go.hideFlags = HideFlags.DontSaveInEditor;
             go.transform.SetParent(root, false);
-            go.layer = root.gameObject.layer;  // IkatUI
+            go.layer = root.gameObject.layer;  // YioUI
             var mf = go.AddComponent<MeshFilter>();
             var mr = go.AddComponent<MeshRenderer>();
             var mesh = new Mesh { indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };

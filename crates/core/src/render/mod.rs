@@ -91,7 +91,7 @@ pub(crate) const INLINE_IMG_SYNTH_ID_BASE: u64 = 1000;
 /// Unity backend's SpriteResolver. This string format is an ABI-level contract
 /// across the FFI boundary — changing it here requires changing the C# side too.
 pub(crate) fn font_atlas_path(page: usize) -> String {
-    format!("ikat://font-atlas/p{page}")
+    format!("yio://font-atlas/p{page}")
 }
 
 /// gradient text（background-clip:text）每字 quad 的 4 角色：按字形角在文本块 box 内的
@@ -277,7 +277,7 @@ pub struct FrameData {
     pub clips: Vec<ClipEntry>,
     /// 帧内产生的运行时警告（如 clip 链超深丢 clipper）——
     /// `Stage::tick_and_render` 归集进 `Scene::warnings`（宿主经
-    /// `ikat_stage_take_warnings` 拉取）。
+    /// `yio_stage_take_warnings` 拉取）。
     pub warnings: Vec<String>,
 }
 
@@ -1512,7 +1512,7 @@ pub(crate) fn pack_effects(effects: &[crate::text::font_effect::FontEffect]) -> 
 /// 是 font y-up（顶到 baseline），y-down 坐标里字形顶在 baseline 上方 → 减（加则上下颠倒）。
 ///
 /// 返回按 atlas 页号分组的 mesh 列表。单字体单字号常见一页装下 → 一项（单 draw call）；
-/// 超 CJK 字符集才跨页 → 多项（每项独立 image_path = ikat://font-atlas/p{page}）。
+/// 超 CJK 字符集才跨页 → 多项（每项独立 image_path = yio://font-atlas/p{page}）。
 ///
 /// per-glyph 按 `Glyph.font_id` 取 face 光栅（回退字形来自别的 face，必须按字形自己的
 /// font_id 取 face + 拼 GlyphKey，否则用错 face 光栅出错字）。装饰线度量走 run 主字体。

@@ -49,7 +49,7 @@ pub struct Stage {
     pub root_size: (f32, f32),
     /// viewport inset 四边 design px [top, right, bottom, left]（env(safe-area-inset-*)
     /// 的取值源）。数值 = root 覆盖 unsafe 屏区的深度：Fit 贴物理边 → 真实 inset，
-    /// Letterbox → 恒 0。宿主经 FFI `ikat_stage_set_safe_area` 按 adapt 结果注入；
+    /// Letterbox → 恒 0。宿主经 FFI `yio_stage_set_safe_area` 按 adapt 结果注入；
     /// 默认全 0（桌面/无刘海 = 无 unsafe 区）。与 root_size 同类：Stage 级环境输入，
     /// 不从包来。（packages/image_sizes 等资源字段已迁 ResourceHost——#109 宿主分离。）
     pub safe_insets: [f32; 4],
@@ -97,7 +97,7 @@ pub struct Stage {
     pub next_list_ordinal: u32,
 }
 
-/// 加载包失败的结构化错误。版本错配单列——宿主须给「Unity 包与 ikat.exe 同版本
+/// 加载包失败的结构化错误。版本错配单列——宿主须给「Unity 包与 yio.exe 同版本
 /// 重打」的专属指引，不能与普通损坏混在一条文案里。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadPkgError {
@@ -161,7 +161,7 @@ impl Stage {
     }
 
     /// 挂外部宿主建 Stage（多 Stage 共享一份资源驻留）。宿主生命周期由调用方管理
-    /// （FFI：`ikat_host_new`/`ikat_host_free`）；Stage drop 只放 Rc 引用，最后一个
+    /// （FFI：`yio_host_new`/`yio_host_free`）；Stage drop 只放 Rc 引用，最后一个
     /// 引用者 drop 时资源释放。`new` = 自建独占宿主的等价便捷入口。
     pub fn new_bound(
         host: std::rc::Rc<std::cell::RefCell<crate::host::ResourceHost>>,
@@ -218,7 +218,7 @@ impl Stage {
     }
 
     /// 设 viewport inset（env(safe-area-inset-*) 的值，design px [top,right,bottom,left]）。
-    /// FFI `ikat_stage_set_safe_area` 按适配结果算好后走这里；拒绝非有限或负值
+    /// FFI `yio_stage_set_safe_area` 按适配结果算好后走这里；拒绝非有限或负值
     /// （语义上 inset 是深度，不为负）。设完下帧 rematch/propagate + solve 即生效
     /// （env() 声明跟随，无需显式触发）。
     pub fn set_safe_insets(&mut self, insets: [f32; 4]) -> Result<(), String> {
@@ -505,7 +505,7 @@ impl Stage {
 
     /// 设文本控件的 IME composition（后端读 Input.compositionString 回灌）。pos 是 composition
     /// 在 value 中的字节偏移。非文本控件 / 越界 node → no-op（不 panic）。下一帧 measure/render
-    /// 会把 composition 拼进显示文本（[`ikat_core::scene::control::display_value`]）。
+    /// 会把 composition 拼进显示文本（[`yio_core::scene::control::display_value`]）。
     ///
     /// NumberField 也接受 composition（预编辑期**不**过滤——composition 是 provisional，
     /// 用户可能还在组字；过滤发生在 [`commit_composition`] 落定时）。
@@ -652,7 +652,7 @@ impl Stage {
     ///
     /// 几何与 render arm 画光标同源：layout 空间 caret = `{rect.x + off_left + cx,
     /// rect.y + line.y, 1.0, line.height}`，再经节点 world transform 投到世界。display 取
-    /// [`ikat_core::scene::control::display_value`]（含 composition 拼接），与 measure 缓存的
+    /// [`yio_core::scene::control::display_value`]（含 composition 拼接），与 measure 缓存的
     /// TextLayout 同源；无缓存（首帧/空 value）→ None（后端 fallback 到节点 layout_rect）。
     ///
     /// 有 composition 时候选窗锁在 composition 的 display 起点（IME 候选窗锁在 composition，

@@ -6,10 +6,10 @@
 //!
 //! 复现 Unity 的 core solve（编码机本地），定位 bug 在 core 还是 Unity 后端。
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{NodeKind, Scene};
-use ikat_core::stage::Stage;
-use ikat_core::text::layout::measure_text;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{NodeKind, Scene};
+use yio_core::stage::Stage;
+use yio_core::text::layout::measure_text;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -89,7 +89,7 @@ fn issue1_text_wrap(scene: &Scene, s: &Stage) {
             None,
             &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
-            ikat_core::text::rich::weight_from_font_weight(st.font_weight),
+            yio_core::text::rich::weight_from_font_weight(st.font_weight),
         );
         println!(
             "  [full intrinsic] width={:.1}  lines={}  (rect.w={:.0} → {})",
@@ -252,7 +252,7 @@ fn issue3_scroll(scene: &Scene, _s: &Stage) {
     println!();
 }
 
-fn dump_text_node(scene: &Scene, s: &Stage, id: ikat_core::scene::node::NodeId, indent: &str) {
+fn dump_text_node(scene: &Scene, s: &Stage, id: yio_core::scene::node::NodeId, indent: &str) {
     let n = match scene.get(id) {
         Some(n) => n,
         None => return,
@@ -274,7 +274,7 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: ikat_core::scene::node::NodeId, 
         r.w,
         r.h,
         st.font_size,
-        st.white_space != ikat_core::style::resolved::WhiteSpace::Normal
+        st.white_space != yio_core::style::resolved::WhiteSpace::Normal
     );
     println!("{}  content={:?}", indent, content);
     if !content.is_empty() {
@@ -288,7 +288,7 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: ikat_core::scene::node::NodeId, 
             None,
             &s.host.borrow().fonts.stack_for(st.font_family.as_deref()),
             st.color,
-            ikat_core::text::rich::weight_from_font_weight(st.font_weight),
+            yio_core::text::rich::weight_from_font_weight(st.font_weight),
         );
         println!(
             "{}  intrinsic width={:.1}  vs rect.w={:.0} → {}",
@@ -307,13 +307,13 @@ fn dump_text_node(scene: &Scene, s: &Stage, id: ikat_core::scene::node::NodeId, 
     }
 }
 
-fn collect_text(scene: &Scene, id: ikat_core::scene::node::NodeId) -> String {
+fn collect_text(scene: &Scene, id: yio_core::scene::node::NodeId) -> String {
     let mut out = String::new();
     collect_text_rec(scene, id, &mut out);
     out
 }
 
-fn collect_text_rec(scene: &Scene, id: ikat_core::scene::node::NodeId, out: &mut String) {
+fn collect_text_rec(scene: &Scene, id: yio_core::scene::node::NodeId, out: &mut String) {
     if let Some(n) = scene.get(id) {
         if matches!(n.kind, NodeKind::TextNode | NodeKind::TextElement) {
             if let Some(c) = scene.text_contents.get(&id) {

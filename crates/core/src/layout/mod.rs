@@ -40,7 +40,7 @@ use taffy::tree::{LayoutInput, LayoutOutput};
 /// `solve`/`build_render_nodes` 接 `&HashMap<String, (u32, u32)>` 查 Image intrinsic 尺寸。
 pub type ImageSizeTable = HashMap<String, (u32, u32)>;
 
-/// Ikat OverflowMode → taffy Overflow（Auto→Scroll，taffy 无 Auto 变体）。
+/// Yio OverflowMode → taffy Overflow（Auto→Scroll，taffy 无 Auto 变体）。
 /// Hidden/Scroll 让 taffy flex automatic min-size=0（CSS flex §4.5，taffy style/mod.rs:124）——
 /// 容器不被 content min-content 撑开，content 可溢出 scroll。不设则 taffy 默认 Visible →
 /// 容器被 content 撑开（viewport=content）→ overlap=0 → scroll 失效。

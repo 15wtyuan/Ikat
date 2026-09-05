@@ -28,7 +28,7 @@ error):
   arrow on a control, `none` for element-level software-cursor hiding. Browser
   preview renders `cursor` natively, so there is no preview gap. In the Unity
   runtime the hand is drawn only if the game registers a cursor texture
-  (`IkatStageDriver.SetCursorTexture`); unregistered, hover falls back to the
+  (`YioStageDriver.SetCursorTexture`); unregistered, hover falls back to the
   system arrow.
 - `color` / `font-size` (px or viewport units — responsive sizes like `font-size: 2vmin`;
   `%` / `em` / `rem` rejected) / `font-family` / `font-weight`
@@ -38,7 +38,7 @@ error):
 - `word-break` — `normal` / `break-all` (break between any characters) / `keep-all` (no breaks inside CJK words)
 - `text-wrap` — `normal` / `nowrap` (disables soft wrap; `balance` / `stable` / `pretty` are rejected — use `text-align` for centered headings)
 - `text-decoration` — `none` / `underline` only (not inherited; `<a>` UA default is `underline`, author declarations override)
-- `-webkit-text-stroke` / `font-effect` — Ikat text extensions
+- `-webkit-text-stroke` / `font-effect` — Yio text extensions
 - `caret-color` / `selection-background` / `selection-color` / `placeholder-color` / `-webkit-text-security` — text-control theming
 - `animation` and longhands: `animation-name` / `animation-duration` / `animation-timing-function` / `animation-delay` / `animation-iteration-count` / `animation-direction` / `animation-fill-mode` / `animation-play-state`
 - `transition`
@@ -133,7 +133,7 @@ so preview matches the runtime.
   while the runtime honors it, so the fence rejects it. Pair every z-index
   with `position` (or a flex parent).
 - **Paint-order lint (warning)**: when static and positioned (or z-declaring)
-  siblings share a parent and the static side declares no z-index, `ikat
+  siblings share a parent and the static side declares no z-index, `yio
   check` warns — positioned elements always paint above static content
   regardless of DOM order, so an undeclared order only works by luck. To
   silence it when overlap is intended, declare the intent explicitly:
@@ -241,8 +241,8 @@ The build flags every one of these with a warning; with zero warnings the
 browser preview is honest.
 
 - `background-image` without `background-size`: browsers show the
-  original size, Ikat stretches to fill.
-- `border-width` without `border-style`: browsers draw nothing, Ikat
+  original size, Yio stretches to fill.
+- `border-width` without `border-style`: browsers draw nothing, Yio
   draws the border.
 - Adjacent margins never collapse (browsers collapse them vertically);
   prefer `gap` for spacing.

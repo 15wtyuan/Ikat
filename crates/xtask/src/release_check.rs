@@ -24,7 +24,7 @@ pub enum CheckError {
         path: String,
         source: String,
     },
-    /// ikat_pkg crate 版本与 unity 包不同轨（ikat CLI 的 `cli == unity` 契约）。
+    /// yio_pkg crate 版本与 unity 包不同轨（yio CLI 的 `cli == unity` 契约）。
     PkgCrateVersionMismatch {
         crate_version: String,
         package_version: String,
@@ -41,7 +41,7 @@ impl std::fmt::Display for CheckError {
         match self {
             Self::MissingField(n) => write!(f, "package.json missing required field: {n}"),
             Self::InvalidSemver(v) => write!(f, "version is not valid SemVer: {v}"),
-            Self::DllNotFound => write!(f, "ikat_ffi_c.dll not found in package"),
+            Self::DllNotFound => write!(f, "yio_ffi_c.dll not found in package"),
             Self::AsmdefMissing(n) => write!(f, "asmdef missing: {n}"),
             Self::ChangelogMissingVersion(v) => {
                 write!(f, "CHANGELOG.md has no section for version {v}")
@@ -55,9 +55,9 @@ impl std::fmt::Display for CheckError {
                 package_version,
             } => write!(
                 f,
-                "ikat_pkg crate version {crate_version} != unity package version \
-                 {package_version}; bump crates/packer/pkg/Cargo.toml to align (ikat CLI \
-                 reports both from the crate version — a mismatch ships a lying `ikat version`)"
+                "yio_pkg crate version {crate_version} != unity package version \
+                 {package_version}; bump crates/packer/pkg/Cargo.toml to align (yio CLI \
+                 reports both from the crate version — a mismatch ships a lying `yio version`)"
             ),
             Self::ArtifactsStale { files } => write!(
                 f,
@@ -125,9 +125,9 @@ pub fn dll_status(committed: &Path) -> DllStatus {
 /// 校验三个 asmdef 齐全。任一缺失返回 `AsmdefMissing`。
 pub fn check_asmdef_present(pkg_dir: &Path) -> Result<(), CheckError> {
     let expected = [
-        "Ikat.Runtime.asmdef",
-        "Editor/Ikat.Editor.asmdef",
-        "Plugins/Ikat/Ikat.Bindings.asmdef",
+        "Yio.Runtime.asmdef",
+        "Editor/Yio.Editor.asmdef",
+        "Plugins/Yio/Yio.Bindings.asmdef",
     ];
     for rel in expected {
         let p = pkg_dir.join(rel);
@@ -173,15 +173,15 @@ fn is_test_code(path: &str) -> bool {
         || file.ends_with("tests.rs")
 }
 
-/// exe/gui 侧过滤器：`crates/` 下会影响 ikat.exe/ikat_gui.exe 产物字节的源变更。
+/// exe/gui 侧过滤器：`crates/` 下会影响 yio.exe/yio_gui.exe 产物字节的源变更。
 /// 排除 xtask（编排工具自身不进产物）与测试/bench 代码。GUI（packer/gui）**在内**
-/// ——它直链 ikat_pkg/ikat_fence 编进 exe（dev fallback 进程内路径），与 dll/
-/// ikat.exe 无条件同批重出。
+/// ——它直链 yio_pkg/yio_fence 编进 exe（dev fallback 进程内路径），与 dll/
+/// yio.exe 无条件同批重出。
 fn affects_artifacts(path: &str) -> bool {
     path.starts_with("crates/") && !path.starts_with("crates/xtask/") && !is_test_code(path)
 }
 
-/// dll 侧过滤器：ikat_ffi_c.dll 只链 core 与 ffi 两个 crate——fence/pkg/gui 的
+/// dll 侧过滤器：yio_ffi_c.dll 只链 core 与 ffi 两个 crate——fence/pkg/gui 的
 /// 改动不进 dll 字节，重建后无 diff 可提交、锚点无法前移，粗过滤器会造出「无解
 /// 的红」（长度形态门批实证：fence 改动后 exe 已重出入库、dll 字节相同，门仍拦）。
 fn affects_dll(path: &str) -> bool {
@@ -223,8 +223,8 @@ fn collect_staleness() -> Result<Vec<String>, CheckError> {
             }
         })
     };
-    let dll_anchor = anchor("unity/package/Plugins/Ikat/ikat_ffi_c.dll")?;
-    let exe_anchor = anchor("unity/package/Editor/Tools/ikat.exe")?;
+    let dll_anchor = anchor("unity/package/Plugins/Yio/yio_ffi_c.dll")?;
+    let exe_anchor = anchor("unity/package/Editor/Tools/yio.exe")?;
     let changed_since = |a: &str| -> Vec<String> {
         if a.is_empty() {
             return vec!["<artifact never committed>".to_string()];
@@ -245,7 +245,7 @@ fn collect_staleness() -> Result<Vec<String>, CheckError> {
     ))
 }
 
-/// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef + ikat crate 版本同轨。
+/// release-check 入口：校验 package.json + CHANGELOG + dll + asmdef + yio crate 版本同轨。
 /// 任意一项失败返回 Err，调用方据此退出非 0。
 pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
     let pkg = paths::repo_root().join("unity/package/package.json");
@@ -259,7 +259,7 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
 
     // dll：入库必须存在。
     let pkg_dir = paths::repo_root().join("unity/package");
-    let committed_dll = pkg_dir.join("Plugins/Ikat/ikat_ffi_c.dll");
+    let committed_dll = pkg_dir.join("Plugins/Yio/yio_ffi_c.dll");
     match dll_status(&committed_dll) {
         DllStatus::NotFound => return Err(CheckError::DllNotFound.into()),
         DllStatus::Ok => {}
@@ -276,8 +276,8 @@ pub fn run_release_check() -> Result<(), Box<dyn std::error::Error>> {
 
     check_asmdef_present(&pkg_dir)?;
 
-    // ikat CLI 版本同轨：crate 版本 == unity 包版本。链条 tag → package.json →
-    // pkg crate → `ikat version`，缺环即消费者装错版本号。
+    // yio CLI 版本同轨：crate 版本 == unity 包版本。链条 tag → package.json →
+    // pkg crate → `yio version`，缺环即消费者装错版本号。
     let cargo_toml = read_file(&paths::repo_root().join("crates/packer/pkg/Cargo.toml"))?;
     let crate_version = parse_crate_version(&cargo_toml).ok_or_else(|| CheckError::ReadFailed {
         path: "crates/packer/pkg/Cargo.toml".into(),
@@ -316,12 +316,12 @@ mod tests {
         // version 行不得干扰。
         let toml = r#"
 [package]
-name = "ikat_pkg"
+name = "yio_pkg"
 version = "0.0.5"
 edition = "2021"
 
 [[bin]]
-name = "ikat"
+name = "yio"
 path = "src/main.rs"
 
 [dependencies]
@@ -396,22 +396,22 @@ serde = { version = "1", features = ["derive"] }
     #[test]
     fn asmdef_present_ok() {
         let dir = tmp_pkg_dir();
-        write_rel(&dir, "Ikat.Runtime.asmdef", b"{}");
-        write_rel(&dir, "Editor/Ikat.Editor.asmdef", b"{}");
-        write_rel(&dir, "Plugins/Ikat/Ikat.Bindings.asmdef", b"{}");
+        write_rel(&dir, "Yio.Runtime.asmdef", b"{}");
+        write_rel(&dir, "Editor/Yio.Editor.asmdef", b"{}");
+        write_rel(&dir, "Plugins/Yio/Yio.Bindings.asmdef", b"{}");
         assert!(check_asmdef_present(&dir).is_ok());
     }
 
     #[test]
     fn asmdef_present_missing() {
         let dir = tmp_pkg_dir();
-        write_rel(&dir, "Ikat.Runtime.asmdef", b"{}");
-        write_rel(&dir, "Editor/Ikat.Editor.asmdef", b"{}");
-        // 故意不写 Plugins/Ikat/Ikat.Bindings.asmdef
+        write_rel(&dir, "Yio.Runtime.asmdef", b"{}");
+        write_rel(&dir, "Editor/Yio.Editor.asmdef", b"{}");
+        // 故意不写 Plugins/Yio/Yio.Bindings.asmdef
         assert!(matches!(
             check_asmdef_present(&dir),
             Err(CheckError::AsmdefMissing(n))
-                if n == "Plugins/Ikat/Ikat.Bindings.asmdef"
+                if n == "Plugins/Yio/Yio.Bindings.asmdef"
         ));
     }
 

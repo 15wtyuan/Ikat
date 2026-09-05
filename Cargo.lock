@@ -1659,69 +1659,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ikat_core"
-version = "0.1.0"
-dependencies = [
- "ab_glyph_rasterizer",
- "bincode",
- "bitflags 2.13.0",
- "criterion",
- "etagere",
- "ikat_pkg",
- "serde",
- "serde_json",
- "slotmap",
- "taffy",
- "ttf-parser",
- "unicode-linebreak",
-]
-
-[[package]]
-name = "ikat_fence"
-version = "0.1.0"
-dependencies = [
- "html5gum",
- "ikat_core",
- "taffy",
-]
-
-[[package]]
-name = "ikat_ffi_c"
-version = "0.1.0"
-dependencies = [
- "csbindgen",
- "ikat_core",
- "ikat_fence",
- "taffy",
-]
-
-[[package]]
-name = "ikat_gui"
-version = "0.1.0"
-dependencies = [
- "ikat_fence",
- "ikat_pkg",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
-]
-
-[[package]]
-name = "ikat_pkg"
-version = "0.0.17"
-dependencies = [
- "etagere",
- "ikat_core",
- "ikat_fence",
- "image",
- "serde",
- "serde_json",
- "taffy",
-]
-
-[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4893,6 +4830,69 @@ dependencies = [
  "csbindgen",
  "semver",
  "serde_json",
+]
+
+[[package]]
+name = "yio_core"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph_rasterizer",
+ "bincode",
+ "bitflags 2.13.0",
+ "criterion",
+ "etagere",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "taffy",
+ "ttf-parser",
+ "unicode-linebreak",
+ "yio_pkg",
+]
+
+[[package]]
+name = "yio_fence"
+version = "0.1.0"
+dependencies = [
+ "html5gum",
+ "taffy",
+ "yio_core",
+]
+
+[[package]]
+name = "yio_ffi_c"
+version = "0.1.0"
+dependencies = [
+ "csbindgen",
+ "taffy",
+ "yio_core",
+ "yio_fence",
+]
+
+[[package]]
+name = "yio_gui"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "yio_fence",
+ "yio_pkg",
+]
+
+[[package]]
+name = "yio_pkg"
+version = "0.0.17"
+dependencies = [
+ "etagere",
+ "image",
+ "serde",
+ "serde_json",
+ "taffy",
+ "yio_core",
+ "yio_fence",
 ]
 
 [[package]]

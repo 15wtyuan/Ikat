@@ -1,5 +1,5 @@
 [package]
-name = "ikat_gui"
+name = "yio_gui"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,8 +10,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ikat_pkg = { path = "../../pkg" }
+yio_pkg = { path = "../../pkg" }
 tauri-plugin-dialog = "2"
 
 [dev-dependencies]
-ikat_fence = { path = "../../../fence" }
+yio_fence = { path = "../../../fence" }

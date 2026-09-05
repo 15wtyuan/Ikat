@@ -1,4 +1,4 @@
-# LoomGUI 路线图（已迁移 GitHub issues）
+# YioGUI 路线图（已迁移 GitHub issues）
 
 > **2026-08-24 起活工作项全部在 GitHub issues**，本文件不再维护任务清单。常用查询：
 >
@@ -15,7 +15,7 @@
 
 ## 北极星：完全体
 
-把 LoomGUI 做成一个**真能拿来发布游戏**的跨引擎游戏 UI 框架。判据（全部满足 = 完全体）：
+把 YioGUI 做成一个**真能拿来发布游戏**的跨引擎游戏 UI 框架。判据（全部满足 = 完全体）：
 
 1. **契约对齐**：三份终态契约（`public-api.md` / `main-design.md` / `fence.md`）100% 落地——公共 API 无 `NotImplementedException` 壳、围栏 CSS 子集完整、架构边界（公共语义 / 内部行为 / 引擎后端三层）干净。**契约承诺 = 必做**：契约项在 M2/M3 消化，v1.0 发版 issue 含契约对齐终审兜底。
 2. **跨引擎**：Unity 后端 ✓；Godot-C# 后端跑通同一 showcase——兑现「Rust 核心 + 多引擎投影」赌注。

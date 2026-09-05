@@ -13,15 +13,15 @@
 // - once 只移除自身，不影响同 list 的其它 entry。
 // - EventRegistration.Dispose 调闭包内的 Remove 从 list 移除 entry；list 空则移 key。
 //
-// 接线契约：EventDemuxer 翻译 raw IkatEvent → typed struct（填 _core.Target = registry.GetOrCreate(nodeId)）
+// 接线契约：EventDemuxer 翻译 raw YioEvent → typed struct（填 _core.Target = registry.GetOrCreate(nodeId)）
 // 后调 Dispatch<T>(targetNodeId, evt)；EventBus 负责 ancestor chain 走 + capture/bubble 路由。
 
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using Ikat.Bindings;
+using Yio.Bindings;
 
-namespace Ikat
+namespace Yio
 {
     /// <summary>
     /// 投影层内部：typed 事件订阅 + DOM 3 阶段路由。
@@ -100,7 +100,7 @@ namespace Ikat
             ulong current = targetNodeId;
             for (int i = 0; i < 10_000; i++)
             {
-                ulong parent = Native.ikat_node_parent(h, current);
+                ulong parent = Native.yio_node_parent(h, current);
                 if (parent == Node.RootSentinel) break;   // 走出根 / target 不 live
                 if (parent == current) break;             // 防御：自循环（理论不达）
                 chain.Add(parent);

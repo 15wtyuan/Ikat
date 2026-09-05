@@ -3,9 +3,9 @@
 //! 验"端到端链通 + class 命中（rect）+ display:none 剪枝 + flex 布局"。继承/color/font、
 //! kind 保真、computed style 的完整断言不在本 smoke 范围——本 smoke 用 Stage public API
 //! （get_node_layout_rect / get_node_visible / find_node_by_id）可达的部分。
-use ikat_core::scene::NodeId;
-use ikat_core::stage::Stage;
-use ikat_pkg::build::{pack_components, Component, PackResult};
+use yio_core::scene::NodeId;
+use yio_core::stage::Stage;
+use yio_pkg::build::{pack_components, Component, PackResult};
 
 /// Pack HTML -> pkg.bin -> Stage -> instantiate -> 帧推进，返回 Stage + 组件根 NodeId。
 ///

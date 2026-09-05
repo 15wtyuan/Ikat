@@ -1,22 +1,22 @@
-//! `ikat preview` — 人类预览工作台：本地只读 HTTP server，serve 工作区源文件 +
+//! `yio preview` — 人类预览工作台：本地只读 HTTP server，serve 工作区源文件 +
 //! 内嵌外壳，把「AI 写完页面 → 人类浏览器过目 → 进 Unity」补成闭环。
 //!
 //! 设计要点（grilling 定案，2026-08；#92 分层修订）：
 //! - 忠实预览：分辨率切换由外壳按 match_mode 缩放设计分辨率渲染，永不触发浏览器
 //!   reflow——core 按固定设计分辨率 solve，预览必须预测运行时。
 //! - 注入分层（#92）：A 层「单真相语义」（组件展开 / 控件语义 / 结构 polyfill）
-//!   嵌在二进制里，boot 入口对每个 HTML 页**恒注入**、经 `/ikat-preview/lib/*`
+//!   嵌在二进制里，boot 入口对每个 HTML 页**恒注入**、经 `/yio-preview/lib/*`
 //!   路由供给——与 CLI 版本天然同版本，工作区不拷贝（复刻物 = 第二真相源）。
 //!   B 层「消费侧语义」（演示数据 / 页面导航 / 页面交互）归工作区：
 //!   `<包目录>/preview/main.js` 全页 + `preview/pages/<页名>.js` 按页，文件存在
 //!   才追加注入。HTML 源零引用、不进打包。
 //! - 生命周期（吸收 superpowers 踩坑）：per-workspace 稳定端口（路径哈希
 //!   41000–41999，浏览器 tab 跨重启不断链）；server-info 落盘
-//!   `<会话根>/.ikat/preview.json` 兜底「AI 后台起进程 stdout 被吞」；空闲超时
+//!   `<会话根>/.yio/preview.json` 兜底「AI 后台起进程 stdout 被吞」；空闲超时
 //!   自杀（默认 4h——30 分钟会打断人类评审）；`--stop` 先验 token 归属再杀、
 //!   确认死亡才算成功；属主进程死亡追踪尽力而为，空闲超时兜底一切。
 //! - 安全：只绑 127.0.0.1；Host 头白名单（防 DNS rebinding）；路径沙箱
-//!   （canonicalize 后必须仍在工作区内，拒绝点开头的路径段——`.ikat`/`.git`
+//!   （canonicalize 后必须仍在工作区内，拒绝点开头的路径段——`.yio`/`.git`
 //!   不可达）。
 
 use crate::config::Located;
@@ -34,7 +34,7 @@ const PORT_BASE: u16 = 41_000;
 const PORT_SPAN: u16 = 1_000;
 /// 空闲超时缺省：4 小时（superpowers 实证 30 分钟会打断人类评审会话）。
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 4 * 60 * 60;
-/// server-info 落盘文件（会话根 `.ikat/` 下，路径沙箱使其不经 HTTP 可达）。
+/// server-info 落盘文件（会话根 `.yio/` 下，路径沙箱使其不经 HTTP 可达）。
 pub const INFO_FILE: &str = "preview.json";
 
 // ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ pub struct PreviewOpts {
     pub idle_timeout: Option<u64>,
 }
 
-/// `ikat preview`（长驻）：定位工作区 → 复用/起服务 → stdout 吐单 JSON → 阻塞至
+/// `yio preview`（长驻）：定位工作区 → 复用/起服务 → stdout 吐单 JSON → 阻塞至
 /// 超时/被停/属主死亡。返回值只在启动失败时出现（成功不返回）。
 pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     let ui = &located.ui;
@@ -90,7 +90,7 @@ pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     let accept_shared = Arc::clone(&shared);
     print_started(&info, false);
     eprintln!(
-        "preview: serving {} (pid {}, idle timeout {}s); Ctrl+C or `ikat preview --stop` to quit",
+        "preview: serving {} (pid {}, idle timeout {}s); Ctrl+C or `yio preview --stop` to quit",
         info.workspace,
         info.pid,
         idle_timeout.as_secs()
@@ -126,12 +126,12 @@ pub fn start(located: &Located, opts: &PreviewOpts) -> Result<i32, String> {
     Ok(0)
 }
 
-/// `ikat preview --stop`：读 server-info → ping 验明正身 → 请求关停 → 确认死亡
+/// `yio preview --stop`：读 server-info → ping 验明正身 → 请求关停 → 确认死亡
 /// （强杀兜底）。归属验证失败绝不杀（防 PID 复用误杀无关进程）。
 pub fn stop(located: &Located) -> Result<i32, String> {
     let Some(info) = read_info(&located.root) else {
         return Err(
-            "no preview server on record for this workspace (missing .ikat/preview.json)".into(),
+            "no preview server on record for this workspace (missing .yio/preview.json)".into(),
         );
     };
     let Some(got) = ping(&info) else {
@@ -202,7 +202,7 @@ pub struct ServerInfo {
 }
 
 fn info_path(root: &Path) -> PathBuf {
-    root.join(".ikat").join(INFO_FILE)
+    root.join(".yio").join(INFO_FILE)
 }
 
 fn read_info(root: &Path) -> Option<ServerInfo> {
@@ -244,7 +244,7 @@ fn fnv1a(s: &str) -> u32 {
 fn bind_listener(ui: &Path, explicit: Option<u16>) -> Result<TcpListener, String> {
     if let Some(p) = explicit {
         return TcpListener::bind(("127.0.0.1", p)).map_err(|e| {
-            format!("bind 127.0.0.1:{p}: {e}（端口被占？`ikat preview --port <n>` 换端口）")
+            format!("bind 127.0.0.1:{p}: {e}（端口被占？`yio preview --port <n>` 换端口）")
         });
     }
     let base = PORT_BASE + (fnv1a(&ui_string(ui)) % u32::from(PORT_SPAN)) as u16;
@@ -560,7 +560,7 @@ fn route(req: &Request, shared: &Shared) -> Response {
         }
         // A 层库路由（#92）：boot 自动注入引这里；工作区 B 层脚本 import 这些
         // 绝对 URL——内容嵌在二进制里，与 CLI 版本天然同版本。
-        (m, p) if p.starts_with("/ikat-preview/lib/") && (m == "GET" || m == "HEAD") => {
+        (m, p) if p.starts_with("/yio-preview/lib/") && (m == "GET" || m == "HEAD") => {
             match p.rsplit('/').next().unwrap_or("") {
                 "boot.js" => {
                     Response::new(200, "OK", "text/javascript; charset=utf-8", simlib::BOOT_JS)
@@ -587,15 +587,15 @@ fn route(req: &Request, shared: &Shared) -> Response {
         ("GET", "/api/workspace.json") => api_workspace(shared),
         // 组件作用域 CSS（#95 / #94 前半步）：server 用 fence 同一入口抽组件样式，
         // 双分支改写后供给——客户端 expand.js 只注入本链接，CSS 语义单真相在 Rust。
-        (m, p) if p.starts_with("/ikat-preview/comp-style/") && (m == "GET" || m == "HEAD") => {
-            serve_comp_style(shared, &p["/ikat-preview/comp-style/".len()..])
+        (m, p) if p.starts_with("/yio-preview/comp-style/") && (m == "GET" || m == "HEAD") => {
+            serve_comp_style(shared, &p["/yio-preview/comp-style/".len()..])
         }
-        ("GET", "/_ikat/ping") => Response::json(
+        ("GET", "/_yio/ping") => Response::json(
             200,
             "OK",
             json!({"ok": true, "token": shared.token, "pid": std::process::id()}),
         ),
-        ("POST", "/_ikat/shutdown") => match req.header("x-ikat-token") {
+        ("POST", "/_yio/shutdown") => match req.header("x-yio-token") {
             Some(t) if t == shared.token => {
                 shared.shutdown.store(true, Ordering::SeqCst);
                 Response::json(200, "OK", json!({"ok": true}))
@@ -667,7 +667,7 @@ fn api_workspace(shared: &Shared) -> Response {
     )
 }
 
-/// `/ikat-preview/comp-style/<name>.css`：组件样式的浏览器作用域版。fence 同一
+/// `/yio-preview/comp-style/<name>.css`：组件样式的浏览器作用域版。fence 同一
 /// 入口（`parse_html_to_ir_named`）抽 `<style>` 文本 + `<link rel=stylesheet>`
 /// 内容，`preview_comp_style::rewrite_component_css` 双分支改写后供给。注册表
 /// 复用打包期扫描器（live 读源——预览哲学：读活文件，不快照打包期解析）。
@@ -688,7 +688,7 @@ fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
         return Response::text(
             500,
             "Internal Server Error",
-            "component registry has errors (see `ikat check`)",
+            "component registry has errors (see `yio check`)",
         );
     };
     let Some((_, def)) = reg.entries().find(|(n, _)| n.as_str() == name) else {
@@ -698,7 +698,7 @@ fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
     let Ok(src) = std::fs::read_to_string(shared.ui.join(&html_rel)) else {
         return Response::text(404, "Not Found", "component source unreadable");
     };
-    let raw = ikat_fence::tree_builder::parse_html_to_ir_named(&src, html_rel.clone());
+    let raw = yio_fence::tree_builder::parse_html_to_ir_named(&src, html_rel.clone());
     let mut css = String::new();
     for st in &raw.style_texts {
         css.push_str(st);
@@ -720,7 +720,7 @@ fn serve_comp_style(shared: &Shared, rest: &str) -> Response {
                 css.push('\n');
             }
             None => css.push_str(&format!(
-                "/* preview: component stylesheet `{href}` not found — `ikat build` errors on it */\n"
+                "/* preview: component stylesheet `{href}` not found — `yio build` errors on it */\n"
             )),
         }
     }
@@ -848,7 +848,7 @@ fn http_date(t: std::time::SystemTime) -> String {
     )
 }
 
-/// 相对路径规整：URL 解码后逐段校验——拒绝 `..`/反斜杠/点开头段（`.ikat`、
+/// 相对路径规整：URL 解码后逐段校验——拒绝 `..`/反斜杠/点开头段（`.yio`、
 /// `.git` 不可达）。返回以正斜杠重组的工作区相对路径。
 fn normalize_rel(rel: &str) -> Option<String> {
     let mut parts = Vec::new();
@@ -973,7 +973,7 @@ fn build_fonts_css(ui: &Path, fonts: &[workspace::FontCfg]) -> String {
     css
 }
 
-/// HTML 注入（#92 分层后的注入约定）：A 层 boot（`/ikat-preview/lib/boot.js`，
+/// HTML 注入（#92 分层后的注入约定）：A 层 boot（`/yio-preview/lib/boot.js`，
 /// 组件展开 + 控件语义 + base polyfill）**恒注入**；工作区 B 层
 /// `<包目录>/preview/main.js`（全页）与 `preview/pages/<页stem>.js`（按页）
 /// 存在才追加。module 自带 defer 语义、按注入序执行——boot 先跑（A 层就绪后
@@ -981,18 +981,15 @@ fn build_fonts_css(ui: &Path, fonts: &[workspace::FontCfg]) -> String {
 /// 路径（浏览器按页面 URL 解析 → 落回本 server 的 /ws/ 下同一目录）。
 /// 字体样式（#104）先插到 `<head>` 开标签后——在页面自身 `<style>`/`<link>`
 /// 之前，页面 CSS 想覆盖默认 family 仍能赢（工作区手写是真相源）。
-/// env(safe-area-inset-*) → var(--ikat-safe-*, 0px) 纯文本改写（#110 预览保真）。
+/// env(safe-area-inset-*) → var(--yio-safe-*, 0px) 纯文本改写（#110 预览保真）。
 /// 浏览器 env() 原生但恒 0（无 viewport-fit=cover + 无 notch）；不改写则用 env() 的
 /// 页面预览/运行时分叉。外壳按当前设备预设把换算后的 design px 写进 iframe 根的
 /// CSS 变量（与 safe 参考线同一张预设表 = 同源）。只应施于 CSS 文本。
 pub(crate) fn rewrite_env_to_vars(css: &str) -> String {
-    css.replace("env(safe-area-inset-top)", "var(--ikat-safe-top, 0px)")
-        .replace("env(safe-area-inset-right)", "var(--ikat-safe-right, 0px)")
-        .replace(
-            "env(safe-area-inset-bottom)",
-            "var(--ikat-safe-bottom, 0px)",
-        )
-        .replace("env(safe-area-inset-left)", "var(--ikat-safe-left, 0px)")
+    css.replace("env(safe-area-inset-top)", "var(--yio-safe-top, 0px)")
+        .replace("env(safe-area-inset-right)", "var(--yio-safe-right, 0px)")
+        .replace("env(safe-area-inset-bottom)", "var(--yio-safe-bottom, 0px)")
+        .replace("env(safe-area-inset-left)", "var(--yio-safe-left, 0px)")
 }
 
 /// HTML 内的 CSS 片段改写：`<style>` 块内容 + tag 的 `style="..."` 属性值。
@@ -1136,7 +1133,7 @@ pub fn inject_preview_scripts(html: &str, page_dir: &Path, stem: &str, fonts_css
     let html = &rewrite_env_in_html(html);
     let html = insert_fonts_style(html, fonts_css);
     let mut tags = String::new();
-    tags.push_str(r#"<script type="module" src="/ikat-preview/lib/boot.js"></script>"#);
+    tags.push_str(r#"<script type="module" src="/yio-preview/lib/boot.js"></script>"#);
     if page_dir.join("preview/main.js").is_file() {
         tags.push_str(r#"<script type="module" src="preview/main.js"></script>"#);
     }
@@ -1165,7 +1162,7 @@ fn insert_fonts_style(html: &str, fonts_css: &str) -> String {
     if fonts_css.is_empty() {
         return html.to_string();
     }
-    let style = format!("<style id=\"ikat-preview-fonts\">\n{fonts_css}</style>");
+    let style = format!("<style id=\"yio-preview-fonts\">\n{fonts_css}</style>");
     let lower = html.to_ascii_lowercase();
     let mut search_from = 0;
     while let Some(pos) = lower[search_from..].find("<head") {
@@ -1200,7 +1197,7 @@ fn http_call(port: u16, method: &str, path: &str, token: Option<&str>) -> Option
     let mut req =
         format!("{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n");
     if let Some(t) = token {
-        req.push_str(&format!("X-Ikat-Token: {t}\r\n"));
+        req.push_str(&format!("X-Yio-Token: {t}\r\n"));
     }
     req.push_str("Content-Length: 0\r\n\r\n");
     stream.write_all(req.as_bytes()).ok()?;
@@ -1214,12 +1211,12 @@ fn http_call(port: u16, method: &str, path: &str, token: Option<&str>) -> Option
 
 /// ping 通则返回 server 的 JSON body（含 token）。
 fn ping(info: &ServerInfo) -> Option<serde_json::Value> {
-    let body = http_call(info.port, "GET", "/_ikat/ping", None)?;
+    let body = http_call(info.port, "GET", "/_yio/ping", None)?;
     serde_json::from_str(&body).ok()
 }
 
 fn request_shutdown(info: &ServerInfo) {
-    let _ = http_call(info.port, "POST", "/_ikat/shutdown", Some(&info.token));
+    let _ = http_call(info.port, "POST", "/_yio/shutdown", Some(&info.token));
 }
 
 /// 内嵌外壳资产（templates/preview-shell/，手写无构建）。
@@ -1231,7 +1228,7 @@ mod shell {
 
 /// 预览 A 层库（templates/preview/lib/，#92）：boot 引导 / 组件展开 / 控件语义 /
 /// 演示填充 / 结构性 polyfill——「单真相语义」的框架真相副本，经路由
-/// `/ikat-preview/lib/*` 供给（与运行二进制天然同版本），工作区不拷贝。
+/// `/yio-preview/lib/*` 供给（与运行二进制天然同版本），工作区不拷贝。
 mod simlib {
     pub const BOOT_JS: &str = include_str!("../templates/preview/lib/boot.js");
     pub const EXPAND_JS: &str = include_str!("../templates/preview/lib/expand.js");
@@ -1280,7 +1277,7 @@ mod tests {
         assert_eq!(normalize_rel("a/./b.html").as_deref(), Some("a/b.html"));
         assert_eq!(normalize_rel("../x"), None);
         assert_eq!(normalize_rel("a/../../x"), None);
-        assert_eq!(normalize_rel(".ikat/preview.json"), None);
+        assert_eq!(normalize_rel(".yio/preview.json"), None);
         assert_eq!(normalize_rel("a/.git/config"), None);
         assert_eq!(normalize_rel("a\\b"), None);
         assert_eq!(normalize_rel(""), None);
@@ -1317,7 +1314,7 @@ mod tests {
 
     #[test]
     fn inject_only_existing_entries() {
-        let tmp = std::env::temp_dir().join(format!("ikat_preview_inject_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("yio_preview_inject_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("preview/pages")).unwrap();
         std::fs::write(tmp.join("preview/main.js"), "// shared").unwrap();
@@ -1326,18 +1323,18 @@ mod tests {
         let html = "<html><head><style>x{}</style></head><body></body></html>";
         let out = inject_preview_scripts(html, &tmp, "home", "");
         // A 层 boot 恒注入（#92）+ 工作区两入口存在才追加。
-        assert!(out.contains(r#"src="/ikat-preview/lib/boot.js""#));
+        assert!(out.contains(r#"src="/yio-preview/lib/boot.js""#));
         assert!(out.contains(r#"<script type="module" src="preview/main.js"></script>"#));
         assert!(out.contains(r#"<script type="module" src="preview/pages/home.js"></script>"#));
         // 注入位置在 </head> 前、页面 <style> 之后。
         let style_pos = out.find("<style>").unwrap();
-        let boot_pos = out.find("/ikat-preview/lib/boot.js").unwrap();
+        let boot_pos = out.find("/yio-preview/lib/boot.js").unwrap();
         let head_pos = out.find("</head>").unwrap();
         assert!(style_pos < boot_pos && boot_pos < head_pos);
 
         // 无按页脚本的页：boot + main。
         let out2 = inject_preview_scripts(html, &tmp, "other", "");
-        assert!(out2.contains("/ikat-preview/lib/boot.js"));
+        assert!(out2.contains("/yio-preview/lib/boot.js"));
         assert!(out2.contains("preview/main.js"));
         assert!(!out2.contains("pages/"));
 
@@ -1346,13 +1343,13 @@ mod tests {
         std::fs::remove_dir_all(&tmp).unwrap();
         std::fs::create_dir_all(&tmp).unwrap();
         let out3 = inject_preview_scripts(html, &tmp, "home", "");
-        assert!(out3.contains(r#"src="/ikat-preview/lib/boot.js""#));
+        assert!(out3.contains(r#"src="/yio-preview/lib/boot.js""#));
         assert!(!out3.contains("preview/main.js"));
     }
 
     #[test]
     fn fonts_css_builds_faces_and_default_body_rule() {
-        let tmp = std::env::temp_dir().join(format!("ikat_preview_fonts_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("yio_preview_fonts_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("res/fonts")).unwrap();
         std::fs::write(tmp.join("res/fonts/a.ttf"), b"ttf").unwrap();
@@ -1383,7 +1380,7 @@ mod tests {
 
     #[test]
     fn fonts_css_no_default_means_no_body_rule() {
-        let tmp = std::env::temp_dir().join(format!("ikat_preview_fonts2_{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("yio_preview_fonts2_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("fonts")).unwrap();
         std::fs::write(tmp.join("fonts/x.ttf"), b"x").unwrap();
@@ -1398,7 +1395,7 @@ mod tests {
         let html = r#"<html><head lang="en"><link rel="stylesheet" href="a.css"><style>x{}</style></head><body></body></html>"#;
         let css = "@font-face { font-family: 'M'; }\nbody { font-family: 'M'; }\n";
         let out = inject_preview_scripts(html, Path::new("."), "home", css);
-        let style_pos = out.find(r#"<style id="ikat-preview-fonts">"#).unwrap();
+        let style_pos = out.find(r#"<style id="yio-preview-fonts">"#).unwrap();
         let link_pos = out.find(r#"<link rel="stylesheet""#).unwrap();
         let page_style_pos = out.rfind("<style>x{}").unwrap();
         // 字体样式在 <head lang="en"> 之后、页面 <link>/<style> 之前——页面
@@ -1409,7 +1406,7 @@ mod tests {
         let html2 = "<html><header>nav</header><body><style>x{}</style></body></html>";
         let out2 = insert_fonts_style(html2, css);
         assert!(
-            out2.starts_with("<style id=\"ikat-preview-fonts\">"),
+            out2.starts_with("<style id=\"yio-preview-fonts\">"),
             "no <head> -> prepend"
         );
 
@@ -1436,7 +1433,7 @@ mod tests {
 
         fn write_ws(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
             let tmp =
-                std::env::temp_dir().join(format!("ikat_preview_{tag}_{}", std::process::id()));
+                std::env::temp_dir().join(format!("yio_preview_{tag}_{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&tmp);
             for (rel, content) in files {
                 let path = tmp.join(rel);
@@ -1497,7 +1494,7 @@ mod tests {
             let ui = write_ws(
                 "serve",
                 &[
-                    ("ikat.workspace.json", WS_JSON),
+                    ("yio.workspace.json", WS_JSON),
                     ("ui/home.html", "<html><head></head><body>hi</body></html>"),
                     (
                         "ui/plain.html",
@@ -1517,29 +1514,29 @@ mod tests {
             // 相对 src 由浏览器按页面 URL 解析回 /ws/ui/preview/。
             let (st, body) = get(port, "/ws/ui/home.html");
             assert_eq!(st, 200);
-            assert!(body.contains(r#"src="/ikat-preview/lib/boot.js""#));
+            assert!(body.contains(r#"src="/yio-preview/lib/boot.js""#));
             assert!(body.contains(r#"<script type="module" src="preview/main.js"></script>"#));
             assert!(body.contains(r#"<script type="module" src="preview/pages/home.js"></script>"#));
-            let boot_pos = body.find("/ikat-preview/lib/boot.js").unwrap();
+            let boot_pos = body.find("/yio-preview/lib/boot.js").unwrap();
             let main_pos = body.find("preview/main.js").unwrap();
             assert!(boot_pos < main_pos, "A 层 boot 先于 B 层注入");
 
             // 无按页脚本的页：boot + main。
             let (st2, body2) = get(port, "/ws/ui/plain.html");
             assert_eq!(st2, 200);
-            assert!(body2.contains("/ikat-preview/lib/boot.js"));
+            assert!(body2.contains("/yio-preview/lib/boot.js"));
             assert!(body2.contains("preview/main.js"));
             assert!(!body2.contains("pages/"));
             // 该工作区无 fonts 段：零字体扰动（负向——无字体的工作区行为不变）。
-            assert!(!body2.contains("ikat-preview-fonts"));
+            assert!(!body2.contains("yio-preview-fonts"));
 
             // A 层库路由：内容嵌在二进制、charset 齐全（#92）。
             for p in [
-                "/ikat-preview/lib/boot.js",
-                "/ikat-preview/lib/expand.js",
-                "/ikat-preview/lib/controls.js",
-                "/ikat-preview/lib/fill.js",
-                "/ikat-preview/lib/base.css",
+                "/yio-preview/lib/boot.js",
+                "/yio-preview/lib/expand.js",
+                "/yio-preview/lib/controls.js",
+                "/yio-preview/lib/fill.js",
+                "/yio-preview/lib/base.css",
             ] {
                 let (stl, bodyl) = get(port, p);
                 assert_eq!(stl, 200, "{p}");
@@ -1558,11 +1555,11 @@ mod tests {
             assert_eq!(st5, 404);
 
             // 沙箱：路径逃逸与点开头段一律 403。
-            let (st6, _) = get(port, "/ws/../ikat.workspace.json");
+            let (st6, _) = get(port, "/ws/../yio.workspace.json");
             assert_eq!(st6, 403);
-            let (st7, _) = get(port, "/ws/ui/../../ikat.workspace.json");
+            let (st7, _) = get(port, "/ws/ui/../../yio.workspace.json");
             assert_eq!(st7, 403);
-            let (st8, _) = get(port, "/ws/.ikat/preview.json");
+            let (st8, _) = get(port, "/ws/.yio/preview.json");
             assert_eq!(st8, 403);
 
             // Host 白名单：非本机 Host 拒（防 DNS rebinding）。
@@ -1575,7 +1572,7 @@ mod tests {
             // 外壳可达。
             let (st10, body10) = get(port, "/");
             assert_eq!(st10, 200);
-            assert!(body10.contains("ikat preview"));
+            assert!(body10.contains("yio preview"));
             let _ = std::fs::remove_dir_all(&ui);
         }
 
@@ -1587,7 +1584,7 @@ mod tests {
             let ui = write_ws(
                 "serve_fonts",
                 &[
-                    ("ikat.workspace.json", ws_json),
+                    ("yio.workspace.json", ws_json),
                     ("res/fonts/p.ttf", "fake-ttf"),
                     (
                         "ui/home.html",
@@ -1603,7 +1600,7 @@ mod tests {
             assert_eq!(st, 200);
             assert!(body.contains("@font-face { font-family: 'Pixel'; src: url(/ws/res/fonts/p.ttf) format('truetype');"));
             assert!(body.contains("body { font-family: 'Pixel'; }"));
-            let font_style_pos = body.find(r#"<style id="ikat-preview-fonts">"#).unwrap();
+            let font_style_pos = body.find(r#"<style id="yio-preview-fonts">"#).unwrap();
             let page_style_pos = body.rfind("<style>body{}").unwrap();
             assert!(font_style_pos < page_style_pos, "注入字体样式先于页面样式");
 
@@ -1619,7 +1616,7 @@ mod tests {
             let ui = write_ws(
                 "api",
                 &[
-                    ("ikat.workspace.json", WS_JSON),
+                    ("yio.workspace.json", WS_JSON),
                     ("ui/home.html", "<html><head></head><body></body></html>"),
                     ("ui/shop.html", "<html><head></head><body></body></html>"),
                     ("ui/preview/main.js", "// sim"),
@@ -1644,10 +1641,10 @@ mod tests {
 
         #[test]
         fn ping_and_shutdown_roundtrip() {
-            let ui = write_ws("stop", &[("ikat.workspace.json", WS_JSON)]);
+            let ui = write_ws("stop", &[("yio.workspace.json", WS_JSON)]);
             let (port, shared) = spawn_server(&ui);
 
-            let (st, body) = get(port, "/_ikat/ping");
+            let (st, body) = get(port, "/_yio/ping");
             assert_eq!(st, 200);
             let v: serde_json::Value = serde_json::from_str(&body).unwrap();
             assert_eq!(v["token"], "t0");
@@ -1655,7 +1652,7 @@ mod tests {
             // 错 token 拒关停、flag 不动。
             let (st2, _) = raw(
                 port,
-                "POST /_ikat/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Ikat-Token: wrong\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "POST /_yio/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Yio-Token: wrong\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             );
             assert_eq!(st2, 403);
             assert!(!shared.shutdown.load(Ordering::SeqCst));
@@ -1663,7 +1660,7 @@ mod tests {
             // 对 token → flag 置位（真正退出由监控线程负责，单测只验协议面）。
             let (st3, _) = raw(
                 port,
-                "POST /_ikat/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Ikat-Token: t0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "POST /_yio/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{P}\r\nX-Yio-Token: t0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             );
             assert_eq!(st3, 200);
             assert!(shared.shutdown.load(Ordering::SeqCst));
@@ -1680,34 +1677,33 @@ mod tests {
             let ui = write_ws(
                 "compstyle",
                 &[
-                    ("ikat.workspace.json", WS_JSON),
+                    ("yio.workspace.json", WS_JSON),
                     ("ui/components/tip-panel.html", comp),
                 ],
             );
             let (port, _shared) = spawn_server(&ui);
 
-            let (st, body) = get(port, "/ikat-preview/comp-style/tip-panel.css");
+            let (st, body) = get(port, "/yio-preview/comp-style/tip-panel.css");
             assert_eq!(st, 200);
             // 双分支：根类规则必须能命中携带标记的模板根（旧 JS 前缀只有后代分支）。
-            assert!(body.contains(
-                "[data-ikat-comp=\"tip-panel\"] .tip, [data-ikat-comp=\"tip-panel\"].tip"
-            ));
+            assert!(body
+                .contains("[data-yio-comp=\"tip-panel\"] .tip, [data-yio-comp=\"tip-panel\"].tip"));
             // host 链剥标签（host 类由镜像机制落到根上）+ 链中根 + 伪类。
             assert!(body.contains(
-                "[data-ikat-comp=\"tip-panel\"] .is-press .slot, [data-ikat-comp=\"tip-panel\"].is-press .slot"
+                "[data-yio-comp=\"tip-panel\"] .is-press .slot, [data-yio-comp=\"tip-panel\"].is-press .slot"
             ));
             assert!(body.contains(
-                "[data-ikat-comp=\"tip-panel\"] .tip .slot:hover, [data-ikat-comp=\"tip-panel\"].tip .slot:hover"
+                "[data-yio-comp=\"tip-panel\"] .tip .slot:hover, [data-yio-comp=\"tip-panel\"].tip .slot:hover"
             ));
             // 声明原文透传。
             assert!(body.contains("width: 320px"));
 
             // 未知名 / 缺后缀 / 大写（围栏外字符）→ 404。
-            let (st2, _) = get(port, "/ikat-preview/comp-style/nope.css");
+            let (st2, _) = get(port, "/yio-preview/comp-style/nope.css");
             assert_eq!(st2, 404);
-            let (st3, _) = get(port, "/ikat-preview/comp-style/tip-panel");
+            let (st3, _) = get(port, "/yio-preview/comp-style/tip-panel");
             assert_eq!(st3, 404);
-            let (st4, _) = get(port, "/ikat-preview/comp-style/TipPanel.css");
+            let (st4, _) = get(port, "/yio-preview/comp-style/TipPanel.css");
             assert_eq!(st4, 404);
             let _ = std::fs::remove_dir_all(&ui);
         }
@@ -1719,7 +1715,7 @@ mod tests {
             let ui = write_ws(
                 "revalidate",
                 &[
-                    ("ikat.workspace.json", WS_JSON),
+                    ("yio.workspace.json", WS_JSON),
                     ("ui/home.html", "<html><head></head><body>hi</body></html>"),
                     ("ui/font.ttf", "\u{0}\u{1}fake-ttf-bytes"),
                 ],
@@ -1798,7 +1794,7 @@ mod env_rewrite_tests {
             "a { padding-top: env(safe-area-inset-top); inset: env(safe-area-inset-left) 0 0 0 }";
         assert_eq!(
             rewrite_env_to_vars(css),
-            "a { padding-top: var(--ikat-safe-top, 0px); inset: var(--ikat-safe-left, 0px) 0 0 0 }"
+            "a { padding-top: var(--yio-safe-top, 0px); inset: var(--yio-safe-left, 0px) 0 0 0 }"
         );
 
         let html = r#"<html><head><style>.x { top: env(safe-area-inset-top) }</style></head>
@@ -1807,10 +1803,10 @@ mod env_rewrite_tests {
 <div class='y' style='left:env(safe-area-inset-left)'>2</div>
 <style>.z { right: env(safe-area-inset-right) }</style></body></html>"#;
         let out = rewrite_env_in_html(html);
-        assert!(out.contains(".x { top: var(--ikat-safe-top, 0px) }"));
-        assert!(out.contains("padding: var(--ikat-safe-bottom, 0px) 8px"));
-        assert!(out.contains("left:var(--ikat-safe-left, 0px)"));
-        assert!(out.contains(".z { right: var(--ikat-safe-right, 0px) }"));
+        assert!(out.contains(".x { top: var(--yio-safe-top, 0px) }"));
+        assert!(out.contains("padding: var(--yio-safe-bottom, 0px) 8px"));
+        assert!(out.contains("left:var(--yio-safe-left, 0px)"));
+        assert!(out.contains(".z { right: var(--yio-safe-right, 0px) }"));
         // 文本节点字面量不动
         assert!(out.contains("docs say env(safe-area-inset-top) is zero"));
     }

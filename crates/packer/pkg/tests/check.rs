@@ -1,8 +1,8 @@
 //! check() 契约：零写入、不要求 output_dir、诊断 collect-all、与 build 同代码路径。
 
-use ikat_pkg::build::analyze;
-use ikat_pkg::diag::Severity;
 use std::path::{Path, PathBuf};
+use yio_pkg::build::analyze;
+use yio_pkg::diag::Severity;
 
 /// 目录树快照：每文件 (path, len, mtime)。check 零写入 = 前后快照一致。
 fn snapshot(root: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
@@ -33,13 +33,13 @@ fn make_workspace(tmp: &Path, html: &str, output_dir: &str) {
     let json = format!(
         r#"{{"version":1,"output_dir":"{output_dir}","packages":[{{"name":"showcase","dirs":["ui/showcase"],"html":[]}}],"atlases":[],"fonts":[]}}"#
     );
-    std::fs::write(tmp.join("ikat.workspace.json"), json).unwrap();
+    std::fs::write(tmp.join("yio.workspace.json"), json).unwrap();
 }
 
 /// check 零写入：跑 analyze 后工作区文件（内容 + mtime）不变。
 #[test]
 fn check_writes_nothing() {
-    let tmp = std::env::temp_dir().join("ikat_check_zero_write_test");
+    let tmp = std::env::temp_dir().join("yio_check_zero_write_test");
     let _ = std::fs::remove_dir_all(&tmp);
     make_workspace(
         &tmp,
@@ -69,7 +69,7 @@ fn check_writes_nothing() {
 /// check 不要求 output_dir：空值也能校验（它零写入，不关心落点；build 才要求非空）。
 #[test]
 fn check_does_not_require_output_dir() {
-    let tmp = std::env::temp_dir().join("ikat_check_no_output_test");
+    let tmp = std::env::temp_dir().join("yio_check_no_output_test");
     let _ = std::fs::remove_dir_all(&tmp);
     make_workspace(&tmp, r#"<div>hi</div>"#, "");
 
@@ -82,7 +82,7 @@ fn check_does_not_require_output_dir() {
 /// check 也须报资源问题，不只是围栏）。
 #[test]
 fn check_collects_fence_and_resource_errors() {
-    let tmp = std::env::temp_dir().join("ikat_check_collect_test");
+    let tmp = std::env::temp_dir().join("yio_check_collect_test");
     let _ = std::fs::remove_dir_all(&tmp);
     // 两个组件各含围栏错误 + 一个缺失字体：三条 error 诊断一次给全。
     make_workspace(&tmp, r#"<p>not in fence</p>"#, "output");
@@ -92,7 +92,7 @@ fn check_collects_fence_and_resource_errors() {
     )
     .unwrap();
     let json = r#"{"version":1,"output_dir":"output","packages":[{"name":"showcase","dirs":["ui/showcase"],"html":[]}],"atlases":[],"fonts":[{"family":"Ghost","file":"fonts/ghost.ttf","default":true,"fallback":false}]}"#;
-    std::fs::write(tmp.join("ikat.workspace.json"), json).unwrap();
+    std::fs::write(tmp.join("yio.workspace.json"), json).unwrap();
 
     let err = match analyze(&tmp) {
         Err(e) => e,
@@ -119,7 +119,7 @@ fn check_collects_fence_and_resource_errors() {
 /// 覆盖缺失（HTML 引用不在任何 atlas）在 check 阶段报出（build 失败前的最早反馈点）。
 #[test]
 fn check_reports_uncovered_sprite_reference() {
-    let tmp = std::env::temp_dir().join("ikat_check_coverage_test");
+    let tmp = std::env::temp_dir().join("yio_check_coverage_test");
     let _ = std::fs::remove_dir_all(&tmp);
     make_workspace(
         &tmp,
@@ -146,7 +146,7 @@ fn check_reports_uncovered_sprite_reference() {
 /// url() 相对 CSS 文件归一成正确的 sprite key（经 atlas 覆盖校验对账）。
 #[test]
 fn check_resolves_link_stylesheet_end_to_end() {
-    let tmp = std::env::temp_dir().join("ikat_check_link_css_test");
+    let tmp = std::env::temp_dir().join("yio_check_link_css_test");
     let _ = std::fs::remove_dir_all(&tmp);
     // 页面在 ui/showcase/，CSS 在 ui/showcase/style/theme.css，
     // CSS 里 url(../../assets/icon.png) 相对 CSS 文件 = workspace assets/icon.png。
@@ -193,7 +193,7 @@ fn check_resolves_link_stylesheet_end_to_end() {
 /// `<link>` 指向不存在的 CSS → error（file 落 CSS 期望路径、定位在 HTML 的 link 标签）。
 #[test]
 fn check_reports_missing_link_stylesheet() {
-    let tmp = std::env::temp_dir().join("ikat_check_link_missing_test");
+    let tmp = std::env::temp_dir().join("yio_check_link_missing_test");
     let _ = std::fs::remove_dir_all(&tmp);
     make_workspace(
         &tmp,
@@ -224,7 +224,7 @@ fn check_reports_missing_link_stylesheet() {
 /// 打包期点破（BorderBgExclusive warning）。纯色背景 + 边框是正常组合，不误报。
 #[test]
 fn check_warns_border_with_gradient_exclusive() {
-    let tmp = std::env::temp_dir().join("ikat_check_border_bg_excl_test");
+    let tmp = std::env::temp_dir().join("yio_check_border_bg_excl_test");
     let _ = std::fs::remove_dir_all(&tmp);
     make_workspace(
         &tmp,

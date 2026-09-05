@@ -2,12 +2,12 @@
 //! 完整镜像 driver 行为链：页面实例化 + 数据驱动列表 + 时钟每帧 remove_node/create/set_text
 //! churn（新 TextContent 释放语义）+ 副本包 Load/Instantiate/Unload/重载 + 下拉开关。
 
-use ikat_core::list::{enter_data_driven, set_item_count};
-use ikat_core::scene::dynamic::{
+use yio_core::list::{enter_data_driven, set_item_count};
+use yio_core::scene::dynamic::{
     append_child, create_node, remove_child, remove_node, set_inline_override, set_text,
 };
-use ikat_core::scene::node::NodeKind;
-use ikat_core::stage::Stage;
+use yio_core::scene::node::NodeKind;
+use yio_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");

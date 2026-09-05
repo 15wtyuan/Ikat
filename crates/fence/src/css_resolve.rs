@@ -5,21 +5,21 @@ use crate::schema::css::{
     validate_animation_value, CssValueParser,
 };
 use crate::schema::tag::{find_tag, DisplayDefault, SemanticKind};
-use ikat_core::style::mapping::apply_decl;
-use ikat_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign, TextDecoration};
+use yio_core::style::mapping::apply_decl;
+use yio_core::style::resolved::{DisplayMode, ResolvedStyle, TextAlign, TextDecoration};
 
-/// 围栏外但常见的 CSS 属性 → 引导文案（说明 Ikat 行为 + 建议怎么改）。
+/// 围栏外但常见的 CSS 属性 → 引导文案（说明 Yio 行为 + 建议怎么改）。
 ///
 /// 这些属性围栏不支持，写了一律 error（`FenceUnknownCssProp`）阻断打包——
-/// 但 error message 帮作者改到 Ikat 等价写法，而非只说「不在围栏」。
+/// 但 error message 帮作者改到 Yio 等价写法，而非只说「不在围栏」。
 /// 返回 `None` 的属性走通用文案。
 ///
 /// 共享给 inline style（`css_resolve`）、fence gate（`fence_gate`）、外部
 /// `<style>` 块（`css_rules`）三处 `FenceUnknownCssProp` 构造点，保证引导文案一致。
 pub(crate) fn unsupported_hint(prop: &str) -> Option<&'static str> {
     Some(match prop {
-        "box-sizing" => "Ikat always uses the border-box model (width already includes padding and border — the engine default). This declaration has no effect — remove it.",
-        "visibility" => "Ikat has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
+        "box-sizing" => "Yio always uses the border-box model (width already includes padding and border — the engine default). This declaration has no effect — remove it.",
+        "visibility" => "Yio has no visibility:hidden. To hide an element use `display:none` (removes layout space) or `opacity:0` (keeps space).",
         "cursor" | "outline" | "user-select" | "object-fit" => {
             "not supported by fence — remove this declaration."
         }
@@ -94,14 +94,14 @@ pub fn resolve_inline_styles_with_diags(
                 }
             }
             // UA 样式表等价：button 默认 text-align: center（浏览器 UA 行为）。
-            // Ikat 无 UA 样式表概念——直接在 tag default 处硬编码。运行时
+            // Yio 无 UA 样式表概念——直接在 tag default 处硬编码。运行时
             // propagate_inherited 会把此值继承给 text 子节点（"Buy" 等居中）。
             // 同时 set INH_TEXT_ALIGN bit，把 UA 默认视为"显式声明"——防
             // propagate_inherited 用父（卡片/列表项）的 text-align 覆盖 button。
             // 用户显式 text-align 声明仍走 inline apply_decl 分支覆盖（CSS 级联）。
             if spec.is_some_and(|s| s.semantic == SemanticKind::Button) {
                 styles[idx].text_align = TextAlign::Center;
-                if let Some(bit) = ikat_core::style::dynamic::inherited_bit("text-align") {
+                if let Some(bit) = yio_core::style::dynamic::inherited_bit("text-align") {
                     styles[idx].inherited_set.0 |= bit;
                 }
                 // UA 容器居中：button 默认 justify-content + align-items = center（CSS 浏览器 UA
@@ -121,7 +121,7 @@ pub fn resolve_inline_styles_with_diags(
             // text-decoration 不继承，无需 bit。
             if spec.is_some_and(|s| s.semantic == SemanticKind::Link) {
                 styles[idx].color = [0.0, 0.0, 238.0 / 255.0, 1.0];
-                if let Some(bit) = ikat_core::style::dynamic::inherited_bit("color") {
+                if let Some(bit) = yio_core::style::dynamic::inherited_bit("color") {
                     styles[idx].inherited_set.0 |= bit;
                 }
                 styles[idx].text_decoration = TextDecoration::Underline;
@@ -153,7 +153,7 @@ pub fn resolve_inline_styles_with_diags(
                     } else {
                         styles[idx]
                             .deferred_inline
-                            .push(ikat_core::style::dynamic::Declaration {
+                            .push(yio_core::style::dynamic::Declaration {
                                 prop: prop.to_string(),
                                 value: value.to_string(),
                             });
@@ -189,11 +189,11 @@ pub fn resolve_inline_styles_with_diags(
                     }
                     styles[idx]
                         .deferred_inline
-                        .push(ikat_core::style::dynamic::Declaration {
+                        .push(yio_core::style::dynamic::Declaration {
                             prop: prop.to_string(),
                             value: value.to_string(),
                         });
-                    if let Some(bit) = ikat_core::style::dynamic::inline_bit(prop) {
+                    if let Some(bit) = yio_core::style::dynamic::inline_bit(prop) {
                         styles[idx].inline_declared |= bit;
                     }
                     continue;
@@ -258,7 +258,7 @@ pub fn resolve_inline_styles_with_diags(
                             // transition 简写解析存值（core transition 引擎读 base_style.transition）。
                             // 值结构宽松（parse 忽略未知 token），但属性域外声明要警告——
                             // 引擎驱动的通道全集见 value_check::TRANSITION_PROPS（与 core
-                            // TweenProp 一一对应），域外属性浏览器会过渡、Ikat 静默 snap
+                            // TweenProp 一一对应），域外属性浏览器会过渡、Yio 静默 snap
                             // （预览≠运行时）。
                             for msg in crate::value_check::transition_warnings(value) {
                                 diagnostics.push(Diagnostic::warning(
@@ -302,12 +302,12 @@ pub fn resolve_inline_styles_with_diags(
                 } else {
                     // inline 声明标记：记该属性由 inline style 声明，rematch 时 class 规则
                     // 不覆盖它（CSS inline > class）。INLINE_* 位覆盖继承与非继承（如 display）。
-                    if let Some(bit) = ikat_core::style::dynamic::inline_bit(prop) {
+                    if let Some(bit) = yio_core::style::dynamic::inline_bit(prop) {
                         styles[idx].inline_declared |= bit;
                     }
                     // inline 可继承声明另 bake 进 inherited_set，避免运行时
                     // propagate_inherited 用父值覆盖子的 inline 声明。
-                    if let Some(bit) = ikat_core::style::dynamic::inherited_bit(prop) {
+                    if let Some(bit) = yio_core::style::dynamic::inherited_bit(prop) {
                         styles[idx].inherited_set.0 |= bit;
                     }
                 }
@@ -396,7 +396,7 @@ mod tests {
         let (tree, _) = parse_html_to_ir(r#"<span style="color:#0000ff"></span>"#);
         let styles = resolve_for_test(&tree);
         let id = tree.roots[0];
-        let color_bit = ikat_core::style::dynamic::inherited_bit("color").unwrap();
+        let color_bit = yio_core::style::dynamic::inherited_bit("color").unwrap();
         assert!(
             styles[id.0].inherited_set.0 & color_bit != 0,
             "inline color must set inherited_set COLOR bit"
@@ -419,7 +419,7 @@ mod tests {
         let (tree, _) = parse_html_to_ir(r#"<div style="font-size:20px"></div>"#);
         let styles = resolve_for_test(&tree);
         let id = tree.roots[0];
-        let fs_bit = ikat_core::style::dynamic::inherited_bit("font-size").unwrap();
+        let fs_bit = yio_core::style::dynamic::inherited_bit("font-size").unwrap();
         assert_eq!(
             styles[id.0].inherited_set.0 & fs_bit,
             fs_bit,
@@ -428,7 +428,7 @@ mod tests {
     }
 
     /// 浏览器 UA 样式表：button 默认 text-align: center（继承到 text 子节点）。
-    /// Ikat 无 UA 样式表概念——按 tag semantic 直接设默认。
+    /// Yio 无 UA 样式表概念——按 tag semantic 直接设默认。
     /// 修前根因：button 元素 text-align=Left（无 UA 表，回落 ResolvedStyle::default Left）
     /// → text 子节点继承 Left → "Buy" 字不居中。
     #[test]
@@ -438,12 +438,12 @@ mod tests {
         let id = tree.roots[0];
         assert_eq!(
             styles[id.0].text_align,
-            ikat_core::style::resolved::TextAlign::Center,
+            yio_core::style::resolved::TextAlign::Center,
             "button UA 默认 text-align: center"
         );
         // UA 默认视为"显式声明"，set INH_TEXT_ALIGN bit——防 propagate_inherited
         // 把父（卡片/列表项等）的 text-align 覆盖到 button。
-        let ta_bit = ikat_core::style::dynamic::inherited_bit("text-align").unwrap();
+        let ta_bit = yio_core::style::dynamic::inherited_bit("text-align").unwrap();
         assert_eq!(
             styles[id.0].inherited_set.0 & ta_bit,
             ta_bit,
@@ -459,7 +459,7 @@ mod tests {
         let id = tree.roots[0];
         assert_eq!(
             styles[id.0].text_align,
-            ikat_core::style::resolved::TextAlign::Left,
+            yio_core::style::resolved::TextAlign::Left,
             "显式 text-align:left 覆盖 button UA center"
         );
     }
@@ -472,7 +472,7 @@ mod tests {
         let id = tree.roots[0];
         assert_eq!(
             styles[id.0].text_align,
-            ikat_core::style::resolved::TextAlign::Left,
+            yio_core::style::resolved::TextAlign::Left,
             "div UA 无 text-align 默认（保持 Left）"
         );
     }
@@ -568,7 +568,7 @@ mod tests {
             .expect("should error");
         assert!(
             d.message.contains("border-box"),
-            "msg should explain Ikat uses border-box: {}",
+            "msg should explain Yio uses border-box: {}",
             d.message
         );
         assert!(
@@ -673,7 +673,7 @@ mod tests {
             .expect("a element");
         assert_eq!(styles[a_idx].color, [0.0, 0.0, 238.0 / 255.0, 1.0]);
         assert_eq!(styles[a_idx].text_decoration, TextDecoration::Underline);
-        let color_bit = ikat_core::style::dynamic::inherited_bit("color").unwrap();
+        let color_bit = yio_core::style::dynamic::inherited_bit("color").unwrap();
         assert_eq!(
             styles[a_idx].inherited_set.0 & color_bit,
             color_bit,

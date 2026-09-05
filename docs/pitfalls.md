@@ -1,4 +1,4 @@
-# Ikat 踩坑记录
+# Yio 踩坑记录
 
 > 只收**可复用规则**：依赖/平台不讲理的事实、跨层动态契约——看代码看不出来的才配进这里。
 > 新坑按主题归位、不编号；bug 编年史不记（代码 + git history 是载体）。
@@ -37,7 +37,7 @@
 - C# `fixed (T* p = &localVar)` 非法（CS0213 already fixed）——`fixed` 只 pin 托管对象（数组/string），局部变量直接取址。
 - **FFI enum 出口用 return-code + out-param，勿用 0 当「不存在」哨兵**——首变体判别值 = 0（如 NodeKind::Container），会与合法值相撞、无法区分。
 
-### Unity Input System 1.19（IkatInputCollector.cs）
+### Unity Input System 1.19（YioInputCollector.cs）
 - 双路径 `#if ENABLE_INPUT_SYSTEM`（`Mouse.current...` 新 API）/ else 旧 `UnityEngine.Input`；asmdef 引用名是 `Unity.InputSystem`（非 `UnityEngine.InputSystemModule`）。
 
 ### image 0.25（packer）
@@ -63,10 +63,10 @@
 ## 2. 跨层闭环规则
 
 ### pkg 格式 bump 代价链
-改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`——已机械化进 `xtask reout`（重打 + 拷回 + 清构建现场），MIN/MAX 同拍另有护栏测试 `min_version_tracks_current` 当场拦（v48 实证：漏拍 MIN 会让旧包漏过版本门、以 Bincode 结构错配炸成无指引的 malformed，0.0.16 CI 红一天才定位）；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `IKATGUI_UPDATE_GOLDEN=1 cargo test -p ikat_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。加 NodeKind 变体另有三件：`from_u8` 尾界测试值（BadKind 探针）+ from_u8 穷尽 guard 表（编译器抓）+ `RECTDIFF_TAG_MAP_REGEN=1 cargo test -p ikat_pkg --test rectdiff_tag_map` 重出 semantic-tags.json；C# 侧 NodeKindTests 计数/判别集同步。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。flags 字节加位**布局不变**（字节宽不变、旧包位恒 0）可免 bump 走语义增量（v47 disabled 位实装）。
+改任何进 `.pkg.bin` 的序列化布局（ResolvedStyle、ControlInit、bincode 结构）→ **必 bump `PKG_FORMAT_VERSION`**（含 MIN/MAX + mod.rs 顶部 changelog 注释）。bump 的代价链（v42 全程实录）：① `core/asset/tests.rs` 有 4 处钉死版本号的断言要同步升；② 重打 14 个 fixtures（13 个 `tests/dotnet/.../fixtures/*.workspace` + showcase 直出 `Assets/Bundles`）并拷回 `*.pkg.bin`——已机械化进 `xtask reout`（重打 + 拷回 + 清构建现场），MIN/MAX 同拍另有护栏测试 `min_version_tracks_current` 当场拦（v48 实证：漏拍 MIN 会让旧包漏过版本门、以 Bincode 结构错配炸成无指引的 malformed，0.0.16 CI 红一天才定位）；③ `packer/pkg/tests/schema_lock.rs` 用失败信息里的新哈希更新 `LOCKED_HASH`；④ golden 事件流 `YIOGUI_UPDATE_GOLDEN=1 cargo test -p yio_ffi_c --lib golden` 再生成；⑤ C# `GoldenEventsAndAbiLayoutTests` 的 `REC` 常量 + 尺寸断言同步；⑥ 重编 .dll + 重出双 exe。加 NodeKind 变体另有三件：`from_u8` 尾界测试值（BadKind 探针）+ from_u8 穷尽 guard 表（编译器抓）+ `RECTDIFF_TAG_MAP_REGEN=1 cargo test -p yio_pkg --test rectdiff_tag_map` 重出 semantic-tags.json；C# 侧 NodeKindTests 计数/判别集同步。漏一环就版本错配（stale pkg / loader rc=-1 / 「tag for enum is not valid」），且常在离改动最远的 consumer 测试才炸——文本 merge 干净 + cargo 全绿 ≠ C# 测试绿。flags 字节加位**布局不变**（字节宽不变、旧包位恒 0）可免 bump 走语义增量（v47 disabled 位实装）。
 
 ### 长跑进程锁构建产物
-- **`ikat preview` server 持锁 `target/debug/ikat.exe`**：进程活着时任何 debug 构建/测试都「failed to remove file 拒绝访问 (os error 5)」——多会话共享工作树时常见且难归因（错误像编译失败）。解法：跑测试用私有 `CARGO_TARGET_DIR=<临时目录>` 隔离；release 产物不受影响（锁的是 debug 路径）。别杀别人的 server。
+- **`yio preview` server 持锁 `target/debug/yio.exe`**：进程活着时任何 debug 构建/测试都「failed to remove file 拒绝访问 (os error 5)」——多会话共享工作树时常见且难归因（错误像编译失败）。解法：跑测试用私有 `CARGO_TARGET_DIR=<临时目录>` 隔离；release 产物不受影响（锁的是 debug 路径）。别杀别人的 server。
 
 ### 机制设计/删除前置检查
 - **设计渲染合成机制前先读对端 shader 能力**：曾设计整套合成 RenderNode 机制，被一次 shader 阅读推翻——对端早已做 source-over 合成。core program 编号 ↔ Unity shader 能力是跨层闭环，先核对两端现状再设计。
@@ -81,7 +81,7 @@
 主 worktree 共享给并行用户会话时，目录级 pathspec（`git add -- crates/`）会把别人分钟级新鲜的在途 WIP 一起收进 commit（实锤：#52 热修批混入 #20/#57 的 build.rs/expand.rs/component-lab 半成品——他们在我两次 git 操作间隙活跃写树）。已推送无法 force-push 拆分（并行会话活跃期禁重写），只能通知对方从 HEAD 续写。纪律：提交前 `git status` 逐项归因（不认识的文件不 stage）；pathspec 列**具体文件清单**；提交后立刻 `git show --stat` 复核混入面。
 
 ### FFI 面改动 × 本地 dotnet 门
-- **改 FFI 入口/签名后，本地 dotnet 门直接跑会装旧产物 dll**：HeadlessTests 从 `unity/package/Plugins/Ikat/ikat_ffi_c.dll` 拷贝运行时——`EntryPointNotFoundException`（找不到 `ikat_stage_*` 入口）= 旧 dll 信号，不是签名错。中间态验证先 `cargo build -p ikat_ffi_c --release && cp target/release/ikat_ffi_c.dll unity/package/Plugins/Ikat/`（或直接 reout）；随后 pkg 版本 bump 会让其余测试批量 TooOld 红——那批是 fixture 陈货，reout 重打后自愈，别逐个排查。
+- **改 FFI 入口/签名后，本地 dotnet 门直接跑会装旧产物 dll**：HeadlessTests 从 `unity/package/Plugins/Yio/yio_ffi_c.dll` 拷贝运行时——`EntryPointNotFoundException`（找不到 `yio_stage_*` 入口）= 旧 dll 信号，不是签名错。中间态验证先 `cargo build -p yio_ffi_c --release && cp target/release/yio_ffi_c.dll unity/package/Plugins/Yio/`（或直接 reout）；随后 pkg 版本 bump 会让其余测试批量 TooOld 红——那批是 fixture 陈货，reout 重打后自愈，别逐个排查。
 
 ### 本地绿 ≠ CI 绿（clippy 双盲区）
 本地 clippy 全绿挡不住 CI 红：① CI 用 `dtolnay/rust-toolchain@stable` 滚动，可比本地 stable 新一档（1.97→1.98 实锤新 lint `chunks_exact_to_as_chunks`）；② clippy 增量缓存跳过未变更 crate——久未 push 的积压 commit 里潜伏的 lint 只在 push 后暴露。push 被 CI bot 镜像 commit 挡直推时先 `git pull --rebase`。
@@ -107,7 +107,7 @@ showcase 有**两份** runner（`unity/showcase-unity/Assets/Scripts/ShowcaseRun
 - **ScriptableObject 禁 `new`** → `CreateInstance<T>()`（`new` 绕过原生对象追踪，IL2CPP 静默失败或产损坏资产）。
 - **shader keyword 须 `multi_compile` 非 `shader_feature`**——未启用的 variant 会被 strip，clip 类功能静默失效且构建期不可见。
 - **blob 顶点是节点本地坐标，不是 render 侧的父系坐标**：build_blob 对纯平移行 re-base 顶点（减 Mtx/Mty 得本地，平移在矩阵列/GO localPosition）；OBJECT_MATRIX 行顶点是盒本地。shader 里任何「吃 design 坐标」的逐片元逻辑（clip 测试、SDF、世界系光照）必须经 per-renderer MPB 补回平移（`_ObjT = (Mtx, Mty)`；合并行 Mtx=0 + 绝对顶点同式自洽）——直接拿 `v.pos.xy` 喂 design 系计算 = 全部测试跑在垃圾坐标上（#52 clip 链首验实锤：图形全灭、文字残条）。动 shader 顶点坐标语义前先读 blob.rs 头注释的 re-base 约定。
-- **F8 / DumpBlobState 的表解析器随布局演进退役会输出乱码**：按定长 stride 手扫二进制表的诊断代码不在编译门罩内（运行时字符串拼接），布局变了它不炸、只吐浮点位模式乱码（如 1065353216 = 1.0f）——恰好把取证引到歧途。改 blob 表布局的批次必须同步 grep 诊断侧解析器（UnityIkatBackend.DumpBlobState / DumpSceneJson 类）；诊断输出里出现「不可能的数值」先怀疑解析器陈旧再看数据。
+- **F8 / DumpBlobState 的表解析器随布局演进退役会输出乱码**：按定长 stride 手扫二进制表的诊断代码不在编译门罩内（运行时字符串拼接），布局变了它不炸、只吐浮点位模式乱码（如 1065353216 = 1.0f）——恰好把取证引到歧途。改 blob 表布局的批次必须同步 grep 诊断侧解析器（UnityYioBackend.DumpBlobState / DumpSceneJson 类）；诊断输出里出现「不可能的数值」先怀疑解析器陈旧再看数据。
 - **ShaderLab Properties 无 Matrix 类型**；MPB 只覆盖 `UnityPerMaterial` CBUFFER 内字段——per-renderer uniform 必须进 CBUFFER 才能被 MPB 覆盖。
 - **PlayMode 首帧 `Time.unscaledDeltaTime` 可达秒级**（加载延迟）——tween/动画别在 Start 自动播（瞬间 complete 写末值）。
 - **UPM 包内代码引用包资源**用 `Packages/<name>/...` 路径，非 `Assets/...`。
@@ -118,7 +118,7 @@ showcase 有**两份** runner（`unity/showcase-unity/Assets/Scripts/ShowcaseRun
 - **Material 缓存键不含 shader keyword**——新 keyword 组合必须有独立 key 来源（新 program 号或新 key flag 维度），蹭已有 program/键会命中同一 Material 实例 → keyword 冲突静默错渲染。
 - **fgui 的 mesh 合并实靠 Unity Dynamic Batching**（隐式、与 SRP Batcher 互斥——URP 下不可控）；SRP Batcher 只降 CPU 不降 draw call。要真 N→1 必须自己合并 mesh。
 - **csproj `<Link>` 引用带 UnityEngine/native 依赖的生产源进纯 net10.0 headless 项目编译失败**——`<Link>` 只拷文件不带依赖链；headless 测试用物理拷贝源文件。
-- **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `Ikat.Editor.EventType` 撞 `Ikat.EventType`），只能全限定名，alias 无用。
+- **C# `using` alias 解不了父命名空间同名类型遮蔽**：子命名空间内的类型名必先命中父级同名类型（如 `Yio.Editor.EventType` 撞 `Yio.EventType`），只能全限定名，alias 无用。
 - **Unity 新版把弃用 API 升级为编译 error（CS0619）**：`Scene.handle` 的 int 隐式转换（6.2+）、`FindObjectsOfType`（2023.1+ 弃用）、`FlareLayer` 类型（6000.5+ 挪出程序集）都会在对应版本直接编不过，而其「替代品」在旧版（如 2021 showcase 工程）又不存在——跨版本写法：按 `Scene` 本身做字典键（IEquatable）、`UNITY_2023_1_OR_NEWER` 门控 API 选择、按类型名字符串摘组件（`GetComponent(typeName)`）。升级 Unity 或写引擎兼容层时 grep 这批符号。
 - **纹理 `Apply(makeNoLongerReadable:true)` 与原地重上传互斥**：页式纹理（字形图集/atlas 页）走「同尺寸脏页 SetPixels 重传」路径，首次上传即弃 CPU 拷贝会让后续每次脏重传抛 "not readable" 且脏位永不清（帧循环中断 = UI 冻结）。须保持可读（`Apply(false, false)`）——光标纹理条目的 `Apply(_, true)` 是一次性消费场景，页纹理不是。
 - **URP 的 `CameraClearFlags.Depth` 连颜色一起清**（URP 17 起 Base 相机语义）：叠在宿主 3D 相机之上的 UI 相机用它会把 3D 场景整屏抹掉。clearFlags 须按管线分流：有更深打底相机时 Built-in 用 Depth、SRP 用 Nothing；无打底（纯 UI 首相机）用 SolidColor（不清色会读到未初始化缓冲）。
@@ -137,4 +137,4 @@ showcase 有**两份** runner（`unity/showcase-unity/Assets/Scripts/ShowcaseRun
 - **跨树 id 解析必须作用域化**：每新增一种作用域形态（组件实例/List item），全局 `find_by_id_attr` 首匹配就会串实例（组件多实例全部命中第一个）——解析须向上找最近 LOOKUP_SCOPE 根在其子树内做（`find_node_by_id_in_own_scope`）。
 - **`remove_node` 联动清理是动态契约**：删节点须同步清全部持久附属表（anim/scroll/controls/roles/lists/text_contents/image_srcs…）——新增持久附属表必须同步加清理，漏一个 = 悬空引用/残留状态。
 - **@keyframes 的 transform 只收 px（TRS 像素模型）——百分比静默不动**：`translateX(-100%)` 等百分比形 parse_transform_trs 走 parse_px 直接 None，fence 不校验 keyframe 值域 → 打包零报错、player 照常 Playing 但每帧 props 全 None，视觉静止。写动画用 px（自身尺寸百分比语义需 layout 参与，框架级支持另立票）。
-- **ABI 位型/字段宽度变更的静默错解码**：位掩码/移位常量（`& 0x6000_0000`、`>> 24`、`0xFFFFFFFF` 哨兵）在位型拓宽后**编译全过但语义死掉**——必须 grep 全部位常量逐个对新位型表重审，不能只跟编译器走；C# 侧同理，csbindgen 对**函数签名引用到**的 repr(C) struct 会生成含字段布局的 C# stub（v43 IkatTweenSpec 实测），但签名外独立序列化的结构（事件 SOA 偏移、`NativeEventBuffer` 手写偏移）仍无生成物——手写镜像的宽度/布局无编译期保护，字段变宽必须人工重排，且每 struct 配 Rust 侧 `size_of` 常量断言 + C# `Marshal.SizeOf` 对照。另防装箱断言陷阱：`Assert.Equal(42u, ulong值)` 经 object 装箱恒 false 但编译过。
+- **ABI 位型/字段宽度变更的静默错解码**：位掩码/移位常量（`& 0x6000_0000`、`>> 24`、`0xFFFFFFFF` 哨兵）在位型拓宽后**编译全过但语义死掉**——必须 grep 全部位常量逐个对新位型表重审，不能只跟编译器走；C# 侧同理，csbindgen 对**函数签名引用到**的 repr(C) struct 会生成含字段布局的 C# stub（v43 YioTweenSpec 实测），但签名外独立序列化的结构（事件 SOA 偏移、`NativeEventBuffer` 手写偏移）仍无生成物——手写镜像的宽度/布局无编译期保护，字段变宽必须人工重排，且每 struct 配 Rust 侧 `size_of` 常量断言 + C# `Marshal.SizeOf` 对照。另防装箱断言陷阱：`Assert.Equal(42u, ulong值)` 经 object 装箱恒 false 但编译过。

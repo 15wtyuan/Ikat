@@ -3,14 +3,14 @@
 
 use std::ffi::CString;
 
-use ikat_core::stage::Stage;
+use yio_core::stage::Stage;
 
 use crate::{ffi_guard, StageHandle};
 
-/// 创建 Stage 句柄（不收字体路径）。字体由 ikat_stage_register_font 单独注册。
+/// 创建 Stage 句柄（不收字体路径）。字体由 yio_stage_register_font 单独注册。
 /// 失败返回 null（当前 Stage::new 不返回 Err，保留 null 分支以保持对称）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_new(w: f32, h: f32) -> *mut StageHandle {
+pub extern "C" fn yio_stage_new(w: f32, h: f32) -> *mut StageHandle {
     ffi_guard(std::ptr::null_mut(), || {
         let stage = match Stage::new((w, h)) {
             Ok(s) => s,
@@ -36,7 +36,7 @@ pub extern "C" fn ikat_stage_new(w: f32, h: f32) -> *mut StageHandle {
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_root_size(h: *mut StageHandle, w: f32, hgt: f32) -> i32 {
+pub extern "C" fn yio_stage_set_root_size(h: *mut StageHandle, w: f32, hgt: f32) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -57,7 +57,7 @@ pub extern "C" fn ikat_stage_set_root_size(h: *mut StageHandle, w: f32, hgt: f32
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_compute_adaptation(
+pub extern "C" fn yio_compute_adaptation(
     design_w: f32,
     design_h: f32,
     screen_w: f32,
@@ -67,16 +67,16 @@ pub extern "C" fn ikat_compute_adaptation(
     safe_w: f32,
     safe_h: f32,
     mode: u32,
-    out: *mut ikat_core::adapt::AdaptResult,
+    out: *mut yio_core::adapt::AdaptResult,
 ) -> i32 {
     ffi_guard(-1, || {
         if out.is_null() {
             return -1;
         }
-        let Some(mode) = ikat_core::adapt::AdaptMode::from_u32(mode) else {
+        let Some(mode) = yio_core::adapt::AdaptMode::from_u32(mode) else {
             return -1;
         };
-        let r = ikat_core::adapt::compute(
+        let r = yio_core::adapt::compute(
             (design_w, design_h),
             (screen_w, screen_h),
             (safe_x, safe_y, safe_w, safe_h),
@@ -88,7 +88,7 @@ pub extern "C" fn ikat_compute_adaptation(
 }
 
 /// 设 Stage 的 viewport inset——`env(safe-area-inset-*)` 的取值源。入参 = 适配
-/// 三件套（`ikat_compute_adaptation` 的 scale/offset）+ 屏幕 safe 矩形（屏幕 px，
+/// 三件套（`yio_compute_adaptation` 的 scale/offset）+ 屏幕 safe 矩形（屏幕 px，
 /// top-down 原点），core 内算 root 屏幕矩形与 unsafe 区的交叠深度（三模式同公式：
 /// Fit 贴物理边 → 真实 inset；Letterbox root 全在 safe 内 → 恒 0）再除 scale 折
 /// design px——换算单源在 Rust，各引擎宿主只转发数字。返回 0=成功，-1=错误
@@ -96,7 +96,7 @@ pub extern "C" fn ikat_compute_adaptation(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_safe_area(
+pub extern "C" fn yio_stage_set_safe_area(
     h: *mut StageHandle,
     scale: f32,
     adapt_off_x: f32,
@@ -134,7 +134,7 @@ pub extern "C" fn ikat_stage_set_safe_area(
 /// 注册字体进 Stage 字体表。family = UTF-8 字符串（指针+len），bytes = ttf/ttc/otf 字节数据。
 /// is_default: 0=否，非 0=是（设定为默认 fallback 字体）。返回 0=成功，-1=错误（null 句柄/非 UTF-8 family/字体解析失败）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_register_font(
+pub extern "C" fn yio_stage_register_font(
     h: *mut StageHandle,
     family: *const u8,
     family_len: usize,
@@ -165,7 +165,7 @@ pub extern "C" fn ikat_stage_register_font(
 /// 主字体缺字时按序 probe 回退链，首个含该字的补上（RmlUi fallback 模型）。
 /// source-agnostic：后端把系统字体 register 进来后，其 family 名同样填这里即可。
 #[no_mangle]
-pub extern "C" fn ikat_stage_set_fallback_families(
+pub extern "C" fn yio_stage_set_fallback_families(
     h: *mut StageHandle,
     text: *const u8,
     text_len: usize,
@@ -194,7 +194,7 @@ pub extern "C" fn ikat_stage_set_fallback_families(
 
 /// null-safe 释放 Stage 句柄。
 #[no_mangle]
-pub extern "C" fn ikat_stage_free(h: *mut StageHandle) {
+pub extern "C" fn yio_stage_free(h: *mut StageHandle) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -207,14 +207,14 @@ pub extern "C" fn ikat_stage_free(h: *mut StageHandle) {
 
 /// 装载二进制包（spec §12/§13）。name = 包名（进 packages 字典 key），bytes = .pkg.bin。
 /// 0=ok；1=pkg 格式版本过旧（TooOld）；2=过新（TooNew）；-1=其他 err（null/UTF-8/损坏）。
-/// 版本错配时用 `ikat_stage_last_pkg_load_version` 取 pkg 声明的版本、
-/// `ikat_pkg_format_version` 取运行时版本，给「Unity 包与 ikat.exe 同版本重打」的专属指引。
+/// 版本错配时用 `yio_stage_last_pkg_load_version` 取 pkg 声明的版本、
+/// `yio_pkg_format_version` 取运行时版本，给「Unity 包与 yio.exe 同版本重打」的专属指引。
 /// 包是 Rust-internal，C# 只透传 bytes（不解析）。
 ///
 /// FFI 签名带 name 参数（对齐 `Stage::load_package(name, bytes)`）。
 /// load_package 只进资源池不建 scene——Unity 侧需先 create_root 建 scene 再 instantiate 建内容。
 #[no_mangle]
-pub extern "C" fn ikat_stage_load_package(
+pub extern "C" fn yio_stage_load_package(
     h: *mut StageHandle,
     name: *const u8,
     name_len: usize,
@@ -234,18 +234,18 @@ pub extern "C" fn ikat_stage_load_package(
         let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
         match sh.stage.load_package(name, bytes) {
             Ok(()) => 0,
-            Err(ikat_core::stage::LoadPkgError::TooOld { .. }) => 1,
-            Err(ikat_core::stage::LoadPkgError::TooNew { .. }) => 2,
+            Err(yio_core::stage::LoadPkgError::TooOld { .. }) => 1,
+            Err(yio_core::stage::LoadPkgError::TooNew { .. }) => 2,
             Err(_) => -1,
         }
     })
 }
 
 /// 最近一次 load_package 失败的 pkg 声明格式版本（0=无/非版本错）。
-/// 配合 `ikat_stage_load_package` 返回码 1/2 使用。共享宿主下宿主级装载
-/// （`ikat_host_load_package`）的版本记录也在此可见。
+/// 配合 `yio_stage_load_package` 返回码 1/2 使用。共享宿主下宿主级装载
+/// （`yio_host_load_package`）的版本记录也在此可见。
 #[no_mangle]
-pub extern "C" fn ikat_stage_last_pkg_load_version(h: *const StageHandle) -> u32 {
+pub extern "C" fn yio_stage_last_pkg_load_version(h: *const StageHandle) -> u32 {
     ffi_guard(0, || {
         if h.is_null() {
             return 0;
@@ -256,15 +256,15 @@ pub extern "C" fn ikat_stage_last_pkg_load_version(h: *const StageHandle) -> u32
 
 /// 运行时（本 dll）支持的 pkg 格式版本。pkg 错配诊断用。
 #[no_mangle]
-pub extern "C" fn ikat_pkg_format_version() -> u32 {
-    ikat_core::asset::PKG_FORMAT_VERSION
+pub extern "C" fn yio_pkg_format_version() -> u32 {
+    yio_core::asset::PKG_FORMAT_VERSION
 }
 
 /// 卸载包：从 Rust stage 移除模板注册（prefab 删除语义——已实例化活节点不受影响）。
 /// atlas 纹理/字体不在此列（workspace 级共享 / driver 级注册，皆不隶属包）。
 /// 0=ok；-1=err（null 句柄 / 非 UTF-8 / 包未加载）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_unload_package(
+pub extern "C" fn yio_stage_unload_package(
     h: *mut StageHandle,
     name: *const u8,
     name_len: usize,
@@ -292,7 +292,7 @@ pub extern "C" fn ikat_stage_unload_package(
 ///
 /// **常驻（不 gate）。**包装 `Stage::instantiate(pkg, comp)`（spec §4.2/§4.4）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_instantiate(
+pub extern "C" fn yio_stage_instantiate(
     h: *mut StageHandle,
     pkg: *const u8,
     pkg_len: usize,
@@ -321,13 +321,13 @@ pub extern "C" fn ikat_stage_instantiate(
     })
 }
 
-/// 全局 shutdown（Domain reload hook）。C# `IkatStage.ResetStatics`（SubsystemRegistration）调用。
+/// 全局 shutdown（Domain reload hook）。C# `YioStage.ResetStatics`（SubsystemRegistration）调用。
 ///
-/// 当前核心无全局 native 态——Stage 是 per-handle（`ikat_stage_free` drop 全部 Stage 拥有的内存），
+/// 当前核心无全局 native 态——Stage 是 per-handle（`yio_stage_free` drop 全部 Stage 拥有的内存），
 /// 故本函数 near-no-op。但 hook 必须存在：将来引入全局 texture/font registry（进程级单例缓存）时，
 /// 此处自动成为清理入口，无需再改 C# 接线。
 ///
 /// 字体字节不泄漏（宿主分离后已修）：`Font` 持回收哨兵，drop 时收回 `Box::leak`
-/// 的字节；FontTable 归属 ResourceHost（`ikat_host_free` / 最后一个挂接 Stage 释放）。
+/// 的字节；FontTable 归属 ResourceHost（`yio_host_free` / 最后一个挂接 Stage 释放）。
 #[no_mangle]
-pub extern "C" fn ikat_shutdown() {}
+pub extern "C" fn yio_shutdown() {}

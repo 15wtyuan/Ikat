@@ -1,7 +1,7 @@
 //! ListView 多模板面：蓝图收养（adopt）+ per-item 模板映射 + enter 前配置缓冲。
 //!
 //! 数据流：C# `TemplateSelector`（纯 `Func<int, UITemplate>`）在 ItemCount set / Notify*
-//! 时对受影响区间求值，把源 NodeId 数组批量推给 core（FFI `ikat_list_set_item_templates`）。
+//! 时对受影响区间求值，把源 NodeId 数组批量推给 core（FFI `yio_list_set_item_templates`）。
 //! core 侧零回调——克隆仍完全在内部 execute 阶段发生，选择结果经本模块的 per-item 映射
 //! 提前送达。enter 前到达的推送缓冲进 `Scene::pending_lists`，enter 收养蓝图后一并消费。
 
@@ -50,7 +50,7 @@ pub(super) fn adopt_blueprint(scene: &mut Scene, ul: NodeId, src: NodeId) -> Res
     Ok(idx)
 }
 
-/// per-item 模板映射推送（FFI `ikat_list_set_item_templates` 的 core 实现）。
+/// per-item 模板映射推送（FFI `yio_list_set_item_templates` 的 core 实现）。
 ///
 /// enter 前：缓冲进 `pending_lists`（vec 按 start+len 扩容，缺省 None=default）。
 /// enter 后：逐源收养解析；模板变了的 item 清已测高度（旧高度属旧蓝图），active slot
@@ -137,7 +137,7 @@ pub fn set_item_templates(
     Ok(())
 }
 
-/// 单模板 override 设定（FFI `ikat_list_set_template` 的 core 实现，ItemTemplate 用）。
+/// 单模板 override 设定（FFI `yio_list_set_template` 的 core 实现，ItemTemplate 用）。
 ///
 /// enter 前：缓冲进 pending（修复旧路径「无 ListState 返 -1 被静默丢」的缺陷）。
 /// enter 后：收养为新蓝图并设为 default；template_ids 里跟随旧 default 的隐式项改指新

@@ -1,0 +1,25 @@
+{
+    "name": "Yio.Tests",
+    "rootNamespace": "Yio.Tests",
+    "references": [
+        "Yio.Runtime",
+        "Yio.Editor",
+        "Yio.Bindings",
+        "Unity.InputSystem",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "autoReferenced": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ]
+}

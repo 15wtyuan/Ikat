@@ -2,11 +2,11 @@ using System;
 using System.Text;
 using UnityEngine;
 
-namespace Ikat
+namespace Yio
 {
     /// 帧 blob 托管解析视图。解析 Rust build_blob 产出的 little-endian blob。
     ///
-    /// 布局（镜像 ikat_ffi_c/src/blob.rs，v15 列级增量）：
+    /// 布局（镜像 yio_ffi_c/src/blob.rs，v15 列级增量）：
     ///   header (132B): magic(u32 LE), version(u32)=15, node_count(u32),
     ///                   skip_count(u32),
     ///                   21× col_offset(u32, byte offset from blob start),
@@ -26,7 +26,7 @@ namespace Ikat
     /// C# on Windows 是 little-endian，BitConverter 直读无需 byte swap。
     public readonly struct FrameBlob
     {
-        public const uint Magic = 0x4D4F4F4C;
+        public const uint Magic = 0x314F4959;
         /// blob 版本。magic+version 校验在 IsValid。
         /// v15：列级增量——Skip 段 + fat arena + mount_id 列；v14 及以前的胖定宽列删除。
         public const uint ExpectedVersion = 15;
@@ -330,7 +330,7 @@ namespace Ikat
             return set;
         }
 
-        // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityIkatBackend.DumpBlobState 线性扫表）。
+        // 诊断 dump 用：暴露读原语 + clip 表偏移（UnityYioBackend.DumpBlobState 线性扫表）。
         public uint ReadU32Public(int o) => ReadU32(o);
         public float ReadF32Public(int o) => ReadF32(o);
         public int ClipTableOffPub => ClipTableOff;

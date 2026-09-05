@@ -1,7 +1,7 @@
 {
-  "productName": "Ikat Packer",
+  "productName": "Yio Packer",
   "version": "0.1.0",
-  "identifier": "com.ikat.packer",
+  "identifier": "com.yio.packer",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -19,7 +19,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Ikat",
+        "title": "Yio",
         "width": 800,
         "height": 600
       }
@@ -30,9 +30,9 @@
     "targets": "all",
     "icon": ["icons/icon.ico"],
     "category": "DeveloperTool",
-    "shortDescription": "Ikat packer — HTML/CSS workspace builder",
-    "longDescription": "Standalone GUI tool for the Ikat cross-engine game UI framework. Import HTML/CSS workspaces, configure packaging options, and produce optimized .pkg.bin bundles with texture atlases.",
-    "publisher": "Ikat",
+    "shortDescription": "Yio packer — HTML/CSS workspace builder",
+    "longDescription": "Standalone GUI tool for the Yio cross-engine game UI framework. Import HTML/CSS workspaces, configure packaging options, and produce optimized .pkg.bin bundles with texture atlases.",
+    "publisher": "Yio",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper",

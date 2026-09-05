@@ -6,17 +6,17 @@
 //! 同通道后者覆盖；同名 Completed 不重播；参数变 → reset 重跑；programmatic player
 //! 不受 sync 管；backwards fill 启动即写首帧（delay 期不闪 base）；stage tick g' 接线。
 
-use ikat_core::scene::animation::{update_all, KeyframePlayer};
-use ikat_core::scene::{
+use yio_core::scene::animation::{update_all, KeyframePlayer};
+use yio_core::scene::{
     AnimatableProps, KeyframeStop, KeyframeStopSelector, KeyframesRule, Node, NodeId, NodeKind,
     PlayerPlayState, Scene,
 };
-use ikat_core::stage::Stage;
-use ikat_core::style::dynamic::{
+use yio_core::stage::Stage;
+use yio_core::style::dynamic::{
     rematch_pseudo_classes, sync_animation_players, Combinator, Compound, Declaration, DynamicRule,
     ParsedSelector, ScopedRule, Specificity,
 };
-use ikat_core::style::resolved::{
+use yio_core::style::resolved::{
     AnimationDirection, AnimationFillMode, AnimationPlayState, AnimationSpec,
 };
 
@@ -113,7 +113,7 @@ fn fade_spec() -> AnimationSpec {
         iteration_count: Some(1),
         direction: AnimationDirection::Normal,
         fill_mode: AnimationFillMode::Both,
-        timing_function: ikat_core::tween::Ease::Linear,
+        timing_function: yio_core::tween::Ease::Linear,
         play_state: AnimationPlayState::Running,
     }
 }
@@ -394,7 +394,7 @@ fn sync_remove_keeps_remaining_players_shared_channel_value() {
         iteration_count: Some(1),
         direction: AnimationDirection::Normal,
         fill_mode: AnimationFillMode::None,
-        timing_function: ikat_core::tween::Ease::Linear,
+        timing_function: yio_core::tween::Ease::Linear,
         play_state: AnimationPlayState::Running,
     };
     let spec_b = AnimationSpec {
@@ -404,7 +404,7 @@ fn sync_remove_keeps_remaining_players_shared_channel_value() {
         iteration_count: Some(1),
         direction: AnimationDirection::Normal,
         fill_mode: AnimationFillMode::None,
-        timing_function: ikat_core::tween::Ease::Linear,
+        timing_function: yio_core::tween::Ease::Linear,
         play_state: AnimationPlayState::Running,
     };
     // 声明 a + b → sync 建 2 player；tick 一帧：两者都写 opacity（b 后写赢 = 0.4）。

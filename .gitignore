@@ -46,10 +46,10 @@ tests/dotnet/obj/
 
 # ===== Rust↔Unity 产物 =====
 # csbindgen 生成的 C# 绑定（由 Rust 侧生成，不入库）
-**/Ikat*Bindings*.cs
-**/Ikat*Bindings*.cs.meta
-!**/Plugins/Ikat/Bindings/IkatBindings.cs
-!**/Plugins/Ikat/Bindings/IkatBindings.cs.meta
+**/Yio*Bindings*.cs
+**/Yio*Bindings*.cs.meta
+!**/Plugins/Yio/Bindings/YioBindings.cs
+!**/Plugins/Yio/Bindings/YioBindings.cs.meta
 # native 库产物（按需，若想入库 prebuilt 可注释掉）
 /**/*.dll
 /**/*.dylib
@@ -85,8 +85,8 @@ crates/packer/gui/src-tauri/gen/
 .superpowers/
 *.snap.new
 
-# HeadlessTests fixture packer output (ikat-pkg build of *.workspace → ../<name>-ws-out/)
-tests/dotnet/Ikat.HeadlessTests/fixtures/*-ws-out/
+# HeadlessTests fixture packer output (yio-pkg build of *.workspace → ../<name>-ws-out/)
+tests/dotnet/Yio.HeadlessTests/fixtures/*-ws-out/
 node_modules
 tmp
 
@@ -96,10 +96,8 @@ tmp
 # ZCode harness session state
 .zcode/
 
-# preview server 运行时状态（pid/port/token，随会话再生，绝不该入库；
-# .loom/ 是更名前同位残留目录——若再冒出来说明有旧版二进制在跑）
-**/.ikat/preview.json
-**/.loom/
+# preview server 运行时状态（pid/port/token，随会话再生，绝不该入库）
+**/.yio/
 
 # ===== 2021.3 回归工程 =====
 # Bundles 与 unity/showcase-unity 同份产物拷贝（33MB），不重复入库；恢复见该工程 README.md

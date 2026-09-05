@@ -18,7 +18,7 @@ pub enum DiagnosticCode {
     InvalidAriaRelation,
     TokenizerError,
     /// inline 元素直接放在 block 容器里（非 flex）。
-    /// Ikat 没有 flex 之外的 inline flow：inline 标签在 block 上下文里被当 block-level
+    /// Yio 没有 flex 之外的 inline flow：inline 标签在 block 上下文里被当 block-level
     /// （撑满父宽 + 竖排），和浏览器的 inline 行为（按内容收缩 + 横排流）不一致 → 渲染不可预测。
     /// 强制作者把 inline 元素放进 flex 容器，让布局意图显式。
     FenceInlineElementInBlockContext,
@@ -36,7 +36,7 @@ pub enum DiagnosticCode {
     /// 显式 flex 的 span 里。
     FenceSlotInInlineContext,
     /// border-width 已声明但 border-style 缺省（CSS initial=none）。
-    /// 浏览器按 CSS 规范不画边框，而 Ikat 历史实现会画 → 预览 ≠ 运行时。
+    /// 浏览器按 CSS 规范不画边框，而 Yio 历史实现会画 → 预览 ≠ 运行时。
     FenceBorderWithoutStyle,
     /// CSS 自定义属性引用环（`--a: var(--b); --b: var(--a)`，#11）。打包期同块静态
     /// 可见的环发 warning（非阻断——不同选择器命中的声明可能落在不同节点、运行时
@@ -44,9 +44,9 @@ pub enum DiagnosticCode {
     /// 「声明了却不生效」，必须响亮提示。
     FenceCustomPropCycle,
     /// background-image 已声明但 background-size 缺省。
-    /// CSS 默认 `auto`（原始尺寸），Ikat 默认 `stretch`（拉伸填满）→ 预览 ≠ 运行时。
+    /// CSS 默认 `auto`（原始尺寸），Yio 默认 `stretch`（拉伸填满）→ 预览 ≠ 运行时。
     FenceBgImageWithoutSize,
-    /// Ikat 控件（role 驱动：`role="progressbar"`/`role="slider"`/...）无任何 CSS 规则命中。
+    /// Yio 控件（role 驱动：`role="progressbar"`/`role="slider"`/...）无任何 CSS 规则命中。
     /// 控件不带 UA 默认样式（core 保持纯净，不开「框架自带样式源」先例），
     /// 未命中 = 运行时渲染空白。强制作者为控件及其内部 slot 子节点提供 CSS。
     FenceControlWithoutCss,
@@ -64,11 +64,11 @@ pub enum DiagnosticCode {
     FenceControlStructureCss,
     /// role 驱动控件缺少 spec §2.2 规定的必需子角色/slot（如 `combobox` 缺
     /// `role=listbox` 子、`slider` 缺 `data-slot=thumb` 子）。旧模式下框架运行时
-    /// 注入 `.ikat-*` 子节点故结构必然完整；新模式由作者自写结构，可能漏写——
+    /// 注入 `.yio-*` 子节点故结构必然完整；新模式由作者自写结构，可能漏写——
     /// 打包期严格拦截，不依赖运行时 reparent 兜底。
     FenceMissingControlChild,
     /// `role` 属性值不在 role 注册表内（通常是拼错，如 `role="silder"`）。
-    /// role 在 Ikat 是控件类型系统本身：未知值若静默回退成基础标签类型，
+    /// role 在 Yio 是控件类型系统本身：未知值若静默回退成基础标签类型，
     /// 元素会跳过全部控件校验（必需子结构、CSS 命中、结构 CSS 契约），构建
     /// 绿灯但运行时得到空白容器——属「不静默降级」原则要拦的典型类别。
     /// 注册表见 schema::tag::ROLE_TO_SEMANTIC + textbox/tabpanel 例外。
@@ -129,7 +129,7 @@ pub enum DiagnosticCode {
     /// 的模型只对文本 run 定义。修复：链接文字只写文本与 `<span>`。
     FenceLinkInvalidChild,
     /// z-index 声明在非定位、非 flex item 的元素上（error，#101）。浏览器对该
-    /// 声明视而不见（元素留在 static 绘制层），Ikat 运行时却恒生效（运行时直改
+    /// 声明视而不见（元素留在 static 绘制层），Yio 运行时却恒生效（运行时直改
     /// z 的 fgui 血统语义）——同一份 HTML 预览（浏览器）与运行时画序不同，预览
     /// 在说谎。围栏硬拒使分歧在构造上够不着；运行时 API 直改 z 不受影响（API
     /// 层非围栏层）。
@@ -142,7 +142,7 @@ pub enum DiagnosticCode {
     FenceMixedPaintOrder,
     /// `overflow:scroll/auto` 与 `clip-path` 同元素声明（error，#52）。scroll 视口
     /// 裁剪是矩形 + scroll_pos 平移语义，shape 裁滚动视口无清晰含义；web 上合法
-    /// 但 Ikat 不做——响亮拒优于静默降级。shape 与 `overflow:hidden` 组合合法
+    /// 但 Yio 不做——响亮拒优于静默降级。shape 与 `overflow:hidden` 组合合法
     /// （两条测试取交集，web 原义）。
     FenceClipPathScrollCombo,
     /// 裁剪链深度超上限（error，#52）。后端 clip uniform 槽 4 组定长；沿祖先链

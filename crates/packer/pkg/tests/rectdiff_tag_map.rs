@@ -6,14 +6,14 @@
 //! idless-unpaired 噪音上涨。本测试从 Rust 真相源（core `kind_to_html_tag` ×
 //! fence `ROLE_TO_SEMANTIC` × bridge `semantic_to_kind`）生成
 //! `semantic-tags.json`，与入库文件逐字节比对；漂移即红，跑
-//! `RECTDIFF_TAG_MAP_REGEN=1 cargo test -p ikat_pkg --test rectdiff_tag_map`
+//! `RECTDIFF_TAG_MAP_REGEN=1 cargo test -p yio_pkg --test rectdiff_tag_map`
 //! 重出。脚本侧改读该 JSON，手抄表删除。
 
-use ikat_core::dump::{kind_to_html_tag, ALL_NODE_KINDS};
-use ikat_core::scene::node::NodeKind;
-use ikat_fence::schema::tag::ROLE_TO_SEMANTIC;
+use yio_core::dump::{kind_to_html_tag, ALL_NODE_KINDS};
+use yio_core::scene::node::NodeKind;
+use yio_fence::schema::tag::ROLE_TO_SEMANTIC;
 
-use ikat_pkg::bridge::semantic_to_kind;
+use yio_pkg::bridge::semantic_to_kind;
 
 fn tag_map_json() -> String {
     // kind 段：NodeKind 名 → tag（ALL_NODE_KINDS 与 dump.rs 单测互锁，见其注释）。
@@ -64,7 +64,7 @@ fn rectdiff_tag_map_fresh() {
     assert_eq!(
         checked_in, generated,
         "semantic-tags.json 与 Rust 真相源漂移（新增/改动 NodeKind 或 role 映射？）——\
-         跑 RECTDIFF_TAG_MAP_REGEN=1 cargo test -p ikat_pkg --test rectdiff_tag_map 重出"
+         跑 RECTDIFF_TAG_MAP_REGEN=1 cargo test -p yio_pkg --test rectdiff_tag_map 重出"
     );
 }
 

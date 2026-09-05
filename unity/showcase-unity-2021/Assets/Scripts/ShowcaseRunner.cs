@@ -1,10 +1,10 @@
 using System;
 using UnityEngine;
-using Ikat;
+using Yio;
 
 /// PlayMode showcase 查看器：导航完全走框架自己的事件系统，无 IMGUI。
 ///
-/// 挂在与 IkatStageDriver 同一 GameObject 上。Play 后：
+/// 挂在与 YioStageDriver 同一 GameObject 上。Play 后：
 ///   - 首页 home：点 7 张 nav-card（nav-settings / nav-mail / ...）跳对应页
 ///   - 各页：点顶栏 / 侧栏的「← 首页」(button#back-home) 回 home
 /// 这些导航元素的 id 已在 showcase HTML 里就位（home.html 的 nav-card、各页的
@@ -37,7 +37,7 @@ public class ShowcaseRunner : MonoBehaviour
     };
 
     // settings 页 tab → panel 配对（HTML 标准 role=tab/tabpanel 模式）。
-    // 浏览器里 ikat-preview.js 的 JS 切 panel display；Ikat 运行时无 JS，这里复刻该逻辑。
+    // 浏览器里 yio-preview.js 的 JS 切 panel display；Yio 运行时无 JS，这里复刻该逻辑。
     // panel-audio 默认可见，其余 HTML 里 style="display:none" 冻结进 pkg。
     static readonly (string tabId, string panelId)[] SETTINGS_TABS =
     {
@@ -48,7 +48,7 @@ public class ShowcaseRunner : MonoBehaviour
         ("tab-search", "panel-search"),
     };
 
-    IkatStageDriver _driver;
+    YioStageDriver _driver;
     Container _current;
     string _shown;
 
@@ -69,10 +69,10 @@ public class ShowcaseRunner : MonoBehaviour
         // 编辑器验收防冻：编辑器窗口失焦（看 Console/切窗）时播放器循环会被挂起，
         // 表现为「游戏只剩一两帧」。Run In Background 让循环失焦持续跑（真机默认行为）。
         Application.runInBackground = true;
-        _driver = GetComponent<IkatStageDriver>();
+        _driver = GetComponent<YioStageDriver>();
         if (_driver == null)
         {
-            Debug.LogError("[Showcase] IkatStageDriver not found on same GameObject — runner wired wrong");
+            Debug.LogError("[Showcase] YioStageDriver not found on same GameObject — runner wired wrong");
             return;
         }
         // 手型光标皮肤（消费侧注册示例）：包不内置任何皮肤（intent 1 缺省 = 系统箭头），
@@ -170,7 +170,7 @@ public class ShowcaseRunner : MonoBehaviour
         }
         if (!page.TryGet<Container>("b12-target", out var handleTarget))
             return;
-        Ikat.AnimationHandle handle = null;
+        Yio.AnimationHandle handle = null;
         if (page.TryGet<Button>("btn-h-play", out var bPlay))
             bPlay.Clicked += () =>
             {
@@ -700,7 +700,7 @@ public class ShowcaseRunner : MonoBehaviour
     }
 
     /// settings 页 tab 切换：HTML 的 role=tab/tabpanel 模式依赖运行时 JS 改 panel display，
-    /// Ikat 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
+    /// Yio 运行时无 JS，这里订阅 tab 按钮 Clicked → 隐藏当前 panel + 显示目标 panel。
     /// panel 是裸 <div>（.panel CSS 无 display 声明）→ 默认 display:block（子元素 page-title/
     /// page-desc/field 垂直堆叠）。显示用 DisplayMode.Block，**不能用 Flex**——Flex 默认
     /// flex-direction:row 会让 panel 的子元素水平排列，布局错乱。隐藏用 DisplayMode.None。
@@ -754,7 +754,7 @@ public class ShowcaseRunner : MonoBehaviour
     /// runtime-css 页（#11）：StyleSheet.Add/Dispose/Clear + SetVar/RemoveVar + var() 消费面。
     /// 判据（肉眼强信号）：目标块变色/复原、同优先后 Add 赢、非法 CSS 异常读数带行列、
     /// chips 组整组翻色/回落、嵌套链 swatch 变色、行内源 chip 恒橙（打包期通路回归）。
-    /// 环 warning 判据不在 PlayMode（走 ikat check 输出，agent 自测）。
+    /// 环 warning 判据不在 PlayMode（走 yio check 输出，agent 自测）。
     /// shape-mask 页（#52）：命中穿透读数（圆/角计数）+ 运行时注入圆遮罩。
     /// 判据（肉眼强信号）：点橙角=角读数翻（clip-path 裁命中——穿透到下层按钮）、
     /// 点圆心=圆读数翻、注入后方图变圆/撤销复原。静态区无接线（CSS 声明面）。
@@ -888,7 +888,7 @@ public class ShowcaseRunner : MonoBehaviour
             if (page.TryGet<Button>("rt-theme", out var themeBtn))
                 themeBtn.Clicked += () =>
                 {
-                    rtPage.Style.SetVar("--rt-accent", new IkatColor(0.37f, 0.71f, 0.83f, 1f));
+                    rtPage.Style.SetVar("--rt-accent", new YioColor(0.37f, 0.71f, 0.83f, 1f));
                     Say("主题·亮青");
                 };
             if (page.TryGet<Button>("rt-untheme", out var unthemeBtn))
@@ -900,7 +900,7 @@ public class ShowcaseRunner : MonoBehaviour
             if (page.TryGet<Button>("rt-chain", out var chainBtn))
                 chainBtn.Clicked += () =>
                 {
-                    rtPage.Style.SetVar("--rt-chain-b", new IkatColor(0.75f, 0.22f, 0.17f, 1f));
+                    rtPage.Style.SetVar("--rt-chain-b", new YioColor(0.75f, 0.22f, 0.17f, 1f));
                     Say("链·红");
                 };
         }
@@ -1060,8 +1060,8 @@ public class ShowcaseRunner : MonoBehaviour
     }
 
     /// ListView 虚拟化驱动：背包 / 邮件左侧列表。
-    /// runtime ListView 是数据驱动的——data-fill 只供浏览器 preview 克隆（ikat-preview.js），
-    /// runtime 必须业务侧设 ItemCount + BindItem 才克隆 slot 渲染 item（见 Ikat.Nodes ListView）。
+    /// runtime ListView 是数据驱动的——data-fill 只供浏览器 preview 克隆（yio-preview.js），
+    /// runtime 必须业务侧设 ItemCount + BindItem 才克隆 slot 渲染 item（见 Yio.Nodes ListView）。
     /// 按 index 区分图标（Image.Src 轮换）+ badge 数量 + 耐久（背包）/ 发件人 + 主题（邮件）。子节点用
     /// Query<T> 按类型取：template 蓝图克隆后 N 个 slot 子节点 id 重复，Get<T> 全局首匹配只命中
     /// 首个 slot（Nodes.cs Get gap），故不用 id。

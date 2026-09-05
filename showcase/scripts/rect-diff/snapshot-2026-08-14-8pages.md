@@ -8,7 +8,7 @@
 ## 工具链修复（本轮 5 项，噪声 106 unpaired → 2）
 
 1. **tag 词汇表归一**（browser-rect.mjs `semanticTag`）：core dump 按 `kind_to_html_tag`（crates/core/src/dump.rs）报语义 tag（role=listitem→li、progressbar→progress、spinbutton/slider/switch/radio/textbox→input、combobox→select、hyphen 标签→custom），browser 侧 DOM 字面 tag 全是 div——两侧桶永配不上。browser-rect 现按同一张表从 `role` 属性归一。
-2. **preview JS 保留 + data-fill 撤销**：ikat-preview.js 是 browser 侧的 core 行为模拟器（textbox placeholder 行高压 39px、progressbar fill 宽、slider thumb 定位）——**必须保留**，全拦会让空 textbox 从 39 掉到 20 制造假 diff（form 页实测 +13 diff）。唯一要撤销的是 `fillListViews`（role=list[data-fill] 模板克隆）：core dump 无 C# driver 跑不了 ItemCount，克隆项无 core 对应物。browser-rect 在测量前删除克隆项；driver 驱动的列表虚拟化归 Unity 机验收（任务 4 本体）。
+2. **preview JS 保留 + data-fill 撤销**：yio-preview.js 是 browser 侧的 core 行为模拟器（textbox placeholder 行高压 39px、progressbar fill 宽、slider thumb 定位）——**必须保留**，全拦会让空 textbox 从 39 掉到 20 制造假 diff（form 页实测 +13 diff）。唯一要撤销的是 `fillListViews`（role=list[data-fill] 模板克隆）：core dump 无 C# driver 跑不了 ItemCount，克隆项无 core 对应物。browser-rect 在测量前删除克隆项；driver 驱动的列表虚拟化归 Unity 机验收（任务 4 本体）。
 3. **0×0 盒不进 idless 桶**（diff.mjs）：browser 枚举一切 DOM（含 display:none），core 只发 laid-out 节点——0×0 进 index-aligned 桶必错位（form 一个隐藏 option 平移整桶配对）。core 侧 0×0 span 例外保留（rich-text folded 要配上报 FOLDED）。
 4. **FOLDED 类别**（diff.mjs）：rich-text inline span 在 core 折叠进父 block run（任务 1 文本模型），公共树留 id 但 rect 0×0 by design——报信息行不计失败。
 5. **preview-base.css 补 workspace 字体**：JetBrainsMono / PressStart2P / DejaVuSans 三族 @font-face（lab 页等宽标本依赖；此前 browser 静默 fallback 系统字体）。
@@ -50,7 +50,7 @@ core dump 输出 `<template>`/组件模板内部节点（slot 0×0），browser 
 
 - **PlayMode 运行时 rect 比对已接**（`run-page.sh --scene=`，本轮交付）：Unity 机上导出 DumpSceneJson → 编码机侧或 Unity 机侧跑比对。操作序列：
   1. Unity PlayMode 打开目标页（driver 已跑、动画入场完成）。
-  2. uloop `execute-dynamic-code`：`System.IO.File.WriteAllText(@"<path>\scene-<page>.json", showcase.Editor.IkatBridge.IkatBridge.DumpScene())`。
+  2. uloop `execute-dynamic-code`：`System.IO.File.WriteAllText(@"<path>\scene-<page>.json", showcase.Editor.YioBridge.YioBridge.DumpScene())`。
   3. `./run-page.sh <page> --scene=<path>\scene-<page>.json` → browser 基线 vs PlayMode 运行时 core 状态（driver 驱动的列表、动画末态都在内）。
   归一脚本 `normalize-dump-scene.mjs` 按 `kind` 字段决断语义 tag（诊断 tag 的 ListView→div / CustomElement→div / TextNode→span 三处分歧不泄漏）。编码机已用 core dump 反造样本 round-trip 自测（与 core-dump 路径 summary 完全一致）。
 - mail/inventory 的 driver 驱动列表虚拟化（ItemCount + slot 覆盖）PlayMode 验收（--scene 模式正是为此准备的路径）。

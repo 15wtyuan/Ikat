@@ -1,13 +1,13 @@
 //! #109 A2 render build 基准：增量 build（输入指纹命中复用）vs 每帧全量重建。
 //! 场景复用 solve.rs 的 api-infra 形状（~2400 节点、文本叶子为主）。
-//! 跑法：`cargo bench -p ikat_core`；`cargo test` 不执行 bench（CI 零负担）。
+//! 跑法：`cargo bench -p yio_core`；`cargo test` 不执行 bench（CI 零负担）。
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use ikat_core::layout::{solve, ImageSizeTable};
-use ikat_core::render::{build_render_nodes, build_render_nodes_cached, dirty::RenderBuildCache};
-use ikat_core::scene::node::{NodeKind, Scene};
-use ikat_core::style::resolved::ResolvedStyle;
-use ikat_core::text::layout::FontTable;
+use yio_core::layout::{solve, ImageSizeTable};
+use yio_core::render::{build_render_nodes, build_render_nodes_cached, dirty::RenderBuildCache};
+use yio_core::scene::node::{NodeKind, Scene};
+use yio_core::style::resolved::ResolvedStyle;
+use yio_core::text::layout::FontTable;
 
 fn font_table() -> FontTable {
     let path = format!(
@@ -149,13 +149,13 @@ fn bench_render_build(c: &mut Criterion) {
     let fonts = font_table();
     let root = (1280.0_f32, 720.0);
     let sizes = ImageSizeTable::new();
-    let mut atlas = ikat_core::text::atlas::GlyphAtlas::new();
+    let mut atlas = yio_core::text::atlas::GlyphAtlas::new();
 
     // 稳态帧（增量命中路径）：预热两帧建缓存与字形，之后每帧全部指纹命中。
     {
         let mut scene = api_infra_shape();
         solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
-        ikat_core::scene::transform::compute_world_transforms(&mut scene);
+        yio_core::scene::transform::compute_world_transforms(&mut scene);
         let mut cache = RenderBuildCache::default();
         let prev = std::collections::HashMap::new();
         build_render_nodes_cached(&scene, &fonts, &prev, &sizes, &mut atlas, &mut cache, 0, 1);
@@ -182,7 +182,7 @@ fn bench_render_build(c: &mut Criterion) {
     {
         let mut scene = api_infra_shape();
         solve(&mut scene, &fonts, root, [0.0; 4], &sizes);
-        ikat_core::scene::transform::compute_world_transforms(&mut scene);
+        yio_core::scene::transform::compute_world_transforms(&mut scene);
         let prev = std::collections::HashMap::new();
         c.bench_function("render_build/steady_full_rebuild", |b| {
             b.iter(|| build_render_nodes(&scene, &fonts, &prev, &sizes, &mut atlas))

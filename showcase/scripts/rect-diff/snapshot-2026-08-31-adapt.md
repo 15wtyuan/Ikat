@@ -1,6 +1,6 @@
 # rect-diff 报告 — adapt 适配演示页 5 形状（2026-08-31，#110）
 
-- 工具：browser-rect.mjs ↔ `dump_page --json`（新增 `IKAT_ROOT`/`IKAT_SAFE` 环境变量 +
+- 工具：browser-rect.mjs ↔ `dump_page --json`（新增 `YIO_ROOT`/`YIO_SAFE` 环境变量 +
   browser 侧 `--viewport`/`--safe` 参数，对拍「运行时 root 形状 + env() 注值」）。
 - 形状：1920x1080（基线）/ 1920x1200 / 1920x1440（fit-width@4:3 类重排）/ 2560x1080
   （fit-height@21:9 类重排）/ 1920x1200+safe=60,0,40,0（env() 通道）。
@@ -11,7 +11,7 @@
 
 | 形状 | rect diffs | unmatched | 归类 |
 |---|---|---|---|
-| 1920x1080 | 17 | 1（ikat-anim-replay，B 层预览按钮，既有） | A 类 |
+| 1920x1080 | 17 | 1（yio-anim-replay，B 层预览按钮，既有） | A 类 |
 | 1920x1200 | 13 | 1（同上） | A 类 |
 | 1920x1440 | 10 | 1（同上） | A 类 |
 | 2560x1080 | 17 | 1（同上） | A 类 |
@@ -32,5 +32,5 @@
 ## 工具链修改
 
 - `browser-rect.mjs`：`--viewport=WxH`（按运行时 root 开视口）+ `--safe=t,r,b,l`
-  （预填 `--ikat-safe-*` 变量，goto 后注值）。
-- `dump_page.rs`：`IKAT_ROOT`/`IKAT_SAFE` 环境变量（root 形状 + safe inset）。
+  （预填 `--yio-safe-*` 变量，goto 后注值）。
+- `dump_page.rs`：`YIO_ROOT`/`YIO_SAFE` 环境变量（root 形状 + safe inset）。

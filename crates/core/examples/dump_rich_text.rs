@@ -13,9 +13,9 @@
 //!   - 对长文本块（mail .read-body 各段），lines.len() > 1 ——宽度受限换行成立（非单行溢出）。
 //!   - 反例（旧 bug）：inline 子各自 layout_rect 非零 + 竖排堆叠（每个一行）——已消除。
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::scene::node::{NodeId, NodeKind, Scene};
-use ikat_core::stage::Stage;
+use yio_core::scene::dynamic::append_child;
+use yio_core::scene::node::{NodeId, NodeKind, Scene};
+use yio_core::stage::Stage;
 
 fn main() {
     let root = env!("CARGO_MANIFEST_DIR");

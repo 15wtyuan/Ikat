@@ -3,11 +3,11 @@
 //! 模板是给外部工作区 agent 的围栏规则副本，历史上曾整段漂移（虚构 30 标签
 //! 世界、CSS 支持清单乌龙）。真相源是 `crates/fence/src/schema/` 的 const 表；
 //! 本测试把模板中的标签/role/CSS 清单拉回与 schema 对账，改 schema 必须同步
-//! 模板，否则这里红。ikat skill 的命令面/退出码与 CLI main.rs 对账（同一模式）。
+//! 模板，否则这里红。yio skill 的命令面/退出码与 CLI main.rs 对账（同一模式）。
 
-use ikat_fence::control_structure_check::{CheckSpec, REQUIRED_CHILDREN};
-use ikat_fence::schema::{find_css_prop, find_shorthand, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS};
-use ikat_fence::value_check::TRANSITION_PROPS;
+use yio_fence::control_structure_check::{CheckSpec, REQUIRED_CHILDREN};
+use yio_fence::schema::{find_css_prop, find_shorthand, ROLE_TO_SEMANTIC, SHELL_TAGS, TAGS};
+use yio_fence::value_check::TRANSITION_PROPS;
 
 const EDITOR_SKILL_MD: &str = include_str!("../../../pkg/templates/editor/SKILL.md");
 const EDITOR_SCHEMA_MD: &str =
@@ -17,7 +17,7 @@ const EDITOR_CSS_MD: &str =
 const RUNTIME_SKILL_MD: &str = include_str!("../../../pkg/templates/runtime/SKILL.md");
 const RUNTIME_API_MD: &str =
     include_str!("../../../pkg/templates/runtime/references/api-reference.md");
-const IKAT_SKILL_MD: &str = include_str!("../../../pkg/templates/ikat/SKILL.md");
+const YIO_SKILL_MD: &str = include_str!("../../../pkg/templates/yio/SKILL.md");
 
 /// 提取锚点区之间的文本（begin/end 均为含 `fence-sync:` 的注释锚点）。
 fn section_between(md: &'static str, begin: &str, end: &str) -> &'static str {
@@ -192,10 +192,10 @@ fn required_children_contracts_in_schema_doc() {
     }
 }
 
-/// ikat skill 命令面 ↔ CLI 实现对账：skill 教的每个子命令必须真实存在（main.rs
+/// yio skill 命令面 ↔ CLI 实现对账：skill 教的每个子命令必须真实存在（main.rs
 /// 分发表），退出码语义不得漂移。改命令面不同步 skill = agent 照手册撞墙。
 #[test]
-fn ikat_skill_commands_match_cli_surface() {
+fn yio_skill_commands_match_cli_surface() {
     // 与 crates/packer/pkg/src/main.rs parse_cmd 的分发集一致。
     let commands = [
         "check",
@@ -211,21 +211,21 @@ fn ikat_skill_commands_match_cli_surface() {
     ];
     for cmd in &commands {
         assert!(
-            IKAT_SKILL_MD.contains(&format!("ikat {cmd}")),
-            "ikat skill must document `ikat {cmd}` (CLI implements it)"
+            YIO_SKILL_MD.contains(&format!("yio {cmd}")),
+            "yio skill must document `yio {cmd}` (CLI implements it)"
         );
     }
     // 退出码三段语义：skill 的表与 CLI 的 exit_code 契约对齐。
-    assert!(IKAT_SKILL_MD.contains("| 0 |"), "exit 0 row present");
-    assert!(IKAT_SKILL_MD.contains("| 1 |"), "exit 1 row present");
-    assert!(IKAT_SKILL_MD.contains("| 2 |"), "exit 2 row present");
+    assert!(YIO_SKILL_MD.contains("| 0 |"), "exit 0 row present");
+    assert!(YIO_SKILL_MD.contains("| 1 |"), "exit 1 row present");
+    assert!(YIO_SKILL_MD.contains("| 2 |"), "exit 2 row present");
     assert!(
-        IKAT_SKILL_MD.contains("format_version"),
+        YIO_SKILL_MD.contains("format_version"),
         "skill must document the JSON format_version contract"
     );
     // 机读约定：stdout 数据 / stderr 进度。
     assert!(
-        IKAT_SKILL_MD.contains("stdout"),
+        YIO_SKILL_MD.contains("stdout"),
         "skill must teach the stdout=data convention"
     );
 }
@@ -235,20 +235,20 @@ fn ikat_skill_commands_match_cli_surface() {
 #[test]
 fn skills_cross_reference_each_other() {
     assert!(
-        EDITOR_SKILL_MD.contains("ikat-runtime"),
-        "editor skill must route runtime work to the ikat-runtime skill"
+        EDITOR_SKILL_MD.contains("yio-runtime"),
+        "editor skill must route runtime work to the yio-runtime skill"
     );
     assert!(
-        RUNTIME_SKILL_MD.contains("ikat-editor"),
-        "runtime skill must route authoring work to the ikat-editor skill"
+        RUNTIME_SKILL_MD.contains("yio-editor"),
+        "runtime skill must route authoring work to the yio-editor skill"
     );
     assert!(
-        RUNTIME_SKILL_MD.contains(".ikat/config.json"),
-        "runtime skill must teach reading .ikat/config.json"
+        RUNTIME_SKILL_MD.contains(".yio/config.json"),
+        "runtime skill must teach reading .yio/config.json"
     );
     assert!(
-        EDITOR_SKILL_MD.contains(".ikat/config.json"),
-        "editor skill must teach reading .ikat/config.json"
+        EDITOR_SKILL_MD.contains(".yio/config.json"),
+        "editor skill must teach reading .yio/config.json"
     );
     // editor 的 references/ 三件必须被主文件指名（渐进披露的入口）。
     for r in ["fence-schema.md", "css-reference.md", "patterns.md"] {
@@ -257,8 +257,8 @@ fn skills_cross_reference_each_other() {
             "editor SKILL.md must point at references/{r}"
         );
     }
-    // runtime 的 API 查找表同理；且 skill 不得再把消费者指回 Ikat 源码仓库
-    // （消费者装的是 Unity 包 + ikat init 工作区，不应被迫 clone 源码翻文档）。
+    // runtime 的 API 查找表同理；且 skill 不得再把消费者指回 Yio 源码仓库
+    // （消费者装的是 Unity 包 + yio init 工作区，不应被迫 clone 源码翻文档）。
     assert!(
         RUNTIME_SKILL_MD.contains("api-reference.md"),
         "runtime SKILL.md must point at references/api-reference.md"

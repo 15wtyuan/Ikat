@@ -1,29 +1,29 @@
-//! ikat CLI：Ikat UI 工作区的校验 / 打包 / 初始化 / workspace 编排。
+//! yio CLI：Yio UI 工作区的校验 / 打包 / 初始化 / workspace 编排。
 //!
 //! 用法（详情见 --help）：
-//!   ikat check [<dir>] [--format human|json]
-//!   ikat build [<dir>] [--format human|json]
-//!   ikat verify [<dir>] [--unity-editor <path>] [--format human|json]
-//!   ikat init <dir> [--ui <dir>] [--agent claude|agents]... [--unity-root <path>] [--output <dir>] [--force]
-//!   ikat new <name>
-//!   ikat list pkg|atlas|font [--format json]
-//!   ikat show <pkg> [--format json]
-//!   ikat font add <file> --family <f> [--default] [--fallback]
-//!   ikat font remove <family>
-//!   ikat font default <family>
-//!   ikat atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
-//!   ikat scaffold [--agent claude|agents]...
-//!   ikat version [--format json]
+//!   yio check [<dir>] [--format human|json]
+//!   yio build [<dir>] [--format human|json]
+//!   yio verify [<dir>] [--unity-editor <path>] [--format human|json]
+//!   yio init <dir> [--ui <dir>] [--agent claude|agents]... [--unity-root <path>] [--output <dir>] [--force]
+//!   yio new <name>
+//!   yio list pkg|atlas|font [--format json]
+//!   yio show <pkg> [--format json]
+//!   yio font add <file> --family <f> [--default] [--fallback]
+//!   yio font remove <family>
+//!   yio font default <family>
+//!   yio atlas add <dir> [--name <n>] [--max-size <n>] [--padding <n>] [--standalone]
+//!   yio scaffold [--agent claude|agents]...
+//!   yio version [--format json]
 //!
 //! 输出约定：human 模式（默认）诊断/进度走 stderr；`--format json` 时 stdout 输出单个
 //! JSON 文档（数据），进度走 stderr。退出码：0 干净 · 1 有 Error 级诊断 / 写命令冲突 ·
-//! 2 用法/配置/io 错。目录解析统一走 config 发现：会话根（含 `.ikat/config.json`）、
-//! ui 目录（含 `ikat.workspace.json`）、或 ui 的直接子目录都可直接作为 `<dir>` / cwd。
+//! 2 用法/配置/io 错。目录解析统一走 config 发现：会话根（含 `.yio/config.json`）、
+//! ui 目录（含 `yio.workspace.json`）、或 ui 的直接子目录都可直接作为 `<dir>` / cwd。
 
-use ikat_pkg::diag::BuildFailure;
-use ikat_pkg::report::{CommandOutput, VersionInfo};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use yio_pkg::diag::BuildFailure;
+use yio_pkg::report::{CommandOutput, VersionInfo};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Format {
@@ -96,7 +96,7 @@ enum Cmd {
         match_mode: Option<String>,
         clear: bool,
     },
-    /// 刷新 agent 脚手架（已有工作区的安全入口——不碰 workspace.json / .ikat / 源文件；
+    /// 刷新 agent 脚手架（已有工作区的安全入口——不碰 workspace.json / .yio / 源文件；
     /// 与 init --force 不同，后者会重写 workspace.json 骨架）。
     Scaffold {
         agents: Vec<String>,
@@ -116,7 +116,7 @@ enum Cmd {
 
 fn usage() -> ! {
     let bin = bin_name();
-    eprintln!("ikat — Ikat UI workspace CLI");
+    eprintln!("yio — Yio UI workspace CLI");
     eprintln!();
     eprintln!("usage:");
     eprintln!(
@@ -139,7 +139,7 @@ fn usage() -> ! {
         "  {bin} init <dir> [--ui <dir>] [--agent <kind>]... [--unity-root <path>] [--output <dir>] [--force]"
     );
     eprintln!(
-        "                                            scaffold skills + config + CLI at <dir>/.ikat/,"
+        "                                            scaffold skills + config + CLI at <dir>/.yio/,"
     );
     eprintln!(
         "                                            workspace.json under --ui (default: same dir)"
@@ -174,10 +174,10 @@ fn usage() -> ! {
     eprintln!("exit codes: 0 clean (warnings allowed) · 1 errors / command conflict · 2 usage/config failure");
     eprintln!();
     eprintln!(
-        "`<dir>` (and the cwd for the remaining commands) may be the session root (has .ikat/),"
+        "`<dir>` (and the cwd for the remaining commands) may be the session root (has .yio/),"
     );
     eprintln!(
-        "the ui workspace itself (has ikat.workspace.json), or a direct child of the ui workspace."
+        "the ui workspace itself (has yio.workspace.json), or a direct child of the ui workspace."
     );
     std::process::exit(2);
 }
@@ -191,7 +191,7 @@ fn bin_name() -> String {
                 .and_then(|n| n.to_str())
                 .map(String::from)
         })
-        .unwrap_or_else(|| "ikat".to_string())
+        .unwrap_or_else(|| "yio".to_string())
 }
 
 /// 手写参数扫描（仓库零 clap 约定）：位置参数 + `--flag value` / `--bool`。
@@ -273,7 +273,7 @@ fn parse_cmd(args: &[String]) -> Option<Cmd> {
     let mut scan = ArgScan::new(rest);
     match sub {
         "check" | "build" | "verify" => {
-            // <dir> 可选：缺省当前目录（AI 在工作区内裸跑 `ikat check` 的主形态）。
+            // <dir> 可选：缺省当前目录（AI 在工作区内裸跑 `yio check` 的主形态）。
             let root = match scan.positional() {
                 Some(d) => PathBuf::from(d),
                 None => std::env::current_dir().ok()?,
@@ -470,7 +470,7 @@ fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
         Ok(p) => p,
         Err(f) => return failure_exit("check", &f, format),
     };
-    match ikat_pkg::build::analyze(&ui) {
+    match yio_pkg::build::analyze(&ui) {
         Ok(outcome) => {
             // 全量 warning：registry 侧 + 各包侧（与 build 成功时的 BuildReport 同口径）。
             let mut warnings = outcome.warnings;
@@ -479,19 +479,19 @@ fn run_check(root: &std::path::Path, format: Format) -> ExitCode {
             }
             // 工作区生成物 stale（scaffold 版本戳落后于本 CLI）——文档/工具没送到
             // 会静默过时，check 是唯一必经门，在此提醒刷新。
-            if let Some(msg) = ikat_pkg::scaffold::stale_stamp_warning(&ui) {
-                warnings.push(ikat_pkg::diag::PackDiagnostic::synthetic_warning(
+            if let Some(msg) = yio_pkg::scaffold::stale_stamp_warning(&ui) {
+                warnings.push(yio_pkg::diag::PackDiagnostic::synthetic_warning(
                     "StaleScaffold",
                     "workspace",
-                    ".ikat/scaffold.version",
+                    ".yio/scaffold.version",
                     msg,
                 ));
             }
             // CLI ↔ Unity 包版本漂移（双向）：exe 与 Unity 插件跨边界配对，漂移
             // 原先只能靠 skill 仪式发现（AI 会忘），check 是唯一必经门。
-            if let Some(msg) = ikat_pkg::config::version_drift_warning(&ui) {
-                warnings.push(ikat_pkg::diag::PackDiagnostic::synthetic_warning(
-                    ikat_pkg::diag::code::IKAT_VERSION_DRIFT,
+            if let Some(msg) = yio_pkg::config::version_drift_warning(&ui) {
+                warnings.push(yio_pkg::diag::PackDiagnostic::synthetic_warning(
+                    yio_pkg::diag::code::YIO_VERSION_DRIFT,
                     "workspace",
                     "Packages/packages-lock.json",
                     msg,
@@ -519,7 +519,7 @@ fn run_build(root: &std::path::Path, format: Format) -> ExitCode {
         Ok(p) => p,
         Err(f) => return failure_exit("build", &f, format),
     };
-    match ikat_pkg::build::build(&ui) {
+    match yio_pkg::build::build(&ui) {
         Ok(report) => {
             match format {
                 Format::Human => {
@@ -558,7 +558,7 @@ fn run_verify(root: &std::path::Path, format: Format, unity_editor: Option<PathB
         Ok(p) => p,
         Err(f) => return failure_exit("verify", &f, format),
     };
-    match ikat_pkg::verify::run(&ui, unity_editor.as_deref()) {
+    match yio_pkg::verify::run(&ui, unity_editor.as_deref()) {
         Ok(outcome) => match format {
             Format::Human => {
                 for w in &outcome.warnings {
@@ -576,7 +576,7 @@ fn run_verify(root: &std::path::Path, format: Format, unity_editor: Option<PathB
                 println!(
                     "{}",
                     CommandOutput::verify_ok(
-                        ikat_pkg::report::VerifySummary {
+                        yio_pkg::report::VerifySummary {
                             assets_checked: outcome.assets_checked,
                             editor: outcome.editor.display().to_string(),
                             log: outcome.log.display().to_string(),
@@ -600,22 +600,22 @@ fn run_init(
     output: String,
     force: bool,
 ) -> ExitCode {
-    match ikat_pkg::init::init(
+    match yio_pkg::init::init(
         &root,
-        ikat_pkg::init::InitOptions {
+        yio_pkg::init::InitOptions {
             agents,
             ui_dir: ui,
             unity_root,
             output_dir: output,
             force,
-            cli_source: ikat_pkg::init::CliSource::CurrentExe,
+            cli_source: yio_pkg::init::CliSource::CurrentExe,
         },
     ) {
         Ok(out) => {
             // cargo new 风格的后续步骤提示（stderr——stdout 保持数据纯净）。
             let split = out.ui != out.root;
             eprintln!(
-                "initialized Ikat workspace (session root: {}, ui workspace: {})",
+                "initialized Yio workspace (session root: {}, ui workspace: {})",
                 out.root.display(),
                 out.ui.display()
             );
@@ -623,30 +623,30 @@ fn run_init(
             eprintln!("next steps:");
             if split {
                 eprintln!(
-                    "  1. open ONE agent session at {} — skills + .ikat/ are wired there",
+                    "  1. open ONE agent session at {} — skills + .yio/ are wired there",
                     out.root.display()
                 );
             } else {
                 eprintln!(
-                    "  1. open an agent session at {} — skills + .ikat/ are wired there",
+                    "  1. open an agent session at {} — skills + .yio/ are wired there",
                     out.root.display()
                 );
             }
-            eprintln!("  2. ikat new <package>          — create the first UI package");
-            eprintln!("  3. put fonts somewhere and:    ikat font add <file> --family <name>");
-            eprintln!("  4. put PNGs under a dir and:   ikat atlas add <dir>");
-            eprintln!("  5. ikat check                  — iterate until clean, then ikat build");
+            eprintln!("  2. yio new <package>          — create the first UI package");
+            eprintln!("  3. put fonts somewhere and:    yio font add <file> --family <name>");
+            eprintln!("  4. put PNGs under a dir and:   yio atlas add <dir>");
+            eprintln!("  5. yio check                  — iterate until clean, then yio build");
             if !out.unity_root_written {
                 eprintln!();
                 eprintln!("note: no --unity-root given — build outputs stay local (output_dir).");
-                eprintln!("      re-run from the GUI packer (Ikat > Open Packer) to bind a Unity project.");
+                eprintln!(
+                    "      re-run from the GUI packer (Yio > Open Packer) to bind a Unity project."
+                );
             }
             if !out.cli_copied {
                 eprintln!();
-                eprintln!("warning: could not copy the CLI into .ikat/ (exe busy?); the workspace");
-                eprintln!(
-                    "         still works via a ikat on PATH or the GitHub Release download."
-                );
+                eprintln!("warning: could not copy the CLI into .yio/ (exe busy?); the workspace");
+                eprintln!("         still works via a yio on PATH or the GitHub Release download.");
             }
             ExitCode::SUCCESS
         }
@@ -656,14 +656,14 @@ fn run_init(
 
 /// 参数目录 → ui 工作区（config 发现：会话根 / ui 本体 / ui 直接子目录）。
 fn locate_arg(root: &std::path::Path) -> Result<PathBuf, BuildFailure> {
-    Ok(ikat_pkg::config::locate(root)?.ui)
+    Ok(yio_pkg::config::locate(root)?.ui)
 }
 
 /// cwd → 工作区定位（new/list/show/font add/atlas add 的根解析；scaffold 另取 root）。
-fn locate_cwd() -> Result<ikat_pkg::config::Located, BuildFailure> {
+fn locate_cwd() -> Result<yio_pkg::config::Located, BuildFailure> {
     let cwd =
         std::env::current_dir().map_err(|e| BuildFailure::config(format!("current dir: {e}")))?;
-    ikat_pkg::config::locate(&cwd)
+    yio_pkg::config::locate(&cwd)
 }
 
 fn run_new(name: &str) -> ExitCode {
@@ -671,11 +671,11 @@ fn run_new(name: &str) -> ExitCode {
         Ok(l) => l.ui,
         Err(f) => return failure_exit("new", &f, Format::Human),
     };
-    match ikat_pkg::workspace_cmd::new_pkg(&root, name) {
+    match yio_pkg::workspace_cmd::new_pkg(&root, name) {
         Ok(s) => {
             println!("{}", serde_json::to_string(&s).unwrap());
             eprintln!(
-                "created ui/{name}/main.html (package `{}`, registered); run `ikat check` next",
+                "created ui/{name}/main.html (package `{}`, registered); run `yio check` next",
                 s.name
             );
             ExitCode::SUCCESS
@@ -690,9 +690,9 @@ fn run_list(kind: ListKind, format: Format) -> ExitCode {
         Err(f) => return failure_exit("list", &f, format),
     };
     let res: Result<serde_json::Value, BuildFailure> = match kind {
-        ListKind::Pkg => list_to_json(ikat_pkg::workspace_cmd::list_pkgs(&root), "packages"),
-        ListKind::Atlas => list_to_json(ikat_pkg::workspace_cmd::list_atlases(&root), "atlases"),
-        ListKind::Font => list_to_json(ikat_pkg::workspace_cmd::list_fonts(&root), "fonts"),
+        ListKind::Pkg => list_to_json(yio_pkg::workspace_cmd::list_pkgs(&root), "packages"),
+        ListKind::Atlas => list_to_json(yio_pkg::workspace_cmd::list_atlases(&root), "atlases"),
+        ListKind::Font => list_to_json(yio_pkg::workspace_cmd::list_fonts(&root), "fonts"),
     };
     match res {
         Ok(json) => {
@@ -713,7 +713,7 @@ fn list_to_json<T: serde::Serialize>(
     let items = res?;
     Ok(serde_json::json!({
         "command": "list",
-        "format_version": ikat_pkg::report::FORMAT_VERSION,
+        "format_version": yio_pkg::report::FORMAT_VERSION,
         "success": true,
         key: items,
     }))
@@ -763,8 +763,8 @@ fn print_human_list(json: &serde_json::Value) {
     }
 }
 
-/// `ikat preview`：长驻服务（stdout 单 JSON 含 URL）或 `--stop` 停实例。
-/// 注意 stop/start 都要会话根（server-info 落盘 `.ikat/preview.json`），
+/// `yio preview`：长驻服务（stdout 单 JSON 含 URL）或 `--stop` 停实例。
+/// 注意 stop/start 都要会话根（server-info 落盘 `.yio/preview.json`），
 /// 不走 locate_arg（那只给 ui）。
 fn run_preview(
     root: &std::path::Path,
@@ -772,41 +772,41 @@ fn run_preview(
     idle_timeout: Option<u64>,
     stop: bool,
 ) -> ExitCode {
-    let located = match ikat_pkg::config::locate(root) {
+    let located = match yio_pkg::config::locate(root) {
         Ok(l) => l,
         Err(f) => return failure_exit("preview", &f, Format::Human),
     };
     let res = if stop {
-        ikat_pkg::preview::stop(&located)
+        yio_pkg::preview::stop(&located)
     } else {
-        ikat_pkg::preview::start(
+        yio_pkg::preview::start(
             &located,
-            &ikat_pkg::preview::PreviewOpts { port, idle_timeout },
+            &yio_pkg::preview::PreviewOpts { port, idle_timeout },
         )
     };
     match res {
         Ok(code) => std::process::ExitCode::from(code as u8),
         Err(msg) => failure_exit(
             "preview",
-            &ikat_pkg::diag::BuildFailure::config(msg),
+            &yio_pkg::diag::BuildFailure::config(msg),
             Format::Human,
         ),
     }
 }
 
 fn run_scaffold(agents: Vec<String>) -> ExitCode {
-    // skills + .ikat CLI 自拷贝 + 版本戳，全会话根（.ikat/config.json 所在——分离
+    // skills + .yio CLI 自拷贝 + 版本戳，全会话根（.yio/config.json 所在——分离
     // 形态下 ≠ ui 目录）。生成物白名单式刷新，config/workspace.json/源文件不动。
     let root = match locate_cwd() {
         Ok(l) => l.root,
         Err(f) => return failure_exit("scaffold", &f, Format::Human),
     };
     let agents = if agents.is_empty() {
-        ikat_pkg::scaffold::detect_agents(&root)
+        yio_pkg::scaffold::detect_agents(&root)
     } else {
         agents
     };
-    match ikat_pkg::scaffold::refresh_workspace(&root, &agents) {
+    match yio_pkg::scaffold::refresh_workspace(&root, &agents) {
         Ok(out) => {
             eprintln!(
                 "refreshed workspace generated artifacts at {} (skills for {}; cli {})",
@@ -832,7 +832,7 @@ fn run_show(pkg: &str, format: Format) -> ExitCode {
         Ok(l) => l.ui,
         Err(f) => return failure_exit("show", &f, format),
     };
-    match ikat_pkg::workspace_cmd::show_pkg(&root, pkg) {
+    match yio_pkg::workspace_cmd::show_pkg(&root, pkg) {
         Ok(d) => {
             match format {
                 Format::Human => {
@@ -873,11 +873,11 @@ fn run_design(size: Option<(f32, f32)>, match_mode: Option<String>, clear: bool)
         Ok(l) => l.ui,
         Err(f) => return failure_exit("design", &f, Format::Human),
     };
-    match ikat_pkg::workspace_cmd::set_design(&root, size, match_mode, clear) {
+    match yio_pkg::workspace_cmd::set_design(&root, size, match_mode, clear) {
         Ok(echo) => {
             println!("{}", serde_json::to_string(&echo).unwrap());
             eprintln!(
-                "design = {}, match_mode = {}; run `ikat build` to bake into ikat.runtime.json",
+                "design = {}, match_mode = {}; run `yio build` to bake into yio.runtime.json",
                 match echo.design {
                     Some(d) => format!("{}x{}", d.w as u32, d.h as u32),
                     None => "(unset)".to_string(),
@@ -900,11 +900,11 @@ fn run_font_add(file: PathBuf, family: Option<String>, default: bool, fallback: 
         Ok(l) => l.ui,
         Err(f) => return failure_exit("font add", &f, Format::Human),
     };
-    match ikat_pkg::workspace_cmd::add_font(&root, &file, &family, default, fallback) {
+    match yio_pkg::workspace_cmd::add_font(&root, &file, &family, default, fallback) {
         Ok(s) => {
             println!("{}", serde_json::to_string(&s).unwrap());
             eprintln!(
-                "registered font family `{}` ({}); run `ikat check` to validate",
+                "registered font family `{}` ({}); run `yio check` to validate",
                 s.family, s.file
             );
             ExitCode::SUCCESS
@@ -918,7 +918,7 @@ fn run_font_remove(family: String) -> ExitCode {
         Ok(l) => l.ui,
         Err(f) => return failure_exit("font remove", &f, Format::Human),
     };
-    match ikat_pkg::workspace_cmd::remove_font(&root, &family) {
+    match yio_pkg::workspace_cmd::remove_font(&root, &family) {
         Ok(s) => {
             println!("{}", serde_json::to_string(&s).unwrap());
             eprintln!(
@@ -927,7 +927,7 @@ fn run_font_remove(family: String) -> ExitCode {
             );
             if s.default {
                 eprintln!(
-                    "note: no default font family remains; set one with `ikat font default <family>`"
+                    "note: no default font family remains; set one with `yio font default <family>`"
                 );
             }
             ExitCode::SUCCESS
@@ -941,7 +941,7 @@ fn run_font_default(family: String) -> ExitCode {
         Ok(l) => l.ui,
         Err(f) => return failure_exit("font default", &f, Format::Human),
     };
-    match ikat_pkg::workspace_cmd::set_default_font(&root, &family) {
+    match yio_pkg::workspace_cmd::set_default_font(&root, &family) {
         Ok(s) => {
             println!("{}", serde_json::to_string(&s).unwrap());
             eprintln!("`{}` is now the single default font family", s.family);
@@ -962,11 +962,11 @@ fn run_atlas_add(
         Ok(l) => l.ui,
         Err(f) => return failure_exit("atlas add", &f, Format::Human),
     };
-    match ikat_pkg::workspace_cmd::add_atlas(&root, &dir, name, max_size, padding, standalone) {
+    match yio_pkg::workspace_cmd::add_atlas(&root, &dir, name, max_size, padding, standalone) {
         Ok(s) => {
             println!("{}", serde_json::to_string(&s).unwrap());
             eprintln!(
-                "registered atlas `{}` (dirs: {}, {} sprite(s)); run `ikat check` to validate",
+                "registered atlas `{}` (dirs: {}, {} sprite(s)); run `yio check` to validate",
                 s.name,
                 s.dirs.join(", "),
                 s.sprites

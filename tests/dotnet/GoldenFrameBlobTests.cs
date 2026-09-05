@@ -1,9 +1,9 @@
 using System;
 using System.IO;
-using Ikat;
+using Yio;
 using Xunit;
 
-namespace Ikat.Tests.Core
+namespace Yio.Tests.Core
 {
     /// <summary>
     /// golden 帧 blob 跨语言对拍：Rust 产器（crates/ffi golden_tests.rs 固定场景）落盘的
@@ -13,7 +13,7 @@ namespace Ikat.Tests.Core
     ///
     /// 断言分两层：全列结构断言（每节点每列值域/相互一致性）+ 场景已知量断言（golden
     /// 场景刻意覆盖 text/img/gradient/shadow/opacity/transform/clip——对应列必出现非默认值）。
-    /// golden 再生成：`IKATGUI_UPDATE_GOLDEN=1 cargo test -p ikat_ffi_c --lib golden`。
+    /// golden 再生成：`YIOGUI_UPDATE_GOLDEN=1 cargo test -p yio_ffi_c --lib golden`。
     /// </summary>
     public class GoldenFrameBlobTests
     {
@@ -28,7 +28,7 @@ namespace Ikat.Tests.Core
             var blob = new FrameBlob(LoadGolden("frame-blob.bin"));
             Assert.True(blob.IsValid,
                 $"golden blob 版本 {blob.Version} 与 C# ExpectedVersion 不符——Rust 侧 blob 布局变了：" +
-                "再生成 golden（IKATGUI_UPDATE_GOLDEN=1 cargo test -p ikat_ffi_c --lib golden）并同步 FrameBlob.cs 列注释");
+                "再生成 golden（YIOGUI_UPDATE_GOLDEN=1 cargo test -p yio_ffi_c --lib golden）并同步 FrameBlob.cs 列注释");
             Assert.Equal(FrameBlob.ExpectedVersion, blob.Version);
 
             int n = blob.NodeCount;
@@ -120,7 +120,7 @@ namespace Ikat.Tests.Core
                 string path = blob.ReadPath(p);
                 Assert.False(string.IsNullOrEmpty(path), $"path 表第 {p} 条空串");
                 if (path == "icons/star.png") sawStarPath = true;
-                if (path.StartsWith("ikat://font-atlas/", StringComparison.Ordinal)) sawFontAtlas = true;
+                if (path.StartsWith("yio://font-atlas/", StringComparison.Ordinal)) sawFontAtlas = true;
             }
             Assert.True(sawStarPath, "图片 path（icons/star.png）缺席");
             Assert.True(sawFontAtlas, "文本字形字体图集 path 缺席");

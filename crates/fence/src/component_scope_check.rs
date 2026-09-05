@@ -13,8 +13,8 @@
 use crate::diagnostic::{Diagnostic, DiagnosticCode, SourceLocation};
 use crate::ir::{IrNodeKind, IrTree};
 use crate::schema::tag::SemanticKind;
-use ikat_core::style::dynamic::DynamicRule;
 use std::collections::{HashMap, HashSet};
+use yio_core::style::dynamic::DynamicRule;
 
 /// 页面树类名分桶（跨文件聚合：`add_page_tree` 逐页累加）。
 #[derive(Default)]

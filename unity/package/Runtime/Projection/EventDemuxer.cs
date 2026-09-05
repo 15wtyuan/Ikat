@@ -1,8 +1,8 @@
-// EventDemuxer：raw IkatEvent stream → typed event struct dispatch。
+// EventDemuxer：raw YioEvent stream → typed event struct dispatch。
 //
 // 设计契约：
-// - Pump(ptr,count) 每 tick 调（IkatHost.Step 内，复用 borrow_events FFI 的同一 buffer）。
-// - 逐条 IkatEvent 翻译为 typed event struct：
+// - Pump(ptr,count) 每 tick 调（YioHost.Step 内，复用 borrow_events FFI 的同一 buffer）。
+// - 逐条 YioEvent 翻译为 typed event struct：
 //     * _core.Target = _ctx._registry.GetOrCreate(nodeId)（投影层 Node 身份）。
 //     * 业务字段（Position/ClickCount/TouchId/Key/Modifiers/Button/DeltaX/DeltaY/
 //       StartPosition）从 raw EventRecord 填充（#63 接线：pad[0]=button（Down/Up）、
@@ -28,23 +28,23 @@
 // - payload 解码（core event.rs）：name 表索引装 click_count+pad（24-bit LE）；PlayerKey u64
 //   拆 touch_id（低 32）+ x（高 32 f32 bits）；y = 载荷（ITERATION=迭代序号 f32 bits /
 //   KEY=percent / HOOK=hook_name 表索引 f32 bits）。字符串经 EventStrTable 索引读回
-//   （ikat_stage_get_event_string，双调法）。
+//   （yio_stage_get_event_string，双调法）。
 //
 // RawEventRecord：读 raw byte* 解包 EventRecord（与 Rust input::EventRecord 布局一致——32 字节，node_id u64 #26）。
-// 自足 struct，不依赖任何外部 IkatEvent 镜像——headless 测试编译链和 Unity 生产链共用此定义。
+// 自足 struct，不依赖任何外部 YioEvent 镜像——headless 测试编译链和 Unity 生产链共用此定义。
 
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
-using Ikat.Bindings;
+using Yio.Bindings;
 
-namespace Ikat
+namespace Yio
 {
     /// <summary>
-    /// Rust <c>ikat_core::input::EventRecord</c> C# 镜像（32 字节，#26 node_id u64 拓宽）。
+    /// Rust <c>yio_core::input::EventRecord</c> C# 镜像（32 字节，#26 node_id u64 拓宽）。
     /// 字段序：node_id:u64 @0 → event_type:u8 @8 → click_count:u8 @9 → pad [2] @10 → touch_id:i32 @12
     /// → x:f32 @16 → y:f32 @20 → dx:f32 @24 → dy:f32 @28（#63：DragMove 逐 Move 增量）。
-    /// 自足 struct（headless 测试编译链用 unsafe 读 byte*，不依赖任何外部的 IkatEvent 镜像）。
+    /// 自足 struct（headless 测试编译链用 unsafe 读 byte*，不依赖任何外部的 YioEvent 镜像）。
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     struct RawEventRecord
@@ -63,7 +63,7 @@ namespace Ikat
     /// <summary>
     /// 投影层内部：每 tick 把 core borrow_events 的 raw <c>EventRecord[]</c> stream
     /// 翻译为 typed event struct 并喂 <see cref="EventBus.Dispatch{T}"/>。
-    /// <see cref="UIContext"/> 持单实例；<see cref="IkatHost.Step"/> 调 <see cref="Pump"/>。
+    /// <see cref="UIContext"/> 持单实例；<see cref="YioHost.Step"/> 调 <see cref="Pump"/>。
     /// </summary>
     internal sealed unsafe class EventDemuxer
     {
@@ -72,7 +72,7 @@ namespace Ikat
         internal EventDemuxer(UIContext ctx) => _ctx = ctx;
 
         /// <summary>
-        /// 每 tick 调：读 <c>borrow_events</c> buffer（IkatHost.Step 已 byte* → IntPtr 透传）
+        /// 每 tick 调：读 <c>borrow_events</c> buffer（YioHost.Step 已 byte* → IntPtr 透传）
         /// → 逐条翻译 → EventBus.Dispatch（typed On&lt;T&gt; 路径，单一订阅表）。
         /// </summary>
         /// <param name="ptr">borrow_events 返回的 native buffer（IntPtr=null 时 no-op）。</param>
@@ -90,19 +90,19 @@ namespace Ikat
                     case (byte)EventType.Down:
                         DispatchTyped(nodeId,
                             new PointerDownEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y), _touchId = evt.touchId,
+                                _position = new YioVector2(evt.x, evt.y), _touchId = evt.touchId,
                                 _button = ButtonOf(evt) });
                         break;
                     case (byte)EventType.Up:
                         DispatchTyped(nodeId,
                             new PointerUpEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y), _touchId = evt.touchId,
+                                _position = new YioVector2(evt.x, evt.y), _touchId = evt.touchId,
                                 _button = ButtonOf(evt) });
                         break;
                     case (byte)EventType.Move:
                         DispatchTyped(nodeId,
                             new PointerMoveEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new YioVector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
                     // Enter/Leave 不沿祖先链路由：core 按悬停链差分逐节点发射（每个进出
                     // 边界的节点各得一条），冒泡会把「后代退链」误投给祖先订阅——指针仍在
@@ -110,50 +110,50 @@ namespace Ikat
                     case (byte)EventType.RollOver:
                         DispatchTyped(nodeId,
                             new PointerEnterEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y) },
+                                _position = new YioVector2(evt.x, evt.y) },
                             routeChain: false);
                         break;
                     case (byte)EventType.RollOut:
                         DispatchTyped(nodeId,
                             new PointerLeaveEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y) },
+                                _position = new YioVector2(evt.x, evt.y) },
                             routeChain: false);
                         break;
                     case (byte)EventType.Click:
                         DispatchTyped(nodeId,
                             new ClickEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y), _clickCount = evt.clickCount });
+                                _position = new YioVector2(evt.x, evt.y), _clickCount = evt.clickCount });
                         break;
 
                     case (byte)EventType.DragStart:
                         DispatchTyped(nodeId,
                             new DragStartEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y),
-                                _startPosition = new IkatVector2(evt.x, evt.y) });
+                                _position = new YioVector2(evt.x, evt.y),
+                                _startPosition = new YioVector2(evt.x, evt.y) });
                         break;
                     case (byte)EventType.DragMove:
                         // Delta = 逐 Move 增量（自上一条 DragMove，首条含阈值前行程——
                         // 累加后元素精确贴指针）。累计偏移用 StartPosition + Position 推导。
                         DispatchTyped(nodeId,
                             new DragMoveEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y),
+                                _position = new YioVector2(evt.x, evt.y),
                                 _deltaX = evt.dx, _deltaY = evt.dy });
                         break;
                     case (byte)EventType.DragEnd:
                         DispatchTyped(nodeId,
                             new DragEndEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y) });
+                                _position = new YioVector2(evt.x, evt.y) });
                         break;
 
                     case (byte)EventType.KeyDown:
                         DispatchTyped(nodeId,
                             new KeyDownEvent { _core = NewCore(nodeId),
-                                _key = (IkatKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
+                                _key = (YioKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
                     case (byte)EventType.KeyUp:
                         DispatchTyped(nodeId,
                             new KeyUpEvent { _core = NewCore(nodeId),
-                                _key = (IkatKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
+                                _key = (YioKeyCode)evt.touchId, _modifiers = (KeyModifiers)(byte)evt._pad });
                         break;
 
                     case (byte)EventType.FocusIn:
@@ -187,7 +187,7 @@ namespace Ikat
                     // Unity 侧本行进 Editor.log/Player.log（Console 面板不显示，取舍可接受）。
                     case (byte)EventType.TransitionSnap:
                         System.Diagnostics.Debug.WriteLine(
-                            $"[Ikat] layout transition snapped (no tween): node {nodeId} prop {evt.clickCount} — endpoints are cross-domain or auto; use one domain (px↔px / %↔% / vw↔vw) with explicit values");
+                            $"[Yio] layout transition snapped (no tween): node {nodeId} prop {evt.clickCount} — endpoints are cross-domain or auto; use one domain (px↔px / %↔% / vw↔vw) with explicit values");
                         break;
 
                     // 解码（core event.rs）：name 表索引 24-bit LE（click_count+pad）；PlayerKey u64
@@ -278,7 +278,7 @@ namespace Ikat
                     case (byte)EventType.LongPress:
                         DispatchTyped(nodeId,
                             new LongPressEvent { _core = NewCore(nodeId),
-                                _position = new IkatVector2(evt.x, evt.y), _touchId = evt.touchId });
+                                _position = new YioVector2(evt.x, evt.y), _touchId = evt.touchId });
                         break;
 
                     // ScrollChanged (17)：source 待补。ScrollPane 物理自维护 tween，
@@ -369,7 +369,7 @@ namespace Ikat
         static uint HookIndex(RawEventRecord evt) => FloatBitsToUInt(evt.y);
 
         /// <summary>
-        /// 按表索引读回字符串（EventStrTable；ikat_stage_get_event_string
+        /// 按表索引读回字符串（EventStrTable；yio_stage_get_event_string
         /// 双调法：探大小 → 扩容 → 真读）。越界/无 scene 返空串（防御——正常路径索引恒由
         /// core intern 产生，越界只可能来自 ABI 漂移）。
         /// </summary>
@@ -378,13 +378,13 @@ namespace Ikat
             if (_ctx._stage == IntPtr.Zero) return "";
             StageHandle* h = (StageHandle*)_ctx._stage.ToPointer();
             nuint len = 0;
-            int rc = Native.ikat_stage_get_event_string(h, idx, null, 0, &len);
+            int rc = Native.yio_stage_get_event_string(h, idx, null, 0, &len);
             if (rc == -1 || len == 0) return "";   // 越界/无 scene/空串
             byte[] buf = new byte[(int)len];
             fixed (byte* bp = buf)
             {
                 nuint written = 0;
-                rc = Native.ikat_stage_get_event_string(h, idx, bp, len, &written);
+                rc = Native.yio_stage_get_event_string(h, idx, bp, len, &written);
                 if (rc != 0) return "";
                 return Encoding.UTF8.GetString(buf, 0, (int)written);
             }

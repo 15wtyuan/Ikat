@@ -1089,7 +1089,7 @@ mod tests {
             uvs: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             colors: vec![[1.0; 4]; 4],
             indices: vec![0, 1, 2, 0, 2, 3],
-            image_path: Some("ikat://font-atlas/p0".into()),
+            image_path: Some("yio://font-atlas/p0".into()),
             program: 1,
             color_matrix: [0.0; 20],
         };

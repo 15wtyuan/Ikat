@@ -1,14 +1,14 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace Ikat.Tests
+namespace Yio.Tests
 {
     public class MaterialManagerTests
     {
         [Test]
         public void SameKeyReturnsSameMaterial()
         {
-            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Yio/Unlit"));
             var white = Texture2D.whiteTexture;
             var a = mm.Get(program: 0, white, maskContext: 0, false);
             var b = mm.Get(program: 0, white, maskContext: 0, false);
@@ -18,7 +18,7 @@ namespace Ikat.Tests
         [Test]
         public void DifferentMaskContextReturnsDifferentMaterial()
         {
-            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Yio/Unlit"));
             var white = Texture2D.whiteTexture;
             var a = mm.Get(0, white, 0, false);
             var b = mm.Get(0, white, 1, false);
@@ -29,7 +29,7 @@ namespace Ikat.Tests
         [Test]
         public void CtxGtZero_MaterialHasClippedKeyword()
         {
-            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Yio/Unlit"));
             var white = Texture2D.whiteTexture;
             var m0 = mm.Get(0, white, 0, false);
             var m1 = mm.Get(0, white, 1, false);
@@ -42,7 +42,7 @@ namespace Ikat.Tests
         [Test]
         public void SetClipEntries_UpdatesCachedMaterialArrays()
         {
-            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Yio/Unlit"));
             var white = Texture2D.whiteTexture;
             var m = mm.Get(0, white, 7, false);   // 建 ctx=7 material
             var entries = new System.Collections.Generic.List<ClipEntryView>
@@ -65,7 +65,7 @@ namespace Ikat.Tests
         [Test]
         public void SetClipEntries_BeforeGet_AppliedOnCreation()
         {
-            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Yio/Unlit"));
             var white = Texture2D.whiteTexture;
             var entries = new System.Collections.Generic.List<ClipEntryView>
             {
@@ -88,7 +88,7 @@ namespace Ikat.Tests
         [Test]
         public void SetClipEntries_MultiEntry_RoundAndPolygon()
         {
-            var mm = new MaterialManager(Shader.Find("Ikat/Unlit"));
+            var mm = new MaterialManager(Shader.Find("Yio/Unlit"));
             var white = Texture2D.whiteTexture;
             var m = mm.Get(0, white, 5, false);
             var entries = new System.Collections.Generic.List<ClipEntryView>

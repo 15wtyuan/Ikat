@@ -1,8 +1,8 @@
 using NUnit.Framework;
 using UnityEngine;
-using Ikat;
+using Yio;
 
-namespace Ikat.Tests
+namespace Yio.Tests
 {
     /// EventBus.Dispatch 的 EditMode 回归：core 引用提取 + 路由 + StopPropagation 传播。
     /// 历史坑（本测试防复发）：Dispatch 曾用 Unsafe.As / __refvalue 别名 struct 首 field——
@@ -34,7 +34,7 @@ namespace Ikat.Tests
             var go = new GameObject("eventbus_dispatch_test");
             try
             {
-                var driver = go.AddComponent<IkatStageDriver>();
+                var driver = go.AddComponent<YioStageDriver>();
                 var ctx = driver.Host.Context;
                 Assert.AreNotEqual(Node.RootSentinel, ctx._rootId,
                     "Awake must have created scene root");
@@ -57,7 +57,7 @@ namespace Ikat.Tests
             finally
             {
                 Object.DestroyImmediate(go);
-                var cam = GameObject.Find("IkatUICamera");
+                var cam = GameObject.Find("YioUICamera");
                 if (cam != null) Object.DestroyImmediate(cam);
             }
         }
@@ -75,7 +75,7 @@ namespace Ikat.Tests
             var go = new GameObject("eventbus_target_only_test");
             try
             {
-                var driver = go.AddComponent<IkatStageDriver>();
+                var driver = go.AddComponent<YioStageDriver>();
                 var ctx = driver.Host.Context;
                 var bus = ctx._eventBus;
 
@@ -113,7 +113,7 @@ namespace Ikat.Tests
             finally
             {
                 Object.DestroyImmediate(go);
-                var cam = GameObject.Find("IkatUICamera");
+                var cam = GameObject.Find("YioUICamera");
                 if (cam != null) Object.DestroyImmediate(cam);
             }
         }
@@ -130,7 +130,7 @@ namespace Ikat.Tests
             var go = new GameObject("eventbus_once_stop_test");
             try
             {
-                var driver = go.AddComponent<IkatStageDriver>();
+                var driver = go.AddComponent<YioStageDriver>();
                 var ctx = driver.Host.Context;
                 var bus = ctx._eventBus;
 
@@ -148,7 +148,7 @@ namespace Ikat.Tests
             finally
             {
                 Object.DestroyImmediate(go);
-                var cam = GameObject.Find("IkatUICamera");
+                var cam = GameObject.Find("YioUICamera");
                 if (cam != null) Object.DestroyImmediate(cam);
             }
         }

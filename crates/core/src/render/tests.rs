@@ -643,7 +643,7 @@ fn build_text_produces_text_layout() {
             assert!(
                 image_path
                     .as_ref()
-                    .is_some_and(|p| p.starts_with("ikat://font-atlas/")),
+                    .is_some_and(|p| p.starts_with("yio://font-atlas/")),
                 "text image_path = synthetic atlas path"
             );
             assert!(!verts.is_empty(), "text 有字形 → verts 非空");
@@ -5194,22 +5194,22 @@ fn textfield_caret_unaffected_by_display_remap() {
     );
 }
 
-// 模式同 scrollbar thumb（render/mod.rs 末尾 append）：open Dropdown 的 .ikat-popup
+// 模式同 scrollbar thumb（render/mod.rs 末尾 append）：open Dropdown 的 .yio-popup
 // 子树不在正常 DFS 渲染（不进 id_to_pos），merge 后末尾追加——sort_key 续 max_sort+1，
 // mask_context=MaskContext(0) 跳出祖先 overflow:hidden clip。
 //
-// 测试场景：overflow:hidden 容器内的 select（open=true）→ .ikat-popup 子树（含 option +
+// 测试场景：overflow:hidden 容器内的 select（open=true）→ .yio-popup 子树（含 option +
 // 其 text）应全部 sort_key > 正常节点，mask_context=0（不被 outer clip 裁）。
 
-/// 建测试 dropdown 场景：outer(overflow:hidden) > select(Dropdown,open) > [.ikat-value,
-/// .ikat-popup > [option > text]]。返回 (scene, outer_id, select_id, popup_id, option_id,
-/// option_text_id)。`open` 控制 Dropdown 的 open 字段 + .ikat-popup 的 display。
+/// 建测试 dropdown 场景：outer(overflow:hidden) > select(Dropdown,open) > [.yio-value,
+/// .yio-popup > [option > text]]。返回 (scene, outer_id, select_id, popup_id, option_id,
+/// option_text_id)。`open` 控制 Dropdown 的 open 字段 + .yio-popup 的 display。
 fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeId) {
     use crate::style::resolved::OverflowMode;
     let mut outer_style = ResolvedStyle::default();
     outer_style.overflow_x = OverflowMode::Hidden;
     outer_style.overflow_y = OverflowMode::Hidden;
-    // .ikat-popup 的 display：open→block（可见，标准弹出列表语义，走末尾追加路径），closed→none（被
+    // .yio-popup 的 display：open→block（可见，标准弹出列表语义，走末尾追加路径），closed→none（被
     // collect_display_none_subtree 剪掉，整子树不渲染——模拟 sync_control_visuals 的
     // inline override 效果，这里直接写 style.taffy_style.display 省去 rematch）。
     let mut popup_style = ResolvedStyle::default();
@@ -5256,12 +5256,12 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
             None,
             None,
         ),
-        // 2: .ikat-value（Container，不在 popup 子树——正常渲染）
+        // 2: .yio-value（Container，不在 popup 子树——正常渲染）
         (
             Some(1),
             NodeKind::Container,
             ResolvedStyle::default(),
-            vec!["ikat-value".to_string()],
+            vec!["yio-value".to_string()],
             None,
             false,
             None,
@@ -5269,12 +5269,12 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
             None,
             None,
         ),
-        // 3: .ikat-popup（浮层容器；display 由 popup_style 定）
+        // 3: .yio-popup（浮层容器；display 由 popup_style 定）
         (
             Some(1),
             NodeKind::Container,
             popup_style,
-            vec!["ikat-popup".to_string()],
+            vec!["yio-popup".to_string()],
             None,
             false,
             None,
@@ -5324,9 +5324,9 @@ fn make_popup_scene(open: bool) -> (Scene, NodeId, NodeId, NodeId, NodeId, NodeI
                 .unwrap()
                 .classes
                 .iter()
-                .any(|x| x == "ikat-popup")
+                .any(|x| x == "yio-popup")
         })
-        .expect("ikat-popup child");
+        .expect("yio-popup child");
     let option_id = scene.get(popup_id).unwrap().children[0];
     let option_text_id = scene.get(option_id).unwrap().children[0];
     // 作者自写结构下 listbox 靠 role 定位（render collect_open_popup_roots 按 role=listbox
@@ -5383,7 +5383,7 @@ fn open_popup_renders_above_all_with_no_clip() {
         &empty_sizes(),
         &mut test_glyph_atlas(),
     );
-    // popup 子树 = .ikat-popup + option + option 的 TextNode（按 node_id 过滤）。
+    // popup 子树 = .yio-popup + option + option 的 TextNode（按 node_id 过滤）。
     let popup_subtree_ids = [popup_id.0, option_id.0, option_text_id.0];
     let popup_rns: Vec<&RenderNode> = frame
         .nodes
@@ -5392,9 +5392,9 @@ fn open_popup_renders_above_all_with_no_clip() {
         .collect();
     assert!(
         !popup_rns.is_empty(),
-        "open popup 子树必须渲染（至少 .ikat-popup + option text）"
+        "open popup 子树必须渲染（至少 .yio-popup + option text）"
     );
-    // 正常节点（outer / select / .ikat-value）的最大 sort_key。
+    // 正常节点（outer / select / .yio-value）的最大 sort_key。
     let normal_ids = scene
         .nodes
         .values()
@@ -5407,17 +5407,17 @@ fn open_popup_renders_above_all_with_no_clip() {
         .filter(|rn| normal_ids.contains(&rn.node_id))
         .collect();
     let max_normal_sort = normal_rns.iter().map(|rn| rn.sort_key).max().unwrap_or(0);
-    // 前置验证：outer(overflow:hidden) 内的正常节点（.ikat-value）确实被裁（mask>0），
+    // 前置验证：outer(overflow:hidden) 内的正常节点（.yio-value）确实被裁（mask>0），
     // 证明 popup 的 mask=0 不是“场景无 clip”的假象，而是真的跳出了祖先 clip。
     let value_rn = frame.nodes.iter().find(|rn| {
         scene
             .get(NodeId(rn.node_id))
-            .is_some_and(|n| n.classes.iter().any(|c| c == "ikat-value"))
+            .is_some_and(|n| n.classes.iter().any(|c| c == "yio-value"))
     });
     if let Some(rn) = value_rn {
         assert!(
             rn.mask_context.0 > 0,
-            ".ikat-value 在 outer(overflow:hidden) 内应被裁（mask>0），证明场景 clip 生效"
+            ".yio-value 在 outer(overflow:hidden) 内应被裁（mask>0），证明场景 clip 生效"
         );
     }
     // 浮层 sort_key 全部 > 正常节点 max（画在最上层）。
@@ -5434,7 +5434,7 @@ fn open_popup_renders_above_all_with_no_clip() {
 
 #[test]
 fn closed_popup_not_rendered() {
-    // open=false → .ikat-popup display:none → collect_display_none_subtree 剪掉整子树，
+    // open=false → .yio-popup display:none → collect_display_none_subtree 剪掉整子树，
     // 也不走末尾追加（open=false 不进追加循环）→ popup 子树完全不出现在 FrameData。
     let fonts = test_font_table().expect("need test font");
     let (scene, _outer_id, _select_id, popup_id, option_id, option_text_id) =
@@ -5511,7 +5511,7 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
             Some(1),
             NodeKind::Container,
             popup_style,
-            vec!["ikat-popup".to_string()],
+            vec!["yio-popup".to_string()],
             None,
             false,
             None,
@@ -5535,9 +5535,9 @@ fn popup_sort_key_strictly_above_scrollbar_thumb() {
                 .unwrap()
                 .classes
                 .iter()
-                .any(|x| x == "ikat-popup")
+                .any(|x| x == "yio-popup")
         })
-        .expect("ikat-popup");
+        .expect("yio-popup");
     // 作者自写结构下 listbox 靠 role 定位（Scene::build entries 不含 role 字段，手动登记）。
     scene.roles.insert(
         popup_id,

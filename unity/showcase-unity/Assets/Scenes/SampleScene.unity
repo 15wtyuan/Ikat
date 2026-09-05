@@ -445,7 +445,7 @@ GameObject:
   - component: {fileID: 1806355434}
   - component: {fileID: 1806355438}
   m_Layer: 5
-  m_Name: Ikat
+  m_Name: Yio
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -477,7 +477,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3e59a64a749b5b9428ea1d269ede2cfd, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Ikat.Runtime::Ikat.IkatInputCollector
+  m_EditorClassIdentifier: Yio.Runtime::Yio.YioInputCollector
   _wheelScrollSpeed: 1
 --- !u!114 &1806355435
 MonoBehaviour:
@@ -490,7 +490,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 807cafc80f771280949bbfadbeb16c63, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Ikat.Runtime::Ikat.IkatStageDriver
+  m_EditorClassIdentifier: Yio.Runtime::Yio.YioStageDriver
   _designSize: {x: 1920, y: 1080}
   _adaptMode: 0
   _uiCamera: {fileID: 0}

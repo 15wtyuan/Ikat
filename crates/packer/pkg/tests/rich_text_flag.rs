@@ -6,18 +6,18 @@
 //! flex 容器+padding+被测文字子会丢测量），使 span+padding+文字 走 text+padding 整体测量。
 //! bridge 是 fence ir_idx → core TemplateNode 的唯一翻译入口，flag 必须在此烘入。
 
-use ikat_core::asset::TemplateNode;
-use ikat_core::scene::node::NodeKind;
+use yio_core::asset::TemplateNode;
+use yio_core::scene::node::NodeKind;
 
 /// bridge 一个组件 HTML，断无 fence 诊断（rich_text 分类是打包期分类，diagnostics 空才算正常通过）。
 fn bridged(html: &str) -> Vec<TemplateNode> {
-    let parsed = ikat_fence::parse_template(html, "test.html");
+    let parsed = yio_fence::parse_template(html, "test.html");
     assert!(
         parsed.diagnostics.is_empty(),
         "fence diags: {:?}",
         parsed.diagnostics
     );
-    ikat_pkg::bridge::bridge(&parsed).expect("bridge ok")
+    yio_pkg::bridge::bridge(&parsed).expect("bridge ok")
 }
 
 /// `<div>hello <span>world</span></div>`：根 div 是 block 容器，直接子全是 inline
@@ -73,7 +73,7 @@ fn bridge_no_flag_for_structural_block() {
 /// 一并烘进 base_style；作者 color 声明覆盖 UA 蓝。
 #[test]
 fn bridge_maps_link_kind_href_and_ua_style() {
-    use ikat_core::style::resolved::TextDecoration;
+    use yio_core::style::resolved::TextDecoration;
     let nodes = bridged(r#"<div>看<a href="open-shop">商店</a></div>"#);
     assert_eq!(nodes[0].kind, NodeKind::Container);
     assert!(
@@ -87,7 +87,7 @@ fn bridge_maps_link_kind_href_and_ua_style() {
     assert_eq!(a.href.as_deref(), Some("open-shop"));
     assert_eq!(a.style.color, [0.0, 0.0, 238.0 / 255.0, 1.0], "UA 链接色");
     assert_eq!(a.style.text_decoration, TextDecoration::Underline);
-    let color_bit = ikat_core::style::dynamic::inherited_bit("color").unwrap();
+    let color_bit = yio_core::style::dynamic::inherited_bit("color").unwrap();
     assert_eq!(
         a.style.inherited_set.0 & color_bit,
         color_bit,

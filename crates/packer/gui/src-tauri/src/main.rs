@@ -1,5 +1,5 @@
-//! Ikat packer GUI (Tauri shell). Build/init semantics go through the
-//! `ikat` CLI subprocess; workspace form read/write stays in-process (the
+//! Yio packer GUI (Tauri shell). Build/init semantics go through the
+//! `yio` CLI subprocess; workspace form read/write stays in-process (the
 //! human's cockpit for inspecting what the AI configured).
 
 // Release 下隐藏 Windows 控制台黑窗（GUI 应用，不需要终端）。

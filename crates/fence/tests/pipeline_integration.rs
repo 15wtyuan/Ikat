@@ -1,7 +1,7 @@
-use ikat_fence::diagnostic::{DiagnosticCode, Severity};
-use ikat_fence::ir::IrNodeKind;
-use ikat_fence::pipeline::parse_template;
-use ikat_fence::schema::tag::SemanticKind;
+use yio_fence::diagnostic::{DiagnosticCode, Severity};
+use yio_fence::ir::IrNodeKind;
+use yio_fence::pipeline::parse_template;
+use yio_fence::schema::tag::SemanticKind;
 
 #[test]
 fn complex_template_parses_clean() {

@@ -1,10 +1,10 @@
-//! ikat.runtime.json：后端自举清单（打包器产，替代 Unity IkatSettings SO）。
+//! yio.runtime.json：后端自举清单（打包器产，替代 Unity YioSettings SO）。
 //! packages / atlases / fonts 是 workspace 级平行列表——atlas 与字体不隶属任何包，
 //! UnloadPackage 只动模板注册表。
 
 use serde::{Deserialize, Serialize};
 
-pub const RUNTIME_FILE: &str = "ikat.runtime.json";
+pub const RUNTIME_FILE: &str = "yio.runtime.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RuntimeManifest {
@@ -16,7 +16,7 @@ pub struct RuntimeManifest {
     pub fonts: Vec<RuntimeFont>,
     /// 设计分辨率（分辨率适配正主，workspace.design 透传）。None = 集成层兜底。
     /// additive 可选字段——version 不跳（旧读者忽略未知键）。None 必须省键而非写
-    /// `null`：Unity 侧手写 reader（IkatManifests.cs）对显式 null 直接抛解析错，
+    /// `null`：Unity 侧手写 reader（YioManifests.cs）对显式 null 直接抛解析错，
     /// manifest 整体作废。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design: Option<DesignDim>,

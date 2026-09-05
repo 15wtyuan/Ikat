@@ -1,17 +1,17 @@
 //! 资源宿主生命周期：host 句柄创建/释放 + 宿主级资源操作（字体注册/回退链/包/
 //! 图尺寸/glyph atlas 拉取）。Stage 侧同名入口保留且行为等价（自建宿主的 Stage
-//! 在自己宿主上操作；`ikat_stage_new_bound` 挂接的 Stage 在共享宿主上操作——
+//! 在自己宿主上操作；`yio_stage_new_bound` 挂接的 Stage 在共享宿主上操作——
 //! 即 stage 级入口在多 Stage 下是「宿主操作的路由糖」）。
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use ikat_core::host::ResourceHost;
-use ikat_core::stage::{LoadPkgError, Stage};
+use yio_core::host::ResourceHost;
+use yio_core::stage::{LoadPkgError, Stage};
 
 use crate::{ffi_guard, StageHandle};
 
-/// opaque 宿主句柄：`Rc<RefCell<ResourceHost>>`。`ikat_stage_new_bound` 克隆 Rc
+/// opaque 宿主句柄：`Rc<RefCell<ResourceHost>>`。`yio_stage_new_bound` 克隆 Rc
 /// 挂进 Stage；宿主释放须在所有挂接 Stage 释放之后（顺序由 C# 侧保证，越序 =
 /// Stage 悬垂 Rc 仍安全——Rc 引用计数使 host_free 后 Stage 自持的克隆仍有效，
 /// 真正释放发生在最后一个引用 drop）。
@@ -19,9 +19,9 @@ pub struct HostHandle {
     host: Rc<RefCell<ResourceHost>>,
 }
 
-/// 创建宿主句柄。字体/atlas/包/图尺寸先于此注册，再 `ikat_stage_new_bound` 挂 Stage。
+/// 创建宿主句柄。字体/atlas/包/图尺寸先于此注册，再 `yio_stage_new_bound` 挂 Stage。
 #[no_mangle]
-pub extern "C" fn ikat_host_new() -> *mut HostHandle {
+pub extern "C" fn yio_host_new() -> *mut HostHandle {
     ffi_guard(std::ptr::null_mut(), || {
         Box::into_raw(Box::new(HostHandle {
             host: Rc::new(RefCell::new(ResourceHost::new())),
@@ -31,7 +31,7 @@ pub extern "C" fn ikat_host_new() -> *mut HostHandle {
 
 /// null-safe 释放宿主句柄。挂接中的 Stage 仍持 Rc 克隆，资源随最后一个引用释放。
 #[no_mangle]
-pub extern "C" fn ikat_host_free(h: *mut HostHandle) {
+pub extern "C" fn yio_host_free(h: *mut HostHandle) {
     ffi_guard((), || {
         if h.is_null() {
             return;
@@ -43,9 +43,9 @@ pub extern "C" fn ikat_host_free(h: *mut HostHandle) {
 }
 
 /// 挂外部宿主建 Stage（多 Stage 共享一份资源驻留）。失败返回 null。
-/// 老入口 `ikat_stage_new` 等价「自建独占宿主」——单 Stage 用法不变。
+/// 老入口 `yio_stage_new` 等价「自建独占宿主」——单 Stage 用法不变。
 #[no_mangle]
-pub extern "C" fn ikat_stage_new_bound(h: *mut HostHandle, w: f32, hgt: f32) -> *mut StageHandle {
+pub extern "C" fn yio_stage_new_bound(h: *mut HostHandle, w: f32, hgt: f32) -> *mut StageHandle {
     ffi_guard(std::ptr::null_mut(), || {
         if h.is_null() {
             return std::ptr::null_mut();
@@ -69,10 +69,10 @@ pub extern "C" fn ikat_stage_new_bound(h: *mut HostHandle, w: f32, hgt: f32) -> 
     })
 }
 
-/// 宿主级字体注册（签名/语义同 `ikat_stage_register_font`，落共享宿主）。
+/// 宿主级字体注册（签名/语义同 `yio_stage_register_font`，落共享宿主）。
 /// 返回 0=成功，-1=错误。
 #[no_mangle]
-pub extern "C" fn ikat_host_register_font(
+pub extern "C" fn yio_host_register_font(
     h: *mut HostHandle,
     family: *const u8,
     family_len: usize,
@@ -100,9 +100,9 @@ pub extern "C" fn ikat_host_register_font(
     })
 }
 
-/// 宿主级回退链（签名/语义同 `ikat_stage_set_fallback_families`，落共享宿主）。
+/// 宿主级回退链（签名/语义同 `yio_stage_set_fallback_families`，落共享宿主）。
 #[no_mangle]
-pub extern "C" fn ikat_host_set_fallback_families(
+pub extern "C" fn yio_host_set_fallback_families(
     h: *mut HostHandle,
     text: *const u8,
     text_len: usize,
@@ -131,11 +131,11 @@ pub extern "C" fn ikat_host_set_fallback_families(
     })
 }
 
-/// 宿主级包装载（签名/语义同 `ikat_stage_load_package`，落共享宿主）。
+/// 宿主级包装载（签名/语义同 `yio_stage_load_package`，落共享宿主）。
 /// 0=ok；1=TooOld；2=TooNew；-1=其他 err。版本记录由 core 侧写入宿主
-/// （`ikat_stage_last_pkg_load_version` 对共享宿主同样可见）。
+/// （`yio_stage_last_pkg_load_version` 对共享宿主同样可见）。
 #[no_mangle]
-pub extern "C" fn ikat_host_load_package(
+pub extern "C" fn yio_host_load_package(
     h: *mut HostHandle,
     name: *const u8,
     name_len: usize,
@@ -155,7 +155,7 @@ pub extern "C" fn ikat_host_load_package(
         let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len) };
         let mut host = host.borrow_mut();
         host.bump_generation();
-        match ikat_core::host::load_package_into(&mut host, name, bytes) {
+        match yio_core::host::load_package_into(&mut host, name, bytes) {
             Ok(()) => 0,
             Err(LoadPkgError::TooOld { .. }) => 1,
             Err(LoadPkgError::TooNew { .. }) => 2,
@@ -164,9 +164,9 @@ pub extern "C" fn ikat_host_load_package(
     })
 }
 
-/// 宿主级图尺寸批量注入（签名/语义同 `ikat_stage_set_image_sizes`，落共享宿主）。
+/// 宿主级图尺寸批量注入（签名/语义同 `yio_stage_set_image_sizes`，落共享宿主）。
 #[no_mangle]
-pub extern "C" fn ikat_host_set_image_sizes(
+pub extern "C" fn yio_host_set_image_sizes(
     h: *mut HostHandle,
     paths_ptr: *const *const std::os::raw::c_char,
     ws: *const u32,
@@ -199,9 +199,9 @@ pub extern "C" fn ikat_host_set_image_sizes(
     })
 }
 
-/// 宿主级 glyph atlas 脏页拉取（签名/语义同 `ikat_stage_font_atlas_dirty_pages`）。
+/// 宿主级 glyph atlas 脏页拉取（签名/语义同 `yio_stage_font_atlas_dirty_pages`）。
 #[no_mangle]
-pub extern "C" fn ikat_host_font_atlas_dirty_pages(
+pub extern "C" fn yio_host_font_atlas_dirty_pages(
     h: *const HostHandle,
     out: *mut u32,
     max: usize,
@@ -223,9 +223,9 @@ pub extern "C" fn ikat_host_font_atlas_dirty_pages(
     })
 }
 
-/// 宿主级 glyph atlas 页像素拉取（签名/语义同 `ikat_stage_font_atlas_page`，双调法）。
+/// 宿主级 glyph atlas 页像素拉取（签名/语义同 `yio_stage_font_atlas_page`，双调法）。
 #[no_mangle]
-pub extern "C" fn ikat_host_font_atlas_page(
+pub extern "C" fn yio_host_font_atlas_page(
     h: *const HostHandle,
     page: u32,
     out_w: *mut u32,
@@ -274,9 +274,9 @@ pub extern "C" fn ikat_host_font_atlas_page(
     })
 }
 
-/// 宿主级清脏页（签名/语义同 `ikat_stage_font_atlas_clear_dirty`）。
+/// 宿主级清脏页（签名/语义同 `yio_stage_font_atlas_clear_dirty`）。
 #[no_mangle]
-pub extern "C" fn ikat_host_font_atlas_clear_dirty(h: *mut HostHandle) {
+pub extern "C" fn yio_host_font_atlas_clear_dirty(h: *mut HostHandle) {
     ffi_guard((), || {
         if h.is_null() {
             return;

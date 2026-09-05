@@ -1,7 +1,7 @@
 using System;
 using System.Globalization;
 
-namespace Ikat
+namespace Yio
 {
     /// <summary>
     /// 把 typed 值（frozen 值类型 + NodeStyle enum）转成 core apply_decl 能解析的 CSS 串，
@@ -12,7 +12,7 @@ namespace Ikat
     /// 不是 CSS 标准记忆。两个关键差异已在此处吸收：
     ///  - Overflow.Clip → "hidden"：Rust OverflowMode 没有 Clip 变体（Hidden 是等价语义），
     ///    parse_overflow 只认 "hidden" 不认 "clip"。
-    ///  - Thickness 四值序 TRBL：parse_four 解析 [top, right, bottom, left] → IkatRect{top, right, bottom, left}。
+    ///  - Thickness 四值序 TRBL：parse_four 解析 [top, right, bottom, left] → YioRect{top, right, bottom, left}。
     /// </summary>
     internal static class CssValueConvert
     {
@@ -29,10 +29,10 @@ namespace Ikat
             }
         }
 
-        internal static string ToCss(IkatColor c)
+        internal static string ToCss(YioColor c)
         {
             if (c.IsUnset) return null;
-            // 8 位 hex（#rrggbbaa）。IkatColor 字段是 0–1 float，× 255 后取整 clamp 到 byte。
+            // 8 位 hex（#rrggbbaa）。YioColor 字段是 0–1 float，× 255 后取整 clamp 到 byte。
             // hex 格式化无 culture 依赖，故插值串无需 InvariantCulture。
             byte r = ClampToByte(c.R);
             byte g = ClampToByte(c.G);
@@ -139,7 +139,7 @@ namespace Ikat
         internal static string ToCss(object value) => value switch
         {
             Length l         => ToCss(l),
-            IkatColor c          => ToCss(c),
+            YioColor c          => ToCss(c),
             Thickness t      => ToCss(t),
             float f          => ToCss(f),
             int i            => ToCss(i),

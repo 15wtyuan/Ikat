@@ -19,9 +19,9 @@
 //! - 关键属性（background/border/overflow/color/opacity 等）另做单字段精确断言，
 //!   作为 skip 推理错误的第二道防线。
 
-use ikat_core::style::mapping::apply_decl;
-use ikat_core::style::resolved::{BorderStyle, OverflowMode, ResolvedStyle, TextAlign};
-use ikat_fence::schema::css::CSS_PROPS;
+use yio_core::style::mapping::apply_decl;
+use yio_core::style::resolved::{BorderStyle, OverflowMode, ResolvedStyle, TextAlign};
+use yio_fence::schema::css::CSS_PROPS;
 
 /// 已知「表示不同但语义等价」的属性：apply 其 schema default 后结构体 ≠ 全 default，
 /// 但差异是表示形式（Some-vs-None / 级联标记 / 惰性 spec），不是语义漂移。
@@ -275,7 +275,7 @@ fn skip_lists_are_accurate() {
     }
 }
 
-fn find_prop_or_panic(name: &str) -> &'static ikat_fence::schema::css::CssPropSpec {
+fn find_prop_or_panic(name: &str) -> &'static yio_fence::schema::css::CssPropSpec {
     CSS_PROPS
         .iter()
         .find(|p| p.name == name)

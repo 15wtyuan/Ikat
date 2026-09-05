@@ -1,5 +1,5 @@
 [package]
-name = "ikat_ffi_c"
+name = "yio_ffi_c"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,12 +7,12 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ikat_core = { path = "../core" }
+yio_core = { path = "../core" }
 # FlexDirection 是 ComputedNodeStyle 字段类型，FFI 稳定化时须 match 其变体（见 lib.rs）。
 taffy = "0.14"
 # 运行时 CSS 注入解析（#11 StyleSheet.Add）：core 不能依赖 fence（方向 core←fence），
 # 解析放 FFI 层——文本 → fence parse_runtime_css → core 的 DynamicRule 结构 → Stage 注入。
-ikat_fence = { path = "../fence" }
+yio_fence = { path = "../fence" }
 
 [build-dependencies]
 csbindgen = "1"

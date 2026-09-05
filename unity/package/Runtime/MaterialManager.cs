@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Ikat
+namespace Yio
 {
     /// DrawState 缓存。
     /// key = (program, texture, mask_context, matrix)。同 key 复用 Material 实例。
@@ -45,7 +45,7 @@ namespace Ikat
                 if (maskContext > 0u)
                 {
                     // ctx>0 → CLIPPED 变体（多 entry 数组：rect/圆角 SDF/circle/polygon
-                    // 按 entry kind 分派，见 Ikat-Unlit.shader clip 段）。
+                    // 按 entry kind 分派，见 Yio-Unlit.shader clip 段）。
                     // mask_context 进 key，每 ctx 独立 Material 实例。
                     mat.EnableKeyword("CLIPPED");
                     // 首帧路径：MirrorPool 先 SetClipEntries 再 Get；新建 Material 时从

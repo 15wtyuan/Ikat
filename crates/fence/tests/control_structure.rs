@@ -4,8 +4,8 @@
 //! `FenceMissingControlChild` error 严格拦截，不依赖运行时 reparent 兜底。本测试
 //! 覆盖端到端 parse_template：role 驱动控件缺必需子 → error。
 
-use ikat_fence::diagnostic::{DiagnosticCode, Severity};
-use ikat_fence::pipeline::parse_template;
+use yio_fence::diagnostic::{DiagnosticCode, Severity};
+use yio_fence::pipeline::parse_template;
 
 fn struct_errors(html: &str) -> Vec<String> {
     let result = parse_template(html, "t.html");

@@ -3,15 +3,15 @@
 //! 解析产 `Vec<AnimationSpec>` / `Vec<TransitionSpec>`（core 类型），bake 进
 //! `base_style.animation` / `base_style.transition`。语义：首个 time=duration、
 //! 次个=delay；ease 按对齐表映射（CSS 标准关键字 → 精确 bezier，#9 起 cubic-bezier()
-//! 函数形 + ikat 超集 keyword 也收）。
+//! 函数形 + yio 超集 keyword 也收）。
 
-use ikat_core::style::resolved::{AnimationDirection, AnimationFillMode, AnimationPlayState};
-use ikat_core::tween::{Ease, TweenProp};
-use ikat_fence::css_resolve::resolve_inline_styles;
-use ikat_fence::schema::css::{
+use yio_core::style::resolved::{AnimationDirection, AnimationFillMode, AnimationPlayState};
+use yio_core::tween::{Ease, TweenProp};
+use yio_fence::css_resolve::resolve_inline_styles;
+use yio_fence::schema::css::{
     parse_animation_value, parse_transition_value, validate_animation_value,
 };
-use ikat_fence::tree_builder::parse_html_to_ir;
+use yio_fence::tree_builder::parse_html_to_ir;
 
 #[test]
 fn animation_full_shorthand() {
@@ -81,7 +81,7 @@ fn animation_ease_keywords_exact_css() {
         ("ease-in-out", b([0.42, 0.0, 0.58, 1.0])),
         ("step-start", Ease::Step { start: true }),
         ("step-end", Ease::Step { start: false }),
-        // ikat 超集（游戏 UI 刚需；fence.md 登记）
+        // yio 超集（游戏 UI 刚需；fence.md 登记）
         ("ease-in-back", Ease::BackIn),
         ("ease-out-elastic", Ease::ElasticOut),
         ("ease-in-out-bounce", Ease::BounceInOut),

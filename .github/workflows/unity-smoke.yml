@@ -31,15 +31,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: build FFI .dll (current Rust source)
-        run: cargo build -p ikat_ffi_c --release
+        run: cargo build -p yio_ffi_c --release
 
       - name: stage .dll into package Plugins
         shell: pwsh
         run: |
-          Copy-Item target/release/ikat_ffi_c.dll `
-            unity/package/Plugins/Ikat/ikat_ffi_c.dll -Force
-          git add unity/package/Plugins/Ikat/ikat_ffi_c.dll
-          git add unity/package/Plugins/Ikat/Bindings/IkatBindings.cs
+          Copy-Item target/release/yio_ffi_c.dll `
+            unity/package/Plugins/Yio/yio_ffi_c.dll -Force
+          git add unity/package/Plugins/Yio/yio_ffi_c.dll
+          git add unity/package/Plugins/Yio/Bindings/YioBindings.cs
       - name: sync bindings via xtask
         run: cargo run -p xtask -- sync-bindings
 
@@ -78,15 +78,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: build FFI .dll (current Rust source)
-        run: cargo build -p ikat_ffi_c --release
+        run: cargo build -p yio_ffi_c --release
 
       - name: stage .dll into package Plugins
         shell: pwsh
         run: |
-          Copy-Item target/release/ikat_ffi_c.dll `
-            unity/package/Plugins/Ikat/ikat_ffi_c.dll -Force
-          git add unity/package/Plugins/Ikat/ikat_ffi_c.dll
-          git add unity/package/Plugins/Ikat/Bindings/IkatBindings.cs
+          Copy-Item target/release/yio_ffi_c.dll `
+            unity/package/Plugins/Yio/yio_ffi_c.dll -Force
+          git add unity/package/Plugins/Yio/yio_ffi_c.dll
+          git add unity/package/Plugins/Yio/Bindings/YioBindings.cs
       - name: sync bindings via xtask
         run: cargo run -p xtask -- sync-bindings
 

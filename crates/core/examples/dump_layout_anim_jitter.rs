@@ -4,11 +4,11 @@
 //! 环境变量：DUR（transition 秒数，默认 0.4）。浏览器同结构不误换列（A/B 已证），
 //! 异常出自 taffy 布局缓存路径。
 //!
-//! 用法：cargo run -p ikat_core --example dump_layout_anim_jitter [--offline]
+//! 用法：cargo run -p yio_core --example dump_layout_anim_jitter [--offline]
 
-use ikat_core::scene::dynamic::append_child;
-use ikat_core::stage::Stage;
-use ikat_pkg::build::{pack_components, Component};
+use yio_core::scene::dynamic::append_child;
+use yio_core::stage::Stage;
+use yio_pkg::build::{pack_components, Component};
 
 fn main() {
     let dur: f32 = std::env::var("DUR")

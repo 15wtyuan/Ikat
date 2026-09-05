@@ -1,7 +1,7 @@
-// inventory 页演示数据（AI 手写，ikat preview server 按页注入；不进打包）。
+// inventory 页演示数据（AI 手写，yio preview server 按页注入；不进打包）。
 // 格子列表运行时由 C# 填充（ItemCount）；预览侧克隆 template 轮换图标。
-import { ready } from '/ikat-preview/lib/boot.js';
-import { fillList, pageDir } from '/ikat-preview/lib/fill.js';
+import { ready } from '/yio-preview/lib/boot.js';
+import { fillList, pageDir } from '/yio-preview/lib/fill.js';
 
 const ITEM_ROTATION = ['item-potion', 'item-chest', 'item-gem', 'item-scroll', 'item-staff', 'item-wand'];
 

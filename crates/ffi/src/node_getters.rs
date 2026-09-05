@@ -1,10 +1,10 @@
 //! 节点只读查询面：布局矩形/世界矩阵/sort_key/可见性/语义类型/id/class/opacity/
 //! computed style 快照、父子遍历、id 查找、交互标志读取。
 
-use ikat_core::scene::NodeId;
-use ikat_core::style::computed::ComputedNodeStyle;
-use ikat_core::style::resolved::TextAlign;
-use ikat_core::transform;
+use yio_core::scene::NodeId;
+use yio_core::style::computed::ComputedNodeStyle;
+use yio_core::style::resolved::TextAlign;
+use yio_core::transform;
 
 use crate::{ffi_guard, StageHandle};
 
@@ -13,7 +13,7 @@ use crate::{ffi_guard, StageHandle};
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_focusable(
+pub extern "C" fn yio_stage_get_node_focusable(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -41,7 +41,7 @@ pub extern "C" fn ikat_stage_get_node_focusable(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_touchable(
+pub extern "C" fn yio_stage_get_node_touchable(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -69,7 +69,7 @@ pub extern "C" fn ikat_stage_get_node_touchable(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_draggable(
+pub extern "C" fn yio_stage_get_node_draggable(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -99,7 +99,7 @@ pub extern "C" fn ikat_stage_get_node_draggable(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_node_is_lookup_scope(h: *const StageHandle, node_id: u64) -> i32 {
+pub extern "C" fn yio_node_is_lookup_scope(h: *const StageHandle, node_id: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -112,7 +112,7 @@ pub extern "C" fn ikat_node_is_lookup_scope(h: *const StageHandle, node_id: u64)
             Some(n) => i32::from(
                 n.interaction
                     .flags
-                    .contains(ikat_core::scene::node::NodeFlags::LOOKUP_SCOPE),
+                    .contains(yio_core::scene::node::NodeFlags::LOOKUP_SCOPE),
             ),
             None => -1,
         }
@@ -125,7 +125,7 @@ pub extern "C" fn ikat_node_is_lookup_scope(h: *const StageHandle, node_id: u64)
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_custom_tag(
+pub extern "C" fn yio_stage_get_custom_tag(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -168,7 +168,7 @@ pub extern "C" fn ikat_stage_get_custom_tag(
 ///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
-pub extern "C" fn ikat_node_parent(h: *const StageHandle, node_id: u64) -> u64 {
+pub extern "C" fn yio_node_parent(h: *const StageHandle, node_id: u64) -> u64 {
     ffi_guard(u64::MAX, || {
         const ROOT_SENTINEL: u64 = u64::MAX;
         if h.is_null() {
@@ -193,7 +193,7 @@ pub extern "C" fn ikat_node_parent(h: *const StageHandle, node_id: u64) -> u64 {
 ///
 /// **常驻（不 gate）：**runtime 稳定入口，`--no-default-features` 构建的 .dll 仍有本函数。
 #[no_mangle]
-pub extern "C" fn ikat_stage_find_node_by_id(
+pub extern "C" fn yio_stage_find_node_by_id(
     h: *const StageHandle,
     id: *const u8,
     id_len: usize,
@@ -222,7 +222,7 @@ pub extern "C" fn ikat_stage_find_node_by_id(
 ///
 /// **常驻（不 gate）：**runtime 稳定入口。
 #[no_mangle]
-pub extern "C" fn ikat_stage_find_node_by_id_in_subtree(
+pub extern "C" fn yio_stage_find_node_by_id_in_subtree(
     h: *const StageHandle,
     root: u64,
     id: *const u8,
@@ -248,7 +248,7 @@ pub extern "C" fn ikat_stage_find_node_by_id_in_subtree(
 
 /// 读节点 layout_rect。null 句柄/无效 node → out 填 0（不 panic）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_layout_rect(
+pub extern "C" fn yio_stage_get_node_layout_rect(
     h: *const StageHandle,
     node_id: u64,
     out_x: *mut f32,
@@ -294,7 +294,7 @@ pub extern "C" fn ikat_stage_get_node_layout_rect(
 /// （独立 *mut out + 无状态码 + null/无效写默认）。空 div（merge_meshes 后 RenderNode
 /// 消失）仍可查——world_transforms 保留全节点（与 node_sort_keys 同）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_world_matrix(
+pub extern "C" fn yio_stage_get_node_world_matrix(
     h: *const StageHandle,
     node_id: u64,
     out_a: *mut f32,
@@ -347,7 +347,7 @@ pub extern "C" fn ikat_stage_get_node_world_matrix(
 
 /// 读节点 sort_key（merge 前快照，DFS 序号）。null/无效 → 写 0。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_sort_key(h: *const StageHandle, node_id: u64, out: *mut u32) {
+pub extern "C" fn yio_stage_get_node_sort_key(h: *const StageHandle, node_id: u64, out: *mut u32) {
     ffi_guard((), || {
         let sk = if h.is_null() {
             None
@@ -366,7 +366,7 @@ pub extern "C" fn ikat_stage_get_node_sort_key(h: *const StageHandle, node_id: u
 
 /// 读节点可见性（存在 + 非 display:none）。null/无效 → 写 0（false）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_visible(h: *const StageHandle, node_id: u64, out: *mut u8) {
+pub extern "C" fn yio_stage_get_node_visible(h: *const StageHandle, node_id: u64, out: *mut u8) {
     ffi_guard((), || {
         let vis = if h.is_null() {
             false
@@ -450,7 +450,7 @@ impl ComputedNodeStyleRepr {
 /// 或 `out` = null）。不用 `-> u8` + 0 哨兵：`NodeKind` 首变体 `Container` 判别值 = 0，
 /// 会与「不存在」撞。`NodeKind` 是 `#[repr(u8)]`，`k as u8` 跨 FFI 稳定。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_kind(
+pub extern "C" fn yio_stage_get_node_kind(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -478,7 +478,7 @@ pub extern "C" fn ikat_stage_get_node_kind(
 /// rc=0 写 buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 /
 /// 无 scene / 死节点 → rc=-1。调试探针（pick 命中链）与 authoring id 读取用。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_id_attr(
+pub extern "C" fn yio_stage_get_node_id_attr(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -516,12 +516,12 @@ pub extern "C" fn ikat_stage_get_node_id_attr(
 
 /// 读 TextNode 文本内容（core 真值，`Scene.text_contents`；无条目 → rc=0 + 空串——
 /// 与 id_attr 的「未声明」同语义，调用方拿空串即可）。双调法同
-/// [`ikat_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；不够（含 0 探
+/// [`yio_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；不够（含 0 探
 /// 大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene / 死节点 → rc=-1（*out_len 置 0）。
 /// 投影层 TextNode.Text getter 走本出口：C# 侧镜像只在 set_text 路径更新，pkg 烙入的
 /// HTML 文本从不过 C# setter，读镜像会把合法初值读成空串（showcase tree 页读数实锤）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_text(
+pub extern "C" fn yio_stage_get_node_text(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -563,13 +563,13 @@ pub extern "C" fn ikat_stage_get_node_text(
 }
 
 /// 读 Image 节点的 src（atlas sprite_key；core 真值，`Scene.image_srcs`；无条目 → rc=0 +
-/// 空串——与 text 同语义）。双调法同 [`ikat_stage_get_node_text`]：buf_cap 足够 → rc=0 写
+/// 空串——与 text 同语义）。双调法同 [`yio_stage_get_node_text`]：buf_cap 足够 → rc=0 写
 /// buf[..*out_len]；不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene /
-/// 死节点 → rc=-1（*out_len 置 0）。与 [`crate::node_setters::ikat_stage_set_src`] 成对；
+/// 死节点 → rc=-1（*out_len 置 0）。与 [`crate::node_setters::yio_stage_set_src`] 成对；
 /// C# Image.Src getter 走本出口（HTML 烙入的 src 从不过 C# setter，读镜像恒空串——
 /// 同 TextNode.Text 的 ghost state 预案）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_src(
+pub extern "C" fn yio_stage_get_src(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -607,13 +607,13 @@ pub extern "C" fn ikat_stage_get_src(
 }
 
 /// 读 `<a>` 节点的 href（#74 链接目标，opaque 字符串；C# Link 事件处理按它路由）。
-/// 双调法同 [`ikat_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；
+/// 双调法同 [`yio_stage_get_node_id_attr`]：buf_cap 足够 → rc=0 写 buf[..*out_len]；
 /// 不够（含 0 探大小）→ rc=-2 + *out_len=所需；null 句柄 / 无 scene / 死节点 → rc=-1
 ///（*out_len 置 0）。非 Link 节点或 link_hrefs 无条目 → rc=1（区别于 -1 的句柄错误：
 /// 调用方拿 1 判「不是链接」，拿 -1 判「参数/场景错误」）。href 由 instantiate 从
 /// pkg TemplateNode 灌入 `Scene.link_hrefs`（围栏保证非空）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_link_href(
+pub extern "C" fn yio_stage_get_link_href(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -634,7 +634,7 @@ pub extern "C" fn ikat_stage_get_link_href(
             unsafe { *out_len = 0 };
             return -1;
         };
-        if node.kind != ikat_core::scene::NodeKind::Link {
+        if node.kind != yio_core::scene::NodeKind::Link {
             unsafe { *out_len = 0 };
             return 1;
         }
@@ -662,7 +662,7 @@ pub extern "C" fn ikat_stage_get_link_href(
 /// 调试探针用：「播完即隐形」的演出层偷命中时 opacity=0 但仍接住指针——链顶即凶手。
 /// rc：0 = ok 且 *out 已填；1 = null 句柄 / 无 scene / 节点不存在 / out null。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_opacity(
+pub extern "C" fn yio_stage_get_node_opacity(
     h: *const StageHandle,
     node_id: u64,
     out: *mut f32,
@@ -686,10 +686,10 @@ pub extern "C" fn ikat_stage_get_node_opacity(
 }
 
 /// 读节点 class 列表（空格 join；无 class → rc=0 + len=0）。双调法同
-/// [`ikat_stage_get_node_id_attr`]。调试探针用（ClassList 公共面是
+/// [`yio_stage_get_node_id_attr`]。调试探针用（ClassList 公共面是
 /// Contains/Add 族，无全量枚举——本出口补齐只读枚举）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_classes(
+pub extern "C" fn yio_stage_get_node_classes(
     h: *const StageHandle,
     node_id: u64,
     out: *mut u8,
@@ -729,7 +729,7 @@ pub extern "C" fn ikat_stage_get_node_classes(
 /// 读节点 computed style 快照。return code：0 = ok 且 `*out` 填好；非 0 = 失败（节点不存在
 /// 或 `out` = null）。
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_computed_style(
+pub extern "C" fn yio_stage_get_node_computed_style(
     h: *const StageHandle,
     node_id: u64,
     out: *mut ComputedNodeStyleRepr,
@@ -756,7 +756,7 @@ pub extern "C" fn ikat_stage_get_node_computed_style(
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_child_count(h: *const StageHandle, node: u64) -> i32 {
+pub extern "C" fn yio_stage_get_child_count(h: *const StageHandle, node: u64) -> i32 {
     ffi_guard(-1, || {
         if h.is_null() {
             return -1;
@@ -775,7 +775,7 @@ pub extern "C" fn ikat_stage_get_child_count(h: *const StageHandle, node: u64) -
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_children(
+pub extern "C" fn yio_stage_get_children(
     h: *const StageHandle,
     node: u64,
     out: *mut u64,
@@ -806,11 +806,11 @@ pub extern "C" fn ikat_stage_get_children(
 }
 
 /// 读节点 disabled 伪类态（`NodeFlags::DISABLED`）。null 句柄 / 无 scene / 节点缺失 → 写 0（false）。
-/// 与 `ikat_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
+/// 与 `yio_stage_set_node_disabled` 对称的读出口（伪类态级联查询用）。
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_get_node_disabled(h: *const StageHandle, node_id: u64, out: *mut u8) {
+pub extern "C" fn yio_stage_get_node_disabled(h: *const StageHandle, node_id: u64, out: *mut u8) {
     ffi_guard((), || {
         let disabled = if h.is_null() {
             false
@@ -835,7 +835,7 @@ pub extern "C" fn ikat_stage_get_node_disabled(h: *const StageHandle, node_id: u
 ///
 /// **常驻（不 gate）。**
 #[no_mangle]
-pub extern "C" fn ikat_stage_drain_removed_nodes(
+pub extern "C" fn yio_stage_drain_removed_nodes(
     h: *mut StageHandle,
     out_len: *mut usize,
 ) -> *const u64 {

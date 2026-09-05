@@ -1,6 +1,6 @@
-use ikat_fence::schema::attr::is_global_attr;
-use ikat_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
-use ikat_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
+use yio_fence::schema::attr::is_global_attr;
+use yio_fence::schema::css::{find_css_prop, find_shorthand, CssValueParser};
+use yio_fence::schema::tag::{find_tag, is_shell_tag, Category, ContentModel, DisplayDefault};
 
 /// The 7 runtime fence tags (div/span/button/img/a/template/slot). Controls and
 /// lists have no dedicated tag -- authors express them with `role` on a `div`.
@@ -26,7 +26,7 @@ fn shell_tags_are_eight() {
     }
     assert_eq!(shells.len(), 8);
     assert_eq!(
-        ikat_fence::schema::tag::SHELL_TAGS.len(),
+        yio_fence::schema::tag::SHELL_TAGS.len(),
         8,
         "SHELL_TAGS registry must hold exactly 8 entries"
     );

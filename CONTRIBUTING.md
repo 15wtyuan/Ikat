@@ -1,14 +1,14 @@
 # 贡献指南
 
-感谢关注 Ikat。贡献前请先读 [README](README.md) 的「为什么」与「快速上手」，了解项目定位与构建命令。
+感谢关注 Yio。贡献前请先读 [README](README.md) 的「为什么」与「快速上手」，了解项目定位与构建命令。
 
 ## 开发环境
 
 - **Rust**（stable，edition 2021）：核心 / 打包器 / FFI。
   ```bash
   cargo test --workspace          # 全量测试
-  cargo test -p ikat_core fence_contract   # 围栏契约门
-  cargo build -p ikat_ffi_c --release      # 编 .dll
+  cargo test -p yio_core fence_contract   # 围栏契约门
+  cargo build -p yio_ffi_c --release      # 编 .dll
   ```
 - **Unity 6.5（URP）**：打开 `unity/showcase-unity/`，PlayMode 从 `StreamingAssets/` 加载 `.pkg.bin`。
 
@@ -16,7 +16,7 @@
 
 ## 两机工作流
 
-- 编码机（Windows）：Rust 改动后重编 `.dll` + `IkatBindings.cs` + commit + push。
+- 编码机（Windows）：Rust 改动后重编 `.dll` + `YioBindings.cs` + commit + push。
 - 验收机：pull 后做 Unity PlayMode 验收。
 - **任何 Rust 改动后必须重编并提交 `.dll`**，否则验收机测不了。
 
@@ -38,7 +38,7 @@ test:        测试
 ## PR 自查清单
 
 - [ ] `cargo test --workspace` 全过
-- [ ] 改了 Rust FFI/ABI → 重编 `.dll` + 重生 `IkatBindings.cs` 并提交
+- [ ] 改了 Rust FFI/ABI → 重编 `.dll` + 重生 `YioBindings.cs` 并提交
 - [ ] 改了 parse-time 逻辑（cascade/mapping）→ 重打 `.pkg.bin`
 - [ ] 改了围栏（CSS 属性/标签）→ 更新 `fence_contract.rs` 测试 + `fence.md`
 - [ ] 代码注释自包含、说 WHY，不引用内部编号或暗语
@@ -47,7 +47,7 @@ test:        测试
 ## 设计文档
 
 - 设计契约：[`docs/design/main-design.md`](docs/design/main-design.md)
-- 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 schema 契约测试赢：`cargo test -p ikat_fence`）
+- 围栏权威：[`docs/design/fence.md`](docs/design/fence.md)（不一致时 schema 契约测试赢：`cargo test -p yio_fence`）
 - 踩坑规则手册：[`docs/pitfalls.md`](docs/pitfalls.md)（依赖适配/闭环规则/Unity 平台，开工前查）
 - 活工作项 = GitHub issues（排活/查进度用 `gh issue list`；`docs/roadmap/` 是归档只读历史）
 

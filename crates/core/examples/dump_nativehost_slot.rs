@@ -16,14 +16,14 @@
 //!
 //! 用法（默认读 worktree 根 showcase.pkg.bin）：
 //! ```bash
-//! cargo run -p ikat_core --example dump_nativehost_slot
+//! cargo run -p yio_core --example dump_nativehost_slot
 //! # 或指定 pkg.bin 路径
-//! cargo run -p ikat_core --example dump_nativehost_slot -- <path-to-pkg.bin>
+//! cargo run -p yio_core --example dump_nativehost_slot -- <path-to-pkg.bin>
 //! ```
-use ikat_core::asset::read_package;
-use ikat_core::scene::node::NodeId;
-use ikat_core::stage::Stage;
 use std::env;
+use yio_core::asset::read_package;
+use yio_core::scene::node::NodeId;
+use yio_core::stage::Stage;
 
 fn main() {
     // 默认 pkg 路径：worktree 根的 showcase.pkg.bin（对齐 PlayMode 从 StreamingAssets 加载）。
@@ -40,7 +40,7 @@ fn main() {
     );
     assert!(
         pkg.components.contains_key("page_nativehost"),
-        "pkg missing page_nativehost component (重打 pkg：cargo run -p ikat_pkg)"
+        "pkg missing page_nativehost component (重打 pkg：cargo run -p yio_pkg)"
     );
 
     let font = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/DejaVuSans.ttf");

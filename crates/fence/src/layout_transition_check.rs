@@ -13,10 +13,10 @@
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, LineMap};
 use crate::ir::{IrNodeKind, IrTree};
-use ikat_core::style::dynamic::DynamicRule;
-use ikat_core::style::mapping::parse_transition;
-use ikat_core::style::resolved::ResolvedStyle;
-use ikat_core::tween::TweenProp;
+use yio_core::style::dynamic::DynamicRule;
+use yio_core::style::mapping::parse_transition;
+use yio_core::style::resolved::ResolvedStyle;
+use yio_core::tween::TweenProp;
 
 /// 值文本的端点域归类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,7 +80,7 @@ pub(crate) fn endpoint_domain_of(value: &str) -> EndpointDomain {
 }
 
 /// transition specs 是否覆盖该通道（all / 显式同名；duration=0 无过渡语义不算）。
-fn specs_cover(specs: &[ikat_core::style::resolved::TransitionSpec], prop: TweenProp) -> bool {
+fn specs_cover(specs: &[yio_core::style::resolved::TransitionSpec], prop: TweenProp) -> bool {
     specs
         .iter()
         .any(|ts| ts.duration > 0.0 && (ts.prop.is_none() || ts.prop == Some(prop)))
@@ -192,7 +192,7 @@ fn check_endpoint_set(
                 "transition {prop_name}: endpoint {} is not animatable ({}) — use explicit \
                  px / % / vw / vh / vmin / vmax values. `auto` and non-length values jump \
                  instantly instead of animating (browsers animate to auto via natural-size \
-                 measurement, which Ikat does not do yet), so the fence rejects them.",
+                 measurement, which Yio does not do yet), so the fence rejects them.",
                 d.label(),
                 values.join(", ")
             ),

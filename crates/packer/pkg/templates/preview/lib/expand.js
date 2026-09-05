@@ -1,5 +1,5 @@
-// 组件展开模拟（框架真相副本，嵌在 ikat 二进制里由 preview server 路由供给；
-// 消费侧经 `/ikat-preview/lib/expand.js` 导入，不拷贝、跟 CLI 版本走）。
+// 组件展开模拟（框架真相副本，嵌在 yio 二进制里由 preview server 路由供给；
+// 消费侧经 `/yio-preview/lib/expand.js` 导入，不拷贝、跟 CLI 版本走）。
 // 镜像打包期 Custom Element 展开：宿主保留位置/属性；模板根 append 到宿主下；
 // <slot name=x> 在拼接位被宿主 light children（slot="x"）替换（无投射内容时保留
 // slot 的 fallback 子女）；纯空白文本节点丢弃；嵌套组件迭代展开至不动点（≤16 pass）。
@@ -7,7 +7,7 @@
 //
 // 组件 <style> 的作用域改写不在本文件（#95 教训：手写正则前缀只会拼后代选择器，
 // 根类规则整条死；@media 放行、keyframes 同名优先级反转同批审计实锤）——CSS
-// 语义单真相在 Rust：server 经 /ikat-preview/comp-style/<name>.css 供给双分支
+// 语义单真相在 Rust：server 经 /yio-preview/comp-style/<name>.css 供给双分支
 // 改写版，这里只注入 <link>。本文件残留职责是纯 DOM 机械层。
 
 // 组件清单缓存（fetchRegistry 灌入）：expandComponentsNow 的补展开数据源。
@@ -43,11 +43,11 @@ export function expandComponents(reg) {
   while (passes++ < 16) {
     const hosts = Array.from(document.querySelectorAll('*')).filter((el) => {
       const name = el.tagName.toLowerCase();
-      return name.indexOf('-') >= 0 && reg[name] && !el.hasAttribute('data-ikat-expanded');
+      return name.indexOf('-') >= 0 && reg[name] && !el.hasAttribute('data-yio-expanded');
     });
     if (!hosts.length) return;
     for (const host of hosts) {
-      host.setAttribute('data-ikat-expanded', '');
+      host.setAttribute('data-yio-expanded', '');
       const name = host.tagName.toLowerCase();
       const def = reg[name];
       const doc = new DOMParser().parseFromString(def.src, 'text/html');
@@ -64,7 +64,7 @@ export function expandComponents(reg) {
       }
       const root = doc.body.firstElementChild;
       if (!root) continue;
-      root.setAttribute('data-ikat-comp', name);
+      root.setAttribute('data-yio-comp', name);
       // Slot 分配自宿主 light children（slot 属性；纯空白文本丢弃）。投射是节点
       // 移动（insertBefore）——监听器/状态保留。
       const assign = {};
@@ -120,7 +120,7 @@ function projectSlots(root, assign, defaults) {
 // 组件惯用「宿主标签开头」的规则寻址自身态（`skill-slot.is-press .slot`）——core
 // 里这条匹配 host 节点（标签保留、状态类挂 host）再下探。预览没有 :host 伪类，
 // 改写选择器后由模板根承接：把 host 的 class 与 data-*/aria-* 属性镜像到根
-// （data-ikat-comp 载体），使改写后的规则与 core 判定一致（Tripawd 狗粮实证：
+// （data-yio-comp 载体），使改写后的规则与 core 判定一致（Tripawd 狗粮实证：
 // 无镜像时整套状态样式在预览里静默全坏）。
 //
 // 合并而非覆盖：根自身的类保留在前（组件样式链可能锚根自身类），host 类追加在后；
@@ -159,16 +159,16 @@ function observeHostState(host, root) {
 // 克隆补展开只登记一次。
 
 function ensureComponentStylesheet(name) {
-  if (document.querySelector(`link[data-ikat-comp-style="${name}"]`)) return;
+  if (document.querySelector(`link[data-yio-comp-style="${name}"]`)) return;
   const link = document.createElement('link');
   link.rel = 'stylesheet';
-  link.setAttribute('data-ikat-comp-style', name);
-  link.href = '/ikat-preview/comp-style/' + name + '.css';
+  link.setAttribute('data-yio-comp-style', name);
+  link.href = '/yio-preview/comp-style/' + name + '.css';
   const isOwned = (el) =>
     el.tagName === 'STYLE' ||
     (el.tagName === 'LINK' && (el.rel || '').toLowerCase() === 'stylesheet');
   const isFramework = (el) =>
-    el.hasAttribute('data-ikat-comp-style') || el.hasAttribute('data-ikat-preview');
+    el.hasAttribute('data-yio-comp-style') || el.hasAttribute('data-yio-preview');
   const anchor = Array.from(document.head.children).find((el) => isOwned(el) && !isFramework(el));
   if (anchor) document.head.insertBefore(link, anchor);
   else document.head.appendChild(link);

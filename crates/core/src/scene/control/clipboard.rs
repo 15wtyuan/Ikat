@@ -4,7 +4,7 @@ use super::edit::{delete_selection, insert_text};
 
 // core 是 cdylib，不能 extern 调宿主剪贴板（Unity GUIUtility.systemCopyBuffer / Win32
 // clipboard）——宿主符号在 core 链接期不可解析，且 C# 宿主无法提供 linkable C 符号。
-// 故由后端在启动时经 FFI `ikat_register_clipboard` 注册一对 set/get 函数指针，core
+// 故由后端在启动时经 FFI `yio_register_clipboard` 注册一对 set/get 函数指针，core
 // 经这两指针间接调。未注册时 write_clipboard no-op、read_clipboard 返空串（防宿主未接线
 // 时 panic）。
 //
@@ -23,7 +23,7 @@ pub type ClipboardGetFn = unsafe extern "C" fn(*mut *mut u8, *mut usize) -> i32;
 static CLIPBOARD_SET: Mutex<Option<ClipboardSetFn>> = Mutex::new(None);
 static CLIPBOARD_GET: Mutex<Option<ClipboardGetFn>> = Mutex::new(None);
 
-/// 注册宿主剪贴板回调（FFI 层 `ikat_register_clipboard` 调）。传 None 可注销。
+/// 注册宿主剪贴板回调（FFI 层 `yio_register_clipboard` 调）。传 None 可注销。
 /// 重复注册覆盖旧值（测试需重注册）。后端应在 Stage 启动后尽早注册一次。
 pub fn register_clipboard(set_fn: Option<ClipboardSetFn>, get_fn: Option<ClipboardGetFn>) {
     *CLIPBOARD_SET.lock().unwrap() = set_fn;

@@ -730,7 +730,7 @@ fn apply_decl_filter_multi_function_concat() {
 /// 多函数 filter 串联顺序与 CSS/fgui 一致（回归测试）。
 /// CSS `filter: A B` = 先 A 后 B → 组合矩阵 = B × A（B 在左，最靠近 color）。
 /// fgui ConcatValues: `_matrix = newPreset × _matrix`（新值左乘）。
-/// Ikat 应同：acc 从 IDENTITY 起，每步 `acc = concat(m, acc)`（新值在左）。
+/// Yio 应同：acc 从 IDENTITY 起，每步 `acc = concat(m, acc)`（新值在左）。
 ///
 /// 用 saturate(0.5) hue-rotate(90deg) —— 二者不可交换（已数学验证），可检出顺序反转。
 /// 正确（CSS）：先 saturate 后 hue-rotate → 组合 = H × S = `concat(hue_rotate(90), saturate(0.5))`。
