@@ -173,7 +173,7 @@ fn golden_files_match_current_blob_version() {
     assert!(frame.len() > 12);
     assert_eq!(
         u32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]),
-        0x4D4F_4F4C,
+        0x314F_4959,
         "frame golden magic"
     );
     assert_eq!(
